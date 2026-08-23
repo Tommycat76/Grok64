@@ -6,11 +6,21 @@ Phone- and tablet-first **Commodore 64 emulator** built with EmulatorJS (VICE WA
 
 ## Live app
 
-**Candidate published / preview URL** (saved 2026-08-23):
+**Primary published URL:**
+
+https://grok64.grok.me
+
+**Status:** Domain resolves and shows Grok publish chrome, but the app currently crashes on load:
+
+```
+(0 , z.jsxDEV) is not a function
+```
+
+Cause: development JSX runtime (`jsxDEV`) leaked into the production bundle. Needs a clean production rebuild/republish from Grok Build (or a fix in the Vite/TanStack Start config so production uses `jsx`, not `jsxDEV`).
+
+**Older sandbox preview (may expire):**
 
 https://hds-q64aqd7pu1ev-6014-f9ie3.grok-code-wild.hades-www.grok-sandbox.com/
-
-> Note: Sandbox hosts can expire or require the original session/account. If this link dies, re-publish from Grok Build when you have a PC and update this section.
 
 ## Stack
 
@@ -55,6 +65,7 @@ https://hds-q64aqd7pu1ev-6014-f9ie3.grok-code-wild.hades-www.grok-sandbox.com/
 
 ## Known issues at last session
 
+- **Published build crash:** `jsxDEV is not a function` (prod bundle has dev JSX runtime)
 - Power button / recoverBoot race (partially fixed with `bootKickRef`)
 - Stick barely visible on black UI → needs higher contrast
 - Requested: **tap zones** on stick base (digital 8-way) in addition to drag
@@ -72,6 +83,7 @@ https://hds-q64aqd7pu1ev-6014-f9ie3.grok-code-wild.hades-www.grok-sandbox.com/
 1. On a PC, open Grok → Projects / Apps → **Grok64** → Continue building / Open workspace.
 2. Export or copy the full tree into this repo (replace reconstructed files).
 3. Or download any “Export source” zip from the builder and push it here.
+4. Re-publish so `grok64.grok.me` gets a clean production build (no `jsxDEV`).
 
 ## License / credits
 
