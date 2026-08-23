@@ -6,11 +6,11 @@ Phone- and tablet-first **Commodore 64 emulator** built with EmulatorJS (VICE WA
 
 ## Live app
 
-If you have the published URL, add it here:
+**Candidate published / preview URL** (saved 2026-08-23):
 
-```
-Published app: (paste URL)
-```
+https://hds-q64aqd7pu1ev-6014-f9ie3.grok-code-wild.hades-www.grok-sandbox.com/
+
+> Note: Sandbox hosts can expire or require the original session/account. If this link dies, re-publish from Grok Build when you have a PC and update this section.
 
 ## Stack
 
