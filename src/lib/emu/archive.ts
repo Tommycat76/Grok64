@@ -36,7 +36,7 @@ export function pickBootFile(files: string[]): string | null {
   if (!files.length) return null;
   const ranked = [...files].sort((a, b) => rankBootCandidate(b) - rankBootCandidate(a));
   const best = ranked[0];
-  if (isJunkRelease(best) && ranked.length === 1) return best; // only choice
+  if (isJunkRelease(best) && ranked.length === 1) return best;
   if (isJunkRelease(best)) {
     const nonJunk = ranked.find((f) => !isJunkRelease(f));
     return nonJunk || best;
@@ -46,6 +46,8 @@ export function pickBootFile(files: string[]): string | null {
 
 export async function toArrayBuffer(data: Blob | ArrayBuffer | Uint8Array): Promise<ArrayBuffer> {
   if (data instanceof ArrayBuffer) return data;
-  if (data instanceof Uint8Array) return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength);
+  if (data instanceof Uint8Array) {
+    return data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+  }
   return data.arrayBuffer();
 }

@@ -1,95 +1,44 @@
 # Grok64
 
-Phone- and tablet-first **Commodore 64 emulator** built with EmulatorJS (VICE WASM), React, and Zustand.
+Phone- and tablet-first **Commodore 64 emulator** (EmulatorJS + VICE WASM, React, Zustand).
 
-> **Status (2026-08-23):** Original Grok Build workspace is not currently attached to the agent session. This repo is a **backup** of architecture, design decisions, QA history, and reconstructed modules so nothing is lost. When the live source is recovered (or re-exported), replace the reconstructed files with the real tree.
+> **Important:** Most of `src/` here is **reconstructed** from the long Grok Build conversation because the original workspace was not attached when this repo was created. Treat it as a faithful design/backup scaffold, not a bit-for-bit copy of the unpublished tree. Replace with the real export when you recover Grok Build on a PC.
 
 ## Live app
 
-**Primary published URL:**
+**https://grok64.grok.me**
 
-https://grok64.grok.me
+Currently crashes on load with `(0 , z.jsxDEV) is not a function` (dev JSX runtime in production bundle). See [docs/PUBLISH.md](docs/PUBLISH.md).
 
-**Status:** Domain resolves and shows Grok publish chrome, but the app currently crashes on load:
+Sandbox preview (may expire):
+`https://hds-q64aqd7pu1ev-6014-f9ie3.grok-code-wild.hades-www.grok-sandbox.com/`
+
+## Repo layout
 
 ```
-(0 , z.jsxDEV) is not a function
+package.json, tsconfig.json
+src/
+  components/emu/Grok64App.tsx   # power, bootKickRef, playBuffer autoplug
+  components/touch-controls.tsx  # stick + FIRE (tap zones + high contrast)
+  lib/detect.ts                  # phone/tablet/desktop
+  lib/store.ts                   # zustand settings
+  lib/emu/host.ts                # single-pad joy vector
+  lib/emu/region.ts              # Boulder Dash → Port 1
+  lib/emu/archive.ts             # junk skip / prefer First Star
+  lib/emu/catalog.ts             # rank/pin catalog hits
+  styles.css                     # tablet dock + visible stick
+scripts/region.test.mjs
+docs/ARCHITECTURE.md, RECOVERY.md, PUBLISH.md
 ```
 
-Cause: development JSX runtime (`jsxDEV`) leaked into the production bundle. Needs a clean production rebuild/republish from Grok Build (or a fix in the Vite/TanStack Start config so production uses `jsx`, not `jsxDEV`).
+## Design rules (do not regress)
 
-**Older sandbox preview (may expire):**
+1. Authentic joystick: one assigned port; FIRE = that port only (no SPACE, no dual-port).
+2. Auto joyport: Boulder Dash / Rockford → Port 1; else Port 2.
+3. No reboot on FIRE or port swap (`bootKickRef`, playLock, hot-swap).
+4. Tablet: stick under CRT, keyboard under stick (`data-device`, `data-kb`).
+5. Catalog: skip Construction Kit / trainers; prefer First Star 1984 BD.
 
-https://hds-q64aqd7pu1ev-6014-f9ie3.grok-code-wild.hades-www.grok-sandbox.com/
+## Owner
 
-## Stack
-
-- **UI:** React 19 + TanStack Start + Tailwind v4
-- **State:** Zustand (settings partialized; joyPort default 2)
-- **Persistence:** IndexedDB
-- **Emulator:** EmulatorJS 4.2.3 + libretro VICE (`vice_x64` / `x64sc`)
-- **Input:** Single virtual joystick on player 0, authentic single-port behavior (CIA Port 2 default `$DC00`, fire bit 4)
-- **Catalog:** Assembly64 + Internet Archive search; ranked picks for classics (Boulder Dash First Star preferred)
-
-## Core design rules (do not regress)
-
-1. **Authentic joystick only**  
-   One assigned port. FIRE = that port’s button only. No SPACE-on-FIRE, no dual-port fire, no extra A/Y face buttons.
-
-2. **Joyport auto-detect**  
-   Boulder Dash / Rockford family → Port 1. Most others → Port 2. Applied in `playBuffer` before hot-swap.
-
-3. **No reboot on FIRE / port swap**  
-   Hot-swap path + `playLock` during disk autostart (8–12s). `bootKickRef` guards against double-boot races with `recoverBoot`.
-
-4. **Tablet layout**  
-   `data-device="tablet"` + `data-kb`. Stick docks under CRT; keyboard under stick (flow layout, no absolute overlay on phone-style stacking).
-
-5. **Catalog hygiene**  
-   `pickBootFile` / `rankCatalogHits` skip Construction Kit, trainers, A Wally, etc. Prefer First Star 1984 Boulder Dash IA d64.
-
-## Key modules (original paths)
-
-| Path | Role |
-|------|------|
-| `src/components/emu/Grok64App.tsx` | Power-on, boot/recover, playBuffer, autoplug, `__g64` debug |
-| `src/lib/emu/host.ts` | `joyInput` / `setJoyVector`, single pad, `simulateInput` |
-| `src/lib/emu/region.ts` | `detectJoyPort`, software hints |
-| `src/lib/emu/catalog.ts` | Search, pin/rank, junk penalty |
-| `src/lib/emu/archive.ts` | `pickBootFile`, SKIP/PREFER, explode archives |
-| `src/components/touch-controls.tsx` / Joystick | Virtual stick + FIRE |
-| `src/styles.css` | Tablet dock, kb overlay rules, min-heights |
-| `src/lib/detect.ts` | phone / tablet / desktop snapshot |
-| `public/software/ports.prg` | CIA port color diagnostic (P2 green, P1 yellow) |
-| `public/software/byte-hopper.prg` | Fire/port QA |
-
-## Known issues at last session
-
-- **Published build crash:** `jsxDEV is not a function` (prod bundle has dev JSX runtime)
-- Power button / recoverBoot race (partially fixed with `bootKickRef`)
-- Stick barely visible on black UI → needs higher contrast
-- Requested: **tap zones** on stick base (digital 8-way) in addition to drag
-- Preview sometimes stuck on “reviving workspace” / “Click to resume Emulator”
-
-## QA scripts (Playwright)
-
-- `scripts/fire-port-assign.mjs` — hopper green P2, ports yellow P1, no reboot
-- `scripts/tablet-bd.mjs` — tablet layout, no kb/stick overlap, BD autoplug P1
-- `scripts/bd-play.mjs` — catalog First Star hit, load, fire without reboot
-- `scripts/region.test.mjs` — pickBootFile + detectJoyPort unit checks
-
-## How to restore full source later
-
-1. On a PC, open Grok → Projects / Apps → **Grok64** → Continue building / Open workspace.
-2. Export or copy the full tree into this repo (replace reconstructed files).
-3. Or download any “Export source” zip from the builder and push it here.
-4. Re-publish so `grok64.grok.me` gets a clean production build (no `jsxDEV`).
-
-## License / credits
-
-- VICE / EmulatorJS: their respective licenses
-- Grok64 app code: owner Tommycat76 (Thomas Phaneuf)
-
----
-
-*Backed up from the long Grok64 build conversation so the project survives workspace disconnects.*
+Tommycat76 (Thomas Phaneuf)

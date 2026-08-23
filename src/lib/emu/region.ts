@@ -8,7 +8,6 @@ export type JoyPort = 1 | 2;
 const PORT1_TITLES = [
   /boulder\s*dash/i,
   /rockford/i,
-  /boulder\s*dash.*construction/i, // still prefer port 1 if somehow loaded
 ];
 
 export function detectJoyPort(haystack: string): JoyPort {

@@ -1,0 +1,30 @@
+{
+  "name": "grok64",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Phone/tablet-first Commodore 64 emulator (EmulatorJS + VICE)",
+  "scripts": {
+    "dev": "vinxi dev",
+    "build": "vinxi build",
+    "start": "vinxi start",
+    "test:region": "node scripts/region.test.mjs"
+  },
+  "dependencies": {
+    "@tanstack/react-router": "^1.0.0",
+    "@tanstack/start": "^1.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zustand": "^5.0.0",
+    "vinxi": "^0.5.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "typescript": "^5.0.0",
+    "tailwindcss": "^4.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
