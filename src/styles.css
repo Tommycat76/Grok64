@@ -1,164 +1,49 @@
-/* Grok64 layout — tablet dock, visible stick, no kb/stick overlap.
-   Reconstructed from build session CSS rules. */
+@import "tailwindcss";
+@import "./g64.css";
 
-:root {
-  color-scheme: dark;
-  --g64-bg: #0a0a0c;
-  --g64-stick-ring: rgba(220, 230, 255, 0.55);
-  --g64-stick-fill: rgba(30, 32, 40, 0.85);
-  --g64-knob: rgba(200, 210, 230, 0.9);
-  --g64-fire: rgba(40, 44, 56, 0.95);
-  --g64-fire-border: rgba(180, 190, 220, 0.5);
+@theme {
+  --font-sans: "Figtree", "Segoe UI", system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --font-display: "Archivo", "Segoe UI", system-ui, sans-serif;
+  --color-bg: #0a0a0b;
+  --color-bg-elevated: #121214;
+  --color-bg-subtle: #1a1a1e;
+  --color-fg: #f2f2f3;
+  --color-fg-muted: #a1a1aa;
+  --color-fg-subtle: #71717a;
+  --color-accent: #c8ccd4;
+  --color-accent-fg: #0a0a0b;
+  --color-led: #c4453a;
+  --color-led-dim: #4a1c18;
+  --color-bezel: #0c0c0e;
+  --color-chassis: #16161a;
+  --color-key: #2a2a30;
+  --color-key-fg: #e8e8ea;
+  --color-phosphor: #75cec8;
+  --shadow-soft: 0 10px 40px #00000073;
+  --radius-xs: 4px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-2xl: 32px;
 }
 
-html,
-body,
-#root {
-  margin: 0;
-  min-height: 100%;
-  background: var(--g64-bg);
-  font-family: system-ui, sans-serif;
-  color: #e8eaf0;
-}
-
-.g64-app {
-  min-height: 100dvh;
-  display: flex;
-  flex-direction: column;
-  background: var(--g64-bg);
-}
-
-.g64-header {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  padding: 0.5rem 0.75rem;
-  flex-shrink: 0;
-}
-
-.g64-badge {
-  font-size: 0.7rem;
-  border: 1px solid #444;
-  border-radius: 999px;
-  padding: 0.1rem 0.5rem;
-}
-
-.g64-stage {
-  flex: 1;
-  min-height: 200px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 0.5rem;
-}
-
-.g64-screen {
-  width: 100%;
-  max-width: 960px;
-  aspect-ratio: 4 / 3;
-  min-height: 160px;
-  background: #000;
-  border-radius: 12px;
-  position: relative;
-  overflow: hidden;
-}
-
-.g64-boot {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  background: rgba(0, 0, 0, 0.6);
-}
-
-.g64-splash {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1.25rem;
-}
-
-.g64-power {
-  width: 72px;
-  height: 72px;
-  border-radius: 50%;
-  border: 2px solid #6cf;
-  background: #111;
-  color: #9ef;
-  font-weight: 600;
-}
-
-.g64-controls {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.75rem 1.25rem 1.25rem;
-  gap: 1rem;
-  flex-shrink: 0;
-}
-
-.g64-stick {
-  width: 120px;
-  height: 120px;
-  border-radius: 50%;
-  border: 2px solid var(--g64-stick-ring);
-  background: var(--g64-stick-fill);
-  position: relative;
-  touch-action: none;
-  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
-}
-
-.g64-stick-knob {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: var(--g64-knob);
-  border: 2px solid rgba(255, 255, 255, 0.35);
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  margin: -24px 0 0 -24px;
-  pointer-events: none;
-}
-
-.g64-fire {
-  width: 88px;
-  height: 88px;
-  border-radius: 50%;
-  border: 2px solid var(--g64-fire-border);
-  background: var(--g64-fire);
-  color: #eef;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  touch-action: manipulation;
-}
-
-.g64-fire:active {
-  background: #3a4060;
-}
-
-.g64-kb {
-  flex-shrink: 0;
-  padding: 0.5rem;
-  background: rgba(20, 22, 28, 0.95);
-}
-
-/* Tablet: flow dock under CRT, keyboard under stick */
-.g64-app[data-device="tablet"] .g64-controls {
-  position: relative;
-}
-
-.g64-app[data-device="tablet"][data-kb="true"] .g64-controls {
-  order: 0;
-}
-
-.g64-app[data-device="phone"][data-kb="true"] .g64-controls {
-  /* phone may overlay; keep stick reachable */
-}
-
-.g64-app[data-kb="true"] .g64-stick {
-  width: 96px;
-  height: 96px;
+@layer base {
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  html {
+    background: var(--color-bg);
+    color: var(--color-fg);
+  }
+  body {
+    background: var(--color-bg);
+    min-height: 100dvh;
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    margin: 0;
+    overflow: hidden;
+  }
 }

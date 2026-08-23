@@ -1,25 +1,22 @@
-# Recovering the full Grok64 source
+# Recovered source (2026-08-23)
 
-## Mobile (current situation)
+The original Grok Build workspace was gone. GitHub previously held reconstructed stubs. This commit replaces them with functioning TypeScript recovered from the live production bundle at https://grok64.grok.me (`/assets/routes-CZHgHMH9.js`).
+
+## What was wrong with the live build
+
+`Bl()` (the app shell) was compiled with `jsxDEV` while the rest of the chunk used `jsx`. Production has no `jsxDEV`, so the splash crashed immediately: `(0 , z.jsxDEV) is not a function`. Recovered source uses the regular JSX runtime.
+
+## What was recovered
+
+- EmulatorJS host: CDN loader, fake “Grok64 Touch” pad, `vice_joyport`, restart guard, playLock, hot-swap `writeFile`, BASIC cold start
+- SID wrap at `$C000`, D64 BAM/PRG wrap, work disk banner
+- Region: PAL/NTSC + Boulder Dash → Port 1
+- Catalog server functions: IA + HVSC + Assembly64 (`/leet/search/aql`, `/leet/search/entries`, `/leet/search/bin`)
+- Keyboard, stick + FIRE, software sheet, machine settings, mapper, about
+- Bundled software in `public/software/`
+
+Server function bodies were hashed out of the client bundle and reconstructed from call sites plus the Assembly64 / IA / HVSC APIs.
+
+## Still true
 
 You do not need a PC to *keep* this backup — this GitHub repo is the backup.
-
-To get the **full original tree** back:
-
-1. When you next have a computer (or a tablet browser that can run Grok Build):
-   - Open [grok.com](https://grok.com) (or the Grok app desktop web).
-   - Look under Projects / Apps / Builds for **Grok64**.
-   - Open it and use any **Export**, **Download source**, or copy from the file tree.
-2. Push that tree into this repo (`Tommycat76/Grok64`) so it replaces the reconstructed stubs.
-
-## What this repo already saves
-
-- Full design rules (joystick authenticity, joyport autoplug, no-reboot FIRE, tablet dock).
-- Boot race fix notes (`bootKickRef`).
-- Catalog / Boulder Dash ranking logic.
-- Reconstructed `region.ts` and `archive.ts`.
-- Architecture and QA script list.
-
-## Published app
-
-Paste the live URL into `README.md` when you have it. The published build is runnable but is not a substitute for source.
