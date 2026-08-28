@@ -3,7 +3,7 @@ import * as Dialog from "@radix-ui/react-dialog";
 import { Cloud, Disc3, FolderOpen, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { CatalogPane } from "./catalog";
-import { fetchUrl } from "@/lib/g64/catalog.server";
+import { fetchUrl } from "@/lib/g64/catalog-api";
 import { ACCEPT, KIND_LABEL, expandArchive, fromBase64, isDiskKind, toArrayBuffer } from "@/lib/g64/files";
 import { deleteFile, isWorkDiskName, listLibrary, putFile } from "@/lib/g64/idb";
 import { BUNDLED, type BundledTitle } from "@/lib/g64/software";

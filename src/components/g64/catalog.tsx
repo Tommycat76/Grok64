@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Disc3, Download, LoaderCircle, Play, Search } from "lucide-react";
 import { toast } from "sonner";
 import { CATALOG_KINDS, SOURCE_LABEL, type CatalogFile, type CatalogHit, type CatalogKind } from "@/lib/g64/catalog";
-import { downloadCatalog, listRelease, searchCatalog } from "@/lib/g64/catalog.server";
+import { downloadCatalog, listRelease, searchCatalog } from "@/lib/g64/catalog-api";
 import { expandArchive, fromBase64, pickBootFile, toArrayBuffer } from "@/lib/g64/files";
 import { listLibrary, putFile } from "@/lib/g64/idb";
 import type { LibraryItem } from "@/lib/g64/store";
