@@ -1,0 +1,68 @@
+import type { BundledTitle } from "./types";
+
+export const BUNDLED: BundledTitle[] = [
+  {
+    id: "raster-sid",
+    name: "Raster + SID",
+    kind: "prg",
+    path: "/software/raster-sid.prg",
+    blurb: "VIC-II raster bars and a reSID arpeggio. Demo path.",
+    tag: "demo",
+  },
+  {
+    id: "byte-hopper",
+    name: "Byte Hopper",
+    kind: "prg",
+    path: "/software/byte-hopper.prg",
+    blurb: "Dodge falling bytes. Press FIRE to start, stick to move, fire to retry.",
+    tag: "game",
+  },
+  {
+    id: "diagnostics",
+    name: "Diagnostics",
+    kind: "prg",
+    path: "/software/diagnostics.prg",
+    blurb: "VIC, SID and CIA smoke test. Fire or any key to exit.",
+    tag: "utility",
+  },
+  {
+    id: "ports",
+    name: "Port Check",
+    kind: "prg",
+    path: "/software/ports.prg",
+    blurb: "Fire test. Green = port 2, yellow = port 1, white = both.",
+    tag: "utility",
+  },
+  {
+    id: "ready",
+    name: "BASIC READY",
+    kind: "d64",
+    path: "/software/blank.d64",
+    blurb: "KERNAL cold start with a writable work disk. Banner, 38911 bytes free, READY.",
+    tag: "utility",
+  },
+  {
+    id: "workbench",
+    name: "Grok64 Workbench",
+    kind: "d64",
+    path: "/software/grok64-workbench.d64",
+    blurb: "1541 disk with every bundled title. Banner, then VICE loads the first file and RUNs.",
+    tag: "disk",
+  },
+  {
+    id: "cart",
+    name: "Grok64 Cartridge",
+    kind: "crt",
+    path: "/software/grok64.crt",
+    blurb: "8K CBM80 cart in the expansion port.",
+    tag: "cart",
+  },
+  {
+    id: "tape",
+    name: "Raster SID (tape)",
+    kind: "t64",
+    path: "/software/raster-sid.t64",
+    blurb: "Same demo on a T64 tape image.",
+    tag: "tape",
+  },
+];

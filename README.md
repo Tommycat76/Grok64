@@ -1,51 +1,40 @@
 # Grok64
 
-Phone- and tablet-first **Commodore 64 emulator** — EmulatorJS + VICE WASM, React 19, Zustand, IndexedDB library.
+Phone- and tablet-first Commodore 64 emulator (EmulatorJS + VICE WASM).
 
-Live app: **https://grok64.grok.me**
+## Live app
 
-This tree is the **recovered functioning source** (August 2026). The previous GitHub copy was a reconstructed stub. Source was recovered from the live production bundle and rewritten as TypeScript so it runs again (the published build crashed with `jsxDEV is not a function` because a production chunk still called the dev JSX runtime).
+- Published slug: **https://grok64.grok.me**
+- Grok Build project id: `01a0303f-68eb-73c3-bf55-0f667c8a2d6d`
 
-## What it is
+## Local Grok Build TUI
 
-- Cold start to BASIC READY with a writable **WORK DISK.D64**
-- Catalog: Assembly64 (when the network allows), HVSC, Internet Archive
-- Downloads stay on this device (IndexedDB) so disks can SAVE
-- Autoplug joystick: Boulder Dash / Rockford → Port 1, otherwise Port 2
-- FIRE maps to the assigned port only (no dual-port, no SPACE-as-fire)
-- Hot-swap disks without a full reboot; playLock during autostart
-- PAL/NTSC from filename tags, SID flags, and known titles
-- Fast VICE core on phones and budget tablets (Onn, iPhone)
+This is the **full source** (not the earlier reconstructed stubs).
 
-## Design rules (do not regress)
+```bash
+git clone https://github.com/Tommycat76/Grok64.git
+cd Grok64
+npm install
+npm run dev
+```
 
-1. Authentic joystick: one assigned port; FIRE = that port only.
+Dev server listens on `0.0.0.0:8080` via `npm run dev` (`scripts/with-app-env.mjs`).
+
+## Stack
+
+React 19, TanStack Start, Tailwind v4, Zustand, EmulatorJS + libretro VICE.
+
+## Design rules
+
+1. Authentic joystick: one assigned port; FIRE = that port only (no SPACE-on-FIRE).
 2. Auto joyport: Boulder Dash / Rockford → Port 1; else Port 2.
-3. No reboot on FIRE or port swap (`playLock`, hot-swap, `bootKick`).
-4. Tablet: stick under CRT, keyboard under stick (`data-device`, `data-kb`).
+3. No reboot on FIRE or port swap (`bootKickRef`, playLock, hot-swap).
+4. Tablet: stick under CRT; keyboard under stick (`data-device`, `data-kb`).
 5. Catalog: skip Construction Kit / trainers; prefer First Star 1984 BD.
 
-## Layout
+## Status 2026-08-28
 
-```
-src/components/g64/   App shell, catalog, keyboard, stick, sheets
-src/lib/g64/          EmulatorJS host, SID wrap, D64, catalog server fns
-src/routes/           TanStack Start routes
-public/software/      Bundled tests (blank disk, Hopper, diagnostics, cart, tape)
-```
+- Restored `Grok64App.tsx` to real JSX (fixes production `jsxDEV is not a function`).
+- Stick: high-contrast + 8-way tap/drag snap.
 
-Auth and a shared database are **off**. Library and settings live in IndexedDB / localStorage (`grok64-settings` v3).
-
-## Run
-
-This is a Grok Build / TanStack Start app (React 19, Vite, Tailwind v4). Open it in Grok Build, or install deps and `npm run dev` on `0.0.0.0:8080`.
-
-EmulatorJS WASM is loaded from `https://cdn.emulatorjs.org/stable/data/`.
-
-## Credits
-
-VICE (GPLv2+) · libretro vice cores · EmulatorJS · reSID (Dag Lem) · Pepto PAL/NTSC · Assembly64 · HVSC · Internet Archive.
-
-## Owner
-
-Tommycat76 (Thomas Phaneuf)
+Owner: Tommycat76 (Thomas Phaneuf)

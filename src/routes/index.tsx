@@ -1,8 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Toaster } from "sonner";
-import { Grok64App } from "@/components/g64/app";
+import { Grok64App } from "@/components/emu/Grok64App";
 
-export const Route = createFileRoute("/")({ component: Home });
+export const Route = createFileRoute("/")({
+  component: Home,
+});
 
 function Home() {
   return (
