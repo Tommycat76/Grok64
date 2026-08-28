@@ -3,7 +3,26 @@ import appCss from "../styles.css?url";
 
 const APP_NAME = "Grok64";
 
+function RootError({ error }: { error: Error }) {
+  return (
+    <html lang="en">
+      <head>
+        <HeadContent />
+      </head>
+      <body>
+        <div style={{ fontFamily: "Figtree, system-ui, sans-serif", background: "#0a0a0b", color: "#f2f2f3", minHeight: "100dvh", padding: "2rem" }}>
+          <p style={{ fontFamily: "Archivo, system-ui, sans-serif", fontWeight: 700 }}>Grok64</p>
+          <p>The emulator hit a snag. Reload the page to try again.</p>
+          <pre style={{ color: "#a1a1aa", whiteSpace: "pre-wrap" }}>{error.message}</pre>
+        </div>
+        <Scripts />
+      </body>
+    </html>
+  );
+}
+
 export const Route = createRootRoute({
+  errorComponent: RootError,
   head: () => ({
     meta: [
       { charSet: "utf-8" },
