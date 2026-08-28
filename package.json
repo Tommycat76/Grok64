@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "vite dev --host 0.0.0.0 --port 8080",
     "build": "vite build",
-    "typecheck": "tsc --noEmit"
+    "preview": "vite preview --host 0.0.0.0 --port 8080",
+    "typecheck": "tsc --noEmit",
+    "check:jsx": "node scripts/check-no-jsxdev.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.15",

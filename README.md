@@ -38,7 +38,14 @@ Auth and a shared database are **off**. Library and settings live in IndexedDB /
 
 ## Run
 
-This is a Grok Build / TanStack Start app (React 19, Vite, Tailwind v4). Open it in Grok Build, or install deps and `npm run dev` on `0.0.0.0:8080`.
+This is a Grok Build / TanStack Start app (React 19, Vite, Tailwind v4). Open it in Grok Build, or:
+
+```
+npm install
+npm run dev
+```
+
+Dev server: `http://0.0.0.0:8080`. Production: `npm run build` then `npm run check:jsx` (must not contain `jsxDEV`).
 
 EmulatorJS WASM is loaded from `https://cdn.emulatorjs.org/stable/data/`.
 
