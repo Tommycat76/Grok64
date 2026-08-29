@@ -7,7 +7,7 @@ const server = await createServer({
   appType: "custom",
   logLevel: "error",
 });
-const { c64Keystrokes } = await server.ssrLoadModule("/src/lib/emu/keys.ts");
+const { c64Keystrokes, keyCodeOf, isJoyFireKey, FIRE_KEY_CODE } = await server.ssrLoadModule("/src/lib/emu/keys.ts");
 const { needsTypedBoot, kindOf, driveForPlay, isDiskKind } = await server.ssrLoadModule("/src/lib/emu/formats.ts");
 await server.close();
 
@@ -60,4 +60,20 @@ test("only floppy images can be inserted as a second disk", () => {
   assert.equal(isDiskKind(kindOf("sideb.g64")), true);
   assert.equal(isDiskKind(kindOf("byte-hopper.prg")), false);
   assert.equal(isDiskKind(kindOf("tune.sid")), false);
+});
+
+test("letter and space keyCodes match VICE/Chrome", () => {
+  assert.equal(keyCodeOf("KeyA", "a"), 65);
+  assert.equal(keyCodeOf("KeyB", "b"), 66);
+  assert.equal(keyCodeOf("Space", " "), 32);
+  assert.equal(keyCodeOf("KeyK", "k"), 75);
+});
+
+test("only Right Ctrl is the host fire key; arrows are not joystick", () => {
+  assert.equal(FIRE_KEY_CODE, "ControlRight");
+  assert.equal(isJoyFireKey("ControlRight"), true);
+  assert.equal(isJoyFireKey("ControlLeft"), false);
+  assert.equal(isJoyFireKey("KeyK"), false);
+  assert.equal(isJoyFireKey("ArrowUp"), false);
+  assert.equal(isJoyFireKey("ArrowLeft"), false);
 });

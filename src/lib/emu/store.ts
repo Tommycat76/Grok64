@@ -14,12 +14,12 @@ import type {
 } from "./types";
 
 const DEFAULT_BINDS: ControlBinding[] = [
-  { action: "up", keys: ["ArrowUp", "KeyW"], padButtons: [12], padAxes: [{ axis: 1, dir: -1 }] },
-  { action: "down", keys: ["ArrowDown", "KeyS"], padButtons: [13], padAxes: [{ axis: 1, dir: 1 }] },
-  { action: "left", keys: ["ArrowLeft", "KeyA"], padButtons: [14], padAxes: [{ axis: 0, dir: -1 }] },
-  { action: "right", keys: ["ArrowRight", "KeyD"], padButtons: [15], padAxes: [{ axis: 0, dir: 1 }] },
-  { action: "fire", keys: ["Space", "KeyK"], padButtons: [0, 2], padAxes: [] },
-  { action: "fire2", keys: ["KeyL"], padButtons: [1], padAxes: [] },
+  { action: "up", keys: [], padButtons: [12], padAxes: [{ axis: 1, dir: -1 }] },
+  { action: "down", keys: [], padButtons: [13], padAxes: [{ axis: 1, dir: 1 }] },
+  { action: "left", keys: [], padButtons: [14], padAxes: [{ axis: 0, dir: -1 }] },
+  { action: "right", keys: [], padButtons: [15], padAxes: [{ axis: 0, dir: 1 }] },
+  { action: "fire", keys: ["ControlRight"], padButtons: [0, 2], padAxes: [] },
+  { action: "fire2", keys: [], padButtons: [1], padAxes: [] },
   { action: "space", keys: [], padButtons: [3], padAxes: [] },
   { action: "runstop", keys: [], padButtons: [9], padAxes: [] },
   { action: "commodore", keys: [], padButtons: [8], padAxes: [] },
@@ -112,7 +112,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       crtFilter: true,
       showJoystick: true,
       showKeyboard: false,
-      arrowsAreJoy: true,
+      arrowsAreJoy: false,
       volume: 0.7,
       binds: DEFAULT_BINDS,
       setMachine: (machineId) => set({ machineId }),
@@ -163,7 +163,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
     }),
     {
       name: "grok64-settings",
-      version: 3,
+      version: 5,
       storage: createJSONStorage(() =>
         typeof window === "undefined"
           ? {
@@ -218,6 +218,13 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
           if (!p.driveMode || p.driveMode === "true") p.driveMode = "auto";
           if (!p.videoStandard) p.videoStandard = "auto";
           if (!p.coreMode) p.coreMode = "auto";
+        }
+        if (version < 4) {
+          p.binds = DEFAULT_BINDS;
+        }
+        if (version < 5) {
+          p.arrowsAreJoy = false;
+          p.binds = DEFAULT_BINDS;
         }
         delete p.powered;
         delete p.running;

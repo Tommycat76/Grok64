@@ -60,16 +60,15 @@
 
 html, body, #app {
   height: 100%;
-  min-height: 100dvh;
-  min-height: 100svh;
+  min-height: var(--app-h, 100svh);
+  height: var(--app-h, 100svh);
   overflow: hidden;
 }
 
 .g64-app {
-  min-height: 100dvh;
-  min-height: 100svh;
-  height: 100dvh;
-  height: 100svh;
+  min-height: var(--app-h, 100svh);
+  height: var(--app-h, 100svh);
+  max-height: var(--app-h, 100svh);
   display: flex;
   flex-direction: column;
   background: var(--color-bg);
@@ -221,6 +220,9 @@ html, body, #app {
   border-radius: 999px;
   padding: 4px 8px;
   background: var(--color-bg-elevated);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
 }
 
 .g64-iconbtn {
@@ -469,23 +471,44 @@ div[class*="ejs_virtual"] {
   width: 136px;
   height: 136px;
   border-radius: 999px;
-  background: color-mix(in oklab, #0c0d12 88%, #1c2230);
-  border: 2px solid color-mix(in oklab, var(--color-fg) 52%, transparent);
+  background: #07080c;
+  border: 2px solid #d8dce6;
   box-shadow:
-    0 0 0 1px rgba(0, 0, 0, 0.65) inset,
-    0 8px 18px rgba(0, 0, 0, 0.45);
+    0 0 0 2px #000 inset,
+    0 0 0 1px rgba(216, 220, 230, 0.35),
+    0 10px 22px rgba(0, 0, 0, 0.62);
   position: relative;
   touch-action: none;
   justify-self: start;
   pointer-events: auto;
 }
+.g64-stick-tick {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 11px;
+  margin: -5.5px 0 0 -1.5px;
+  border-radius: 2px;
+  background: #cfd3de;
+  pointer-events: none;
+  opacity: 0.92;
+}
+.g64-stick-tick[data-dir="n"] { transform: translateY(-54px); }
+.g64-stick-tick[data-dir="s"] { transform: translateY(54px); }
+.g64-stick-tick[data-dir="e"] { transform: translateX(54px) rotate(90deg); }
+.g64-stick-tick[data-dir="w"] { transform: translateX(-54px) rotate(90deg); }
+.g64-stick-tick[data-dir="ne"] { transform: translate(38px, -38px) rotate(45deg); }
+.g64-stick-tick[data-dir="se"] { transform: translate(38px, 38px) rotate(-45deg); }
+.g64-stick-tick[data-dir="sw"] { transform: translate(-38px, 38px) rotate(45deg); }
+.g64-stick-tick[data-dir="nw"] { transform: translate(-38px, -38px) rotate(-45deg); }
 .g64-knob {
   width: 58px;
   height: 58px;
   border-radius: 999px;
-  background: color-mix(in oklab, #2a3144 70%, #c8d0e8);
-  border: 2px solid color-mix(in oklab, var(--color-fg) 70%, transparent);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  background: #3d465c;
+  border: 2px solid #eef1f7;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.65);
   position: absolute;
   left: 50%;
   top: 50%;
@@ -497,6 +520,15 @@ div[class*="ejs_virtual"] {
     calc(-50% + (var(--ky) * var(--g64-travel)))
   );
   pointer-events: none;
+}
+.g64-pad-note {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-phosphor);
+  align-self: end;
+  padding: 8px 4px;
 }
 .g64-fire-col {
   display: flex;
@@ -649,6 +681,16 @@ div[class*="ejs_virtual"] {
   padding: 10px 16px 12px;
   background: color-mix(in oklab, var(--color-chassis) 82%, transparent);
   border-top: 1px solid color-mix(in oklab, var(--color-fg) 10%, transparent);
+}
+.g64-app[data-kb="true"] .g64-stage {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.g64-app[data-kb="true"] .g64-bezel,
+.g64-app[data-kb="true"] .g64-screen {
+  min-height: 0;
+  min-width: 0;
 }
 .g64-app[data-kb="true"] .g64-kb,
 .g64-app[data-device="tablet"] .g64-kb {
@@ -995,14 +1037,14 @@ div[class*="ejs_virtual"] {
   }
 }
 
-@media (orientation: landscape) and (max-height: 500px) {
-  .g64-stage {
+@media (max-height: 500px) {
+  .g64-app[data-orient="landscape"] .g64-stage {
     flex-direction: column;
   }
-  .g64-bezel {
+  .g64-app[data-orient="landscape"] .g64-bezel {
     flex: 1;
   }
-  .g64-controls {
+  .g64-app[data-orient="landscape"]:not([data-kb="true"]) .g64-controls {
     left: 8px;
     right: 8px;
     bottom: 12px;
@@ -1011,29 +1053,29 @@ div[class*="ejs_virtual"] {
     min-height: 0;
     justify-items: stretch;
   }
-  .g64-stick {
+  .g64-app[data-orient="landscape"] .g64-stick {
     width: 108px;
     height: 108px;
     justify-self: start;
   }
-  .g64-fire-col {
+  .g64-app[data-orient="landscape"] .g64-fire-col {
     justify-self: end;
   }
-  .g64-fire {
+  .g64-app[data-orient="landscape"] .g64-fire {
     width: 68px;
     height: 68px;
     justify-self: center;
   }
-  .g64-key {
+  .g64-app[data-orient="landscape"] .g64-key {
     min-height: 40px;
     height: 40px;
     font-size: 14px;
   }
-  .g64-kb-bar .g64-key {
+  .g64-app[data-orient="landscape"] .g64-kb-bar .g64-key {
     min-height: 42px;
     height: 42px;
   }
-  .g64-top h1 {
+  .g64-app[data-orient="landscape"] .g64-top h1 {
     display: none;
   }
 }
@@ -1099,53 +1141,138 @@ div[class*="ejs_virtual"] {
   height: 100px;
 }
 
-@media (orientation: landscape) {
-  .g64-app[data-device="tablet"] .g64-stage,
-  .g64-app[data-device="desktop"] .g64-stage {
-    flex-direction: column;
-    align-items: stretch;
-    gap: 0;
-  }
-  .g64-app[data-device="tablet"] .g64-bezel,
-  .g64-app[data-device="desktop"] .g64-bezel {
-    flex: 1 1 auto;
-    width: auto;
-    aspect-ratio: 4 / 3;
-    max-height: 100%;
-    margin-inline: auto;
-  }
-  .g64-app[data-device="tablet"]:not([data-kb="true"]) .g64-controls {
-    position: absolute;
-    left: 16px;
-    right: 16px;
-    bottom: 20px;
-    width: auto;
-    flex: none;
-    background: transparent;
-    border-top: 0;
-    padding: 0;
-    grid-template-columns: 1fr auto;
-    min-height: 0;
-    justify-items: stretch;
-    align-content: end;
-  }
-  .g64-app[data-device="tablet"][data-kb="true"] .g64-controls {
-    position: relative;
-    left: auto;
-    right: auto;
-    bottom: auto;
-    grid-template-columns: 1fr auto;
-  }
-  .g64-app[data-device="tablet"] .g64-stick {
-    justify-self: start;
-  }
-  .g64-app[data-device="tablet"] .g64-fire-col,
-  .g64-app[data-device="tablet"] .g64-fire {
-    justify-self: end;
-  }
-  .g64-app[data-device="desktop"] .g64-bezel {
-    max-width: 960px;
-  }
+.g64-app[data-orient="landscape"][data-device="tablet"] .g64-stage,
+.g64-app[data-orient="landscape"][data-device="desktop"] .g64-stage {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+.g64-app[data-orient="landscape"][data-device="tablet"] .g64-bezel,
+.g64-app[data-orient="landscape"][data-device="desktop"] .g64-bezel {
+  flex: 1 1 auto;
+  width: auto;
+  aspect-ratio: 4 / 3;
+  max-height: 100%;
+  margin-inline: auto;
+}
+.g64-app[data-orient="landscape"][data-device="tablet"]:not([data-kb="true"]) .g64-controls {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 20px;
+  width: auto;
+  flex: none;
+  background: transparent;
+  border-top: 0;
+  padding: 0;
+  grid-template-columns: 1fr auto;
+  min-height: 0;
+  justify-items: stretch;
+  align-content: end;
+}
+.g64-app[data-orient="landscape"][data-device="tablet"][data-kb="true"] .g64-controls {
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  grid-template-columns: 1fr auto;
+}
+.g64-app[data-orient="landscape"][data-device="tablet"] .g64-stick {
+  justify-self: start;
+}
+.g64-app[data-orient="landscape"][data-device="tablet"] .g64-fire-col,
+.g64-app[data-orient="landscape"][data-device="tablet"] .g64-fire {
+  justify-self: end;
+}
+.g64-app[data-orient="landscape"][data-device="desktop"] .g64-bezel {
+  max-width: 960px;
+}
+
+/* Viewport-based landscape (Onn: ignore stale screen.orientation) */
+.g64-app[data-orient="landscape"][data-kb="true"] .g64-log {
+  display: none !important;
+}
+.g64-app[data-orient="landscape"][data-kb="true"] .g64-stage {
+  flex: 1 1 0;
+  min-height: 0;
+  padding-bottom: 4px;
+}
+.g64-app[data-orient="landscape"][data-kb="true"] .g64-bezel {
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: auto;
+  margin-inline: auto;
+}
+.g64-app[data-orient="landscape"][data-kb="true"] .g64-screen {
+  min-height: 0;
+  min-width: 0;
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  aspect-ratio: 4 / 3;
+  flex: 0 1 auto;
+}
+.g64-app[data-orient="landscape"][data-kb="true"] .g64-controls {
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  flex: 0 0 auto;
+  padding: 4px 16px 6px;
+}
+.g64-app[data-orient="landscape"][data-kb="true"] .g64-stick {
+  width: 88px;
+  height: 88px;
+}
+.g64-app[data-orient="landscape"][data-kb="true"] .g64-knob {
+  width: 36px;
+  height: 36px;
+  --g64-travel: 22px;
+}
+.g64-app[data-orient="landscape"][data-kb="true"] .g64-fire {
+  width: 64px;
+  height: 64px;
+  font-size: 11px;
+}
+.g64-app[data-orient="landscape"][data-kb="true"] .g64-kb {
+  position: relative;
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  z-index: 8;
+  padding-bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+}
+.g64-app[data-orient="landscape"][data-kb="true"] .g64-key {
+  min-height: 36px;
+  height: 36px;
+  font-size: 13px;
+}
+.g64-app[data-orient="landscape"][data-kb="true"] .g64-kb-bar .g64-key {
+  min-height: 40px;
+  height: 40px;
+}
+
+.g64-app[data-orient="landscape"]:not([data-kb="true"])[data-device="tablet"] .g64-controls {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 20px;
+  width: auto;
+  flex: none;
+  background: transparent;
+  border-top: 0;
+  padding: 0;
+}
+
+.g64-app[data-device="desktop"] .g64-controls {
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  flex: 0 0 auto;
 }
 
 .g64-app[data-device="desktop"] .g64-stage {

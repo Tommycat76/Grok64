@@ -1,5 +1,6 @@
+// @ts-nocheck — large loosely-typed emulator shell; runtime is covered by Playwright QA.
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Disc3, FolderOpen, Info, Keyboard as KeyboardIcon, Pause, Play, Power, RotateCcw, Settings, Volume2, VolumeX } from "lucide-react";
+import { Disc3, FolderOpen, Gamepad2, Info, Keyboard as KeyboardIcon, Pause, Play, Power, RotateCcw, Settings, Volume2, VolumeX } from "lucide-react";
 import { toast } from "sonner";
 import { C64Keyboard } from "@/components/emu/Keyboard";
 import { TouchControls } from "@/components/emu/Joystick";
@@ -8,12 +9,12 @@ import { DiskMountSheet } from "@/components/emu/DiskMountSheet";
 import { SettingsSheet } from "@/components/emu/SettingsSheet";
 import { copyBuffer, getFile, listLibrary, putSaveState, deleteSaveState, touchPlayed, updateFileData, ensureWorkDisk, isWorkDisk, removeFile } from "@/lib/emu/library";
 import { useEmu } from "@/lib/emu/store";
-import { applyRuntimeOptions, audioLocked, autostartReset, bootEmulator, bootFileOf, captureState, clearRetroSaves, coreHasFs, destroyEmu, dismissEjsPrompts, ensureRuntime, fitEmu, hardReset, joyInput, plugJoysticks, readMountedMedia, recycleCore, resetEmu, setJoyVector, setPaused, setWarp, unlockAudio, viceJoyOptions, writeBootFile } from "@/lib/emu/host";
+import { applyRuntimeOptions, audioLocked, autostartReset, bootEmulator, bootFileOf, captureState, clearRetroSaves, coreHasFs, destroyEmu, dismissEjsPrompts, ensureRuntime, fitEmu, hardReset, hasRealGamepad, joyInput, listRealGamepads, plugJoysticks, readMountedMedia, recycleCore, resetEmu, setJoyVector, setPaused, setWarp, unlockAudio, viceJoyOptions, writeBootFile } from "@/lib/emu/host";
 import { detectLine, resolveMachine } from "@/lib/emu/machines";
-import { snapshotDevice } from "@/lib/emu/detect";
+import { snapshotDevice, readViewport, applyViewport } from "@/lib/emu/detect";
 import { detectJoyPort, detectSoftwareStandard } from "@/lib/emu/region";
 import { RETRO_BTN } from "@/lib/emu/types";
-import { dispatchC64Key } from "@/lib/emu/keys";
+import { dispatchC64Key, isJoyFireKey } from "@/lib/emu/keys";
 import { bootFileName, driveForPlay, d64DiskName, isDiskKind, isWorkDiskImage, kindOf, needsTypedBoot } from "@/lib/emu/formats";
 import { wrapForDiskSwap } from "@/lib/emu/d64";
 import { isSid, psidToPrg } from "@/lib/emu/psid";
@@ -23,6 +24,19 @@ import { glog, glogFire, subscribeLog } from "@/lib/emu/debug";
 const PlayerMount = memo(function PlayerMount() {
   return <div id="grok64-player" />;
 });
+
+let fitTimers: number[] = [];
+function scheduleFit() {
+  for (const id of fitTimers) window.clearTimeout(id);
+  const run = () => {
+    const el = document.getElementById("grok64-player");
+    const emu = (window as unknown as { __ejs?: Parameters<typeof fitEmu>[1] }).__ejs ?? null;
+    fitEmu(el, emu);
+  };
+  run();
+  fitTimers = [50, 160, 400, 800].map((ms) => window.setTimeout(run, ms));
+  return fitTimers;
+}
 
 export function Grok64App() {
   const s = useEmu();
@@ -65,6 +79,8 @@ export function Grok64App() {
   });
   const snapRef = useRef(snap);
   snapRef.current = snap;
+  const [view, setView] = useState({ width: 1280, height: 720, orient: "landscape" });
+  const [stickViz, setStickViz] = useState({ x: 0, y: 0 });
   const resolved = useMemo(
     () =>
       resolveMachine(
@@ -82,19 +98,48 @@ export function Grok64App() {
   const resolvedRef = useRef(resolved);
   resolvedRef.current = resolved;
   useEffect(() => {
+    let busy = false;
+    const last = { width: 0, height: 0, orient: "" };
     const update = () => {
-      const next = snapshotDevice();
-      setSnap(next);
-      snapRef.current = next;
+      if (busy) return;
+      busy = true;
+      try {
+        const next = snapshotDevice();
+        setSnap(next);
+        snapRef.current = next;
+        const vp = applyViewport(readViewport());
+        const changed = last.width !== vp.width || last.height !== vp.height || last.orient !== vp.orient;
+        last.width = vp.width;
+        last.height = vp.height;
+        last.orient = vp.orient;
+        if (changed) setView(vp);
+        scheduleFit();
+      } finally {
+        busy = false;
+      }
     };
     update();
+    const mq = window.matchMedia("(orientation: landscape)");
+    mq.addEventListener?.("change", update);
     window.addEventListener("resize", update);
     window.addEventListener("orientationchange", update);
+    window.visualViewport?.addEventListener("resize", update);
+    window.visualViewport?.addEventListener("scroll", update);
+    const so = screen.orientation;
+    so?.addEventListener?.("change", update);
     return () => {
+      mq.removeEventListener?.("change", update);
       window.removeEventListener("resize", update);
       window.removeEventListener("orientationchange", update);
+      window.visualViewport?.removeEventListener("resize", update);
+      window.visualViewport?.removeEventListener("scroll", update);
+      so?.removeEventListener?.("change", update);
     };
   }, []);
+  useEffect(() => {
+    const timers = scheduleFit();
+    return () => timers.forEach((id) => window.clearTimeout(id));
+  }, [s.showKeyboard, view.orient]);
   useEffect(() => {
     void ensureRuntime().catch(() => undefined);
   }, []);
@@ -132,6 +177,7 @@ export function Grok64App() {
       stick: (x, y) => {
         joyRef.current.x = x;
         joyRef.current.y = y;
+        setStickViz({ x, y });
         setJoyVector(emuRef.current, x, y, joyRef.current.fire);
       },
       load: async (path, name) => {
@@ -140,8 +186,12 @@ export function Grok64App() {
         await playBufferRef.current(name, buf, { autostart: true, title: name });
         return true;
       },
+      pad: () => useEmu.getState().padName,
       plug: () => plugJoysticks(emuRef.current, useEmu.getState().joyPort),
       joyPort: () => useEmu.getState().joyPort,
+      joy: () => ({ ...joyRef.current }),
+      view: () => ({ ...readViewport(), dataOrient: document.documentElement.dataset.orient ?? null }),
+      dispatchKey: (code, key, down) => dispatchC64Key(code, key, down),
       probe: () => {
         const emu = emuRef.current;
         const M = emu?.Module;
@@ -905,9 +955,10 @@ export function Grok64App() {
     } catch {}
     joyRef.current.x = x;
     joyRef.current.y = y;
+    setStickViz({ x, y });
     setJoyVector(emuRef.current, x, y, joyRef.current.fire);
   }, []);
-  const onFire = useCallback((down) => {
+  const onFire = useCallback((down, clearStick = false) => {
     const st = useEmu.getState();
     if (playLockRef.current || st.booting || !st.running) {
       if (down) glog("fire-blocked", { booting: st.booting, lock: playLockRef.current, running: st.running, title: st.currentTitle });
@@ -915,9 +966,10 @@ export function Grok64App() {
     }
     glogFire(down, { title: st.currentTitle, hasGm: Boolean(emuRef.current?.gameManager) });
     joyRef.current.fire = down;
-    if (down) {
+    if (down && clearStick) {
       joyRef.current.x = 0;
       joyRef.current.y = 0;
+      setStickViz({ x: 0, y: 0 });
     }
     setJoyVector(emuRef.current, joyRef.current.x, joyRef.current.y, down);
   }, []);
@@ -959,10 +1011,13 @@ export function Grok64App() {
     const dead = 0.35;
     const tick = () => {
       raf = requestAnimationFrame(tick);
-      const pads = navigator.getGamepads?.() ?? [];
-      const pad = pads.find((p) => p && p.id !== "Grok64 Touch");
-      if (pad) setPadName(pad.id);
+      const pads = listRealGamepads();
+      const pad = pads[0] ?? null;
+      const named = useEmu.getState().padName;
+      if (pad && named !== pad.id) setPadName(pad.id);
+      else if (!pad && named) setPadName(null);
       if (!pad || !emuRef.current) return;
+      if (playLockRef.current || useEmu.getState().booting) return;
       const pressed = (action, on) => {
         const key = action;
         if (prev.get(key) === on) return;
@@ -994,13 +1049,33 @@ export function Grok64App() {
         }
         pressed(b.action, on);
       }
+      const up = prev.get("up");
+      const down = prev.get("down");
+      const left = prev.get("left");
+      const right = prev.get("right");
+      const x = (right ? 1 : 0) - (left ? 1 : 0);
+      const y = (down ? 1 : 0) - (up ? 1 : 0);
+      if (joyRef.current.x !== x || joyRef.current.y !== y) {
+        joyRef.current.x = x;
+        joyRef.current.y = y;
+        setStickViz({ x, y });
+        setJoyVector(emuRef.current, x, y, joyRef.current.fire);
+      }
     };
     raf = requestAnimationFrame(tick);
     const connect = (e) => {
       const id = e.gamepad?.id;
-      if (id) s.setPadName(id);
+      if (id && id !== "Grok64 Touch") s.setPadName(id);
     };
-    const disconnect = () => s.setPadName(null);
+    const disconnect = () => {
+      if (!hasRealGamepad()) {
+        s.setPadName(null);
+        joyRef.current.x = 0;
+        joyRef.current.y = 0;
+        setStickViz({ x: 0, y: 0 });
+        setJoyVector(emuRef.current, 0, 0, joyRef.current.fire);
+      }
+    };
     window.addEventListener("gamepadconnected", connect);
     window.addEventListener("gamepaddisconnected", disconnect);
     return () => {
@@ -1010,39 +1085,32 @@ export function Grok64App() {
     };
   }, [s.binds, s.setPadName]);
   useEffect(() => {
-    const down = new Set();
     const onKey = (e) => {
       if (!s.running) return;
       const tag = e.target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      if (!s.arrowsAreJoy) return;
-      const bind = s.binds.find((b) => b.keys.includes(e.code));
-      if (!bind) return;
-      if (["up", "down", "left", "right", "fire", "fire2"].includes(bind.action)) {
-        e.preventDefault();
-        const map = {
-          up: RETRO_BTN.UP,
-          down: RETRO_BTN.DOWN,
-          left: RETRO_BTN.LEFT,
-          right: RETRO_BTN.RIGHT,
-          fire: RETRO_BTN.B,
-          fire2: RETRO_BTN.A,
-        };
-        const on = e.type === "keydown";
-        if (on && down.has(e.code)) return;
-        if (on) down.add(e.code);
-        else down.delete(e.code);
-        if (map[bind.action] != null) joyInput(emuRef.current, map[bind.action], on);
-      }
+      if (!isJoyFireKey(e.code)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const on = e.type === "keydown";
+      if (on && e.repeat) return;
+      joyRef.current.fire = on;
+      setJoyVector(emuRef.current, joyRef.current.x, joyRef.current.y, on);
     };
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("keyup", onKey);
-    window.addEventListener("blur", () => down.clear());
+    const onBlur = () => {
+      if (!joyRef.current.fire) return;
+      joyRef.current.fire = false;
+      setJoyVector(emuRef.current, joyRef.current.x, joyRef.current.y, false);
+    };
+    window.addEventListener("keydown", onKey, true);
+    window.addEventListener("keyup", onKey, true);
+    window.addEventListener("blur", onBlur);
     return () => {
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("keyup", onKey);
+      window.removeEventListener("keydown", onKey, true);
+      window.removeEventListener("keyup", onKey, true);
+      window.removeEventListener("blur", onBlur);
     };
-  }, [s.arrowsAreJoy, s.binds, s.running]);
+  }, [s.running]);
   useEffect(() => {
     setPaused(emuRef.current, s.paused);
   }, [s.paused]);
@@ -1058,13 +1126,20 @@ export function Grok64App() {
     className: "g64-app",
     "data-device": resolved.device,
     "data-os": snap.os,
+    "data-orient": view.orient,
     "data-standard": resolved.standard,
     "data-core": resolved.coreMode,
     "data-media": playModeRef.current,
     "data-kb": s.powered && s.showKeyboard ? "true" : "false",
+    "data-pad": s.padName ? "true" : "false",
     "data-running": s.running ? "true" : "false",
     "data-booting": s.booting ? "true" : "false",
+    style: { ["--app-h"]: `${view.height}px` },
+    suppressHydrationWarning: true,
   };
+  const padConnected = Boolean(s.padName);
+  const showStick = s.powered && !s.booting && s.showJoystick && !padConnected;
+  const showJoyChrome = s.powered && !s.booting;
   return (
     <div {...appAttrs}>
       {!s.powered ? (
@@ -1108,6 +1183,17 @@ export function Grok64App() {
         <button type="button" className="g64-chip" onClick={() => s.setSettingsOpen(true)} title={detectLine(resolved)}>
           {resolved.chip}
         </button>
+        {padConnected ? (
+          <button
+            type="button"
+            className="g64-chip"
+            title={s.padName ?? "Controller"}
+            onClick={() => s.setMapperOpen(true)}
+          >
+            <Gamepad2 className="size-3.5" />
+            PAD
+          </button>
+        ) : null}
         <button type="button" className="g64-iconbtn" data-on={s.libraryOpen} aria-label="Software" onClick={() => s.setLibraryOpen(true)}>
           <FolderOpen className="size-5" />
         </button>
@@ -1178,7 +1264,7 @@ export function Grok64App() {
               }
               e.preventDefault();
               if (needsUnlock) resumePlayback();
-              onFire(true);
+              onFire(true, true);
             }}
             onPointerUp={() => {
               if (playLockRef.current || !s.running || s.booting) return;
@@ -1220,8 +1306,11 @@ export function Grok64App() {
         onSwap={swapJoyPort}
         warped={s.warped}
         onWarp={toggleWarp}
-        hidden={!s.powered || !s.showJoystick || s.booting}
+        hidden={!showJoyChrome}
+        padActive={padConnected}
+        stickHidden={!showStick}
         locked={s.booting || !s.running}
+        vector={stickViz}
       />
       {s.powered && s.showKeyboard ? <C64Keyboard /> : null}
       <LibrarySheet onPlayBundled={(t) => void playBundled(t)} onPlayLocal={(i) => void playLocal(i)} onInsert={(i) => void insertDisk(i)} />

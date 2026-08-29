@@ -167,10 +167,12 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               <span>On-screen joystick</span>
               <Switch on={s.showJoystick} onToggle={() => s.setShowJoystick(!s.showJoystick)} />
             </div>
-            <div className="g64-row">
-              <span>Arrows as joystick</span>
-              <Switch on={s.arrowsAreJoy} onToggle={() => s.setArrowsAreJoy(!s.arrowsAreJoy)} />
-            </div>
+            <p className="mb-3 text-xs text-fg-subtle">
+              Keyboard is the full C64 keyboard on computer, tablet, and phone. Right Ctrl is FIRE. Arrow keys are CRSR, never the stick. A plugged-in gamepad is used first; the on-screen stick only appears when no controller is connected.
+            </p>
+            {s.padName ? (
+              <p className="mb-3 text-sm text-phosphor">Using controller: {s.padName}</p>
+            ) : null}
             <div className="g64-field">
               <label>Volume</label>
               <input
@@ -202,7 +204,7 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               <h2>Controls</h2>
             </Drawer.Title>
             <p className="lead">
-              Pair a Bluetooth pad in iPhone Settings or Android Bluetooth, then press a button here. HID, MFi, Xbox, DualShock and most Android controllers show up in the Gamepad API. Web Bluetooth is not available in iOS Safari.
+              Pair a Bluetooth pad in iPhone Settings or Android Bluetooth, then press a button here. HID, MFi, Xbox, DualShock and most Android controllers show up in the Gamepad API. Web Bluetooth is not available in iOS Safari. Stick directions only come from a pad or the on-screen joystick — never from keys.
             </p>
             {s.padName ? (
               <p className="mb-3 text-sm text-phosphor">{s.padName}</p>
@@ -250,17 +252,24 @@ function MapperList() {
     if (!listen) return;
     const onKey = (e: KeyboardEvent) => {
       e.preventDefault();
-      const current = useEmu.getState().binds.find((b) => b.action === listen);
+      if (listen === "up" || listen === "down" || listen === "left" || listen === "right") {
+        setListen(null);
+        return;
+      }
+      if (listen === "fire") {
+        setBind("fire", { keys: ["ControlRight"] });
+        setListen(null);
+        return;
+      }
       setBind(listen, { keys: [e.code] });
       setListen(null);
-      void current;
     };
     window.addEventListener("keydown", onKey, { capture: true });
     let raf = 0;
     const poll = () => {
       raf = requestAnimationFrame(poll);
       const pads = navigator.getGamepads?.() ?? [];
-      const pad = pads.find((p) => p);
+      const pad = pads.find((p) => p && p.id !== "Grok64 Touch");
       if (!pad) return;
       const idx = pad.buttons.findIndex((b) => b.pressed);
       if (idx >= 0) {

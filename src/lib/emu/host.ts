@@ -192,23 +192,58 @@ function btn(i: number, on: boolean) {
   padButtons[i].value = on ? 1 : 0;
 }
 
+let origGetGamepads: Navigator["getGamepads"] | null = null;
+const NATIVE_PADS = "__g64NativePads";
+
+export function listRealGamepads(): Gamepad[] {
+  if (typeof navigator === "undefined") return [];
+  try {
+    const nav = navigator as Navigator & { [NATIVE_PADS]?: Navigator["getGamepads"] };
+    const fn = origGetGamepads ?? nav[NATIVE_PADS] ?? navigator.getGamepads?.bind(navigator);
+    const list = fn ? Array.from(fn.call(navigator)) : [];
+    return list.filter((p): p is Gamepad => Boolean(p && p.connected && p.id && p.id !== PAD_ID));
+  } catch {
+    return [];
+  }
+}
+
+export function hasRealGamepad(): boolean {
+  return listRealGamepads().length > 0;
+}
+
 export function installVirtualPad() {
+  if (typeof navigator === "undefined") return;
+  const nav = navigator as Navigator & {
+    webkitGetGamepads?: () => (Gamepad | null)[];
+    [NATIVE_PADS]?: Navigator["getGamepads"];
+  };
+  if (!nav[NATIVE_PADS] && nav.getGamepads && !(nav.getGamepads as { __g64pad?: boolean }).__g64pad) {
+    nav[NATIVE_PADS] = nav.getGamepads.bind(nav);
+  }
+  origGetGamepads = nav[NATIVE_PADS] ?? origGetGamepads;
   if (padInstalled) return;
   padInstalled = true;
-  const nav = navigator as Navigator & { webkitGetGamepads?: () => (Gamepad | null)[] };
-  const orig = nav.getGamepads?.bind(nav);
+  const orig = origGetGamepads;
   const origWeb = nav.webkitGetGamepads?.bind(nav);
   const list = () => {
     const now = performance.now();
     virtualPad0.timestamp = now;
-    const real = orig ? Array.from(orig()) : origWeb ? Array.from(origWeb()) : [];
+    let real: (Gamepad | null)[] = [];
+    try {
+      if (orig && orig !== list) real = Array.from(orig());
+      else if (origWeb) real = Array.from(origWeb());
+    } catch {
+      real = [];
+    }
+    const extras = real.filter((p) => p && p.id !== PAD_ID);
     return [
       virtualPad0 as unknown as Gamepad,
-      real[1] ?? null,
-      real[2] ?? null,
-      real[3] ?? null,
+      extras[0] ?? null,
+      extras[1] ?? null,
+      extras[2] ?? null,
     ];
   };
+  (list as { __g64pad?: boolean }).__g64pad = true;
   try {
     Object.defineProperty(nav, "getGamepads", { configurable: true, value: list });
   } catch {
@@ -257,6 +292,8 @@ function ensureValue2(emu: EjsInstance | null) {
     [7, "DPAD_RIGHT"],
     [8, "BUTTON_1"],
     [9, "BUTTON_3"],
+    [10, "LEFT_TOP_SHOULDER"],
+    [11, "RIGHT_TOP_SHOULDER"],
     [16, "LEFT_STICK_X:+1"],
     [17, "LEFT_STICK_X:-1"],
     [18, "LEFT_STICK_Y:+1"],
@@ -267,6 +304,7 @@ function ensureValue2(emu: EjsInstance | null) {
     if (!emu.controls[0]) emu.controls[0] = {};
     for (const [idx, label] of maps) {
       const row = emu.controls[0][idx] ?? {};
+      row.value = "unbound";
       row.value2 = label;
       emu.controls[0][idx] = row;
     }
@@ -357,7 +395,40 @@ function patchEjsInput() {
         "input_player1_analog_dpad_mode = 0\n" +
         "input_player1_joypad_index = 0\n" +
         "input_autodetect_enable = false\n" +
-        "input_max_users = 1\n"
+        "input_max_users = 1\n" +
+        'input_player1_a = "nul"\n' +
+        'input_player1_b = "nul"\n' +
+        'input_player1_x = "nul"\n' +
+        'input_player1_y = "nul"\n' +
+        'input_player1_l = "nul"\n' +
+        'input_player1_r = "nul"\n' +
+        'input_player1_l2 = "nul"\n' +
+        'input_player1_r2 = "nul"\n' +
+        'input_player1_l3 = "nul"\n' +
+        'input_player1_r3 = "nul"\n' +
+        'input_player1_start = "nul"\n' +
+        'input_player1_select = "nul"\n' +
+        'input_player1_up = "nul"\n' +
+        'input_player1_down = "nul"\n' +
+        'input_player1_left = "nul"\n' +
+        'input_player1_right = "nul"\n' +
+        'input_player1_l_x_plus = "nul"\n' +
+        'input_player1_l_x_minus = "nul"\n' +
+        'input_player1_l_y_plus = "nul"\n' +
+        'input_player1_l_y_minus = "nul"\n' +
+        'input_player1_up_axis = "nul"\n' +
+        'input_player1_down_axis = "nul"\n' +
+        'input_player1_left_axis = "nul"\n' +
+        'input_player1_right_axis = "nul"\n' +
+        'input_player1_up_btn = "nul"\n' +
+        'input_player1_down_btn = "nul"\n' +
+        'input_player1_left_btn = "nul"\n' +
+        'input_player1_right_btn = "nul"\n' +
+        'input_enable_hotkey = "nul"\n' +
+        'input_pause_toggle = "nul"\n' +
+        'input_reset = "nul"\n' +
+        'input_exit_emulator = "nul"\n' +
+        'input_menu_toggle = "nul"\n'
       );
     };
   }
@@ -405,6 +476,8 @@ function coreOptions(cfg: BootConfig): Record<string, string> {
     vice_reset: cfg.autostart === false ? "hard" : "autostart",
     vice_statusbar: "disabled",
     vice_vkbd: "disabled",
+    vice_keyboard_input: "enabled",
+    vice_physical_keyboard_pass_through: "enabled",
     ...viceJoyOptions(cfg.joyPort),
     shader: "disabled",
   };
@@ -430,6 +503,7 @@ export async function bootEmulator(el: HTMLElement, cfg: BootConfig): Promise<Ej
     disableCue: true,
     language: "en-US",
     browserMode: 2,
+    keyboardInput: true,
     defaultOptions: coreOptions(cfg),
     defaultControllers: padControllers(),
     retroarchOpts: [
@@ -536,27 +610,40 @@ export function viceJoyOptions(port: JoyPort): Record<string, string> {
     vice_joyport_type: "1",
     vice_retropad_options: "disabled",
     vice_keyrah_keypad_mappings: "disabled",
+    vice_mapper_up: "---",
+    vice_mapper_down: "---",
+    vice_mapper_left: "---",
+    vice_mapper_right: "---",
+    vice_mapper_lu: "---",
+    vice_mapper_ld: "---",
+    vice_mapper_ll: "---",
+    vice_mapper_lr: "---",
+    vice_mapper_ru: "---",
+    vice_mapper_rd: "---",
+    vice_mapper_rl: "---",
+    vice_mapper_rr: "---",
   };
 }
 
 function padMap(): PadMap {
+  const unbound = { value: "unbound", value2: "" };
   return {
-    0: { value: "x", value2: "BUTTON_2" },
-    1: { value: "s", value2: "BUTTON_4" },
-    2: { value: "v", value2: "SELECT" },
-    3: { value: "enter", value2: "START" },
-    4: { value: "up arrow", value2: "DPAD_UP" },
-    5: { value: "down arrow", value2: "DPAD_DOWN" },
-    6: { value: "left arrow", value2: "DPAD_LEFT" },
-    7: { value: "right arrow", value2: "DPAD_RIGHT" },
-    8: { value: "z", value2: "BUTTON_1" },
-    9: { value: "a", value2: "BUTTON_3" },
-    10: { value: "q", value2: "LEFT_TOP_SHOULDER" },
-    11: { value: "e", value2: "RIGHT_TOP_SHOULDER" },
-    16: { value: "h", value2: "LEFT_STICK_X:+1" },
-    17: { value: "f", value2: "LEFT_STICK_X:-1" },
-    18: { value: "g", value2: "LEFT_STICK_Y:+1" },
-    19: { value: "t", value2: "LEFT_STICK_Y:-1" },
+    0: { value: "unbound", value2: "BUTTON_2" },
+    1: { value: "unbound", value2: "BUTTON_4" },
+    2: { value: "unbound", value2: "SELECT" },
+    3: { value: "unbound", value2: "START" },
+    4: { value: "unbound", value2: "DPAD_UP" },
+    5: { value: "unbound", value2: "DPAD_DOWN" },
+    6: { value: "unbound", value2: "DPAD_LEFT" },
+    7: { value: "unbound", value2: "DPAD_RIGHT" },
+    8: { value: "unbound", value2: "BUTTON_1" },
+    9: { value: "unbound", value2: "BUTTON_3" },
+    10: { value: "unbound", value2: "LEFT_TOP_SHOULDER" },
+    11: { value: "unbound", value2: "RIGHT_TOP_SHOULDER" },
+    16: { ...unbound, value2: "LEFT_STICK_X:+1" },
+    17: { ...unbound, value2: "LEFT_STICK_X:-1" },
+    18: { ...unbound, value2: "LEFT_STICK_Y:+1" },
+    19: { ...unbound, value2: "LEFT_STICK_Y:-1" },
   };
 }
 
@@ -569,15 +656,19 @@ export function plugJoysticks(emu: EjsInstance | null, _port: JoyPort = 2) {
   if (!emu) return;
   userJoyPort = _port;
   guardCore(emu);
-  if (!keyboardArmed) {
-    try {
-      emu.gameManager?.setKeyboardEnabled?.(true);
-    } catch {
-      /* ignore */
-    }
-    keyboardArmed = true;
+  try {
+    emu.gameManager?.setKeyboardEnabled?.(true);
+  } catch {
+    /* ignore */
   }
+  applyRuntimeOptions(emu, {
+    vice_physical_keyboard_pass_through: "enabled",
+    vice_keyboard_input: "enabled",
+  });
+  keyboardArmed = true;
   bindVirtualPad(emu);
+  window.setTimeout(() => ensureValue2(emu), 250);
+  window.setTimeout(() => ensureValue2(emu), 1200);
   for (let i = 0; i < 16; i++) joyInput(emu, i, false);
   try {
     emu.gameManager?.setVariable?.("vice_joyport", _port === 1 ? "1" : "2");
@@ -720,18 +811,27 @@ export function destroyEmu(emu: EjsInstance | null, el: HTMLElement | null) {
   if (el) el.innerHTML = "";
 }
 
+let fitting = false;
+
 export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null) {
-  if (!el) return;
+  if (!el || fitting) return;
+  fitting = true;
   const canvas =
     (emu?.Module?.canvas as HTMLCanvasElement | undefined) ||
     (el.querySelector("canvas") as HTMLCanvasElement | null);
-  if (!canvas) return;
-  if (canvas.width >= 64 && canvas.height >= 64) return;
   try {
-    canvas.width = 384;
-    canvas.height = 272;
+    if (canvas) {
+      if (canvas.width < 64 || canvas.height < 64) {
+        canvas.width = 384;
+        canvas.height = 272;
+      }
+      canvas.style.width = "100%";
+      canvas.style.height = "100%";
+    }
   } catch {
     /* ignore */
+  } finally {
+    fitting = false;
   }
 }
 

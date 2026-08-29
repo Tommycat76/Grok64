@@ -31,10 +31,14 @@ React 19, TanStack Start, Tailwind v4, Zustand, EmulatorJS + libretro VICE.
 3. No reboot on FIRE or port swap (`bootKickRef`, playLock, hot-swap).
 4. Tablet: stick under CRT; keyboard under stick (`data-device`, `data-kb`).
 5. Catalog: skip Construction Kit / trainers; prefer First Star 1984 BD.
+6. Host keyboard is the full C64 keyboard. Right Ctrl is FIRE. No keys move the stick.
+7. A real gamepad (Bluetooth / USB) is used first; on-screen stick is fallback.
 
 ## Status 2026-08-28
 
 - Restored `Grok64App.tsx` to real JSX (fixes production `jsxDEV is not a function`).
 - Stick: high-contrast + 8-way tap/drag snap.
+- Host keyboard is the full C64 keyboard; Right Ctrl = FIRE; no keys for stick direction.
+- Real gamepad is preferred; on-screen stick is the fallback.
 
 Owner: Tommycat76 (Thomas Phaneuf)

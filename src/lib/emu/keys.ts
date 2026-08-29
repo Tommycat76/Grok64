@@ -128,6 +128,13 @@ export function keyCodeOf(code: string, key: string): number {
   return 0;
 }
 
+/** Right Ctrl is the only host key mapped to joystick fire. All other keys are C64. */
+export const FIRE_KEY_CODE = "ControlRight";
+
+export function isJoyFireKey(code: string): boolean {
+  return code === FIRE_KEY_CODE;
+}
+
 export function dispatchC64Key(
   code: string,
   key: string,
@@ -135,18 +142,26 @@ export function dispatchC64Key(
   mods: { shift?: boolean } = {},
 ) {
   const keyCode = keyCodeOf(code, key);
-  const init: KeyboardEventInit = {
-    key,
-    code,
-    keyCode,
-    which: keyCode,
-    bubbles: true,
-    cancelable: true,
-    composed: true,
-    shiftKey: !!mods.shift,
-  };
   const type = down ? "keydown" : "keyup";
-  const ev = () => new KeyboardEvent(type, init);
+  const make = () => {
+    const ev = new KeyboardEvent(type, {
+      key,
+      code,
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      shiftKey: !!mods.shift,
+    });
+    // Chrome ignores keyCode/which in the constructor.
+    try {
+      Object.defineProperty(ev, "keyCode", { get: () => keyCode, configurable: true });
+      Object.defineProperty(ev, "which", { get: () => keyCode, configurable: true });
+      Object.defineProperty(ev, "charCode", { get: () => (down && key.length === 1 ? keyCode : 0), configurable: true });
+    } catch {
+      /* older engines */
+    }
+    return ev;
+  };
   const parent =
     (document.querySelector("#grok64-player [tabindex]") as HTMLElement | null) ??
     document.getElementById("grok64-player");
@@ -155,13 +170,13 @@ export function dispatchC64Key(
   } catch {
     /* ignore */
   }
-  parent?.dispatchEvent(ev());
+  parent?.dispatchEvent(make());
   const canvas =
     document.querySelector("#canvas") ??
     document.querySelector("#grok64-player canvas");
-  canvas?.dispatchEvent(ev());
-  window.dispatchEvent(ev());
-  document.dispatchEvent(ev());
+  canvas?.dispatchEvent(make());
+  window.dispatchEvent(make());
+  document.dispatchEvent(make());
 }
 
 export interface C64Stroke {

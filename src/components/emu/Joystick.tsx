@@ -10,7 +10,10 @@ interface Props {
   warped?: boolean;
   onWarp?: () => void;
   hidden?: boolean;
+  padActive?: boolean;
+  stickHidden?: boolean;
   locked?: boolean;
+  vector?: { x: number; y: number };
 }
 
 function capture(el: Element, id: number) {
@@ -22,9 +25,9 @@ function capture(el: Element, id: number) {
 }
 
 /** Snap analog stick to 8-way digital for C64 accuracy. */
-function snap8(dx: number, dy: number): { x: number; y: number } {
+function snap8(dx: number, dy: number, dead = 0.18): { x: number; y: number } {
   const m = Math.hypot(dx, dy);
-  if (m < 0.28) return { x: 0, y: 0 };
+  if (m < dead) return { x: 0, y: 0 };
   const a = Math.atan2(dy, dx);
   const sector = Math.round((a / Math.PI) * 4);
   switch (sector) {
@@ -58,7 +61,10 @@ export function TouchControls({
   warped,
   onWarp,
   hidden,
+  padActive,
+  stickHidden,
   locked,
+  vector,
 }: Props) {
   const base = useRef<HTMLDivElement>(null);
   const fireEl = useRef<HTMLDivElement>(null);
@@ -67,8 +73,13 @@ export function TouchControls({
   const pid = useRef<number | null>(null);
   const onFireRef = useRef(onFire);
   onFireRef.current = onFire;
+  const onVectorRef = useRef(onVector);
+  onVectorRef.current = onVector;
   const lockedRef = useRef(locked);
   lockedRef.current = locked;
+  const tapHold = useRef<number | null>(null);
+  const downAt = useRef(0);
+  const lastDir = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
     const el = fireEl.current;
@@ -117,9 +128,7 @@ export function TouchControls({
       el.removeEventListener("touchcancel", release);
       el.removeEventListener("lostpointercapture", release);
     };
-  }, [hidden]);
-
-  if (hidden) return null;
+  }, [hidden, padActive]);
 
   function setFromPoint(clientX: number, clientY: number) {
     const el = base.current;
@@ -135,16 +144,89 @@ export function TouchControls({
       dy /= m;
     }
     const snapped = snap8(dx, dy);
+    lastDir.current = snapped;
     setKnob(snapped);
-    onVector(snapped.x, snapped.y);
+    onVectorRef.current(snapped.x, snapped.y);
+  }
+
+  function centerStick() {
+    lastDir.current = { x: 0, y: 0 };
+    setKnob({ x: 0, y: 0 });
+    onVectorRef.current(0, 0);
   }
 
   function stickDown(e: React.PointerEvent) {
     e.preventDefault();
     e.stopPropagation();
+    if (lockedRef.current) return;
+    if (tapHold.current) {
+      window.clearTimeout(tapHold.current);
+      tapHold.current = null;
+    }
     pid.current = e.pointerId;
     capture(e.currentTarget, e.pointerId);
+    downAt.current = Date.now();
     setFromPoint(e.clientX, e.clientY);
+  }
+
+  function stickUp(e: React.PointerEvent) {
+    if (pid.current !== e.pointerId) return;
+    pid.current = null;
+    const held = Date.now() - downAt.current;
+    const dir = lastDir.current;
+    if (held < 140 && (dir.x !== 0 || dir.y !== 0)) {
+      tapHold.current = window.setTimeout(() => {
+        tapHold.current = null;
+        centerStick();
+      }, 90);
+      return;
+    }
+    centerStick();
+  }
+
+  if (hidden) return null;
+
+  const tools = (
+    <div className="g64-play-tools">
+      <button
+        type="button"
+        className="g64-port"
+        aria-label={`Joystick port ${joyPort}, tap to swap`}
+        title={`Joystick port ${joyPort} — tap to swap`}
+        onPointerDown={(e) => {
+          e.preventDefault();
+          onSwap();
+        }}
+      >
+        <ArrowLeftRight className="size-3.5" />
+        P{joyPort}
+      </button>
+      {onWarp ? (
+        <button
+          type="button"
+          className="g64-port"
+          data-on={warped ? "true" : "false"}
+          aria-label={warped ? "Warp on, tap to disable" : "Warp off, tap to enable"}
+          title="Warp"
+          onPointerDown={(e) => {
+            e.preventDefault();
+            onWarp();
+          }}
+        >
+          <FastForward className="size-3.5" />
+          WARP
+        </button>
+      ) : null}
+    </div>
+  );
+
+  if (padActive || stickHidden) {
+    return (
+      <div className="g64-controls" data-pad={padActive ? "true" : "false"}>
+        {padActive ? <div className="g64-pad-note">Controller</div> : <div />}
+        <div className="g64-fire-col">{tools}</div>
+      </div>
+    );
   }
 
   return (
@@ -158,61 +240,37 @@ export function TouchControls({
           e.preventDefault();
           setFromPoint(e.clientX, e.clientY);
         }}
-        onPointerUp={(e) => {
-          if (pid.current !== e.pointerId) return;
-          pid.current = null;
-          setKnob({ x: 0, y: 0 });
-          onVector(0, 0);
-        }}
+        onPointerUp={stickUp}
         onPointerCancel={() => {
           pid.current = null;
-          setKnob({ x: 0, y: 0 });
-          onVector(0, 0);
+          if (tapHold.current) {
+            window.clearTimeout(tapHold.current);
+            tapHold.current = null;
+          }
+          centerStick();
         }}
-        aria-label="Joystick"
+        aria-label="Joystick. Tap a direction or drag."
       >
+        <span className="g64-stick-tick" data-dir="n" />
+        <span className="g64-stick-tick" data-dir="e" />
+        <span className="g64-stick-tick" data-dir="s" />
+        <span className="g64-stick-tick" data-dir="w" />
+        <span className="g64-stick-tick" data-dir="ne" />
+        <span className="g64-stick-tick" data-dir="se" />
+        <span className="g64-stick-tick" data-dir="sw" />
+        <span className="g64-stick-tick" data-dir="nw" />
         <div
           className="g64-knob"
           style={
             {
-              "--kx": String(knob.x),
-              "--ky": String(knob.y),
+              "--kx": String(vector?.x ?? knob.x),
+              "--ky": String(vector?.y ?? knob.y),
             } as React.CSSProperties
           }
         />
       </div>
       <div className="g64-fire-col">
-        <div className="g64-play-tools">
-          <button
-            type="button"
-            className="g64-port"
-            aria-label={`Joystick port ${joyPort}, tap to swap`}
-            title={`Joystick port ${joyPort} — tap to swap`}
-            onPointerDown={(e) => {
-              e.preventDefault();
-              onSwap();
-            }}
-          >
-            <ArrowLeftRight className="size-3.5" />
-            P{joyPort}
-          </button>
-          {onWarp ? (
-            <button
-              type="button"
-              className="g64-port"
-              data-on={warped ? "true" : "false"}
-              aria-label={warped ? "Warp on, tap to disable" : "Warp off, tap to enable"}
-              title="Warp"
-              onPointerDown={(e) => {
-                e.preventDefault();
-                onWarp();
-              }}
-            >
-              <FastForward className="size-3.5" />
-              WARP
-            </button>
-          ) : null}
-        </div>
+        {tools}
         <div
           ref={fireEl}
           className="g64-fire"
