@@ -1183,11 +1183,19 @@ function pruneExtraDisks(emu: EjsInstance | null) {
   const FS = fsOf(emu);
   if (!FS?.readdir || !FS.unlink) return;
   const keep = new Set([...unitMounts.values(), ...WORK_DISK_NAMES]);
+  const boot = bootFileOf(emu);
+  if (boot) keep.add(boot);
   for (const m of readMountedMedia(emu)) {
     if (!keep.has(m.name) && /\.(d64|d71|d81|g64|g71)$/i.test(m.name)) {
       removeMediaFile(FS, m.name);
     }
   }
+}
+
+/** Hot-swap a game disk without changing IEC unit wiring — keeps emu.fileName valid for autostart. */
+export function swapBootDisk(emu: EjsInstance | null, data: Uint8Array, fallbackName?: string | null): boolean {
+  const target = bootFileOf(emu) ?? fallbackName ?? null;
+  return writeBootFile(emu, data, target);
 }
 
 export function coreHasFs(emu: EjsInstance | null): boolean {

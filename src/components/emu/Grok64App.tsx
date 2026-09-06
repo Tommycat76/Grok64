@@ -31,6 +31,7 @@ import {
   listRealGamepads,
   mountDiskOnUnit,
   applyIecUnit,
+  swapBootDisk,
   plugJoysticks,
   probeCore,
   readMountedMedia,
@@ -596,7 +597,22 @@ export function Grok64App() {
     },
     [s, clearMenuJoyInput, startIosAutoPaint],
   );
-  const kickAutostart = useCallback(() => {
+  const syncJiffy = useCallback(async (emu: typeof emuRef.current) => {
+    if (!emu) return;
+    const st = useEmu.getState();
+    if (st.jiffyDos && (await hasJiffyPair())) {
+      try {
+        const roms = await romFileMap();
+        if (Object.keys(roms).length) injectRoms(emu, roms);
+        applyRuntimeOptions(emu, { vice_jiffydos: "enabled" });
+      } catch {
+        /* optional */
+      }
+    } else {
+      applyRuntimeOptions(emu, { vice_jiffydos: "disabled" });
+    }
+  }, []);
+  const kickAutostart = useCallback(async () => {
     glog("kickAutostart", { mode: playModeRef.current, title: useEmu.getState().currentTitle });
     pendingKickRef.current = false;
     setAwaitingStart(false);
@@ -607,9 +623,10 @@ export function Grok64App() {
     setWarp(emuRef.current, false);
     useEmu.getState().setWarped(false);
     clearRetroSaves(emuRef.current);
+    await syncJiffy(emuRef.current);
     autostartReset(emuRef.current, playModeRef.current === "disk");
     beginPlayLock(playLockDuration(playModeRef.current), "Restarting…");
-  }, [beginPlayLock]);
+  }, [beginPlayLock, syncJiffy]);
   const resumePlayback = useCallback(() => {
     unlockAudio(emuRef.current);
     const playerEl = document.getElementById("grok64-player");
@@ -980,8 +997,8 @@ export function Grok64App() {
       const wrapped = wrapForDiskSwap(origKind, media, bootName);
       if (live && emuRef.current && (wrapped || origKind === "d64")) {
         const payloadDisk = wrapped ?? media;
-        const iec = useEmu.getState().iecDrive;
-        const wrote = mountDiskOnUnit(emuRef.current, playUnit, payloadDisk, bootName, iec);
+        // Keep overwriting the current boot file (WORK DISK.D64) so VICE autostart still finds it.
+        const wrote = swapBootDisk(emuRef.current, payloadDisk, bootName);
         if (wrote) {
           glog("hot-swap", { filename, title, kind: origKind });
           persistGateRef.current = false;
@@ -1359,10 +1376,12 @@ export function Grok64App() {
     toast.message(st.mouseMode ? `Mouse → Port ${next}` : `Joystick → Port ${next}`);
   }, [expansionOpts]);
   useEffect(() => {
-    applyRuntimeOptions(emuRef.current, expansionOpts());
+    const emu = emuRef.current;
+    applyRuntimeOptions(emu, expansionOpts());
+    void syncJiffy(emu);
     const st = useEmu.getState();
-    if (st.mouseMode) plugJoysticks(emuRef.current, st.joyPort);
-  }, [s.reuSize, s.iecDrive, s.iecUnit, s.mouseMode, s.joyPort, s.machineId, s.scpuSimm, s.scpuTurbo, s.jiffyDos, expansionOpts]);
+    if (st.mouseMode) plugJoysticks(emu, st.joyPort);
+  }, [s.reuSize, s.iecDrive, s.iecUnit, s.mouseMode, s.joyPort, s.machineId, s.scpuSimm, s.scpuTurbo, s.jiffyDos, expansionOpts, syncJiffy]);
   useEffect(() => {
     setIecDevice(useEmu.getState().iecUnit);
     const st = useEmu.getState();
@@ -1696,12 +1715,12 @@ export function Grok64App() {
         </button>
         <button
           type="button"
-          className="g64-iconbtn extra"
+          className="g64-iconbtn extra g64-reset"
           aria-label="Reset"
           onClick={() => {
             const mode = playModeRef.current;
             if (mode === "basic") {
-              hardReset(emuRef.current);
+              void syncJiffy(emuRef.current).then(() => hardReset(emuRef.current));
               return;
             }
             if (mode === "disk") {
@@ -1709,10 +1728,10 @@ export function Grok64App() {
               persistGateRef.current = false;
               pendingKickRef.current = false;
               setAwaitingStart(false);
-              kickAutostart();
+              void kickAutostart();
               return;
             }
-            resetEmu(emuRef.current);
+            void syncJiffy(emuRef.current).then(() => resetEmu(emuRef.current));
           }}
         >
           <RotateCcw className="size-5" />
