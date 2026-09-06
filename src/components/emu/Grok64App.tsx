@@ -59,7 +59,9 @@ import { applyStickPrecision, createStickPrecision, resetStickPrecision } from "
 import { publicUrl } from "@/lib/public-url";
 import { pokeAudioUnlock } from "@/lib/emu/audio-unlock";
 import {
+  forceIosMirrorBlit,
   installIosPaintHooks,
+  iosTapResumeCooldown,
   kickIosPaint,
   scheduleIosPaintKicks,
   shotDisplayCanvas,
@@ -586,7 +588,7 @@ export function Grok64App() {
     unlockAudio(emuRef.current);
     const playerEl = document.getElementById("grok64-player");
     kickIosPaint(emuRef.current, playerEl, "resume", true);
-    startIosAutoPaint();
+    iosTapResumeCooldown();
     dismissEjsPrompts(playerEl, "play");
     s.setPaused(false);
     setPaused(emuRef.current, false);
@@ -594,6 +596,13 @@ export function Grok64App() {
     setAwaitingStart(false);
     setIosResume(false);
     glog("resumePlayback");
+    void forceIosMirrorBlit(emuRef.current, playerEl, true).then((ok) => {
+      if (ok) {
+        setIosResume(false);
+        glog("ios-resume-blit-ok");
+      }
+      startIosAutoPaint();
+    });
   }, [s, startIosAutoPaint]);
   const kickIosAfterEmuAction = useCallback((emu: typeof emuRef.current, tag: string, gen?: number) => {
     if (!isIosPhone() || !emu) return;

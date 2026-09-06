@@ -3,26 +3,80 @@ import { dismissEjsPrompts, fitEmu, unlockAudio } from "./host";
 import { isIosPhone } from "./detect";
 import { glog } from "./debug";
 
+function copyBytes(raw: Uint8Array | ArrayBuffer | null | undefined): Uint8Array | null {
+  if (!raw) return null;
+  if (raw instanceof ArrayBuffer) return new Uint8Array(raw.slice(0));
+  if (raw instanceof Uint8Array) return new Uint8Array(raw);
+  return null;
+}
+
+function pngLooksValid(raw: Uint8Array | null): boolean {
+  return Boolean(
+    raw &&
+      raw.byteLength >= 2500 &&
+      raw[0] === 0x89 &&
+      raw[1] === 0x50 &&
+      raw[2] === 0x4e &&
+      raw[3] === 0x47,
+  );
+}
+
+/** Decode a PNG blob for canvas draw — Image() is more reliable than createImageBitmap on CriOS. */
+async function decodePngBlob(blob: Blob): Promise<{ width: number; height: number; draw: (ctx: CanvasRenderingContext2D) => void; dispose: () => void }> {
+  if (typeof createImageBitmap === "function") {
+    try {
+      const bmp = await createImageBitmap(blob);
+      return {
+        width: bmp.width,
+        height: bmp.height,
+        draw: (ctx) => ctx.drawImage(bmp, 0, 0),
+        dispose: () => bmp.close?.(),
+      };
+    } catch {
+      /* fall through */
+    }
+  }
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    img.decoding = "async";
+    await new Promise<void>((resolve, reject) => {
+      img.onload = () => resolve();
+      img.onerror = () => reject(new Error("img-decode"));
+      img.src = url;
+    });
+    return {
+      width: img.naturalWidth,
+      height: img.naturalHeight,
+      draw: (ctx) => ctx.drawImage(img, 0, 0),
+      dispose: () => {
+        img.src = "";
+      },
+    };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 /** Sample PNG screenshot luminance — rejects black PNGs that still exceed byte thresholds. */
 export async function frameImageMetrics(raw: Uint8Array | null): Promise<{ lum: number; uniq: number } | null> {
-  if (!raw || raw.byteLength < 2500) return null;
-  if (typeof createImageBitmap !== "function") return { lum: raw.byteLength > 8000 ? 40 : 0, uniq: 2 };
+  const u8 = copyBytes(raw);
+  if (!u8 || u8.byteLength < 2500) return null;
+  if (!pngLooksValid(u8)) return u8.byteLength > 8000 ? { lum: 40, uniq: 2 } : null;
   try {
-    const blob = new Blob([new Uint8Array(raw)], {
-      type: "image/png",
-    });
-    const bmp = await createImageBitmap(blob);
-    const side = Math.min(48, bmp.width, bmp.height);
+    const blob = new Blob([new Uint8Array(u8)], { type: "image/png" });
+    const decoded = await decodePngBlob(blob);
+    const side = Math.min(48, decoded.width, decoded.height);
     const c = document.createElement("canvas");
     c.width = side;
     c.height = side;
     const ctx = c.getContext("2d", { willReadFrequently: true });
     if (!ctx) {
-      bmp.close?.();
+      decoded.dispose();
       return null;
     }
-    ctx.drawImage(bmp, 0, 0, side, side);
-    bmp.close?.();
+    decoded.draw(ctx);
+    decoded.dispose();
     const data = ctx.getImageData(0, 0, side, side).data;
     let lum = 0;
     const buckets = new Set<number>();
@@ -36,7 +90,7 @@ export async function frameImageMetrics(raw: Uint8Array | null): Promise<{ lum: 
     const px = data.length / 4;
     return { lum: lum / px, uniq: buckets.size };
   } catch {
-    return null;
+    return u8.byteLength > 8000 ? { lum: 40, uniq: 2 } : null;
   }
 }
 
@@ -52,6 +106,14 @@ function mirrorCanvas(root: HTMLElement | null): HTMLCanvasElement | null {
     (root?.querySelector(".g64-ios-mirror") as HTMLCanvasElement | null) ??
     (document.querySelector("#grok64-player .g64-ios-mirror") as HTMLCanvasElement | null)
   );
+}
+
+function setMirrorVisible(root: HTMLElement | null, on: boolean) {
+  const player =
+    root?.closest("#grok64-player") ??
+    root ??
+    document.getElementById("grok64-player");
+  player?.classList.toggle("g64-ios-mirror-on", on);
 }
 
 async function elementHasFrame(el: HTMLCanvasElement | null): Promise<boolean> {
@@ -152,8 +214,8 @@ export function scheduleIosPaintKicks(emu: EjsInstance | null, root: HTMLElement
 export async function viceHasFrame(emu: EjsInstance | null): Promise<boolean> {
   if (!emu?.gameManager?.screenshot) return false;
   try {
-    const raw = await emu.gameManager.screenshot();
-    const m = await frameImageMetrics(raw instanceof Uint8Array ? raw : null);
+    const raw = copyBytes(await emu.gameManager.screenshot());
+    const m = await frameImageMetrics(raw);
     return Boolean(m && m.lum > 4 && m.uniq >= 2);
   } catch {
     return false;
@@ -183,19 +245,29 @@ export async function waitForViceFrame(
 
 let mirrorGen = 0;
 let mirrorRaf = 0;
+let mirrorTimer = 0;
 let mirrorActive = false;
 let mirrorPainted = false;
+let mirrorEmu: EjsInstance | null = null;
 
 export function isIosMirrorActive(): boolean {
   return mirrorActive;
+}
+
+export function isIosMirrorPainted(): boolean {
+  return mirrorPainted;
 }
 
 export function stopIosViceMirror() {
   mirrorGen += 1;
   if (mirrorRaf) cancelAnimationFrame(mirrorRaf);
   mirrorRaf = 0;
+  if (mirrorTimer) window.clearInterval(mirrorTimer);
+  mirrorTimer = 0;
   mirrorActive = false;
   mirrorPainted = false;
+  mirrorEmu = null;
+  setMirrorVisible(null, false);
   const el = document.querySelector("#grok64-player .g64-ios-mirror");
   el?.remove();
 }
@@ -219,6 +291,81 @@ function ensureMirrorCanvas(root: HTMLElement | null): HTMLCanvasElement | null 
   return canvas;
 }
 
+async function blitPngToMirror(
+  root: HTMLElement | null,
+  raw: Uint8Array,
+  metrics?: { lum: number; uniq: number } | null,
+): Promise<boolean> {
+  const canvas = ensureMirrorCanvas(root);
+  if (!canvas) return false;
+  const m = metrics ?? (await frameImageMetrics(raw));
+  if (!m || m.lum <= 4) return false;
+  try {
+    const blob = new Blob([new Uint8Array(raw)], { type: "image/png" });
+    const decoded = await decodePngBlob(blob);
+    if (canvas.width !== decoded.width) canvas.width = decoded.width;
+    if (canvas.height !== decoded.height) canvas.height = decoded.height;
+    const ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) {
+      decoded.dispose();
+      return false;
+    }
+    decoded.draw(ctx);
+    decoded.dispose();
+    setMirrorVisible(root, true);
+    return true;
+  } catch (err) {
+    glog("ios-mirror-blit-fail", { m: err instanceof Error ? err.message : String(err) });
+    return false;
+  }
+}
+
+async function blitGlCanvasToMirror(root: HTMLElement | null): Promise<boolean> {
+  const src = playerCanvas(root);
+  if (!src || src.width < 8) return false;
+  forceCanvasPresent(src);
+  try {
+    const url = src.toDataURL("image/png");
+    const bin = atob(url.split(",")[1] || "");
+    const raw = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
+    return await blitPngToMirror(root, raw);
+  } catch {
+    return false;
+  }
+}
+
+/** One-shot VICE screenshot → mirror blit (user-gesture path). */
+export async function forceIosMirrorBlit(
+  emu: EjsInstance | null,
+  root: HTMLElement | null,
+  fromUserGesture = false,
+): Promise<boolean> {
+  if (!isIosPhone() || !emu) return false;
+  if (fromUserGesture) {
+    const glOk = await blitGlCanvasToMirror(root);
+    if (glOk) {
+      mirrorPainted = true;
+      glog("ios-mirror-painted-gl");
+      return true;
+    }
+  }
+  if (!emu.gameManager?.screenshot) return false;
+  try {
+    const raw = copyBytes(await emu.gameManager.screenshot());
+    if (!raw || !pngLooksValid(raw)) return false;
+    const ok = await blitPngToMirror(root, raw);
+    if (ok) {
+      mirrorPainted = true;
+      glog("ios-mirror-painted-force");
+    }
+    return ok;
+  } catch (err) {
+    glog("ios-mirror-force-fail", { m: err instanceof Error ? err.message : String(err) });
+    return false;
+  }
+}
+
 /**
  * Blit VICE screenshots to a 2D overlay — works on CriOS without user gesture
  * when preserveDrawingBuffer WebGL stays black on screen.
@@ -229,47 +376,33 @@ export function startIosViceMirror(
   onFirstPaint?: () => void,
 ) {
   if (!isIosPhone() || !emu?.gameManager?.screenshot) return;
+  if (mirrorActive && mirrorEmu === emu) {
+    if (mirrorPainted) onFirstPaint?.();
+    return;
+  }
   stopIosViceMirror();
   const gen = mirrorGen;
   const canvas = ensureMirrorCanvas(root);
   if (!canvas) return;
   mirrorActive = true;
+  mirrorEmu = emu;
   let pending = false;
   let ticks = 0;
   let paintedCb = onFirstPaint ?? null;
 
-  const tick = () => {
-    if (gen !== mirrorGen) return;
-    mirrorRaf = requestAnimationFrame(tick);
-    ticks += 1;
-
-    if (ticks % 20 === 0) {
-      void canvasHasFrame(emu, root).then((native) => {
-        if (gen !== mirrorGen || !native) return;
-        glog("ios-mirror-handoff-native");
-        paintedCb?.();
-        paintedCb = null;
-        stopIosViceMirror();
-      });
-      return;
-    }
-
-    if (pending || ticks % 2 !== 0) return;
+  const capture = () => {
+    if (gen !== mirrorGen || pending) return;
     pending = true;
     void emu
       .gameManager!.screenshot!()
       .then(async (raw) => {
         if (gen !== mirrorGen) return;
-        const u8 = raw instanceof Uint8Array ? raw : null;
+        const u8 = copyBytes(raw);
+        if (!u8 || !pngLooksValid(u8)) return;
         const m = await frameImageMetrics(u8);
-        if (!m || m.lum <= 4 || !u8) return;
-        const blob = new Blob([new Uint8Array(u8)], { type: "image/png" });
-        const bmp = await createImageBitmap(blob);
-        if (canvas.width !== bmp.width) canvas.width = bmp.width;
-        if (canvas.height !== bmp.height) canvas.height = bmp.height;
-        const ctx = canvas.getContext("2d", { alpha: false });
-        ctx?.drawImage(bmp, 0, 0);
-        bmp.close?.();
+        if (!m || m.lum <= 4) return;
+        const ok = await blitPngToMirror(root, u8, m);
+        if (!ok) return;
         if (!mirrorPainted) {
           mirrorPainted = true;
           glog("ios-mirror-painted");
@@ -277,12 +410,31 @@ export function startIosViceMirror(
           paintedCb = null;
         }
       })
-      .catch(() => undefined)
+      .catch((err) => {
+        glog("ios-mirror-capture-fail", { m: err instanceof Error ? err.message : String(err) });
+      })
       .finally(() => {
         pending = false;
       });
   };
+
+  const tick = () => {
+    if (gen !== mirrorGen) return;
+    mirrorRaf = requestAnimationFrame(tick);
+    ticks += 1;
+    if (ticks % 30 === 0) {
+      void canvasHasFrame(emu, root).then((native) => {
+        if (gen !== mirrorGen || !native) return;
+        glog("ios-mirror-handoff-native");
+        paintedCb?.();
+        paintedCb = null;
+        stopIosViceMirror();
+      });
+    }
+  };
   mirrorRaf = requestAnimationFrame(tick);
+  mirrorTimer = window.setInterval(capture, 180);
+  capture();
 }
 
 type PaintTarget = { emu: EjsInstance | null; root: HTMLElement | null };
@@ -292,6 +444,7 @@ let hooksInstalled = false;
 let activeTarget: PaintTarget = { emu: null, root: null };
 let onPaintedCb: (() => void) | null = null;
 let onTimeoutCb: (() => void) | null = null;
+let tapCooldownUntil = 0;
 
 export function stopIosPaintWatchdog() {
   watchdogGen += 1;
@@ -330,11 +483,17 @@ export function startIosPaintWatchdog(
     stopIosPaintWatchdog();
   };
 
+  if (mirrorPainted) {
+    signalPainted();
+    return;
+  }
+
   startIosViceMirror(emu, root, signalPainted);
 
   const gen = watchdogGen;
   let frames = 0;
-  const maxFrames = resolved.maxFrames ?? 360;
+  const maxFrames = resolved.maxFrames ?? 480;
+  const started = performance.now();
 
   const tick = () => {
     if (gen !== watchdogGen) return;
@@ -342,24 +501,41 @@ export function startIosPaintWatchdog(
     const { emu: e, root: r } = activeTarget;
     if (!e) return;
     kickIosPaint(e, r, `wd${frames}`);
+    if (mirrorPainted) {
+      signalPainted();
+      return;
+    }
     void displayHasFrame(e, r).then((ok) => {
       if (gen !== watchdogGen) return;
-      if (ok) {
-        glog("ios-watchdog-painted", { frames, mirror: mirrorActive });
+      if (ok || mirrorPainted) {
+        glog("ios-watchdog-painted", { frames, mirror: mirrorActive, mirrorPainted });
         signalPainted();
         return;
       }
-      if (frames < maxFrames) {
+      const elapsed = performance.now() - started;
+      if (frames < maxFrames && elapsed < 14_000) {
         watchdogRaf = requestAnimationFrame(tick);
       } else {
-        glog("ios-watchdog-timeout", { frames, mirror: mirrorActive, mirrorPainted });
-        if (!painted && !mirrorPainted) onTimeoutCb?.();
+        glog("ios-watchdog-timeout", { frames, mirror: mirrorActive, mirrorPainted, elapsed: Math.round(elapsed) });
+        if (!painted && !mirrorPainted) {
+          if (performance.now() < tapCooldownUntil) {
+            glog("ios-resume-cooldown");
+            watchdogRaf = requestAnimationFrame(tick);
+            return;
+          }
+          onTimeoutCb?.();
+        }
         onTimeoutCb = null;
         scheduleIosPaintKicks(e, r);
       }
     });
   };
   watchdogRaf = requestAnimationFrame(tick);
+}
+
+/** Suppress tap overlay for a few seconds after the user already tapped. */
+export function iosTapResumeCooldown(ms = 8000) {
+  tapCooldownUntil = performance.now() + ms;
 }
 
 export function installIosPaintHooks(getTarget: () => PaintTarget) {
