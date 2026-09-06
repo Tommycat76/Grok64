@@ -117,7 +117,6 @@ let userJoyPort: JoyPort = 2;
 function preserveWebglBuffer() {
   if (webglPatched || typeof HTMLCanvasElement === "undefined") return;
   webglPatched = true;
-  const ios = detectOs() === "ios";
   const proto = HTMLCanvasElement.prototype;
   const orig = proto.getContext;
   proto.getContext = function patchedContext(
@@ -126,10 +125,15 @@ function preserveWebglBuffer() {
     attrs?: Record<string, unknown>,
   ) {
     if (type === "webgl" || type === "webgl2" || type === "experimental-webgl") {
-      // preserveDrawingBuffer doubles framebuffer RAM — skip on iOS to avoid tab kills.
-      const merged: Record<string, unknown> = { ...attrs, antialias: false, alpha: false };
-      if (!ios) merged.preserveDrawingBuffer = true;
-      return orig.call(this, type, merged);
+      // iOS WebKit will not composite the C64 framebuffer without preserveDrawingBuffer
+      // (VICE screenshot succeeds while the CRT canvas stays black). Costs extra VRAM but
+      // x64sc + capped REU on iPhone is stable; skipping this regresses blank CRT on iOS.
+      return orig.call(this, type, {
+        ...attrs,
+        antialias: false,
+        alpha: false,
+        preserveDrawingBuffer: true,
+      });
     }
     return orig.call(this, type, attrs as never);
   } as typeof proto.getContext;
