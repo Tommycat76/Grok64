@@ -145,42 +145,85 @@ function authPopupPlugin(): Plugin {
 // `0.0.0.0:8080` is the live-preview contract — don't change host/port.
 // The dev server starts once `src/router.tsx` and `src/routes/` exist — see
 // AGENTS.md § "First scaffold".
-export default defineConfig(({ command, isPreview }) => ({
-  server: {
-    host: "0.0.0.0",
-    port: 8080,
-    strictPort: true,
-    watch: {
-      ignored: ["**/logs/**", "**/screenshots/**", "**/artifacts/**", "**/attachments/**"],
+const vercelBuild = process.env.GROK_VERCEL_BUILD === "1";
+
+export default defineConfig(({ command, isPreview }) => {
+  const production = command === "build" || isPreview;
+  // SPA prerender only for flattened static dist — dev/vercel keep server fns.
+  const staticSpaBuild = command === "build" && !vercelBuild && !isPreview;
+
+  return {
+    // Relative asset URLs for flattened static dist only — absolute base in dev/vercel
+    // so TanStack server-fn routes (`/_serverFn/...`) resolve correctly.
+    base: staticSpaBuild ? "./" : "/",
+    build: {
+      outDir: "dist",
+      emptyOutDir: true,
     },
-  },
-  preview: {
-    host: "127.0.0.1",
-    port: 8081,
-    strictPort: true,
-  },
-  resolve: { tsconfigPaths: true },
-  plugins: [
-    pgliteBootstrapPlugin(),
-    // Before tanstackStart so /auth/popup never falls through to the SPA.
-    authPopupPlugin(),
-    // Dev-only /__app-env, read by scripts/check-auth-invariant.mjs.
-    appEnvPlugin(),
-    // PWA head + ?install=1 tutorial page; runs before Start/Nitro.
-    grokPwaPlugin(),
-    tailwindcss(),
-    tanstackStart(),
-    ...(command === "build" || isPreview
-      ? [
-          nitro({
-            preset: "vercel",
-            // Auto-registers server/middleware/* (the PWA install page +
-            // manifest + head-tag middleware). Nitro v3 defaults serverDir to
-            // false, so removing this silently unwires /?install=1 on deploys.
-            serverDir: "./server",
-          }),
-        ]
-      : []),
-    viteReact(),
-  ],
-}));
+    server: {
+      host: "0.0.0.0",
+      port: 8080,
+      strictPort: true,
+      watch: {
+        ignored: ["**/logs/**", "**/screenshots/**", "**/artifacts/**", "**/attachments/**"],
+      },
+    },
+    preview: {
+      host: "127.0.0.1",
+      port: 8081,
+      strictPort: true,
+    },
+    resolve: { tsconfigPaths: true },
+    oxc: production
+      ? {
+          jsx: {
+            runtime: "automatic",
+            importSource: "react",
+            development: false,
+          },
+        }
+      : undefined,
+    plugins: [
+      pgliteBootstrapPlugin(),
+      // Before tanstackStart so /auth/popup never falls through to the SPA.
+      authPopupPlugin(),
+      // Dev-only /__app-env, read by scripts/check-auth-invariant.mjs.
+      appEnvPlugin(),
+      // PWA head + ?install=1 tutorial page; runs before Start/Nitro.
+      grokPwaPlugin(),
+      tailwindcss(),
+      tanstackStart(
+        staticSpaBuild
+          ? {
+              spa: {
+                enabled: true,
+                maskPath: "/",
+                prerender: {
+                  outputPath: "/index.html",
+                },
+              },
+              prerender: {
+                enabled: true,
+                crawlLinks: false,
+              },
+            }
+          : {},
+      ),
+      ...(vercelBuild && (command === "build" || isPreview)
+        ? [
+            nitro({
+              preset: "vercel",
+              // Auto-registers server/middleware/* (the PWA install page +
+              // manifest + head-tag middleware). Nitro v3 defaults serverDir to
+              // false, so removing this silently unwires /?install=1 on deploys.
+              serverDir: "./server",
+            }),
+          ]
+        : []),
+      viteReact({
+        jsxRuntime: "automatic",
+        jsxImportSource: "react",
+      }),
+    ],
+  };
+});

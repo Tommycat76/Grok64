@@ -8,12 +8,13 @@
   },
   "scripts": {
     "dev": "node scripts/with-app-env.mjs vite dev --host 0.0.0.0 --port 8080",
-    "build": "node scripts/with-app-env.mjs vite build && npm run db:migrate",
+    "build": "node scripts/with-app-env.mjs vite build && node scripts/flatten-dist.mjs dist && node scripts/ensure-bd.mjs dist && node scripts/check-no-jsxdev.mjs dist && npm run db:migrate",
+    "build:vercel": "GROK_VERCEL_BUILD=1 node scripts/with-app-env.mjs vite build && npm run db:migrate",
     "db:migrate": "node scripts/migrate.mjs",
     "build:dev": "node scripts/with-app-env.mjs vite build --mode development",
     "preview": "node scripts/with-app-env.mjs vite preview",
     "typecheck": "tsc --noEmit",
-    "check:auth": "node scripts/check-auth-invariant.mjs",
+    "check:jsx": "node scripts/check-no-jsxdev.mjs dist",
     "test": "node --test 'scripts/**/*.test.mjs'",
     "lint": "eslint .",
     "format": "prettier --write ."

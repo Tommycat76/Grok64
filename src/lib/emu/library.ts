@@ -1,5 +1,6 @@
 import type { LibraryItem, StoredFile } from "./types";
 import { kindOf } from "./formats";
+import { publicUrl } from "@/lib/public-url";
 
 const DB_NAME = "grok64";
 const STORE = "files";
@@ -176,7 +177,7 @@ export async function ensureWorkDisk(): Promise<LibraryItem> {
   const items = await listLibrary();
   const found = items.find((i) => i.name.toUpperCase() === WORK_DISK_NAME);
   if (found) return found;
-  const res = await fetch("/software/blank.d64");
+  const res = await fetch(publicUrl("/software/blank.d64"));
   if (!res.ok) throw new Error("Could not create a work disk");
   const buf = await res.arrayBuffer();
   return putFile(WORK_DISK_NAME, buf, "local");
