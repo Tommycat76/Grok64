@@ -23,12 +23,20 @@ interface Props {
   frameMs?: number;
 }
 
+type PointerZones = { stick?: boolean; fire?: boolean; jump?: boolean };
+
 function capture(el: Element, id: number) {
   try {
     el.setPointerCapture(id);
   } catch {
     /* iOS WebView can reject capture */
   }
+}
+
+function hitRect(el: HTMLElement | null, x: number, y: number, pad = 0) {
+  if (!el) return false;
+  const r = el.getBoundingClientRect();
+  return x >= r.left - pad && x <= r.right + pad && y >= r.top - pad && y <= r.bottom + pad;
 }
 
 export function TouchControls({
@@ -68,6 +76,8 @@ export function TouchControls({
   gateRef.current = gate;
   const frameMsRef = useRef(frameMs);
   frameMsRef.current = frameMs;
+  const jumpRef = useRef(jumpEnabled);
+  jumpRef.current = jumpEnabled;
   const lastDir = useRef({ x: 0, y: 0 });
   const sentDir = useRef({ x: 0, y: 0 });
   const tapHold = useRef<number | null>(null);
@@ -106,27 +116,31 @@ export function TouchControls({
     onVectorRef.current(0, 0);
   }
 
-  function zoneAt(target: EventTarget | null, x?: number, y?: number): "stick" | "fire" | "jump" | null {
+  function zonesAt(target: EventTarget | null, x: number, y: number): PointerZones | null {
+    const fire = hitRect(fireEl.current, x, y, 6);
+    const jump = jumpRef.current && hitRect(jumpEl.current, x, y, 6);
+    if (fire || jump) return { fire, jump };
     let el = target instanceof Element ? target : null;
-    if (!el && x != null && y != null) el = document.elementFromPoint(x, y);
-    if (!el) return null;
-    if (jumpEl.current?.contains(el) || el.closest(".g64-jump")) return "jump";
-    if (fireEl.current?.contains(el) || el.closest(".g64-fire:not(.g64-jump)")) return "fire";
-    if (stickEl.current?.contains(el) || el.closest(".g64-stick")) return "stick";
+    if (!el) el = document.elementFromPoint(x, y);
+    if (stickEl.current?.contains(el) || el?.closest(".g64-stick")) return { stick: true };
+    if (hitRect(stickEl.current, x, y, 4)) return { stick: true };
     return null;
   }
 
   useEffect(() => {
     const host = root.current;
     if (!host) return;
-    const active = new Map<number, "stick" | "fire" | "jump">();
+    const active = new Map<number, PointerZones>();
     let fireOn = false;
     let jumpOn = false;
 
     const syncButtons = () => {
-      const zones = [...active.values()];
-      const nextFire = zones.includes("fire");
-      const nextJump = zones.includes("jump");
+      let nextFire = false;
+      let nextJump = false;
+      for (const z of active.values()) {
+        if (z.fire) nextFire = true;
+        if (z.jump) nextJump = true;
+      }
       if (nextFire !== fireOn) {
         fireOn = nextFire;
         setFireDown(nextFire);
@@ -139,10 +153,10 @@ export function TouchControls({
       }
     };
 
-    const down = (id: number, zone: "stick" | "fire" | "jump", x: number, y: number) => {
+    const down = (id: number, zones: PointerZones, x: number, y: number) => {
       if (lockedRef.current || active.has(id)) return;
-      active.set(id, zone);
-      if (zone === "stick") {
+      active.set(id, zones);
+      if (zones.stick) {
         if (tapHold.current) {
           window.clearTimeout(tapHold.current);
           tapHold.current = null;
@@ -155,19 +169,19 @@ export function TouchControls({
     };
 
     const move = (id: number, x: number, y: number) => {
-      const zone = active.get(id);
-      if (zone === "stick" && stickPid.current === id) setFromPoint(x, y);
+      const zones = active.get(id);
+      if (zones?.stick && stickPid.current === id) setFromPoint(x, y);
     };
 
     const up = (id: number) => {
-      const zone = active.get(id);
-      if (!zone) return;
+      const zones = active.get(id);
+      if (!zones) return;
       active.delete(id);
-      if (zone === "stick" && stickPid.current === id) {
+      if (zones.stick && stickPid.current === id) {
         stickPid.current = null;
         const held = Date.now() - downAt.current;
         const dir = lastDir.current;
-        const stillStick = [...active.values()].includes("stick");
+        const stillStick = [...active.values()].some((z) => z.stick);
         if (!stillStick) {
           if (held < 140 && (dir.x !== 0 || dir.y !== 0)) {
             tapHold.current = window.setTimeout(() => {
@@ -185,7 +199,7 @@ export function TouchControls({
     const onTouchStart = (e: TouchEvent) => {
       let hit = false;
       for (const t of Array.from(e.changedTouches)) {
-        const z = zoneAt(e.target, t.clientX, t.clientY);
+        const z = zonesAt(e.target, t.clientX, t.clientY);
         if (z) {
           hit = true;
           down(t.identifier, z, t.clientX, t.clientY);
@@ -208,10 +222,10 @@ export function TouchControls({
     };
     const onPointerDown = (e: PointerEvent) => {
       if (e.pointerType === "touch") return;
-      const z = zoneAt(e.target, e.clientX, e.clientY);
+      const z = zonesAt(e.target, e.clientX, e.clientY);
       if (!z) return;
       e.preventDefault();
-      if (z === "stick") capture(host, e.pointerId);
+      if (z.stick) capture(host, e.pointerId);
       down(e.pointerId, z, e.clientX, e.clientY);
     };
     const onPointerMove = (e: PointerEvent) => {
