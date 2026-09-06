@@ -1,5 +1,5 @@
 import type { CorePref, DriveMode, JoyPort, MachineId, VideoPref } from "./types";
-import type { IecDrive, ReuSize, ScpuSimm } from "./expand";
+import type { IecDrive, IecUnit, ReuSize, ScpuSimm } from "./expand";
 import { openGrok64Db, ROMS, SDPART, SNAPS } from "./library";
 
 export type RomSlotId = "jiffy-c64" | "jiffy-1541" | "jiffy-1571" | "jiffy-1581" | "cmdhd";
@@ -52,6 +52,7 @@ export interface HardwareRecipe {
   driveMode: DriveMode;
   reuSize: ReuSize;
   iecDrive: IecDrive;
+  iecUnit: IecUnit;
   mouseMode: boolean;
   scpuSimm: ScpuSimm;
   scpuTurbo: boolean;
@@ -275,6 +276,7 @@ export function recipeLine(r: HardwareRecipe): string {
     r.machineId === "scpu" ? "SCPU" : "C64",
     r.reuSize === "none" ? "no REU" : `REU ${r.reuSize}`,
     r.iecDrive.toUpperCase(),
+    r.iecUnit && r.iecUnit !== 8 ? `#${r.iecUnit}` : null,
     r.jiffyDos ? "Jiffy" : null,
     r.mouseMode ? "1351" : null,
   ].filter(Boolean);

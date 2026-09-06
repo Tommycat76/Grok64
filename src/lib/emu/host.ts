@@ -1,7 +1,7 @@
 import { detectOs, isIosPhone } from "./detect";
 import { sidOptions } from "./machines";
 import { buildViceExtras } from "./vice-extras";
-import type { DriveMode, IecDrive, JoyPort, ReuSize, ScpuSimm, SidEngine, SidModel } from "./types";
+import type { DriveMode, IecDrive, IecUnit, JoyPort, ReuSize, ScpuSimm, SidEngine, SidModel } from "./types";
 import { RETRO_BTN } from "./types";
 import { glog } from "./debug";
 
@@ -475,6 +475,7 @@ export interface BootConfig {
   autostart?: boolean;
   reu?: ReuSize;
   iec?: IecDrive;
+  iecUnit?: IecUnit;
   mouse?: boolean;
   scpu?: boolean;
   scpuSimm?: ScpuSimm;
@@ -511,6 +512,7 @@ function coreOptions(cfg: BootConfig): Record<string, string> {
     ...buildViceExtras({
       reu: effectiveReu(cfg.reu),
       iec: cfg.iec ?? "1541",
+      iecUnit: cfg.iecUnit ?? 8,
       mouse: !!cfg.mouse,
       joyPort: cfg.joyPort,
       scpu: !!cfg.scpu,

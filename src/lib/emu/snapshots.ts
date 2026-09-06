@@ -1,5 +1,5 @@
 import { openExpansionDb, STORES, txDone } from "./expansion-db";
-import type { IecDrive, JoyPort, MachineId, ReuSize, ScpuSimm } from "./types";
+import type { IecDrive, IecUnit, JoyPort, MachineId, ReuSize, ScpuSimm } from "./types";
 
 export interface HardwareRecipe {
   machineId: MachineId;
@@ -8,6 +8,7 @@ export interface HardwareRecipe {
   driveMode: string;
   reuSize: ReuSize;
   iecDrive: IecDrive;
+  iecUnit: IecUnit;
   mouseMode: boolean;
   scpuSimm: ScpuSimm;
   scpuTurbo: boolean;
@@ -33,6 +34,7 @@ export function recipeSummary(recipe: HardwareRecipe): string {
     recipe.machineId === "scpu" ? "SCPU" : "C64",
     recipe.reuSize === "none" ? "no REU" : `REU ${recipe.reuSize}`,
     recipe.iecDrive.toUpperCase(),
+    recipe.iecUnit !== 8 ? `#${recipe.iecUnit}` : null,
     recipe.jiffyDos ? "Jiffy" : null,
     recipe.mouseMode ? "1351" : null,
   ]

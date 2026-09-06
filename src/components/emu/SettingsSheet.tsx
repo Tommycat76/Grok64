@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Drawer } from "vaul";
 import { ExpansionPanel } from "@/components/emu/ExpansionPanel";
+import { IecUnitSeg } from "@/components/emu/IecUnitSeg";
 import { detectLine, MACHINES, type ResolvedMachine } from "@/lib/emu/machines";
 import { ACTION_LABEL, useEmu } from "@/lib/emu/store";
 import type { ActionId, CorePref, DriveMode, IecDrive, ReuSize, ScpuSimm, SidEngine, SidModel, VideoPref } from "@/lib/emu/types";
@@ -61,6 +62,7 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               onClick={() => {
                 s.setReuSize("16384kB");
                 s.setIecDrive("sd2iec");
+                s.setIecUnit(8);
                 s.setMouseMode(true);
                 s.setJoyPort(1);
                 s.setDriveMode("true");
@@ -156,8 +158,14 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
                   </button>
                 ))}
               </div>
+              {s.iecDrive === "sd2iec" || s.iecDrive === "cmdhd" || s.iecDrive === "1581" ? (
+                <div className="g64-field" style={{ marginTop: 8 }}>
+                  <label>Drive unit</label>
+                  <IecUnitSeg value={s.iecUnit} onChange={(u) => s.setIecUnit(u)} />
+                </div>
+              ) : null}
               <p className="text-xs text-fg-subtle">
-                SD2IEC is device 8 after READY (`LOAD"$=P",8`, `CD://0:`, `CD:os`). CMD HD still wants your Boot ROM 2.80. 1581 for .d81. C64 OS: kit above, then put the system files on partition 0 in folder os.
+                SD2IEC / CMD HD mount on the unit you pick (`LOAD"$",8` → use 8, or 9–11 for a second device). CMD HD still wants your Boot ROM 2.80. 1581 for .d81. C64 OS: kit above, then put the system files on partition 0 in folder os.
               </p>
             </div>
 

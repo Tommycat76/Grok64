@@ -1,4 +1,4 @@
-import type { LibraryItem, StoredFile } from "./types";
+import type { LibraryItem, StoredFile, IecUnit } from "./types";
 import { kindOf } from "./formats";
 import { publicUrl } from "@/lib/public-url";
 
@@ -139,6 +139,17 @@ export async function deleteSaveState(id: string): Promise<void> {
   await txDone(tx);
 }
 
+
+export async function updateFileUnit(id: string, unit: IecUnit | undefined): Promise<void> {
+  const file = await getFile(id);
+  if (!file) return;
+  if (unit === undefined) delete file.iecUnit;
+  else file.iecUnit = unit;
+  const db = await openDb();
+  const tx = db.transaction(STORE, "readwrite");
+  tx.objectStore(STORE).put(file);
+  await txDone(tx);
+}
 
 export async function touchPlayed(id: string): Promise<void> {
   const file = await getFile(id);
