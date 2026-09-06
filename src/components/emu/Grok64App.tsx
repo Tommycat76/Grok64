@@ -46,7 +46,7 @@ import { hasJiffyPair, prefetchBundledRoms, romFileMap } from "@/lib/emu/roms";
 import { installSd2iecHooks, partitionsForMount, tickSd2iec } from "@/lib/emu/sd2iec";
 import { buildViceExtras, wantsLargeReu, wantsSuperCpu } from "@/lib/emu/vice-extras";
 import { detectLine, resolveMachine } from "@/lib/emu/machines";
-import { snapshotDevice, readViewport, applyViewport } from "@/lib/emu/detect";
+import { snapshotDevice, readViewport, applyViewport, isIosPhone } from "@/lib/emu/detect";
 import { detectJoyPort, detectSoftwareStandard } from "@/lib/emu/region";
 import { RETRO_BTN } from "@/lib/emu/types";
 import { dispatchC64Key, isJoyFireKey } from "@/lib/emu/keys";
@@ -210,6 +210,15 @@ export function Grok64App() {
   useEffect(() => {
     let raf = 0;
     const last = { width: 0, height: 0, orient: "" };
+    const bootSnap = snapshotDevice();
+    snapRef.current = bootSnap;
+    setSnap(bootSnap);
+    if (typeof document !== "undefined") {
+      document.documentElement.dataset.g64os = bootSnap.os;
+      if (bootSnap.os === "ios" && useEmu.getState().crtFilter) {
+        useEmu.getState().setCrtFilter(false);
+      }
+    }
     const update = () => {
       if (raf) return;
       raf = requestAnimationFrame(() => {
@@ -666,7 +675,7 @@ export function Grok64App() {
             const finish = () => {
               if (loadGenRef.current !== gen) return;
               bootHoldRef.current = false;
-              void (async () => {
+              const injectExtras = async () => {
                 try {
                   const roms = await romFileMap();
                   if (Object.keys(roms).length) injectRoms(emu, roms);
@@ -690,7 +699,16 @@ export function Grok64App() {
                     );
                   }, 2200);
                 }
-              })();
+              };
+              if (isIosPhone()) {
+                bootTimersRef.current.push(
+                  window.setTimeout(() => {
+                    if (loadGenRef.current === gen) void injectExtras();
+                  }, 1200),
+                );
+              } else {
+                void injectExtras();
+              }
               s.setBooting(false);
               s.setRunning(true);
               s.setCurrentTitle(opts.title ?? gameName);
@@ -1582,7 +1600,7 @@ export function Grok64App() {
             }}
           >
             <PlayerMount />
-            {s.crtFilter ? <div className="g64-scan" /> : null}
+            {s.crtFilter && snap.os !== "ios" ? <div className="g64-scan" /> : null}
             {s.booting ? (
               <button
                 type="button"
