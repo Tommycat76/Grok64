@@ -163,8 +163,9 @@ export function applyViewport(vp: ViewportSnapshot): ViewportSnapshot {
   const top = vv ? Math.max(0, Math.round(vv.offsetTop)) : 0;
   root.style.setProperty("--g64-vv-top", `${top}px`);
   if (detectOs() === "ios") {
-    const standalone = window.matchMedia("(display-mode: standalone)").matches;
-    root.style.setProperty("--g64-ios-browser-pad", standalone ? "0px" : "52px");
+    // Visual viewport offset already accounts for browser chrome; do not reserve
+    // a fixed banner-sized band (regression from PR #12).
+    root.style.setProperty("--g64-ios-browser-pad", "0px");
   }
   return vp;
 }

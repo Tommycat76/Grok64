@@ -106,12 +106,20 @@ for (let i = 0; i < 40; i++) {
   await page.waitForTimeout(500);
 }
 await page.waitForTimeout(6000);
-const after = await page.evaluate(() => ({
-  title: window.__g64?.title?.(),
-  boots: (window.__g64log || []).filter((l) => /boot-begin|power-on/.test(String(l))).length,
-  running: window.__g64?.running?.(),
-  splash: !!document.querySelector(".g64-splash"),
-}));
+const after = await page.evaluate(async () => {
+  let frame = false;
+  try {
+    const shot = await window.__g64?.shot?.();
+    frame = Boolean(shot && shot.bytes > 2500);
+  } catch {}
+  return {
+    title: window.__g64?.title?.(),
+    boots: (window.__g64log || []).filter((l) => /boot-begin|power-on/.test(String(l))).length,
+    running: window.__g64?.running?.(),
+    splash: !!document.querySelector(".g64-splash"),
+    frame,
+  };
+});
 console.log("BD", JSON.stringify(after));
 await browser.close();
 
@@ -125,6 +133,10 @@ if (after.splash || !after.running) {
 }
 if (after.boots > bootsBefore) {
   console.log("FAIL full core recycle during hot-swap");
+  process.exit(2);
+}
+if (!after.frame) {
+  console.log("FAIL VICE framebuffer empty after hot-swap (blank CRT)");
   process.exit(2);
 }
 console.log("PASS ios boot READY + boulder dash hot-swap");

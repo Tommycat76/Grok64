@@ -1159,6 +1159,9 @@ div[class*="ejs_virtual"] {
   .g64-app {
     padding-top: max(8px, env(safe-area-inset-top, 0px));
   }
+  html[data-g64os="ios"] .g64-app {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
   .g64-top {
     margin-top: 0;
     margin-bottom: 4px;
@@ -1454,18 +1457,41 @@ div[class*="ejs_virtual"] {
 
 /* iOS WebKit: backdrop-filter on many touch targets can GPU-crash; use solid fills. */
 html[data-g64os="ios"] .g64-app {
-  padding-top: max(
-    12px,
-    env(safe-area-inset-top, 0px),
-    var(--g64-vv-top, 0px),
-    var(--g64-ios-browser-pad, 0px)
-  );
+  /* Notch/status bar only — Chrome URL bar is outside the layout viewport. */
+  padding-top: env(safe-area-inset-top, 0px);
+}
+html[data-g64os="ios"] .g64-kb {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background: color-mix(in oklab, var(--color-bg) 94%, transparent);
+}
+html[data-g64os="ios"] .g64-key {
+  overflow: visible;
+}
+html[data-g64os="ios"] .g64-key-petscii {
+  opacity: 1;
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--color-phosphor);
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+}
+html[data-g64os="ios"] .g64-key-petscii em {
+  font-size: 9px;
+  font-weight: 600;
+  color: var(--color-phosphor);
+}
+html[data-g64os="ios"] .g64-key-petscii em[data-side="sh"] {
+  font-size: 8px;
+  font-weight: 600;
+  color: var(--color-fg-muted);
 }
 html[data-g64os="ios"] .g64-top {
-  margin-top: 2px;
+  margin-top: 0;
 }
 html[data-g64os="ios"] .g64-log {
-  margin-top: 2px;
+  margin-top: 0;
 }
 html[data-g64os="ios"] #grok64-player .ejs_canvas_parent,
 html[data-g64os="ios"] #grok64-player canvas {

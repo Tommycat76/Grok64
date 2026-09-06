@@ -552,6 +552,29 @@ export function Grok64App() {
     setAwaitingStart(false);
     glog("resumePlayback");
   }, [s]);
+  const kickIosAfterEmuAction = useCallback(
+    (emu: typeof emuRef.current, tag: string, gen?: number) => {
+      if (!isIosPhone() || !emu) return;
+      const playerEl = document.getElementById("grok64-player");
+      fitEmu(playerEl, emu);
+      kickIosPaint(emu, playerEl, tag);
+      scheduleIosPaintKicks(emu, playerEl);
+      setIosResume(true);
+      void waitForViceFrame(emu, playerEl, 12_000).then((ok) => {
+        if (gen != null && loadGenRef.current !== gen) return;
+        if (ok) {
+          setIosResume(false);
+          setNeedsUnlock(false);
+          glog("ios-frame-ok", { tag });
+        } else {
+          setIosResume(true);
+          setNeedsUnlock(true);
+          glog("ios-resume-needed", { tag });
+        }
+      });
+    },
+    [],
+  );
   const clearBootTimers = () => {
     for (const t of bootTimersRef.current) window.clearTimeout(t);
     bootTimersRef.current = [];
@@ -737,19 +760,7 @@ export function Grok64App() {
               fitEmu(playerEl, emu);
               bootTimersRef.current.push(window.setTimeout(() => fitEmu(playerEl, emu), 250));
               if (isIosPhone()) {
-                scheduleIosPaintKicks(emu, playerEl);
-                setIosResume(true);
-                void waitForViceFrame(emu, playerEl, 14_000).then((ok) => {
-                  if (loadGenRef.current !== gen) return;
-                  if (ok) {
-                    setIosResume(false);
-                    setNeedsUnlock(false);
-                  } else {
-                    setIosResume(true);
-                    setNeedsUnlock(true);
-                    glog("ios-resume-needed");
-                  }
-                });
+                kickIosAfterEmuAction(emu, "boot", gen);
               }
               if (audioLocked(emu)) {
                 pendingKickRef.current = false;
@@ -916,6 +927,7 @@ export function Grok64App() {
           if (work) hardReset(emuRef.current);
           else resetEmu(emuRef.current);
           plugJoysticks(emuRef.current, useEmu.getState().joyPort);
+          if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, "hot-swap");
           s.setCurrentTitle(title);
           s.setRunning(true);
           if (work) {

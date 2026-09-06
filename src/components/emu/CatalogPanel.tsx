@@ -9,12 +9,12 @@ import {
   searchCatalog,
   searchCatalogClient,
   downloadCatalogFile,
+  downloadCatalogFileClient,
   type CatalogFile,
   type CatalogHit,
   type CatalogKind,
 } from "@/lib/emu/catalog";
 import { explodeArchive, pickBootFile, toArrayBuffer, b64ToU8 } from "@/lib/emu/archive";
-import { iaClientFetchUrl, isProxiedIaUrl } from "@/lib/emu/ia-proxy";
 import { listLibrary, putFile } from "@/lib/emu/library";
 import { useEmu } from "@/lib/emu/store";
 import type { LibraryItem } from "@/lib/emu/types";
@@ -24,40 +24,22 @@ interface Props {
   onInsert?: (item: LibraryItem) => void;
 }
 
-async function fetchViaProxy(url: string): Promise<Uint8Array> {
-  const href = iaClientFetchUrl(url);
-  const res = await fetch(href, {
-    headers: { Accept: "application/octet-stream,*/*" },
-  });
-  if (!res.ok) throw new Error(`Download failed (${res.status})`);
-  const buf = new Uint8Array(await res.arrayBuffer());
-  if (buf.byteLength < 16) throw new Error("File was empty.");
-  return buf;
-}
-
 async function fetchRemote(file: CatalogFile): Promise<{ name: string; data: Uint8Array }> {
-  if (file.url && (isProxiedIaUrl(file.url) || iaClientFetchUrl(file.url) !== file.url)) {
-    try {
-      const data = await fetchViaProxy(file.url);
-      return { name: file.name, data };
-    } catch {
-      /* try serverFn next */
-    }
+  const payload = {
+    name: file.name,
+    ...(file.url ? { url: file.url } : {}),
+    ...(file.a64 ? { a64: file.a64 } : {}),
+  };
+  try {
+    const res = await downloadCatalogFileClient(payload);
+    return { name: res.name || file.name, data: b64ToU8(res.base64) };
+  } catch {
+    /* static Plex hosts have no serverFn — try legacy path when client fetch fails */
   }
   try {
-    const res = await downloadCatalogFile({
-      data: {
-        name: file.name,
-        ...(file.url ? { url: file.url } : {}),
-        ...(file.a64 ? { a64: file.a64 } : {}),
-      },
-    });
+    const res = await downloadCatalogFile({ data: payload });
     return { name: res.name || file.name, data: b64ToU8(res.base64) };
   } catch (err) {
-    if (file.url) {
-      const data = await fetchViaProxy(file.url);
-      return { name: file.name, data };
-    }
     throw err instanceof Error ? err : new Error("Download failed");
   }
 }
