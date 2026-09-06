@@ -1,8 +1,8 @@
 import { createServerFn } from "@tanstack/react-start";
-import { maybeProxyArchiveUrl, iaDownloadUrl, iaMetadataUrl, iaSearchUrl } from "./ia-proxy";
+import { iaDownloadUrl, iaMetadataUrl, iaSearchUrl, iaClientFetchUrl } from "./ia-proxy";
 import { z } from "zod";
 import { kindOf } from "./formats";
-import { isJunkRelease } from "./archive";
+import { isJunkRelease, u8ToB64 } from "./archive";
 
 export type CatalogKind = "all" | "games" | "carts" | "disks" | "sid" | "demos";
 
@@ -471,6 +471,54 @@ export const listCatalogFiles = createServerFn({ method: "POST" })
   .validator(HitSchema)
   .handler(async ({ data }) => listCatalogFilesClient(data));
 
+function assertCatalogBinary(buf: Uint8Array) {
+  if (buf.byteLength > MAX_FILE) throw new Error("File is larger than 6 MB.");
+  if (buf.byteLength < 16) throw new Error("File was empty.");
+  const magic = String.fromCharCode(buf[0] ?? 0, buf[1] ?? 0, buf[2] ?? 0, buf[3] ?? 0);
+  if (magic.startsWith("<!do") || magic.startsWith("<htm") || magic.startsWith("{")) {
+    throw new Error("Got a web page instead of a C64 file.");
+  }
+}
+
+/** Browser/static-host download — IA via /api/ia, Assembly64 direct, HVSC direct. */
+export async function downloadCatalogFileClient(data: {
+  name: string;
+  url?: string;
+  a64?: { itemId: string; category: number; fileId: string };
+}): Promise<{ name: string; base64: string; size: number }> {
+  let buf: Uint8Array;
+  let name = data.name;
+  if (data.a64) {
+    const { itemId, category, fileId } = data.a64;
+    const path =
+      fileId === "__zip__"
+        ? `/search/zip/${encodeURIComponent(itemId)}/${category}`
+        : `/search/bin/${encodeURIComponent(itemId)}/${category}/${encodeURIComponent(fileId)}`;
+    const res = await a64Fetch(path, "application/octet-stream");
+    if (!res.ok) throw new Error(`Assembly64 download failed (${res.status})`);
+    buf = new Uint8Array(await res.arrayBuffer());
+  } else if (data.url) {
+    const href = iaClientFetchUrl(data.url);
+    const target = new URL(href, typeof window !== "undefined" ? window.location.origin : "https://archive.org");
+    if (/^(localhost|127\.|10\.|192\.168\.|0\.|169\.254\.)/i.test(target.hostname)) {
+      throw new Error("That address cannot be fetched.");
+    }
+    const res = await fetch(target.toString(), {
+      headers: { Accept: "application/octet-stream,*/*", "User-Agent": "Grok64Emu/1.0" },
+      signal: AbortSignal.timeout(TIMEOUT),
+      redirect: "follow",
+    });
+    if (!res.ok) throw new Error(`Download failed (${res.status})`);
+    buf = new Uint8Array(await res.arrayBuffer());
+    const cd = res.headers.get("content-disposition")?.match(/filename\*?=(?:UTF-8'')?["']?([^";]+)["']?/i);
+    if (cd?.[1]) name = decodeURIComponent(cd[1]);
+  } else {
+    throw new Error("No download for that file.");
+  }
+  assertCatalogBinary(buf);
+  return { name, base64: u8ToB64(buf), size: buf.byteLength };
+}
+
 export const downloadCatalogFile = createServerFn({ method: "POST" })
   .validator(
     z.object({
@@ -485,43 +533,7 @@ export const downloadCatalogFile = createServerFn({ method: "POST" })
         .optional(),
     }),
   )
-  .handler(async ({ data }) => {
-    let buf: Uint8Array;
-    let name = data.name;
-    if (data.a64) {
-      const { itemId, category, fileId } = data.a64;
-      const path =
-        fileId === "__zip__"
-          ? `/search/zip/${encodeURIComponent(itemId)}/${category}`
-          : `/search/bin/${encodeURIComponent(itemId)}/${category}/${encodeURIComponent(fileId)}`;
-      const res = await a64Fetch(path, "application/octet-stream");
-      if (!res.ok) throw new Error(`Assembly64 download failed (${res.status})`);
-      buf = new Uint8Array(await res.arrayBuffer());
-    } else if (data.url && /^https?:\/\//i.test(data.url)) {
-      const target = new URL(maybeProxyArchiveUrl(data.url));
-      if (/^(localhost|127\.|10\.|192\.168\.|0\.|169\.254\.)/i.test(target.hostname)) {
-        throw new Error("That address cannot be fetched.");
-      }
-      const res = await fetch(target.toString(), {
-        headers: { Accept: "application/octet-stream,*/*", "User-Agent": "Grok64Emu/1.0" },
-        signal: AbortSignal.timeout(TIMEOUT),
-        redirect: "follow",
-      });
-      if (!res.ok) throw new Error(`Download failed (${res.status})`);
-      buf = new Uint8Array(await res.arrayBuffer());
-      const cd = res.headers.get("content-disposition")?.match(/filename\*?=(?:UTF-8'')?["']?([^";]+)["']?/i);
-      if (cd?.[1]) name = decodeURIComponent(cd[1]);
-    } else {
-      throw new Error("No download for that file.");
-    }
-    if (buf.byteLength > MAX_FILE) throw new Error("File is larger than 6 MB.");
-    if (buf.byteLength < 16) throw new Error("File was empty.");
-    const magic = String.fromCharCode(buf[0] ?? 0, buf[1] ?? 0, buf[2] ?? 0, buf[3] ?? 0);
-    if (magic.startsWith("<!do") || magic.startsWith("<htm") || magic.startsWith("{")) {
-      throw new Error("Got a web page instead of a C64 file.");
-    }
-    return { name, base64: Buffer.from(buf).toString("base64"), size: buf.byteLength };
-  });
+  .handler(async ({ data }) => downloadCatalogFileClient(data));
 
 export const SOURCE_LABEL: Record<CatalogHit["source"], string> = {
   a64: "Assembly64",
