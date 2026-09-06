@@ -148,7 +148,8 @@ export function C64Keyboard() {
           ) : null}
           {row.map((id) => {
             const k = key(id);
-            const showPetscii = !sym && !k.modifier && Boolean(k.gfx || (k.shift && k.shift.length <= 2));
+            const showPetscii =
+              !k.modifier && Boolean(k.gfx || (k.shift && k.shift.length <= 2));
             return (
               <KeyBtn
                 key={k.id}
