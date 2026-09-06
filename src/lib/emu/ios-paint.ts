@@ -58,6 +58,8 @@ async function decodePngBlob(blob: Blob): Promise<{ width: number; height: numbe
   }
 }
 
+let metricsCanvas: HTMLCanvasElement | null = null;
+
 /** Sample PNG screenshot luminance — rejects black PNGs that still exceed byte thresholds. */
 export async function frameImageMetrics(raw: Uint8Array | null): Promise<{ lum: number; uniq: number } | null> {
   const u8 = copyBytes(raw);
@@ -66,8 +68,9 @@ export async function frameImageMetrics(raw: Uint8Array | null): Promise<{ lum: 
   try {
     const blob = new Blob([new Uint8Array(u8)], { type: "image/png" });
     const decoded = await decodePngBlob(blob);
+    if (!metricsCanvas) metricsCanvas = document.createElement("canvas");
+    const c = metricsCanvas;
     const side = Math.min(48, decoded.width, decoded.height);
-    const c = document.createElement("canvas");
     c.width = side;
     c.height = side;
     const ctx = c.getContext("2d", { willReadFrequently: true });
@@ -116,33 +119,81 @@ function setMirrorVisible(root: HTMLElement | null, on: boolean) {
   player?.classList.toggle("g64-ios-mirror-on", on);
 }
 
+const glReadCache = new WeakMap<HTMLCanvasElement, WebGLRenderingContext | WebGL2RenderingContext>();
+
+function cachedGl(canvas: HTMLCanvasElement): WebGLRenderingContext | WebGL2RenderingContext | null {
+  const existing = glReadCache.get(canvas);
+  if (existing && !existing.isContextLost?.()) return existing;
+  const gl =
+    (canvas.getContext("webgl2", { preserveDrawingBuffer: true }) as WebGL2RenderingContext | null) ??
+    (canvas.getContext("webgl", { preserveDrawingBuffer: true }) as WebGLRenderingContext | null);
+  if (gl) glReadCache.set(canvas, gl);
+  return gl;
+}
+
+function samplePixels(data: ArrayLike<number>): { lum: number; uniq: number } {
+  let lum = 0;
+  const buckets = new Set<number>();
+  for (let i = 0; i < data.length; i += 4) {
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+    lum += (r + g + b) / 3;
+    buckets.add((r >> 4) * 256 + (g >> 4) * 16 + (b >> 4));
+  }
+  const px = data.length / 4 || 1;
+  return { lum: lum / px, uniq: buckets.size };
+}
+
+function pixelsLookLive(m: { lum: number; uniq: number } | null): boolean {
+  return Boolean(m && m.lum > 4 && m.uniq >= 2);
+}
+
+function sampleGlCanvas(canvas: HTMLCanvasElement): { lum: number; uniq: number } | null {
+  try {
+    const gl = cachedGl(canvas);
+    if (!gl) return null;
+    gl.finish?.();
+    const side = 8;
+    const buf = new Uint8Array(side * side * 4);
+    gl.readPixels(0, 0, side, side, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+    return samplePixels(buf);
+  } catch {
+    return null;
+  }
+}
+
+function sample2dCanvas(canvas: HTMLCanvasElement): { lum: number; uniq: number } | null {
+  try {
+    const side = Math.min(16, canvas.width, canvas.height);
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx || side < 4) return null;
+    return samplePixels(ctx.getImageData(0, 0, side, side).data);
+  } catch {
+    return null;
+  }
+}
+
 async function elementHasFrame(el: HTMLCanvasElement | null): Promise<boolean> {
   if (!el || el.width < 8 || el.height < 8) return false;
-  try {
-    const url = el.toDataURL("image/png");
-    const bin = atob(url.split(",")[1] || "");
-    const raw = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
-    const m = await frameImageMetrics(raw);
-    return Boolean(m && m.lum > 4 && m.uniq >= 2);
-  } catch {
-    return false;
+  forceCanvasPresent(el);
+  if (el.classList.contains("g64-ios-mirror")) {
+    return pixelsLookLive(sample2dCanvas(el));
   }
+  return pixelsLookLive(sampleGlCanvas(el));
 }
 
 /** Nudge iOS WebKit to composite a preserveDrawingBuffer WebGL framebuffer. */
 export function forceCanvasPresent(canvas: HTMLCanvasElement | null) {
   if (!canvas || canvas.width < 8 || canvas.height < 8) return;
   try {
-    const gl =
-      (canvas.getContext("webgl2", { preserveDrawingBuffer: true }) as WebGL2RenderingContext | null) ??
-      (canvas.getContext("webgl", { preserveDrawingBuffer: true }) as WebGLRenderingContext | null);
+    if (canvas.classList.contains("g64-ios-mirror")) return;
+    const gl = cachedGl(canvas);
     if (gl) {
       gl.finish?.();
       const buf = new Uint8Array(4);
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
     }
-    canvas.toDataURL("image/png");
   } catch {
     /* ignore */
   }
@@ -162,6 +213,20 @@ export async function displayHasFrame(emu: EjsInstance | null, root?: HTMLElemen
   return elementHasFrame(mirrorCanvas(root ?? null));
 }
 
+let paintSettled = false;
+
+export function isIosPaintSettled(): boolean {
+  return paintSettled;
+}
+
+export function resetIosPaintState() {
+  paintSettled = false;
+}
+
+function markPaintSettled() {
+  paintSettled = true;
+}
+
 /** Kick WebGL/main-loop on iOS WebKit — pass fromUserGesture=true inside tap handlers. */
 export function kickIosPaint(
   emu: EjsInstance | null,
@@ -172,7 +237,7 @@ export function kickIosPaint(
   if (!isIosPhone() || !emu) return;
   unlockAudio(emu);
   if (fromUserGesture) dismissEjsPrompts(root, "play");
-  else dismissEjsPrompts(root, "boot");
+  else if (!paintSettled) dismissEjsPrompts(root, "boot");
   try {
     emu.paused = false;
   } catch {
@@ -183,27 +248,29 @@ export function kickIosPaint(
   } catch {
     /* ignore */
   }
-  try {
-    const canvas = (emu.Module?.canvas as HTMLCanvasElement | undefined) ?? playerCanvas(root);
-    if (canvas) {
-      if (canvas.tabIndex < 0) canvas.tabIndex = 0;
-      canvas.focus?.();
-      forceCanvasPresent(canvas);
+  if (!paintSettled || fromUserGesture) {
+    try {
+      const canvas = (emu.Module?.canvas as HTMLCanvasElement | undefined) ?? playerCanvas(root);
+      if (canvas) {
+        if (canvas.tabIndex < 0) canvas.tabIndex = 0;
+        canvas.focus?.();
+        forceCanvasPresent(canvas);
+      }
+    } catch {
+      /* ignore */
     }
-  } catch {
-    /* ignore */
-  }
-  fitEmu(root, emu);
-  try {
-    window.dispatchEvent(new Event("resize"));
-  } catch {
-    /* ignore */
+    fitEmu(root, emu);
+    try {
+      window.dispatchEvent(new Event("resize"));
+    } catch {
+      /* ignore */
+    }
   }
   glog(`ios-paint-${tag}`);
 }
 
 export function scheduleIosPaintKicks(emu: EjsInstance | null, root: HTMLElement | null) {
-  if (!isIosPhone() || !emu) return;
+  if (!isIosPhone() || !emu || paintSettled) return;
   const delays = [0, 50, 120, 250, 500, 1000, 2000, 4000];
   for (const ms of delays) {
     window.setTimeout(() => kickIosPaint(emu, root, `t${ms}`), ms);
@@ -216,7 +283,7 @@ export async function viceHasFrame(emu: EjsInstance | null): Promise<boolean> {
   try {
     const raw = copyBytes(await emu.gameManager.screenshot());
     const m = await frameImageMetrics(raw);
-    return Boolean(m && m.lum > 4 && m.uniq >= 2);
+    return pixelsLookLive(m);
   } catch {
     return false;
   }
@@ -245,7 +312,6 @@ export async function waitForViceFrame(
 
 let mirrorGen = 0;
 let mirrorRaf = 0;
-let mirrorTimer = 0;
 let mirrorActive = false;
 let mirrorPainted = false;
 let mirrorEmu: EjsInstance | null = null;
@@ -262,8 +328,6 @@ export function stopIosViceMirror() {
   mirrorGen += 1;
   if (mirrorRaf) cancelAnimationFrame(mirrorRaf);
   mirrorRaf = 0;
-  if (mirrorTimer) window.clearInterval(mirrorTimer);
-  mirrorTimer = 0;
   mirrorActive = false;
   mirrorPainted = false;
   mirrorEmu = null;
@@ -295,11 +359,16 @@ async function blitPngToMirror(
   root: HTMLElement | null,
   raw: Uint8Array,
   metrics?: { lum: number; uniq: number } | null,
+  skipMetrics = false,
 ): Promise<boolean> {
   const canvas = ensureMirrorCanvas(root);
   if (!canvas) return false;
-  const m = metrics ?? (await frameImageMetrics(raw));
-  if (!m || m.lum <= 4) return false;
+  if (!skipMetrics) {
+    const m = metrics ?? (await frameImageMetrics(raw));
+    if (!pixelsLookLive(m)) return false;
+  } else if (!pngLooksValid(raw)) {
+    return false;
+  }
   try {
     const blob = new Blob([new Uint8Array(raw)], { type: "image/png" });
     const decoded = await decodePngBlob(blob);
@@ -324,12 +393,26 @@ async function blitGlCanvasToMirror(root: HTMLElement | null): Promise<boolean> 
   const src = playerCanvas(root);
   if (!src || src.width < 8) return false;
   forceCanvasPresent(src);
+  const m = sampleGlCanvas(src);
+  if (!pixelsLookLive(m)) return false;
   try {
-    const url = src.toDataURL("image/png");
-    const bin = atob(url.split(",")[1] || "");
-    const raw = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
-    return await blitPngToMirror(root, raw);
+    const side = Math.min(src.width, src.height, 384);
+    if (!metricsCanvas) metricsCanvas = document.createElement("canvas");
+    const c = metricsCanvas;
+    c.width = side;
+    c.height = side;
+    const ctx = c.getContext("2d", { alpha: false });
+    if (!ctx) return false;
+    ctx.drawImage(src, 0, 0, side, side);
+    const mirror = ensureMirrorCanvas(root);
+    if (!mirror) return false;
+    if (mirror.width !== side) mirror.width = side;
+    if (mirror.height !== side) mirror.height = side;
+    const mctx = mirror.getContext("2d", { alpha: false });
+    if (!mctx) return false;
+    mctx.drawImage(c, 0, 0);
+    setMirrorVisible(root, true);
+    return true;
   } catch {
     return false;
   }
@@ -346,6 +429,7 @@ export async function forceIosMirrorBlit(
     const glOk = await blitGlCanvasToMirror(root);
     if (glOk) {
       mirrorPainted = true;
+      markPaintSettled();
       glog("ios-mirror-painted-gl");
       return true;
     }
@@ -354,9 +438,10 @@ export async function forceIosMirrorBlit(
   try {
     const raw = copyBytes(await emu.gameManager.screenshot());
     if (!raw || !pngLooksValid(raw)) return false;
-    const ok = await blitPngToMirror(root, raw);
+    const ok = await blitPngToMirror(root, raw, null, mirrorPainted);
     if (ok) {
       mirrorPainted = true;
+      markPaintSettled();
       glog("ios-mirror-painted-force");
     }
     return ok;
@@ -364,6 +449,15 @@ export async function forceIosMirrorBlit(
     glog("ios-mirror-force-fail", { m: err instanceof Error ? err.message : String(err) });
     return false;
   }
+}
+
+function signalMirrorPainted(onFirstPaint?: (() => void) | null) {
+  if (!mirrorPainted) {
+    mirrorPainted = true;
+    markPaintSettled();
+    glog("ios-mirror-painted");
+  }
+  onFirstPaint?.();
 }
 
 /**
@@ -399,16 +493,18 @@ export function startIosViceMirror(
         if (gen !== mirrorGen) return;
         const u8 = copyBytes(raw);
         if (!u8 || !pngLooksValid(u8)) return;
-        const m = await frameImageMetrics(u8);
-        if (!m || m.lum <= 4) return;
-        const ok = await blitPngToMirror(root, u8, m);
-        if (!ok) return;
-        if (!mirrorPainted) {
-          mirrorPainted = true;
-          glog("ios-mirror-painted");
-          paintedCb?.();
-          paintedCb = null;
+        if (mirrorPainted) {
+          const ok = await blitPngToMirror(root, u8, null, true);
+          if (!ok) return;
+          signalMirrorPainted(null);
+          return;
         }
+        const m = await frameImageMetrics(u8);
+        if (!pixelsLookLive(m)) return;
+        const ok = await blitPngToMirror(root, u8, m, true);
+        if (!ok) return;
+        signalMirrorPainted(paintedCb);
+        paintedCb = null;
       })
       .catch((err) => {
         glog("ios-mirror-capture-fail", { m: err instanceof Error ? err.message : String(err) });
@@ -422,18 +518,20 @@ export function startIosViceMirror(
     if (gen !== mirrorGen) return;
     mirrorRaf = requestAnimationFrame(tick);
     ticks += 1;
-    if (ticks % 30 === 0) {
-      void canvasHasFrame(emu, root).then((native) => {
+    const cadence = mirrorPainted ? 4 : 2;
+    if (ticks % cadence === 0) capture();
+    if (mirrorPainted && ticks % 180 === 0) {
+      void elementHasFrame(playerCanvas(root)).then((native) => {
         if (gen !== mirrorGen || !native) return;
         glog("ios-mirror-handoff-native");
         paintedCb?.();
         paintedCb = null;
         stopIosViceMirror();
+        markPaintSettled();
       });
     }
   };
   mirrorRaf = requestAnimationFrame(tick);
-  mirrorTimer = window.setInterval(capture, 180);
   capture();
 }
 
@@ -468,6 +566,10 @@ export function startIosPaintWatchdog(
   if (!isIosPhone() || !emu) return;
   const resolved: IosPaintWatchdogOpts =
     typeof opts === "function" ? { onPainted: opts } : (opts ?? {});
+  if (paintSettled && (mirrorPainted || !mirrorActive)) {
+    resolved.onPainted?.();
+    return;
+  }
   activeTarget = { emu, root };
   onPaintedCb = resolved.onPainted ?? null;
   onTimeoutCb = resolved.onTimeout ?? null;
@@ -477,6 +579,7 @@ export function startIosPaintWatchdog(
   const signalPainted = () => {
     if (painted) return;
     painted = true;
+    markPaintSettled();
     onPaintedCb?.();
     onPaintedCb = null;
     onTimeoutCb = null;
@@ -500,10 +603,12 @@ export function startIosPaintWatchdog(
     frames += 1;
     const { emu: e, root: r } = activeTarget;
     if (!e) return;
-    kickIosPaint(e, r, `wd${frames}`);
     if (mirrorPainted) {
       signalPainted();
       return;
+    }
+    if (frames <= 12 || frames % 3 === 0) {
+      kickIosPaint(e, r, `wd${frames}`);
     }
     void displayHasFrame(e, r).then((ok) => {
       if (gen !== watchdogGen) return;
@@ -545,7 +650,8 @@ export function installIosPaintHooks(getTarget: () => PaintTarget) {
   const resume = () => {
     const { emu, root } = getTarget();
     if (!emu) return;
-    kickIosPaint(emu, root, "resume");
+    resetIosPaintState();
+    kickIosPaint(emu, root, "resume", true);
     startIosPaintWatchdog(emu, root);
   };
 
@@ -560,6 +666,7 @@ export function installIosPaintHooks(getTarget: () => PaintTarget) {
   const onCtxLost = (ev: Event) => {
     glog("webgl-context-lost");
     ev.preventDefault();
+    resetIosPaintState();
     const { emu, root } = getTarget();
     if (emu) scheduleIosPaintKicks(emu, root);
   };
@@ -581,9 +688,9 @@ export function installIosPaintHooks(getTarget: () => PaintTarget) {
   watchCanvas();
 }
 
-/** Prefer mirror canvas for QA readback when native GL is still black. */
+/** Prefer mirror canvas for QA readback once it has a painted frame. */
 export function shotDisplayCanvas(root?: HTMLElement | null): HTMLCanvasElement | null {
   const mirror = mirrorCanvas(root ?? null);
-  if (mirror && mirror.width >= 8) return mirror;
+  if (mirrorPainted && mirror && mirror.width >= 8) return mirror;
   return playerCanvas(root ?? null);
 }
