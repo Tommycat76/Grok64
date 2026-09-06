@@ -129,3 +129,26 @@ export function resolveDrive(
   if (pref === "auto") return core === "fast" ? "fast" : "true";
   return pref;
 }
+
+export interface ViewportSnapshot {
+  width: number;
+  height: number;
+  orient: "landscape" | "portrait";
+}
+
+export function readViewport(): ViewportSnapshot {
+  if (typeof window === "undefined") {
+    return { width: 1280, height: 720, orient: "landscape" };
+  }
+  const vv = window.visualViewport;
+  const width = Math.round(vv?.width ?? window.innerWidth);
+  const height = Math.round(vv?.height ?? window.innerHeight);
+  return { width, height, orient: width >= height ? "landscape" : "portrait" };
+}
+
+/** Keep viewport in sync with the shell; hook for future safe-area tweaks. */
+export function applyViewport(vp: ViewportSnapshot): ViewportSnapshot {
+  if (typeof document === "undefined") return vp;
+  document.documentElement.dataset.orient = vp.orient;
+  return vp;
+}
