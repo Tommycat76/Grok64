@@ -1095,17 +1095,39 @@ div[class*="ejs_virtual"] {
 }
 
 @media (max-width: 430px) {
-  .g64-chip {
-    display: none;
-  }
   .g64-top h1 {
     font-size: 13px;
-    flex: 1 1 auto;
+    flex: 0 0 auto;
     min-width: 0;
     margin-right: 2px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .g64-top-rail {
+    flex: 1 1 auto;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    min-width: 0;
+    -webkit-overflow-scrolling: touch;
+    scroll-snap-type: x proximity;
+    mask-image: linear-gradient(
+      90deg,
+      transparent 0,
+      #000 6px,
+      #000 calc(100% - 10px),
+      transparent 100%
+    );
+  }
+  .g64-chip {
+    flex-shrink: 0;
+    font-size: 9px;
+    padding: 4px 6px;
+  }
+  .g64-chip-gate {
+    min-height: 28px;
+    padding: 4px 6px;
+    font-size: 8px;
   }
   .g64-iconbtn {
     width: 40px;
