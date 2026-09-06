@@ -395,13 +395,16 @@ function patchEjsInput() {
     proto.__g64pad = true;
     const orig = proto.getRetroArchCfg;
     proto.getRetroArchCfg = function patchedCfg(this: unknown) {
+      const iosAudio = isIosPhone()
+        ? "audio_latency = 256\n" + "audio_block_frames = 512\n" + "audio_out_rate = 48000\n"
+        : "audio_latency = 160\n";
       return (
         orig.call(this) +
         "video_gpu_screenshot = false\n" +
         "autosave_interval = 0\n" +
         "savestate_auto_load = false\n" +
         "savestate_auto_save = false\n" +
-        "audio_latency = 160\n" +
+        iosAudio +
         "audio_sync = true\n" +
         "audio_max_timing_skew = 0.05\n" +
         "audio_rate_control = true\n" +
@@ -631,6 +634,22 @@ export function unlockAudio(emu: EjsInstance | null) {
     } catch {
       /* ignore */
     }
+  }
+}
+
+export function suspendAudio(emu: EjsInstance | null) {
+  try {
+    const sources = emu?.Module?.AL?.currentCtx?.sources;
+    if (sources) {
+      for (const src of sources) {
+        const ctx = src?.gain?.context;
+        if (ctx && ctx.state === "running") {
+          void ctx.suspend().catch(() => undefined);
+        }
+      }
+    }
+  } catch {
+    /* ignore */
   }
 }
 

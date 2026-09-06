@@ -16,7 +16,7 @@ export function pokeAudioUnlock() {
       if (pokeCtx.state === "suspended") void pokeCtx.resume();
       return;
     }
-    pokeCtx = new Ctx({ latencyHint: "interactive" });
+    pokeCtx = new Ctx({ latencyHint: ios ? "playback" : "interactive" });
     const ctx = pokeCtx;
     const close = () => {
       try {
