@@ -7,7 +7,17 @@ const server = await createServer({
   appType: "custom",
   logLevel: "error",
 });
-const { c64Keystrokes, keyCodeOf, isJoyFireKey, FIRE_KEY_CODE } = await server.ssrLoadModule("/src/lib/emu/keys.ts");
+const {
+  c64Keystrokes,
+  keyCodeOf,
+  isJoyFireKey,
+  FIRE_KEY_CODE,
+  C64_ROWS,
+  TOUCH_ABC,
+  TOUCH_SYM,
+  LETTER_IDS,
+} = await server.ssrLoadModule("/src/lib/emu/keys.ts");
+const { petsciiToScreen, glyphHasPixels } = await server.ssrLoadModule("/src/lib/emu/petscii-glyphs.ts");
 const { needsTypedBoot, kindOf, driveForPlay, isDiskKind } = await server.ssrLoadModule("/src/lib/emu/formats.ts");
 await server.close();
 
@@ -67,6 +77,42 @@ test("letter and space keyCodes match VICE/Chrome", () => {
   assert.equal(keyCodeOf("KeyB", "b"), 66);
   assert.equal(keyCodeOf("Space", " "), 32);
   assert.equal(keyCodeOf("KeyK", "k"), 75);
+});
+
+test("every letter keycap has real C= and SHIFT PETSCII", () => {
+  const byId = new Map(C64_ROWS.flat().map((k) => [k.id, k]));
+  for (const id of LETTER_IDS) {
+    const k = byId.get(id);
+    assert.ok(k, `missing letter ${id}`);
+    assert.ok(k.cbmPetscii, `${id} missing C= PETSCII`);
+    assert.ok(k.shiftPetscii, `${id} missing SHIFT PETSCII`);
+    assert.notEqual(k.cbmPetscii, k.shiftPetscii, `${id} C= and SHIFT must differ`);
+    assert.equal(glyphHasPixels(petsciiToScreen(k.cbmPetscii)), true, `${id} C= glyph empty`);
+    assert.equal(glyphHasPixels(petsciiToScreen(k.shiftPetscii)), true, `${id} SHIFT glyph empty`);
+  }
+});
+
+test("ABC + 123 layers expose the full C64 key set Tom asked for", () => {
+  const visible = new Set([...TOUCH_ABC, ...TOUCH_SYM].flat());
+  for (const id of ["at", "star", "eq", "plus", "minus", "colon", "semi", "arr", "uparr", "pound"]) {
+    assert.equal(visible.has(id), true, `ABC/123 missing ${id}`);
+  }
+  for (const id of ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8"]) {
+    assert.equal(visible.has(id), true, `123 missing ${id}`);
+  }
+  for (const id of ["clr", "home", "inst", "del", "restore", "pi"]) {
+    assert.equal(visible.has(id), true, `123 missing ${id}`);
+  }
+  assert.equal(TOUCH_ABC.flat().filter((id) => LETTER_IDS.includes(id)).length, 26);
+});
+
+test("SHIFT-A is the spade and SHIFT-Q is the filled circle", () => {
+  const byId = new Map(C64_ROWS.flat().map((k) => [k.id, k]));
+  assert.equal(petsciiToScreen(byId.get("a").shiftPetscii), 0x41);
+  assert.equal(petsciiToScreen(byId.get("q").shiftPetscii), 0x51);
+  assert.equal(petsciiToScreen(byId.get("s").shiftPetscii), 0x53);
+  assert.equal(petsciiToScreen(byId.get("z").shiftPetscii), 0x5a);
+  assert.equal(petsciiToScreen(byId.get("x").shiftPetscii), 0x58);
 });
 
 test("only Right Ctrl is the host fire key; arrows are not joystick", () => {

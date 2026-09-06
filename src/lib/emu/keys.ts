@@ -1,8 +1,14 @@
 export interface C64Key {
   id: string;
   label: string;
+  /** Printed SHIFT punctuation (! " [ ] < > ?) when it is not a PETSCII graphic. */
   shift?: string;
-  gfx?: string;
+  /** PETSCII code for the C= (left) graphic on a real C64 keycap. */
+  cbmPetscii?: number;
+  /** PETSCII code for the SHIFT (right) graphic on a real C64 keycap. */
+  shiftPetscii?: number;
+  /** Hold SHIFT while this key is down (INST, CLR, π, F2/F4/F6/F8). */
+  forceShift?: boolean;
   code: string;
   key: string;
   width?: number;
@@ -11,70 +17,73 @@ export interface C64Key {
 
 export const C64_ROWS: C64Key[][] = [
   [
-    { id: "arr", label: "←", code: "Backquote", key: "`" },
-    { id: "1", label: "1", shift: "!", gfx: "┌", code: "Digit1", key: "1" },
-    { id: "2", label: "2", shift: '"', gfx: "▀", code: "Digit2", key: "2" },
-    { id: "3", label: "3", shift: "#", gfx: "▄", code: "Digit3", key: "3" },
-    { id: "4", label: "4", shift: "$", gfx: "▌", code: "Digit4", key: "4" },
-    { id: "5", label: "5", shift: "%", gfx: "▐", code: "Digit5", key: "5" },
-    { id: "6", label: "6", shift: "&", gfx: "░", code: "Digit6", key: "6" },
-    { id: "7", label: "7", shift: "'", gfx: "▒", code: "Digit7", key: "7" },
-    { id: "8", label: "8", shift: "(", gfx: "▓", code: "Digit8", key: "8" },
-    { id: "9", label: "9", shift: ")", gfx: "■", code: "Digit9", key: "9" },
-    { id: "0", label: "0", shift: ")", code: "Digit0", key: "0" },
-    { id: "plus", label: "+", code: "Minus", key: "+" },
-    { id: "minus", label: "−", code: "Equal", key: "-" },
-    { id: "pound", label: "£", code: "Backslash", key: "\\" },
-    { id: "clr", label: "CLR", code: "Home", key: "Home", width: 1.3 },
-    { id: "del", label: "DEL", code: "Backspace", key: "Backspace", width: 1.3 },
+    { id: "arr", label: "←", code: "Backquote", key: "`", shiftPetscii: 0x5f, cbmPetscii: 0x5f },
+    { id: "1", label: "1", shift: "!", shiftPetscii: 0x21, code: "Digit1", key: "1" },
+    { id: "2", label: "2", shift: '"', shiftPetscii: 0x22, code: "Digit2", key: "2" },
+    { id: "3", label: "3", shift: "#", shiftPetscii: 0x23, code: "Digit3", key: "3" },
+    { id: "4", label: "4", shift: "$", shiftPetscii: 0x24, code: "Digit4", key: "4" },
+    { id: "5", label: "5", shift: "%", shiftPetscii: 0x25, code: "Digit5", key: "5" },
+    { id: "6", label: "6", shift: "&", shiftPetscii: 0x26, code: "Digit6", key: "6" },
+    { id: "7", label: "7", shift: "'", shiftPetscii: 0x27, code: "Digit7", key: "7" },
+    { id: "8", label: "8", shift: "(", shiftPetscii: 0x28, code: "Digit8", key: "8" },
+    { id: "9", label: "9", shift: ")", shiftPetscii: 0x29, code: "Digit9", key: "9" },
+    { id: "0", label: "0", code: "Digit0", key: "0" },
+    { id: "plus", label: "+", code: "Minus", key: "+", cbmPetscii: 0xa6, shiftPetscii: 0xdb },
+    { id: "minus", label: "−", code: "Equal", key: "-", cbmPetscii: 0xdc, shiftPetscii: 0xdd },
+    { id: "pound", label: "£", code: "Backslash", key: "\\", cbmPetscii: 0xa8, shiftPetscii: 0xa9 },
+    { id: "home", label: "HOME", code: "Home", key: "Home", width: 1.3 },
+    { id: "clr", label: "CLR", code: "Home", key: "Home", width: 1.3, forceShift: true },
+    { id: "inst", label: "INST", code: "Insert", key: "Insert", width: 1.3 },
+    { id: "del", label: "DEL", shift: "INST", code: "Backspace", key: "Backspace", width: 1.3 },
   ],
   [
     { id: "ctrl", label: "CTRL", code: "ControlLeft", key: "Control", width: 1.4, modifier: "ctrl" },
-    { id: "q", label: "Q", gfx: "●", code: "KeyQ", key: "q" },
-    { id: "w", label: "W", gfx: "○", code: "KeyW", key: "w" },
-    { id: "e", label: "E", gfx: "━", code: "KeyE", key: "e" },
-    { id: "r", label: "R", code: "KeyR", key: "r" },
-    { id: "t", label: "T", code: "KeyT", key: "t" },
-    { id: "y", label: "Y", code: "KeyY", key: "y" },
-    { id: "u", label: "U", code: "KeyU", key: "u" },
-    { id: "i", label: "I", code: "KeyI", key: "i" },
-    { id: "o", label: "O", code: "KeyO", key: "o" },
-    { id: "p", label: "P", code: "KeyP", key: "p" },
-    { id: "at", label: "@", code: "BracketLeft", key: "@" },
-    { id: "star", label: "*", code: "BracketRight", key: "*" },
-    { id: "uparr", label: "↑", code: "Delete", key: "Delete" },
+    { id: "q", label: "Q", code: "KeyQ", key: "q", cbmPetscii: 0xab, shiftPetscii: 0xd1 },
+    { id: "w", label: "W", code: "KeyW", key: "w", cbmPetscii: 0xb3, shiftPetscii: 0xd7 },
+    { id: "e", label: "E", code: "KeyE", key: "e", cbmPetscii: 0xb1, shiftPetscii: 0xc5 },
+    { id: "r", label: "R", code: "KeyR", key: "r", cbmPetscii: 0xb2, shiftPetscii: 0xd2 },
+    { id: "t", label: "T", code: "KeyT", key: "t", cbmPetscii: 0xa3, shiftPetscii: 0xd4 },
+    { id: "y", label: "Y", code: "KeyY", key: "y", cbmPetscii: 0xb7, shiftPetscii: 0xd9 },
+    { id: "u", label: "U", code: "KeyU", key: "u", cbmPetscii: 0xb8, shiftPetscii: 0xd5 },
+    { id: "i", label: "I", code: "KeyI", key: "i", cbmPetscii: 0xa2, shiftPetscii: 0xc9 },
+    { id: "o", label: "O", code: "KeyO", key: "o", cbmPetscii: 0xb9, shiftPetscii: 0xcf },
+    { id: "p", label: "P", code: "KeyP", key: "p", cbmPetscii: 0xaf, shiftPetscii: 0xd0 },
+    { id: "at", label: "@", code: "BracketLeft", key: "@", cbmPetscii: 0xa4, shiftPetscii: 0xba },
+    { id: "star", label: "*", code: "BracketRight", key: "*", cbmPetscii: 0xdf, shiftPetscii: 0xc0 },
+    { id: "uparr", label: "↑", code: "Delete", key: "Delete", cbmPetscii: 0xde, shiftPetscii: 0xde },
+    { id: "pi", label: "π", code: "Delete", key: "Delete", forceShift: true, shiftPetscii: 0xde },
     { id: "restore", label: "RST", code: "PageUp", key: "PageUp", width: 1.3 },
   ],
   [
     { id: "run", label: "RUN", code: "Escape", key: "Escape", width: 1.5 },
-    { id: "lock", label: "A LOCK", code: "CapsLock", key: "CapsLock", width: 1.3, modifier: "lock" },
-    { id: "a", label: "A", gfx: "♠", code: "KeyA", key: "a" },
-    { id: "s", label: "S", gfx: "♥", code: "KeyS", key: "s" },
-    { id: "d", label: "D", code: "KeyD", key: "d" },
-    { id: "f", label: "F", code: "KeyF", key: "f" },
-    { id: "g", label: "G", code: "KeyG", key: "g" },
-    { id: "h", label: "H", code: "KeyH", key: "h" },
-    { id: "j", label: "J", code: "KeyJ", key: "j" },
-    { id: "k", label: "K", code: "KeyK", key: "k" },
-    { id: "l", label: "L", code: "KeyL", key: "l" },
-    { id: "colon", label: ":", shift: "[", code: "Semicolon", key: ":" },
-    { id: "semi", label: ";", shift: "]", code: "Quote", key: ";" },
+    { id: "lock", label: "LOCK", code: "CapsLock", key: "CapsLock", width: 1.3, modifier: "lock" },
+    { id: "a", label: "A", code: "KeyA", key: "a", cbmPetscii: 0xb0, shiftPetscii: 0xc1 },
+    { id: "s", label: "S", code: "KeyS", key: "s", cbmPetscii: 0xae, shiftPetscii: 0xd3 },
+    { id: "d", label: "D", code: "KeyD", key: "d", cbmPetscii: 0xac, shiftPetscii: 0xc4 },
+    { id: "f", label: "F", code: "KeyF", key: "f", cbmPetscii: 0xbb, shiftPetscii: 0xc6 },
+    { id: "g", label: "G", code: "KeyG", key: "g", cbmPetscii: 0xa5, shiftPetscii: 0xc7 },
+    { id: "h", label: "H", code: "KeyH", key: "h", cbmPetscii: 0xb4, shiftPetscii: 0xc8 },
+    { id: "j", label: "J", code: "KeyJ", key: "j", cbmPetscii: 0xb5, shiftPetscii: 0xca },
+    { id: "k", label: "K", code: "KeyK", key: "k", cbmPetscii: 0xa1, shiftPetscii: 0xcb },
+    { id: "l", label: "L", code: "KeyL", key: "l", cbmPetscii: 0xb6, shiftPetscii: 0xcc },
+    { id: "colon", label: ":", shift: "[", shiftPetscii: 0x5b, cbmPetscii: 0x5b, code: "Semicolon", key: ":" },
+    { id: "semi", label: ";", shift: "]", shiftPetscii: 0x5d, cbmPetscii: 0x5d, code: "Quote", key: ";" },
     { id: "eq", label: "=", code: "IntlBackslash", key: "=" },
     { id: "return", label: "RETURN", code: "Enter", key: "Enter", width: 1.8 },
   ],
   [
     { id: "cbm", label: "C=", code: "Tab", key: "Tab", width: 1.4, modifier: "cbm" },
     { id: "lshift", label: "SHIFT", code: "ShiftLeft", key: "Shift", width: 1.6, modifier: "shift" },
-    { id: "z", label: "Z", gfx: "♦", code: "KeyZ", key: "z" },
-    { id: "x", label: "X", gfx: "♣", code: "KeyX", key: "x" },
-    { id: "c", label: "C", code: "KeyC", key: "c" },
-    { id: "v", label: "V", code: "KeyV", key: "v" },
-    { id: "b", label: "B", code: "KeyB", key: "b" },
-    { id: "n", label: "N", code: "KeyN", key: "n" },
-    { id: "m", label: "M", code: "KeyM", key: "m" },
-    { id: "comma", label: ",", shift: "<", code: "Comma", key: "," },
-    { id: "dot", label: ".", shift: ">", code: "Period", key: "." },
-    { id: "slash", label: "/", shift: "?", code: "Slash", key: "/" },
+    { id: "z", label: "Z", code: "KeyZ", key: "z", cbmPetscii: 0xad, shiftPetscii: 0xda },
+    { id: "x", label: "X", code: "KeyX", key: "x", cbmPetscii: 0xbd, shiftPetscii: 0xd8 },
+    { id: "c", label: "C", code: "KeyC", key: "c", cbmPetscii: 0xbc, shiftPetscii: 0xc3 },
+    { id: "v", label: "V", code: "KeyV", key: "v", cbmPetscii: 0xbe, shiftPetscii: 0xd6 },
+    { id: "b", label: "B", code: "KeyB", key: "b", cbmPetscii: 0xbf, shiftPetscii: 0xc2 },
+    { id: "n", label: "N", code: "KeyN", key: "n", cbmPetscii: 0xaa, shiftPetscii: 0xce },
+    { id: "m", label: "M", code: "KeyM", key: "m", cbmPetscii: 0xa7, shiftPetscii: 0xcd },
+    { id: "comma", label: ",", shift: "<", shiftPetscii: 0x3c, cbmPetscii: 0x3c, code: "Comma", key: "," },
+    { id: "dot", label: ".", shift: ">", shiftPetscii: 0x3e, cbmPetscii: 0x3e, code: "Period", key: "." },
+    { id: "slash", label: "/", shift: "?", shiftPetscii: 0x3f, cbmPetscii: 0x3f, code: "Slash", key: "/" },
     { id: "rshift", label: "SHIFT", code: "ShiftRight", key: "Shift", width: 1.6, modifier: "shift" },
     { id: "crsrud", label: "↕", code: "ArrowDown", key: "ArrowDown" },
     { id: "crsrlr", label: "↔", code: "ArrowRight", key: "ArrowRight" },
@@ -82,11 +91,40 @@ export const C64_ROWS: C64Key[][] = [
   [
     { id: "space", label: "SPACE", code: "Space", key: " ", width: 8 },
     { id: "f1", label: "F1", code: "F1", key: "F1", width: 1.2 },
+    { id: "f2", label: "F2", code: "F2", key: "F2", width: 1.2 },
     { id: "f3", label: "F3", code: "F3", key: "F3", width: 1.2 },
+    { id: "f4", label: "F4", code: "F4", key: "F4", width: 1.2 },
     { id: "f5", label: "F5", code: "F5", key: "F5", width: 1.2 },
+    { id: "f6", label: "F6", code: "F6", key: "F6", width: 1.2 },
     { id: "f7", label: "F7", code: "F7", key: "F7", width: 1.2 },
+    { id: "f8", label: "F8", code: "F8", key: "F8", width: 1.2 },
   ],
 ];
+
+/** Compact ABC — every letter with C=/SHIFT PETSCII, plus C64 symbol keys. */
+export const TOUCH_ABC: string[][] = [
+  ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
+  ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
+  ["z", "x", "c", "v", "b", "n", "m"],
+  ["at", "star", "uparr", "pound", "colon", "semi", "plus", "minus", "eq", "arr"],
+];
+
+/** 123 — remaining C64 keys: numbers, F1–F8, CLR/HOME/INST/DEL/RESTORE, CRSR. */
+export const TOUCH_SYM: string[][] = [
+  ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
+  ["plus", "minus", "pound", "at", "star", "colon", "semi", "eq", "uparr", "pi"],
+  ["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8"],
+  ["clr", "home", "inst", "del", "restore", "comma", "dot", "slash"],
+];
+
+export const TOUCH_CURSORS = ["crsrlr", "crsrud"] as const;
+
+export const LETTER_IDS = "abcdefghijklmnopqrstuvwxyz".split("");
+
+export function hasPetsciiLayer(k: C64Key): boolean {
+  if (k.modifier) return false;
+  return Boolean(k.cbmPetscii || k.shiftPetscii || (k.shift && k.shift.length <= 4));
+}
 
 const KEY_CODES: Record<string, number> = {
   Backspace: 8,
@@ -106,10 +144,15 @@ const KEY_CODES: Record<string, number> = {
   ArrowDown: 40,
   Delete: 46,
   CapsLock: 20,
+  Insert: 45,
   F1: 112,
+  F2: 113,
   F3: 114,
+  F4: 115,
   F5: 116,
+  F6: 117,
   F7: 118,
+  F8: 119,
   Numpad0: 96,
   Numpad1: 97,
   Numpad2: 98,

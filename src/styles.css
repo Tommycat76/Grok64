@@ -868,7 +868,7 @@ div[class*="ejs_virtual"] {
 }
 .g64-app[data-device="phone"] .g64-key,
 .g64-app[data-device="tablet"] .g64-key {
-  overflow: visible;
+  overflow: hidden;
 }
 .g64-key-petscii {
   position: absolute;
@@ -877,30 +877,46 @@ div[class*="ejs_virtual"] {
   right: 0;
   display: flex;
   justify-content: space-between;
-  padding: 0 5px;
+  align-items: flex-start;
+  padding: 0 2px;
   pointer-events: none;
-  font-family: var(--font-petscii);
-  font-size: 8px;
-  font-weight: 700;
   line-height: 1;
   opacity: 1;
   color: var(--color-phosphor);
-  text-shadow: 0 0 3px color-mix(in oklab, var(--color-phosphor) 55%, transparent);
   -webkit-text-size-adjust: none;
   text-size-adjust: none;
 }
 .g64-key-petscii em {
-  font-family: var(--font-petscii);
   font-style: normal;
   font-size: 8px;
   font-weight: 700;
   color: var(--color-phosphor);
   opacity: 1;
+  display: flex;
+  min-width: 14px;
+  min-height: 14px;
 }
 .g64-key-petscii em[data-side="sh"] {
-  font-size: 7px;
+  font-size: 8px;
   font-weight: 700;
-  color: color-mix(in oklab, var(--color-phosphor) 90%, var(--color-fg));
+  color: color-mix(in oklab, var(--color-phosphor) 88%, #fff);
+}
+.g64-petg {
+  display: block;
+  flex: none;
+  fill: currentColor;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  filter: drop-shadow(0 0 2px color-mix(in oklab, var(--color-phosphor) 55%, transparent));
+}
+.g64-key-main-pet {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.g64-key-main-pet .g64-petg {
+  width: 18px;
+  height: 18px;
 }
 .g64-key-main {
   margin-top: auto;
@@ -1511,33 +1527,42 @@ div[class*="ejs_virtual"] {
 .g64-app[data-device="tablet"] .g64-key {
   min-height: 52px;
   height: 52px;
-  font-size: 18px;
+  font-size: 17px;
   border-radius: 10px;
 }
-/* Touch keyboard PETSCII — corner glyphs from PR #4 / 746d44d */
+/* Touch keyboard PETSCII — real C64 8×8 glyphs on phone + tablet */
 .g64-app[data-device="phone"] .g64-key-petscii,
 .g64-app[data-device="tablet"] .g64-key-petscii {
   top: 2px;
-  font-size: 9px;
-  text-shadow: 0 0 3px color-mix(in oklab, var(--color-phosphor) 55%, transparent);
-  -webkit-font-smoothing: antialiased;
 }
 .g64-app[data-device="phone"] .g64-key-petscii em,
 .g64-app[data-device="tablet"] .g64-key-petscii em {
-  font-family: var(--font-petscii);
-  font-size: 9px;
-  font-weight: 700;
   color: var(--color-phosphor);
   opacity: 1;
 }
-.g64-app[data-device="phone"] .g64-key-petscii em[data-side="sh"],
-.g64-app[data-device="tablet"] .g64-key-petscii em[data-side="sh"] {
-  font-size: 8px;
-  color: color-mix(in oklab, var(--color-phosphor) 90%, var(--color-fg));
+.g64-app[data-device="phone"] .g64-key-petscii .g64-petg {
+  width: 11px;
+  height: 11px;
+}
+.g64-app[data-device="tablet"] .g64-key-petscii .g64-petg {
+  width: 16px;
+  height: 16px;
 }
 .g64-app[data-device="phone"] .g64-key[data-petscii="true"] .g64-key-main,
 .g64-app[data-device="tablet"] .g64-key[data-petscii="true"] .g64-key-main {
-  margin-top: 11px;
+  margin-top: 13px;
+}
+.g64-app[data-device="phone"] .g64-kb[data-layer="abc"] .g64-key,
+.g64-app[data-device="phone"] .g64-kb[data-layer="sym"] .g64-key {
+  min-height: 44px;
+  height: 44px;
+}
+.g64-app[data-device="phone"] .g64-kb-cursors {
+  padding: 0 36px;
+}
+.g64-app[data-device="phone"] .g64-kb-cursors .g64-key {
+  min-height: 36px;
+  height: 36px;
 }
 .g64-app[data-device="phone"] .g64-key,
 .g64-app[data-device="tablet"] .g64-key {
@@ -1723,11 +1748,11 @@ html[data-g64os="ios"] .g64-kb {
   background: color-mix(in oklab, var(--color-bg) 94%, transparent);
 }
 html[data-g64os="ios"] .g64-key {
-  overflow: visible;
+  overflow: hidden;
 }
 .g64-app[data-device="phone"] .g64-key,
 .g64-app[data-device="tablet"] .g64-key {
-  overflow: visible;
+  overflow: hidden;
 }
 html[data-g64os="ios"] .g64-top {
   margin-top: 0;
