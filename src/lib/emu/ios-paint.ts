@@ -263,7 +263,7 @@ export function startIosViceMirror(
         const u8 = raw instanceof Uint8Array ? raw : null;
         const m = await frameImageMetrics(u8);
         if (!m || m.lum <= 4 || !u8) return;
-        const blob = new Blob([u8], { type: "image/png" });
+        const blob = new Blob([new Uint8Array(u8)], { type: "image/png" });
         const bmp = await createImageBitmap(blob);
         if (canvas.width !== bmp.width) canvas.width = bmp.width;
         if (canvas.height !== bmp.height) canvas.height = bmp.height;
