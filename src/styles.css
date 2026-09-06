@@ -189,13 +189,13 @@ html, body, #app {
 .g64-top {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 6px 10px;
-  min-height: 52px;
+  gap: 4px;
+  padding: 4px 6px;
+  min-height: 44px;
   flex: 0 0 auto;
   position: relative;
   z-index: 50;
-  margin: 0 10px 8px;
+  margin: 4px 8px 8px;
   background: color-mix(in oklab, var(--color-bg-elevated) 92%, transparent);
   border: 1px solid color-mix(in oklab, var(--color-fg) 14%, transparent);
   border-radius: 14px;
@@ -207,8 +207,41 @@ html, body, #app {
   font-weight: 600;
   letter-spacing: -0.03em;
   margin: 0;
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
+}
+.g64-top-rail {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.g64-top-rail::-webkit-scrollbar {
+  display: none;
+}
+.g64-top-icons {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+.g64-chip-gate {
+  letter-spacing: 0.08em;
+  min-height: 32px;
+  padding: 5px 8px;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--color-fg);
+  border-color: color-mix(in oklab, var(--color-fg) 28%, transparent);
+}
+.g64-chip-gate[data-on="true"] {
+  background: color-mix(in oklab, var(--color-phosphor) 42%, var(--color-bg-elevated));
+  color: #04120a;
+  border-color: var(--color-phosphor);
 }
 .g64-chip {
   font-family: var(--font-mono);
@@ -482,6 +515,13 @@ div[class*="ejs_virtual"] {
   justify-self: start;
   pointer-events: auto;
 }
+.g64-stick-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-self: start;
+  pointer-events: auto;
+}
 .g64-stick-tick {
   position: absolute;
   left: 50%;
@@ -596,6 +636,20 @@ div[class*="ejs_virtual"] {
   opacity: 0.4;
   pointer-events: none;
 }
+.g64-fire-row {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+.g64-controls[data-jump="true"] .g64-fire-row .g64-fire {
+  width: 108px;
+  height: 108px;
+}
+.g64-jump {
+  letter-spacing: 0.12em;
+}
 
 .g64-kb {
   position: absolute;
@@ -633,12 +687,41 @@ div[class*="ejs_virtual"] {
   font-weight: 600;
   letter-spacing: 0.01em;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   line-height: 1;
   touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
+  position: relative;
+  padding: 4px 2px 3px;
+}
+.g64-key-petscii {
+  position: absolute;
+  top: 3px;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: space-between;
+  padding: 0 5px;
+  pointer-events: none;
+  font-family: var(--font-mono);
+  font-size: 7px;
+  line-height: 1;
+  opacity: 0.5;
+}
+.g64-key-petscii em {
+  font-style: normal;
+  font-size: 7px;
+}
+.g64-key-petscii em[data-side="sh"] {
+  font-size: 6px;
+}
+.g64-key-main {
+  margin-top: auto;
+  font-size: inherit;
+  line-height: 1;
 }
 .g64-key.mod {
   flex: 1.15 1 0;
@@ -1080,6 +1163,22 @@ div[class*="ejs_virtual"] {
   }
 }
 
+.g64-app[data-device="tablet"] .g64-top {
+  margin: 4px 12px 8px;
+  padding: 4px 8px;
+}
+.g64-app[data-device="tablet"] .g64-top h1 {
+  display: none;
+}
+.g64-app[data-device="tablet"] .g64-chip-gate {
+  font-size: 8px;
+  padding: 5px 7px;
+  min-height: 30px;
+}
+.g64-app[data-device="tablet"] .g64-chip {
+  font-size: 10px;
+  padding: 5px 8px;
+}
 .g64-app[data-device="tablet"] .g64-stage {
   gap: 0;
   padding: 0 16px 8px;
@@ -1109,23 +1208,28 @@ div[class*="ejs_virtual"] {
   font-size: 14px;
   letter-spacing: 0.16em;
 }
+.g64-app[data-device="tablet"] .g64-controls[data-jump="true"] .g64-fire-row .g64-fire {
+  width: 112px;
+  height: 112px;
+}
 .g64-app[data-device="tablet"] .g64-key {
   min-height: 52px;
   height: 52px;
   font-size: 18px;
   border-radius: 10px;
 }
+.g64-app[data-device="tablet"] .g64-key-petscii {
+  font-size: 8px;
+}
+.g64-app[data-device="tablet"] .g64-key-petscii em {
+  font-size: 8px;
+}
+.g64-app[data-device="tablet"] .g64-key-petscii em[data-side="sh"] {
+  font-size: 7px;
+}
 .g64-app[data-device="tablet"] .g64-kb-bar .g64-key {
   min-height: 56px;
   height: 56px;
-}
-.g64-app[data-device="tablet"] .g64-chip {
-  font-size: 11px;
-  padding: 6px 10px;
-}
-.g64-app[data-device="tablet"] .g64-top {
-  margin: 0 16px 10px;
-  padding: 8px 14px;
 }
 .g64-app[data-device="tablet"][data-kb="true"] .g64-stick {
   width: 148px;

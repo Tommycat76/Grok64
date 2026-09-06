@@ -21,6 +21,11 @@ import { isSid, psidToPrg } from "@/lib/emu/psid";
 import { toArrayBuffer } from "@/lib/emu/archive";
 import { glog, glogFire, subscribeLog } from "@/lib/emu/debug";
 import { createMenuJoyGate, menuJoyStep, resetMenuJoyGate } from "@/lib/emu/menu-joy.mjs";
+import { applyStickPrecision, createStickPrecision, resetStickPrecision } from "@/lib/emu/stick-precision.mjs";
+
+function frameMsForStandard(standard: string) {
+  return standard === "ntsc" ? 1000 / 60 : 20;
+}
 
 const PlayerMount = memo(function PlayerMount() {
   return <div id="grok64-player" />;
@@ -63,6 +68,8 @@ export function Grok64App() {
   const playLockRef = useRef(false);
   const playLockGen = useRef(0);
   const menuJoyGateRef = useRef(createMenuJoyGate());
+  const stickPrecisionRef = useRef(createStickPrecision(20));
+  const jumpHeldRef = useRef(false);
   const arrowJoyRef = useRef({ up: false, down: false, left: false, right: false });
   const lastJoySentRef = useRef({ x: 0, y: 0, fire: false });
   const fireArmedAt = useRef(0);
@@ -133,6 +140,7 @@ export function Grok64App() {
     if (a.right) x = 1;
     if (a.up) y = -1;
     if (a.down) y = 1;
+    if (jumpHeldRef.current) y = -1;
     if (isMenuJoyMode()) {
       const out = menuJoyStep(menuJoyGateRef.current, x, y, performance.now());
       if (out.x === 0 && out.y === 0) {
@@ -144,6 +152,16 @@ export function Grok64App() {
       return;
     }
     resetMenuJoyGate(menuJoyGateRef.current);
+    const st = useEmu.getState();
+    if (st.stickGate === "4way") {
+      stickPrecisionRef.current.precision = true;
+      stickPrecisionRef.current.periodMs = frameMsForStandard(resolvedRef.current.standard);
+      const out = applyStickPrecision(stickPrecisionRef.current, { x, y }, performance.now());
+      x = out.x;
+      y = out.y;
+    } else {
+      stickPrecisionRef.current.precision = false;
+    }
     const last = lastJoySentRef.current;
     if (x === last.x && y === last.y && fire === last.fire) return;
     lastJoySentRef.current = { x, y, fire };
@@ -1004,6 +1022,22 @@ export function Grok64App() {
       window.removeEventListener("g64-unlock", unlock);
     };
   }, []);
+  const onJump = useCallback((down: boolean) => {
+    const st = useEmu.getState();
+    if (playLockRef.current || st.booting || !st.running) {
+      jumpHeldRef.current = false;
+      return;
+    }
+    jumpHeldRef.current = down;
+    emitJoyVector();
+  }, [emitJoyVector]);
+  useEffect(() => {
+    stickPrecisionRef.current.precision = s.stickGate === "4way";
+    resetStickPrecision(stickPrecisionRef.current);
+  }, [s.stickGate]);
+  useEffect(() => {
+    stickPrecisionRef.current.periodMs = frameMsForStandard(resolved.standard);
+  }, [resolved.standard]);
   const onVector = useCallback((x, y) => {
     if (playLockRef.current || useEmu.getState().booting) return;
     unlockAudio(emuRef.current);
@@ -1261,20 +1295,59 @@ export function Grok64App() {
       ) : null}
       <header className="g64-top" hidden={!s.powered}>
         <h1>Grok64</h1>
-        <button type="button" className="g64-chip" onClick={() => s.setSettingsOpen(true)} title={detectLine(resolved)}>
-          {resolved.chip}
-        </button>
-        {padConnected ? (
+        <div className="g64-top-rail">
+          <button type="button" className="g64-chip" onClick={() => s.setSettingsOpen(true)} title={detectLine(resolved)}>
+            {resolved.chip}
+          </button>
           <button
             type="button"
-            className="g64-chip"
-            title={s.padName ?? "Controller"}
-            onClick={() => s.setMapperOpen(true)}
+            className="g64-chip g64-chip-gate"
+            data-on={s.stickGate === "4way" ? "true" : "false"}
+            title={
+              s.stickGate === "4way"
+                ? "Slow 4-way D-pad — tap for 8-way"
+                : "Tap for slow cardinals (Paradroid, Boulder Dash)"
+            }
+            onClick={() => {
+              const next = s.stickGate === "4way" ? "8way" : "4way";
+              s.setStickGate(next);
+              resetStickPrecision(stickPrecisionRef.current);
+              stickPrecisionRef.current.precision = next === "4way";
+              toast.message(next === "4way" ? "Cardinals — tap to step, hold to crawl" : "8-way C64 stick");
+            }}
           >
-            <Gamepad2 className="size-3.5" />
-            PAD
+            CARDINALS
           </button>
-        ) : null}
+          <button
+            type="button"
+            className="g64-chip g64-chip-gate"
+            data-on={s.jumpBtn ? "true" : "false"}
+            title={s.jumpBtn ? "Jump button on — tap to hide" : "Show jump button (stick up)"}
+            onClick={() => {
+              const next = !s.jumpBtn;
+              s.setJumpBtn(next);
+              if (!next) {
+                jumpHeldRef.current = false;
+                emitJoyVector();
+              }
+              toast.message(next ? "Jump button on — stick up" : "Jump button off");
+            }}
+          >
+            JUMP
+          </button>
+          {padConnected ? (
+            <button
+              type="button"
+              className="g64-chip"
+              title={s.padName ?? "Controller"}
+              onClick={() => s.setMapperOpen(true)}
+            >
+              <Gamepad2 className="size-3.5" />
+              PAD
+            </button>
+          ) : null}
+        </div>
+        <div className="g64-top-icons">
         <button type="button" className="g64-iconbtn" data-on={s.libraryOpen} aria-label="Software" onClick={() => s.setLibraryOpen(true)}>
           <FolderOpen className="size-5" />
         </button>
@@ -1328,6 +1401,7 @@ export function Grok64App() {
         <button type="button" className="g64-iconbtn extra" aria-label="About" onClick={() => s.setAboutOpen(true)}>
           <Info className="size-5" />
         </button>
+        </div>
       </header>
       <div className="g64-log" aria-live="polite" hidden={!s.powered}>
         {logLines.slice(-5).map((l) => (
@@ -1383,6 +1457,8 @@ export function Grok64App() {
       <TouchControls
         onVector={onVector}
         onFire={onFire}
+        onJump={onJump}
+        jumpEnabled={s.jumpBtn}
         joyPort={s.joyPort}
         onSwap={swapJoyPort}
         warped={s.warped}
@@ -1392,6 +1468,8 @@ export function Grok64App() {
         stickHidden={!showStick}
         locked={s.booting || !s.running}
         vector={stickViz}
+        gate={s.stickGate}
+        frameMs={frameMsForStandard(resolved.standard)}
       />
       {s.powered && s.showKeyboard ? <C64Keyboard /> : null}
       <LibrarySheet onPlayBundled={(t) => void playBundled(t)} onPlayLocal={(i) => void playLocal(i)} onInsert={(i) => void insertDisk(i)} />

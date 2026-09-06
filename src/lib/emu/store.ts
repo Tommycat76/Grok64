@@ -51,6 +51,8 @@ interface SettingsSlice {
   showJoystick: boolean;
   showKeyboard: boolean;
   arrowsAreJoy: boolean;
+  stickGate: "4way" | "8way";
+  jumpBtn: boolean;
   volume: number;
   binds: ControlBinding[];
   setMachine: (id: MachineId) => void;
@@ -64,6 +66,8 @@ interface SettingsSlice {
   setShowJoystick: (v: boolean) => void;
   setShowKeyboard: (v: boolean) => void;
   setArrowsAreJoy: (v: boolean) => void;
+  setStickGate: (g: "4way" | "8way") => void;
+  setJumpBtn: (v: boolean) => void;
   setVolume: (v: number) => void;
   setBind: (action: ActionId, patch: Partial<ControlBinding>) => void;
   resetBinds: () => void;
@@ -113,6 +117,8 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       showJoystick: true,
       showKeyboard: false,
       arrowsAreJoy: false,
+      stickGate: "4way",
+      jumpBtn: false,
       volume: 0.7,
       binds: DEFAULT_BINDS,
       setMachine: (machineId) => set({ machineId }),
@@ -126,6 +132,8 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       setShowJoystick: (showJoystick) => set({ showJoystick }),
       setShowKeyboard: (showKeyboard) => set({ showKeyboard }),
       setArrowsAreJoy: (arrowsAreJoy) => set({ arrowsAreJoy }),
+      setStickGate: (stickGate) => set({ stickGate }),
+      setJumpBtn: (jumpBtn) => set({ jumpBtn }),
       setVolume: (volume) => set({ volume }),
       setBind: (action, patch) =>
         set((s) => ({
@@ -163,7 +171,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
     }),
     {
       name: "grok64-settings",
-      version: 5,
+      version: 6,
       storage: createJSONStorage(() =>
         typeof window === "undefined"
           ? {
@@ -184,6 +192,8 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         crtFilter: s.crtFilter,
         showJoystick: s.showJoystick,
         arrowsAreJoy: s.arrowsAreJoy,
+        stickGate: s.stickGate,
+        jumpBtn: s.jumpBtn,
         volume: s.volume,
         binds: s.binds,
       }),
@@ -200,6 +210,8 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
           "crtFilter",
           "showJoystick",
           "arrowsAreJoy",
+          "stickGate",
+          "jumpBtn",
           "volume",
           "binds",
         ] as const;
@@ -225,6 +237,10 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         if (version < 5) {
           p.arrowsAreJoy = false;
           p.binds = DEFAULT_BINDS;
+        }
+        if (version < 6) {
+          if (!p.stickGate) p.stickGate = "4way";
+          if (p.jumpBtn === undefined) p.jumpBtn = false;
         }
         delete p.powered;
         delete p.running;
