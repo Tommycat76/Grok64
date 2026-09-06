@@ -62,7 +62,10 @@ import {
   forceIosMirrorBlit,
   installIosPaintHooks,
   iosTapResumeCooldown,
+  isIosMirrorPainted,
+  isIosPaintSettled,
   kickIosPaint,
+  resetIosPaintState,
   scheduleIosPaintKicks,
   shotDisplayCanvas,
   startIosPaintWatchdog,
@@ -474,8 +477,11 @@ export function Grok64App() {
       if (canvas && (canvas.width < 64 || canvas.height < 64)) {
         fitEmu(root, emuRef.current);
       }
-      if (isIosPhone() && emuRef.current && useEmu.getState().running) {
+      if (isIosPhone() && emuRef.current && useEmu.getState().running && !isIosPaintSettled()) {
         kickIosPaint(emuRef.current, root, "poll");
+      }
+      if (isIosPhone() && emuRef.current && useEmu.getState().running && !useEmu.getState().muted) {
+        unlockAudio(emuRef.current);
       }
       if (!pendingKickRef.current) setAwaitingStart(false);
     }, 350);
@@ -508,6 +514,10 @@ export function Grok64App() {
     } catch {}
   }, []);
   const startIosAutoPaint = useCallback((onPainted?: () => void) => {
+    if (isIosPaintSettled() && isIosMirrorPainted()) {
+      onPainted?.();
+      return;
+    }
     const playerEl = document.getElementById("grok64-player");
     startIosPaintWatchdog(emuRef.current, playerEl, {
       onPainted: () => {
@@ -682,9 +692,15 @@ export function Grok64App() {
         sh: el.parentElement?.clientHeight ?? 0,
       });
       if (emuRef.current) {
+        stopIosPaintWatchdog();
+        stopIosViceMirror();
+        resetIosPaintState();
         await recycleCore(emuRef.current, el);
         emuRef.current = null;
       } else {
+        stopIosPaintWatchdog();
+        stopIosViceMirror();
+        resetIosPaintState();
         destroyEmu(null, el);
       }
       bootHoldRef.current = opts.autostart === false;
@@ -1152,6 +1168,7 @@ export function Grok64App() {
   }, [s.powered, s.booting, recoverBoot]);
   useEffect(() => {
     if (!s.powered || !isIosPhone()) return;
+    if (isIosPaintSettled() && isIosMirrorPainted()) return;
     const playerEl = document.getElementById("grok64-player");
     if (s.booting || s.running) {
       kickIosPaint(emuRef.current, playerEl, s.booting ? "booting" : "running");

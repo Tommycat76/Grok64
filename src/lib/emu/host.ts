@@ -401,6 +401,10 @@ function patchEjsInput() {
         "autosave_interval = 0\n" +
         "savestate_auto_load = false\n" +
         "savestate_auto_save = false\n" +
+        "audio_latency = 160\n" +
+        "audio_sync = true\n" +
+        "audio_max_timing_skew = 0.05\n" +
+        "audio_rate_control = true\n" +
         'input_libretro_device_p1 = "1"\n' +
         'input_libretro_device_p2 = "0"\n' +
         "input_player1_analog_dpad_mode = 0\n" +
@@ -606,7 +610,9 @@ export function unlockAudio(emu: EjsInstance | null) {
     if (sources) {
       for (const src of sources) {
         const ctx = src?.gain?.context;
-        if (ctx && ctx.state === "suspended") void ctx.resume();
+        if (ctx && ctx.state === "suspended") {
+          void ctx.resume().catch(() => undefined);
+        }
       }
     }
   } catch {
