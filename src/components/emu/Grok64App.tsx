@@ -1738,7 +1738,13 @@ export function Grok64App() {
       />
       {s.powered && s.showKeyboard ? <C64Keyboard /> : null}
       <LibrarySheet onPlayBundled={(t) => void playBundled(t)} onPlayLocal={(i) => void playLocal(i)} onInsert={(i) => void insertDisk(i)} />
-      <DiskMountSheet open={diskOpen} onOpenChange={setDiskOpen} onInsert={(i) => void insertDisk(i)} onBrowse={() => s.setLibraryOpen(true)} />
+      <DiskMountSheet
+        open={diskOpen}
+        onOpenChange={setDiskOpen}
+        onPlay={(i) => void playLocal(i)}
+        onInsert={(i) => void insertDisk(i)}
+        onBrowse={() => s.setLibraryOpen(true)}
+      />
       <SettingsSheet resolved={resolved} />
       <SnapshotsSheet
         canCapture={s.powered && s.running && !s.booting}
