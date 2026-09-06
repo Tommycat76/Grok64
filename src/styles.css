@@ -1160,7 +1160,23 @@ div[class*="ejs_virtual"] {
 
 @media (max-width: 900px) {
   .g64-app {
-    padding-top: max(140px, calc(env(safe-area-inset-top, 0px) + 88px));
+    padding-top: max(8px, env(safe-area-inset-top, 0px));
+  }
+  .g64-top {
+    margin-top: 0;
+    margin-bottom: 4px;
+  }
+  .g64-log {
+    margin-bottom: 4px;
+  }
+  .g64-bezel {
+    align-items: flex-start;
+    justify-content: flex-start;
+    padding-top: 6px;
+  }
+  .g64-screen {
+    flex: 0 0 auto;
+    max-height: calc(100% - 12px);
   }
 }
 
@@ -1208,7 +1224,7 @@ div[class*="ejs_virtual"] {
 }
 
 .g64-app[data-device="tablet"] .g64-top {
-  margin: 4px 12px 8px;
+  margin: 0 12px 4px;
   padding: 4px 8px;
 }
 .g64-app[data-device="tablet"] .g64-top h1 {
