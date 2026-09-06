@@ -22,19 +22,21 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
 
   return (
     <>
-      <Drawer.Root open={s.settingsOpen} onOpenChange={s.setSettingsOpen}>
+      <Drawer.Root open={s.settingsOpen} onOpenChange={s.setSettingsOpen} handleOnly>
         <Drawer.Portal>
           <Drawer.Overlay className="fixed inset-0 z-[900] bg-black/60" />
-          <Drawer.Content className="g64-sheet fixed right-0 bottom-0 left-0 z-[950] overflow-auto">
+          <Drawer.Content className="g64-sheet fixed right-0 bottom-0 left-0 z-[950]">
             <div className="g64-handle" />
-            <Drawer.Title asChild>
-              <h2>Machine</h2>
-            </Drawer.Title>
-            <p className="lead">
-              Auto picks PAL or NTSC from the software — filename tags, SID flags, and known releases — so it runs as the coder intended. Fast core on phones and budget tablets. Video and core apply on the next load. Joystick port swaps immediately.
-            </p>
-            {resolved ? <p className="g64-detect-inline">{detectLine(resolved)}</p> : null}
-
+            <div className="g64-sheet-head">
+              <Drawer.Title asChild>
+                <h2>Machine</h2>
+              </Drawer.Title>
+              <p className="lead">
+                Auto picks PAL or NTSC from the software — filename tags, SID flags, and known releases — so it runs as the coder intended. Fast core on phones and budget tablets. Video and core apply on the next load. Joystick port swaps immediately.
+              </p>
+              {resolved ? <p className="g64-detect-inline">{detectLine(resolved)}</p> : null}
+            </div>
+            <div className="g64-sheet-body">
             <div className="g64-row">
               <span>1351 mouse + touchpad</span>
               <Switch on={s.mouseMode} onToggle={() => s.setMouseMode(!s.mouseMode)} />
@@ -124,6 +126,42 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
             </div>
 
             <div className="g64-field">
+              <label>SuperCPU</label>
+              <div className="g64-row" style={{ marginBottom: 8 }}>
+                <span>CMD SuperCPU (65816)</span>
+                <Switch on={s.machineId === "scpu"} onToggle={() => s.setMachine(s.machineId === "scpu" ? "c64-auto" : "scpu")} />
+              </div>
+              <div className="g64-seg">
+                {(["0", "1", "2", "4", "8", "16"] as ScpuSimm[]).map((id) => (
+                  <button key={id} type="button" data-on={s.scpuSimm === id} onClick={() => s.setScpuSimm(id)}>
+                    {SCPU_SIMM_LABEL[id]}
+                  </button>
+                ))}
+              </div>
+              <div className="g64-row" style={{ marginTop: 8 }}>
+                <span>20 MHz turbo</span>
+                <Switch on={s.scpuTurbo} onToggle={() => s.setScpuTurbo(!s.scpuTurbo)} />
+              </div>
+              <p className="text-xs text-fg-subtle">
+                SuperCPU is a different VICE core (xscpu64): 20 MHz 65816 + onboard SIMM, separate from the REU. EmulatorJS stable/latest often does not ship that WASM — if it's missing, Grok64 stays on C64 and these settings wait for the core. Applies on next load.
+              </p>
+            </div>
+
+            <div className="g64-field">
+              <label>Storage / IEC</label>
+              <div className="g64-seg">
+                {(["1541", "1581", "sd2iec", "cmdhd"] as IecDrive[]).map((id) => (
+                  <button key={id} type="button" data-on={s.iecDrive === id} onClick={() => s.setIecDrive(id)}>
+                    {IEC_LABEL[id]}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-fg-subtle">
+                SD2IEC is device 8 after READY (`LOAD"$=P",8`, `CD://0:`, `CD:os`). CMD HD still wants your Boot ROM 2.80. 1581 for .d81. C64 OS: kit above, then put the system files on partition 0 in folder os.
+              </p>
+            </div>
+
+            <div className="g64-field">
               <label>SID engine</label>
               <div className="g64-seg">
                 {(["ReSID", "FastSID", "ReSID-fp"] as SidEngine[]).map((e) => (
@@ -192,42 +230,6 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               </p>
             </div>
 
-            <div className="g64-field">
-              <label>SuperCPU</label>
-              <div className="g64-row" style={{ marginBottom: 8 }}>
-                <span>CMD SuperCPU (65816)</span>
-                <Switch on={s.machineId === "scpu"} onToggle={() => s.setMachine(s.machineId === "scpu" ? "c64-auto" : "scpu")} />
-              </div>
-              <div className="g64-seg">
-                {(["0", "1", "2", "4", "8", "16"] as ScpuSimm[]).map((id) => (
-                  <button key={id} type="button" data-on={s.scpuSimm === id} onClick={() => s.setScpuSimm(id)}>
-                    {SCPU_SIMM_LABEL[id]}
-                  </button>
-                ))}
-              </div>
-              <div className="g64-row" style={{ marginTop: 8 }}>
-                <span>20 MHz turbo</span>
-                <Switch on={s.scpuTurbo} onToggle={() => s.setScpuTurbo(!s.scpuTurbo)} />
-              </div>
-              <p className="text-xs text-fg-subtle">
-                SuperCPU is a different VICE core (xscpu64): 20 MHz 65816 + onboard SIMM, separate from the REU. EmulatorJS stable/latest often does not ship that WASM — if it's missing, Grok64 stays on C64 and these settings wait for the core. Applies on next load.
-              </p>
-            </div>
-
-            <div className="g64-field">
-              <label>Storage / IEC</label>
-              <div className="g64-seg">
-                {(["1541", "1581", "sd2iec", "cmdhd"] as IecDrive[]).map((id) => (
-                  <button key={id} type="button" data-on={s.iecDrive === id} onClick={() => s.setIecDrive(id)}>
-                    {IEC_LABEL[id]}
-                  </button>
-                ))}
-              </div>
-              <p className="text-xs text-fg-subtle">
-                SD2IEC is device 8 after READY (`LOAD"$=P",8`, `CD://0:`, `CD:os`). CMD HD still wants your Boot ROM 2.80. 1581 for .d81. C64 OS: kit above, then put the system files on partition 0 in folder os.
-              </p>
-            </div>
-
             <ExpansionPanel />
 
             <div className="g64-row">
@@ -280,6 +282,7 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
             <button type="button" className="g64-btn mt-2 w-full" onClick={() => s.setAboutOpen(true)}>
               About VICE & credits
             </button>
+            </div>
           </Drawer.Content>
         </Drawer.Portal>
       </Drawer.Root>
