@@ -5,13 +5,16 @@ import {
   KIND_CHIPS,
   SOURCE_LABEL,
   listCatalogFiles,
+  listCatalogFilesClient,
   searchCatalog,
+  searchCatalogClient,
   downloadCatalogFile,
   type CatalogFile,
   type CatalogHit,
   type CatalogKind,
 } from "@/lib/emu/catalog";
 import { explodeArchive, pickBootFile, toArrayBuffer, b64ToU8 } from "@/lib/emu/archive";
+import { iaClientFetchUrl, isProxiedIaUrl } from "@/lib/emu/ia-proxy";
 import { listLibrary, putFile } from "@/lib/emu/library";
 import { useEmu } from "@/lib/emu/store";
 import type { LibraryItem } from "@/lib/emu/types";
@@ -21,15 +24,42 @@ interface Props {
   onInsert?: (item: LibraryItem) => void;
 }
 
-async function fetchRemote(file: CatalogFile): Promise<{ name: string; data: Uint8Array }> {
-  const res = await downloadCatalogFile({
-    data: {
-      name: file.name,
-      ...(file.url ? { url: file.url } : {}),
-      ...(file.a64 ? { a64: file.a64 } : {}),
-    },
+async function fetchViaProxy(url: string): Promise<Uint8Array> {
+  const href = iaClientFetchUrl(url);
+  const res = await fetch(href, {
+    headers: { Accept: "application/octet-stream,*/*" },
   });
-  return { name: res.name || file.name, data: b64ToU8(res.base64) };
+  if (!res.ok) throw new Error(`Download failed (${res.status})`);
+  const buf = new Uint8Array(await res.arrayBuffer());
+  if (buf.byteLength < 16) throw new Error("File was empty.");
+  return buf;
+}
+
+async function fetchRemote(file: CatalogFile): Promise<{ name: string; data: Uint8Array }> {
+  if (file.url && (isProxiedIaUrl(file.url) || iaClientFetchUrl(file.url) !== file.url)) {
+    try {
+      const data = await fetchViaProxy(file.url);
+      return { name: file.name, data };
+    } catch {
+      /* try serverFn next */
+    }
+  }
+  try {
+    const res = await downloadCatalogFile({
+      data: {
+        name: file.name,
+        ...(file.url ? { url: file.url } : {}),
+        ...(file.a64 ? { a64: file.a64 } : {}),
+      },
+    });
+    return { name: res.name || file.name, data: b64ToU8(res.base64) };
+  } catch (err) {
+    if (file.url) {
+      const data = await fetchViaProxy(file.url);
+      return { name: file.name, data };
+    }
+    throw err instanceof Error ? err : new Error("Download failed");
+  }
 }
 
 export function CatalogPanel({ onPlay, onInsert }: Props) {
@@ -49,7 +79,12 @@ export function CatalogPanel({ onPlay, onInsert }: Props) {
   async function runSearch(q: string, k: CatalogKind) {
     setSearching(true);
     try {
-      const res = await searchCatalog({ data: { query: q, kind: k } });
+      let res;
+      try {
+        res = await searchCatalog({ data: { query: q, kind: k } });
+      } catch {
+        res = await searchCatalogClient({ query: q, kind: k });
+      }
       setHits(res.hits);
       setA64(res.a64);
     } catch (err) {
@@ -97,7 +132,11 @@ export function CatalogPanel({ onPlay, onInsert }: Props) {
     try {
       let list = files[hit.key];
       if (!list) {
-        list = await listCatalogFiles({ data: hit });
+        try {
+          list = await listCatalogFiles({ data: hit });
+        } catch {
+          list = await listCatalogFilesClient(hit);
+        }
         setFiles((m) => ({ ...m, [hit.key]: list! }));
       }
       if (list.length > 1 && mode !== "play") {

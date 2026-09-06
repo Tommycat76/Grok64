@@ -437,7 +437,9 @@ html, body, #app {
   font-size: 22px;
   font-weight: 600;
   letter-spacing: -0.03em;
-  pointer-events: none;
+  pointer-events: auto;
+  touch-action: manipulation;
+  cursor: pointer;
 }
 
 .ejs__controls,
@@ -1451,6 +1453,27 @@ div[class*="ejs_virtual"] {
 }
 
 /* iOS WebKit: backdrop-filter on many touch targets can GPU-crash; use solid fills. */
+html[data-g64os="ios"] .g64-app {
+  padding-top: max(
+    12px,
+    env(safe-area-inset-top, 0px),
+    var(--g64-vv-top, 0px),
+    var(--g64-ios-browser-pad, 0px)
+  );
+}
+html[data-g64os="ios"] .g64-top {
+  margin-top: 2px;
+}
+html[data-g64os="ios"] .g64-log {
+  margin-top: 2px;
+}
+html[data-g64os="ios"] #grok64-player .ejs_canvas_parent,
+html[data-g64os="ios"] #grok64-player canvas {
+  transform: translateZ(0);
+  -webkit-transform: translateZ(0);
+  min-width: 160px;
+  min-height: 120px;
+}
 html[data-g64os="ios"] .g64-fire,
 html[data-g64os="ios"] .g64-port,
 html[data-g64os="ios"] .g64-top {

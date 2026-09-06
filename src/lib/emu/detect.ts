@@ -154,9 +154,17 @@ export function readViewport(): ViewportSnapshot {
   return { width, height, orient: width >= height ? "landscape" : "portrait" };
 }
 
-/** Keep viewport in sync with the shell; hook for future safe-area tweaks. */
+/** Keep viewport in sync with the shell; sets safe-area CSS vars for iOS browser chrome. */
 export function applyViewport(vp: ViewportSnapshot): ViewportSnapshot {
   if (typeof document === "undefined") return vp;
-  document.documentElement.dataset.orient = vp.orient;
+  const root = document.documentElement;
+  root.dataset.orient = vp.orient;
+  const vv = window.visualViewport;
+  const top = vv ? Math.max(0, Math.round(vv.offsetTop)) : 0;
+  root.style.setProperty("--g64-vv-top", `${top}px`);
+  if (detectOs() === "ios") {
+    const standalone = window.matchMedia("(display-mode: standalone)").matches;
+    root.style.setProperty("--g64-ios-browser-pad", standalone ? "0px" : "52px");
+  }
   return vp;
 }
