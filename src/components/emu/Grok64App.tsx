@@ -12,7 +12,6 @@ import { copyBuffer, getFile, listLibrary, putSaveState, deleteSaveState, touchP
 import { useEmu } from "@/lib/emu/store";
 import {
   applyRuntimeOptions,
-  audioLocked,
   autostartReset,
   bootEmulator,
   bootFileOf,
@@ -59,10 +58,26 @@ import { createMenuJoyGate, menuJoyStep, resetMenuJoyGate } from "@/lib/emu/menu
 import { applyStickPrecision, createStickPrecision, resetStickPrecision } from "@/lib/emu/stick-precision.mjs";
 import { publicUrl } from "@/lib/public-url";
 import { pokeAudioUnlock } from "@/lib/emu/audio-unlock";
-import { kickIosPaint, scheduleIosPaintKicks, waitForViceFrame } from "@/lib/emu/ios-paint";
+import {
+  installIosPaintHooks,
+  kickIosPaint,
+  scheduleIosPaintKicks,
+  startIosPaintWatchdog,
+  stopIosPaintWatchdog,
+} from "@/lib/emu/ios-paint";
 
 function frameMsForStandard(standard: string) {
   return standard === "ntsc" ? 1000 / 60 : 20;
+}
+
+function playLockDuration(mode: string): number {
+  if (isIosPhone()) return mode === "disk" ? 5000 : 1600;
+  return mode === "disk" ? 12_000 : 3500;
+}
+
+function gameplayReadyDelay(lockMs: number): number {
+  if (isIosPhone()) return lockMs + 250;
+  return Math.max(lockMs + 4000, 20_000);
 }
 
 const PlayerMount = memo(function PlayerMount() {
@@ -113,9 +128,7 @@ export function Grok64App() {
   const arrowJoyRef = useRef({ up: false, down: false, left: false, right: false });
   const lastJoySentRef = useRef({ x: 0, y: 0, fire: false });
   const fireArmedAt = useRef(0);
-  const [needsUnlock, setNeedsUnlock] = useState(false);
   const [awaitingStart, setAwaitingStart] = useState(false);
-  const [iosResume, setIosResume] = useState(false);
   const [diskOpen, setDiskOpen] = useState(false);
   const [logLines, setLogLines] = useState([]);
   const [softwareStd, setSoftwareStd] = useState(null);
@@ -281,8 +294,12 @@ export function Grok64App() {
       .catch(() => undefined);
   }, []);
   useEffect(() => {
-    void listLibrary().then(s.setLibrary);
-  }, [s.setLibrary]);
+    installIosPaintHooks(() => ({
+      emu: emuRef.current,
+      root: document.getElementById("grok64-player"),
+    }));
+    return () => stopIosPaintWatchdog();
+  }, []);
   useEffect(() => {
     const w = window;
     w.__g64 = {
@@ -449,8 +466,9 @@ export function Grok64App() {
       if (canvas && (canvas.width < 64 || canvas.height < 64)) {
         fitEmu(root, emuRef.current);
       }
-      const locked = audioLocked(emuRef.current);
-      setNeedsUnlock(locked && !useEmu.getState().booting && useEmu.getState().running);
+      if (isIosPhone() && emuRef.current && useEmu.getState().running) {
+        kickIosPaint(emuRef.current, root, "poll");
+      }
       if (!pendingKickRef.current) setAwaitingStart(false);
     }, 350);
     return () => window.clearInterval(id);
@@ -485,8 +503,9 @@ export function Grok64App() {
     (ms, msg) => {
       playLockGen.current += 1;
       const gen = playLockGen.current;
+      const lockMs = isIosPhone() ? playLockDuration(playModeRef.current) : ms;
       playLockRef.current = true;
-      bootHoldRef.current = true;
+      bootHoldRef.current = false;
       persistGateRef.current = false;
       inGameplayRef.current = false;
       clearMenuJoyInput();
@@ -494,15 +513,13 @@ export function Grok64App() {
       joyRef.current.x = 0;
       joyRef.current.y = 0;
       setJoyVector(emuRef.current, 0, 0, false);
-      s.setBooting(true, msg);
       s.setRunning(true);
-      glog("play-lock", { ms, msg, gen });
+      glog("play-lock", { ms: lockMs, msg, gen, ios: isIosPhone() });
       bootTimersRef.current.push(
         window.setTimeout(() => {
           if (playLockGen.current !== gen) return;
           playLockRef.current = false;
-          bootHoldRef.current = false;
-          fireArmedAt.current = Date.now() + 400;
+          fireArmedAt.current = Date.now() + 300;
           setWarp(emuRef.current, false);
           applyRuntimeOptions(emuRef.current, {
             vice_autostart_warp: "disabled",
@@ -511,16 +528,23 @@ export function Grok64App() {
           s.setBooting(false);
           s.setRunning(true);
           plugJoysticks(emuRef.current, useEmu.getState().joyPort);
+          inGameplayRef.current = true;
+          clearMenuJoyInput();
           glog("play-unlock", { title: useEmu.getState().currentTitle });
           persistGateRef.current = true;
-        }, ms),
+          if (isIosPhone()) {
+            const playerEl = document.getElementById("grok64-player");
+            kickIosPaint(emuRef.current, playerEl, "play-unlock");
+            startIosPaintWatchdog(emuRef.current, playerEl);
+          }
+        }, lockMs),
       );
       bootTimersRef.current.push(
         window.setTimeout(() => {
           if (playLockGen.current !== gen) return;
           inGameplayRef.current = true;
           clearMenuJoyInput();
-        }, Math.max(ms + 4e3, 2e4)),
+        }, gameplayReadyDelay(lockMs)),
       );
     },
     [s, clearMenuJoyInput],
@@ -529,7 +553,6 @@ export function Grok64App() {
     glog("kickAutostart", { mode: playModeRef.current, title: useEmu.getState().currentTitle });
     pendingKickRef.current = false;
     setAwaitingStart(false);
-    setNeedsUnlock(false);
     persistGateRef.current = false;
     inGameplayRef.current = false;
     unlockAudio(emuRef.current);
@@ -538,43 +561,32 @@ export function Grok64App() {
     useEmu.getState().setWarped(false);
     clearRetroSaves(emuRef.current);
     autostartReset(emuRef.current, playModeRef.current === "disk");
-    beginPlayLock(playModeRef.current === "disk" ? 12e3 : 4e3, "Restarting…");
+    beginPlayLock(playLockDuration(playModeRef.current), "Restarting…");
   }, [beginPlayLock]);
   const resumePlayback = useCallback(() => {
     unlockAudio(emuRef.current);
-    kickIosPaint(emuRef.current, document.getElementById("grok64-player"), "tap");
-    dismissEjsPrompts(document.getElementById("grok64-player"), "play");
-    setNeedsUnlock(false);
-    setIosResume(false);
+    const playerEl = document.getElementById("grok64-player");
+    kickIosPaint(emuRef.current, playerEl, "resume");
+    startIosPaintWatchdog(emuRef.current, playerEl);
+    dismissEjsPrompts(playerEl, "play");
     s.setPaused(false);
     setPaused(emuRef.current, false);
     pendingKickRef.current = false;
     setAwaitingStart(false);
     glog("resumePlayback");
   }, [s]);
-  const kickIosAfterEmuAction = useCallback(
-    (emu: typeof emuRef.current, tag: string, gen?: number) => {
-      if (!isIosPhone() || !emu) return;
-      const playerEl = document.getElementById("grok64-player");
-      fitEmu(playerEl, emu);
-      kickIosPaint(emu, playerEl, tag);
-      scheduleIosPaintKicks(emu, playerEl);
-      setIosResume(true);
-      void waitForViceFrame(emu, playerEl, 12_000).then((ok) => {
-        if (gen != null && loadGenRef.current !== gen) return;
-        if (ok) {
-          setIosResume(false);
-          setNeedsUnlock(false);
-          glog("ios-frame-ok", { tag });
-        } else {
-          setIosResume(true);
-          setNeedsUnlock(true);
-          glog("ios-resume-needed", { tag });
-        }
-      });
-    },
-    [],
-  );
+  const kickIosAfterEmuAction = useCallback((emu: typeof emuRef.current, tag: string, gen?: number) => {
+    if (!isIosPhone() || !emu) return;
+    const playerEl = document.getElementById("grok64-player");
+    fitEmu(playerEl, emu);
+    kickIosPaint(emu, playerEl, tag);
+    scheduleIosPaintKicks(emu, playerEl);
+    startIosPaintWatchdog(emu, playerEl, () => {
+      if (gen != null && loadGenRef.current !== gen) return;
+      useEmu.getState().setBooting(false);
+      glog("ios-frame-ok", { tag });
+    });
+  }, []);
   const clearBootTimers = () => {
     for (const t of bootTimersRef.current) window.clearTimeout(t);
     bootTimersRef.current = [];
@@ -631,7 +643,6 @@ export function Grok64App() {
       const playDrive = driveForPlay(res.drive, { typedDisk: !!opts.diskLoad });
       const hz = res.standard === "ntsc" ? "NTSC 60" : "PAL 50";
       s.setBooting(true, opts.autostart === false ? `Cold start · ${hz}…` : `Loading ${opts.title ?? gameName} · ${hz}…`);
-      setNeedsUnlock(false);
       glog("boot-begin", {
         game: gameName,
         core: res.core,
@@ -762,27 +773,20 @@ export function Grok64App() {
               if (isIosPhone()) {
                 kickIosAfterEmuAction(emu, "boot", gen);
               }
-              if (audioLocked(emu)) {
-                pendingKickRef.current = false;
-                setAwaitingStart(false);
-                setNeedsUnlock(true);
+              pendingKickRef.current = false;
+              setAwaitingStart(false);
+              if (opts.autostart !== false && playModeRef.current !== "basic") {
+                beginPlayLock(playLockDuration(playModeRef.current), `Loading ${opts.title ?? gameName}…`);
               } else {
-                pendingKickRef.current = false;
-                setAwaitingStart(false);
-                if (opts.autostart !== false && playModeRef.current !== "basic") {
-                  const lockMs = playModeRef.current === "disk" ? 12e3 : 3500;
-                  beginPlayLock(lockMs, `Loading ${opts.title ?? gameName}…`);
-                } else {
-                  bootTimersRef.current.push(
-                    window.setTimeout(() => {
-                      if (loadGenRef.current === gen) {
-                        persistGateRef.current = true;
-                        inGameplayRef.current = true;
-                        clearMenuJoyInput();
-                      }
-                    }, 2e3),
-                  );
-                }
+                bootTimersRef.current.push(
+                  window.setTimeout(() => {
+                    if (loadGenRef.current === gen) {
+                      persistGateRef.current = true;
+                      inGameplayRef.current = true;
+                      clearMenuJoyInput();
+                    }
+                  }, isIosPhone() ? 800 : 2e3),
+                );
               }
             };
             if (opts.autostart === false) {
@@ -942,7 +946,7 @@ export function Grok64App() {
               }, 2e3),
             );
           } else {
-            beginPlayLock(playModeRef.current === "disk" ? 12e3 : 3500, `Loading ${title}…`);
+            beginPlayLock(playLockDuration(playModeRef.current), `Loading ${title}…`);
           }
           return;
         }
@@ -1118,8 +1122,18 @@ export function Grok64App() {
     return () => window.clearTimeout(id);
   }, [s.powered, s.booting, recoverBoot]);
   useEffect(() => {
+    if (!s.powered || !isIosPhone()) return;
+    const playerEl = document.getElementById("grok64-player");
+    if (s.booting || s.running) {
+      kickIosPaint(emuRef.current, playerEl, s.booting ? "booting" : "running");
+      startIosPaintWatchdog(emuRef.current, playerEl, () => {
+        if (bootHoldRef.current || playLockRef.current) return;
+        useEmu.getState().setBooting(false);
+      });
+    }
+  }, [s.powered, s.booting, s.running]);
+  useEffect(() => {
     if (!s.running) return;
-    recoverOnceRef.current = false;
     const kick = () => {
       fitEmu(document.getElementById("grok64-player"), emuRef.current);
       window.dispatchEvent(new Event("resize"));
@@ -1185,8 +1199,8 @@ export function Grok64App() {
     stickPrecisionRef.current.periodMs = frameMsForStandard(resolved.standard);
   }, [resolved.standard]);
   const onVector = useCallback((x, y) => {
-    if (playLockRef.current || useEmu.getState().booting) return;
     unlockAudio(emuRef.current);
+    if (playLockRef.current || useEmu.getState().booting) return;
     setPaused(emuRef.current, false);
     try {
       emuRef.current && (emuRef.current.paused = false);
@@ -1198,6 +1212,7 @@ export function Grok64App() {
   }, [emitJoyVector]);
   const onFire = useCallback((down, clearStick = false) => {
     const st = useEmu.getState();
+    unlockAudio(emuRef.current);
     if (playLockRef.current || st.booting || !st.running) {
       if (down) glog("fire-blocked", { booting: st.booting, lock: playLockRef.current, running: st.running, title: st.currentTitle });
       return;
@@ -1615,12 +1630,13 @@ export function Grok64App() {
           <div
             className={s.running ? "g64-screen is-on" : "g64-screen"}
             onPointerDown={(e) => {
-              if (playLockRef.current || s.booting || !s.running) {
-                if (!playLockRef.current && (s.booting || !s.running)) resumePlayback();
+              unlockAudio(emuRef.current);
+              if (playLockRef.current || !s.running) return;
+              if (s.booting) {
+                resumePlayback();
                 return;
               }
               e.preventDefault();
-              if (needsUnlock || iosResume) resumePlayback();
               onFire(true, true);
             }}
             onPointerUp={() => {
@@ -1635,26 +1651,9 @@ export function Grok64App() {
             <PlayerMount />
             {s.crtFilter && snap.os !== "ios" ? <div className="g64-scan" /> : null}
             {s.booting ? (
-              <button
-                type="button"
-                className="g64-boot"
-                onPointerDown={() => {
-                  dismissEjsPrompts(document.getElementById("grok64-player"), "boot");
-                  kickIosPaint(emuRef.current, document.getElementById("grok64-player"), "boot-tap");
-                  resumePlayback();
-                }}
-              >
+              <div className="g64-boot" aria-live="polite">
                 {s.bootMsg || "**** GROK64 EMU ****"}
-              </button>
-            ) : null}
-            {(awaitingStart || needsUnlock || iosResume) && !s.booting ? (
-              <button type="button" className="g64-unlock" onPointerDown={() => resumePlayback()} onClick={() => resumePlayback()}>
-                {awaitingStart
-                  ? `Tap to start${s.currentTitle && s.currentTitle !== "BASIC" ? ` ${s.currentTitle.replace(/\.[a-z0-9]{2,4}$/i, "")}` : ""}`
-                  : iosResume
-                    ? "Tap screen to show READY"
-                    : "Tap to play"}
-              </button>
+              </div>
             ) : null}
           </div>
         </div>
@@ -1671,7 +1670,7 @@ export function Grok64App() {
         hidden={!showJoyChrome}
         padActive={padConnected}
         stickHidden={!showStick}
-        locked={s.booting || !s.running}
+        locked={!s.running}
         vector={stickViz}
         gate={s.stickGate}
         frameMs={frameMsForStandard(resolved.standard)}

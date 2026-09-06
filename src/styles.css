@@ -21,6 +21,7 @@
   --font-display: "Archivo", "Segoe UI", system-ui, sans-serif;
   --font-sans: "Figtree", "Segoe UI", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --font-petscii: "Noto Sans Symbols 2", "Apple Symbols", "Segoe UI Symbol", "Symbola", var(--font-mono);
 
   --radius-xs: 4px;
   --radius-sm: 8px;
@@ -414,7 +415,7 @@ html, body, #app {
   place-items: center;
   text-align: center;
   padding: 24px;
-  background: #000;
+  background: rgb(0 0 0 / 0.72);
   color: var(--color-phosphor);
   font-family: var(--font-mono);
   font-size: 13px;
@@ -422,7 +423,7 @@ html, body, #app {
   z-index: 30;
   border: 0;
   width: 100%;
-  cursor: pointer;
+  pointer-events: none;
 }
 
 .g64-unlock {
@@ -701,6 +702,10 @@ div[class*="ejs_virtual"] {
   position: relative;
   padding: 4px 2px 3px;
 }
+.g64-app[data-device="phone"] .g64-key,
+.g64-app[data-device="tablet"] .g64-key {
+  overflow: visible;
+}
 .g64-key-petscii {
   position: absolute;
   top: 3px;
@@ -710,17 +715,26 @@ div[class*="ejs_virtual"] {
   justify-content: space-between;
   padding: 0 5px;
   pointer-events: none;
-  font-family: var(--font-mono);
-  font-size: 7px;
+  font-family: var(--font-petscii);
+  font-size: 8px;
+  font-weight: 700;
   line-height: 1;
-  opacity: 0.5;
+  opacity: 1;
+  color: var(--color-phosphor);
+  text-shadow: 0 0 3px color-mix(in oklab, var(--color-phosphor) 55%, transparent);
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
 }
 .g64-key-petscii em {
   font-style: normal;
-  font-size: 7px;
+  font-size: 8px;
+  font-weight: 700;
+  color: var(--color-phosphor);
 }
 .g64-key-petscii em[data-side="sh"] {
-  font-size: 6px;
+  font-size: 7px;
+  font-weight: 700;
+  color: var(--color-fg-muted);
 }
 .g64-key-main {
   margin-top: auto;
@@ -1284,13 +1298,22 @@ div[class*="ejs_virtual"] {
   border-radius: 10px;
 }
 .g64-app[data-device="tablet"] .g64-key-petscii {
-  font-size: 8px;
+  font-size: 9px;
 }
 .g64-app[data-device="tablet"] .g64-key-petscii em {
-  font-size: 8px;
+  font-size: 9px;
 }
 .g64-app[data-device="tablet"] .g64-key-petscii em[data-side="sh"] {
-  font-size: 7px;
+  font-size: 8px;
+}
+.g64-app[data-device="phone"] .g64-key-petscii {
+  font-size: 9px;
+}
+.g64-app[data-device="phone"] .g64-key-petscii em {
+  font-size: 9px;
+}
+.g64-app[data-device="phone"] .g64-key-petscii em[data-side="sh"] {
+  font-size: 8px;
 }
 .g64-app[data-device="tablet"] .g64-kb-bar .g64-key {
   min-height: 56px;
@@ -1468,24 +1491,9 @@ html[data-g64os="ios"] .g64-kb {
 html[data-g64os="ios"] .g64-key {
   overflow: visible;
 }
-html[data-g64os="ios"] .g64-key-petscii {
-  opacity: 1;
-  font-size: 9px;
-  font-weight: 600;
-  line-height: 1;
-  color: var(--color-phosphor);
-  -webkit-text-size-adjust: none;
-  text-size-adjust: none;
-}
-html[data-g64os="ios"] .g64-key-petscii em {
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--color-phosphor);
-}
-html[data-g64os="ios"] .g64-key-petscii em[data-side="sh"] {
-  font-size: 8px;
-  font-weight: 600;
-  color: var(--color-fg-muted);
+.g64-app[data-device="phone"] .g64-key,
+.g64-app[data-device="tablet"] .g64-key {
+  overflow: visible;
 }
 html[data-g64os="ios"] .g64-top {
   margin-top: 0;
