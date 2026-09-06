@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowLeftRight, FastForward } from "lucide-react";
 import type { JoyPort } from "@/lib/emu/types";
-import { snapStick } from "@/lib/emu/stick-precision.mjs";
+import { snapStick, STICK_TAP_HOLD_MS, STICK_TAP_MAX_MS } from "@/lib/emu/stick-precision.mjs";
 
 export type StickGate = "4way" | "8way";
 
@@ -221,11 +221,11 @@ export function TouchControls({
         const dir = lastDir.current;
         const stillStick = [...active.values()].some((z) => z.stick);
         if (!stillStick) {
-          if (held < 155 && (dir.x !== 0 || dir.y !== 0)) {
+          if (held < STICK_TAP_MAX_MS && (dir.x !== 0 || dir.y !== 0)) {
             tapHold.current = window.setTimeout(() => {
               tapHold.current = null;
               centerStick();
-            }, 62);
+            }, STICK_TAP_HOLD_MS);
           } else {
             centerStick();
           }
