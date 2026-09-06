@@ -21,7 +21,7 @@ export const C64_ROWS: C64Key[][] = [
     { id: "7", label: "7", shift: "'", gfx: "▒", code: "Digit7", key: "7" },
     { id: "8", label: "8", shift: "(", gfx: "▓", code: "Digit8", key: "8" },
     { id: "9", label: "9", shift: ")", gfx: "■", code: "Digit9", key: "9" },
-    { id: "0", label: "0", shift: "0", code: "Digit0", key: "0" },
+    { id: "0", label: "0", shift: ")", code: "Digit0", key: "0" },
     { id: "plus", label: "+", code: "Minus", key: "+" },
     { id: "minus", label: "−", code: "Equal", key: "-" },
     { id: "pound", label: "£", code: "Backslash", key: "\\" },

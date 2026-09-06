@@ -12,6 +12,7 @@ import { copyBuffer, getFile, listLibrary, putSaveState, deleteSaveState, touchP
 import { useEmu } from "@/lib/emu/store";
 import {
   applyRuntimeOptions,
+  applyJiffyDos,
   autostartReset,
   bootEmulator,
   bootFileOf,
@@ -52,7 +53,7 @@ import {
 import { hasJiffyPair, prefetchBundledRoms, romFileMap } from "@/lib/emu/roms";
 import { installSd2iecHooks, partitionsForMount, setIecDevice, tickSd2iec } from "@/lib/emu/sd2iec";
 import { buildViceExtras, wantsLargeReu, wantsSuperCpu } from "@/lib/emu/vice-extras";
-import { detectLine, resolveMachine } from "@/lib/emu/machines";
+import { detectLine, resolveMachine, videoStandardOptions } from "@/lib/emu/machines";
 import { snapshotDevice, readViewport, applyViewport, isIosPhone, isTouchMobile } from "@/lib/emu/detect";
 import { detectJoyPort, detectSoftwareStandard } from "@/lib/emu/region";
 import { RETRO_BTN } from "@/lib/emu/types";
@@ -597,21 +598,17 @@ export function Grok64App() {
     },
     [s, clearMenuJoyInput, startIosAutoPaint],
   );
-  const syncJiffy = useCallback(async (emu: typeof emuRef.current) => {
-    if (!emu) return;
-    const st = useEmu.getState();
-    if (st.jiffyDos && (await hasJiffyPair())) {
-      try {
-        const roms = await romFileMap();
-        if (Object.keys(roms).length) injectRoms(emu, roms);
-        applyRuntimeOptions(emu, { vice_jiffydos: "enabled" });
-      } catch {
-        /* optional */
-      }
-    } else {
-      applyRuntimeOptions(emu, { vice_jiffydos: "disabled" });
-    }
-  }, []);
+  const syncJiffy = useCallback(
+    async (emu: typeof emuRef.current, reset: "hard" | "soft" | "none" = "none") => {
+      if (!emu) return false;
+      const st = useEmu.getState();
+      const on = await applyJiffyDos(emu, st.jiffyDos);
+      if (reset === "hard") hardReset(emu);
+      else if (reset === "soft") resetEmu(emu);
+      return on;
+    },
+    [],
+  );
   const kickAutostart = useCallback(async () => {
     glog("kickAutostart", { mode: playModeRef.current, title: useEmu.getState().currentTitle });
     pendingKickRef.current = false;
@@ -623,7 +620,7 @@ export function Grok64App() {
     setWarp(emuRef.current, false);
     useEmu.getState().setWarped(false);
     clearRetroSaves(emuRef.current);
-    await syncJiffy(emuRef.current);
+    await syncJiffy(emuRef.current, "soft");
     autostartReset(emuRef.current, playModeRef.current === "disk");
     beginPlayLock(playLockDuration(playModeRef.current), "Restarting…");
   }, [beginPlayLock, syncJiffy]);
@@ -804,6 +801,10 @@ export function Grok64App() {
                 } catch {
                   /* optional */
                 }
+                if (useEmu.getState().jiffyDos) {
+                  await applyJiffyDos(emu, true);
+                  if (opts.autostart === false) hardReset(emu);
+                }
                 const pending = pendingSnapshotRef.current;
                 if (pending) {
                   restoreState(emu, pending.data);
@@ -814,11 +815,9 @@ export function Grok64App() {
                   setIecDevice(unit);
                   window.setTimeout(() => {
                     const ok = installSd2iecHooks(emu);
-                    toast.message(
-                      ok
-                        ? `SD2IEC on device ${unit} — LOAD"$",${unit}  CD://n:`
-                        : "SD2IEC card mounted; C64 RAM hook unavailable this core",
-                    );
+                    if (ok) {
+                      toast.message(`SD2IEC on unit ${unit} — LOAD"$",${unit}`);
+                    }
                   }, 2200);
                 }
               };
@@ -1007,13 +1006,35 @@ export function Grok64App() {
           setAwaitingStart(false);
           clearBootTimers();
           clearRetroSaves(emuRef.current);
+          const stNow = useEmu.getState();
+          const resNow = resolveMachine(
+            {
+              machineId: stNow.machineId,
+              videoStandard: stNow.videoStandard,
+              coreMode: stNow.coreMode,
+              driveMode: stNow.driveMode,
+            },
+            snapRef.current,
+            detected,
+          );
+          resolvedRef.current = resNow;
           applyRuntimeOptions(emuRef.current, {
+            ...videoStandardOptions(
+              {
+                machineId: stNow.machineId,
+                videoStandard: stNow.videoStandard,
+                coreMode: stNow.coreMode,
+                driveMode: stNow.driveMode,
+              },
+              resNow.standard,
+            ),
             vice_autostart: work ? "disabled" : "enabled",
             vice_autostart_warp: work ? "disabled" : "enabled",
             vice_autoloadwarp: work ? "disabled" : "enabled",
             vice_reset: work ? "hard" : "autostart",
             ...viceJoyOptions(useEmu.getState().joyPort),
           });
+          await syncJiffy(emuRef.current, "none");
           if (work) hardReset(emuRef.current);
           else resetEmu(emuRef.current);
           plugJoysticks(emuRef.current, useEmu.getState().joyPort);
@@ -1047,7 +1068,7 @@ export function Grok64App() {
         iecUnit: playUnit,
       });
     },
-    [s, persistNow, startWithUrl, beginPlayLock],
+    [s, persistNow, startWithUrl, beginPlayLock, syncJiffy],
   );
   playBufferRef.current = playBuffer;
   const playBundled = useCallback(
@@ -1232,13 +1253,10 @@ export function Grok64App() {
     if (!s.running) return;
     const kick = () => {
       fitEmu(document.getElementById("grok64-player"), emuRef.current);
-      window.dispatchEvent(new Event("resize"));
     };
-    const a = window.setTimeout(kick, 50);
-    const b = window.setTimeout(kick, 400);
+    const a = window.setTimeout(kick, 80);
     return () => {
       window.clearTimeout(a);
-      window.clearTimeout(b);
     };
   }, [s.running]);
   useEffect(() => {
@@ -1378,10 +1396,14 @@ export function Grok64App() {
   useEffect(() => {
     const emu = emuRef.current;
     applyRuntimeOptions(emu, expansionOpts());
-    void syncJiffy(emu);
+    void syncJiffy(emu, "none");
     const st = useEmu.getState();
     if (st.mouseMode) plugJoysticks(emu, st.joyPort);
-  }, [s.reuSize, s.iecDrive, s.iecUnit, s.mouseMode, s.joyPort, s.machineId, s.scpuSimm, s.scpuTurbo, s.jiffyDos, expansionOpts, syncJiffy]);
+  }, [s.reuSize, s.iecDrive, s.iecUnit, s.mouseMode, s.joyPort, s.machineId, s.scpuSimm, s.scpuTurbo, expansionOpts, syncJiffy]);
+  useEffect(() => {
+    if (!emuRef.current || !useEmu.getState().running) return;
+    void syncJiffy(emuRef.current, "hard");
+  }, [s.jiffyDos, syncJiffy]);
   useEffect(() => {
     setIecDevice(useEmu.getState().iecUnit);
     const st = useEmu.getState();
@@ -1560,10 +1582,10 @@ export function Grok64App() {
     style: { ["--app-h"]: `${view.height}px` },
     suppressHydrationWarning: true,
   };
-  const padConnected = Boolean(s.padName);
-  const showStick = s.powered && !s.booting && s.showJoystick && !padConnected && !s.mouseMode;
-  const showJoyChrome = s.powered && !s.booting;
-  const showMousePad = s.powered && !s.booting && s.mouseMode && !padConnected;
+  const padConnected = hasRealGamepad();
+  const showStick = s.powered && s.showJoystick && !padConnected && !s.mouseMode;
+  const showJoyChrome = s.powered;
+  const showMousePad = s.powered && s.mouseMode && !padConnected;
   return (
     <div {...appAttrs}>
       {!s.powered ? (
@@ -1607,6 +1629,23 @@ export function Grok64App() {
         <div className="g64-top-rail">
           <button type="button" className="g64-chip" onClick={() => s.setSettingsOpen(true)} title={detectLine(resolved)}>
             {resolved.chip}
+          </button>
+          <button
+            type="button"
+            className="g64-chip g64-chip-gate"
+            data-on={s.iecDrive === "sd2iec" ? "true" : "false"}
+            title={
+              s.iecDrive === "sd2iec"
+                ? "SD2IEC ON — tap Settings to turn off"
+                : "SD2IEC OFF — enable in Settings"
+            }
+            onClick={() => {
+              const next = s.iecDrive === "sd2iec" ? "1541" : "sd2iec";
+              s.setIecDrive(next);
+              toast.message(next === "sd2iec" ? "SD2IEC ON — reset to apply" : "SD2IEC OFF — 1541 drive");
+            }}
+          >
+            SD2IEC
           </button>
           <button
             type="button"
@@ -1720,7 +1759,7 @@ export function Grok64App() {
           onClick={() => {
             const mode = playModeRef.current;
             if (mode === "basic") {
-              void syncJiffy(emuRef.current).then(() => hardReset(emuRef.current));
+              void syncJiffy(emuRef.current, "hard");
               return;
             }
             if (mode === "disk") {
@@ -1731,7 +1770,7 @@ export function Grok64App() {
               void kickAutostart();
               return;
             }
-            void syncJiffy(emuRef.current).then(() => resetEmu(emuRef.current));
+            void syncJiffy(emuRef.current, "soft");
           }}
         >
           <RotateCcw className="size-5" />
@@ -1841,7 +1880,7 @@ export function Grok64App() {
         hidden={!showJoyChrome}
         padActive={padConnected}
         stickHidden={!showStick && !showMousePad}
-        locked={!s.running}
+        locked={!s.running || s.booting}
         vector={stickViz}
         gate={s.stickGate}
         frameMs={frameMsForStandard(resolved.standard)}

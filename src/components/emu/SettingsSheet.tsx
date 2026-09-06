@@ -171,6 +171,22 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
 
             <div className="g64-field">
               <label>Storage / IEC</label>
+              <div className="g64-row" style={{ marginBottom: 8 }}>
+                <span>SD2IEC virtual card</span>
+                <Switch
+                  on={s.iecDrive === "sd2iec"}
+                  onToggle={() => {
+                    const next = s.iecDrive === "sd2iec" ? "1541" : "sd2iec";
+                    s.setIecDrive(next);
+                    toast.message(next === "sd2iec" ? "SD2IEC ON — applies on next reset" : "SD2IEC OFF — back to 1541");
+                  }}
+                />
+              </div>
+              <p className="mb-2 text-xs text-fg-subtle">
+                {s.iecDrive === "sd2iec"
+                  ? "SD2IEC is ON. Device 8 is a FAT card (partitions //0:–//3:). Turn OFF to use a normal 1541 floppy."
+                  : "SD2IEC is OFF. Tap the switch to mount the virtual SD card instead of a 1541 disk drive."}
+              </p>
               <div className="g64-seg">
                 {(["1541", "1581", "sd2iec", "cmdhd"] as IecDrive[]).map((id) => (
                   <button key={id} type="button" data-on={s.iecDrive === id} onClick={() => s.setIecDrive(id)}>

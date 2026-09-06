@@ -16,6 +16,7 @@ import {
 } from "@/lib/emu/catalog";
 import { explodeArchive, pickBootFile, toArrayBuffer, b64ToU8 } from "@/lib/emu/archive";
 import { listLibrary, putFile } from "@/lib/emu/library";
+import { regionBadge } from "@/lib/emu/region";
 import { useEmu } from "@/lib/emu/store";
 import type { LibraryItem } from "@/lib/emu/types";
 
@@ -206,11 +207,13 @@ export function CatalogPanel({ onPlay, onInsert }: Props) {
           const open = openKey === hit.key;
           const list = files[hit.key] ?? [];
           const busy = busyKey === hit.key;
+          const region = regionBadge(hit.title);
           return (
             <div key={hit.key} className="g64-card g64-hit">
               <button type="button" className="g64-hit-main" onClick={() => void grabHit(hit, "play")}>
                 <strong>{hit.title}</strong>
                 <em className="g64-tag not-italic">{SOURCE_LABEL[hit.source]}</em>
+                {region ? <em className="g64-tag g64-tag-region not-italic">{region}</em> : null}
                 <span>{hit.subtitle}</span>
               </button>
               <div className="g64-hit-actions">

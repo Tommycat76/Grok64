@@ -169,6 +169,16 @@ function c64Model(id: MachineId, standard: VideoHz): string {
   return standard === "ntsc" ? "C64 NTSC" : "C64 PAL";
 }
 
+/** Live VICE options when software region is detected mid-session (hot-swap). */
+export function videoStandardOptions(prefs: ResolvePrefs, standard: VideoHz): Record<string, string> {
+  const mac = machineById(prefs.machineId);
+  if (mac.family !== "c64" || prefs.machineId === "scpu") return {};
+  return {
+    vice_c64_model: c64Model(prefs.machineId, standard),
+    vice_external_palette: standard === "ntsc" ? "pepto-ntsc" : "pepto-pal",
+  };
+}
+
 export function resolveMachine(
   prefs: ResolvePrefs,
   snap: DeviceSnapshot = snapshotDevice(),

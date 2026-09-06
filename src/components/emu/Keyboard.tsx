@@ -10,24 +10,31 @@ function key(id: string): C64Key {
   return BY_ID.get(id)!;
 }
 
+/** Compact ABC rows — every letter key from the real C64 layout. */
 const ALPHA: string[][] = [
   ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
   ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
   ["z", "x", "c", "v", "b", "n", "m"],
 ];
 
+/** Numbers, symbols, cursors, and function keys from the top C64 rows. */
 const SYM: string[][] = [
   ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"],
   ["arr", "plus", "minus", "pound", "at", "star", "colon", "semi", "eq", "uparr"],
-  ["f1", "f3", "f5", "f7", "clr", "restore"],
+  ["comma", "dot", "slash", "clr", "restore"],
+  ["f1", "f3", "f5", "f7"],
 ];
+
+function hasPetsciiLayer(k: C64Key): boolean {
+  if (k.modifier) return false;
+  return Boolean(k.gfx || (k.shift && k.shift.length <= 2 && k.shift !== k.label));
+}
 
 function KeyBtn({
   k,
   className,
   held,
   glyph,
-  petscii,
   onDown,
   onUp,
 }: {
@@ -35,16 +42,17 @@ function KeyBtn({
   className?: string;
   held: boolean;
   glyph: string;
-  petscii?: boolean;
   onDown: (k: C64Key) => void;
   onUp: (k: C64Key) => void;
 }) {
   const downAt = useRef(0);
+  const petscii = hasPetsciiLayer(k);
   return (
     <button
       type="button"
       className={className ? `g64-key ${className}` : "g64-key"}
       data-mod={held ? "true" : "false"}
+      data-petscii={petscii ? "true" : "false"}
       aria-label={k.label}
       onPointerDown={(e) => {
         e.preventDefault();
@@ -125,6 +133,7 @@ export function C64Keyboard() {
   const cbmKey = key("cbm");
   const ctrlKey = key("ctrl");
   const runKey = key("run");
+  const lockKey = key("lock");
   const retKey = key("return");
   const delKey = key("del");
   const spaceKey = key("space");
@@ -146,20 +155,13 @@ export function C64Keyboard() {
           {i === 2 && !sym ? (
             <KeyBtn k={shiftKey} className="mod" held={held(shiftKey)} glyph="SHIFT" onDown={down} onUp={up} />
           ) : null}
+          {sym && i === 0 ? (
+            <KeyBtn k={ctrlKey} className="mod" held={held(ctrlKey)} glyph="CTRL" onDown={down} onUp={up} />
+          ) : null}
           {row.map((id) => {
             const k = key(id);
-            const showPetscii =
-              !k.modifier && Boolean(k.gfx || (k.shift && k.shift.length <= 2));
             return (
-              <KeyBtn
-                key={k.id}
-                k={k}
-                held={held(k)}
-                glyph={glyph(k)}
-                petscii={showPetscii}
-                onDown={down}
-                onUp={up}
-              />
+              <KeyBtn key={k.id} k={k} held={held(k)} glyph={glyph(k)} onDown={down} onUp={up} />
             );
           })}
           {i === 2 && !sym ? (
@@ -190,7 +192,11 @@ export function C64Keyboard() {
           {sym ? "ABC" : "123"}
         </button>
         <KeyBtn k={cbmKey} className="mod" held={held(cbmKey)} glyph="C=" onDown={down} onUp={up} />
-        <KeyBtn k={ctrlKey} className="mod" held={held(ctrlKey)} glyph="CTRL" onDown={down} onUp={up} />
+        {!sym ? (
+          <KeyBtn k={ctrlKey} className="mod" held={held(ctrlKey)} glyph="CTRL" onDown={down} onUp={up} />
+        ) : (
+          <KeyBtn k={lockKey} className="mod" held={held(lockKey)} glyph="LOCK" onDown={down} onUp={up} />
+        )}
         <KeyBtn k={spaceKey} className="space" held={held(spaceKey)} glyph="SPACE" onDown={down} onUp={up} />
         <KeyBtn k={runKey} className="mod" held={held(runKey)} glyph="RUN" onDown={down} onUp={up} />
         <KeyBtn k={retKey} className="wide" held={held(retKey)} glyph="RETURN" onDown={down} onUp={up} />

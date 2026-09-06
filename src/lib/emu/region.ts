@@ -176,3 +176,17 @@ export function detectJoyPort(hint: SoftwareHint | string): JoyPort {
 export function resolveSoftwareVideo(hint: SoftwareHint | string): VideoHz {
   return detectSoftwareStandard(hint) ?? DEFAULT_VIDEO;
 }
+
+/** Short badge for catalog rows — null when unknown (VICE PAL default at boot). */
+export function regionBadge(hint: SoftwareHint | string): "PAL" | "NTSC" | null {
+  const v = detectSoftwareStandard(hint);
+  if (v === "pal") return "PAL";
+  if (v === "ntsc") return "NTSC";
+  return null;
+}
+
+export function regionHintText(hint: SoftwareHint | string): string | null {
+  const badge = regionBadge(hint);
+  if (!badge) return null;
+  return badge === "NTSC" ? "NTSC 60 Hz" : "PAL 50 Hz";
+}
