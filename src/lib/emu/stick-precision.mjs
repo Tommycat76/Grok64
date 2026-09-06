@@ -70,10 +70,10 @@ export function createStickPrecision(periodMs = 20) {
 }
 
 /**
- * Cardinals: edge tap = one short pulse + brief rest. Center hold latches solid
- * after the rest gap so platformers walk at game speed on phone and tablet.
+ * Cardinals: ring tap = one short pulse + brief rest (Paradroid step). Center
+ * drag with finger down latches solid after the rest gap (platformer walk).
  */
-export function applyStickPrecision(state, raw, now = performance.now()) {
+export function applyStickPrecision(state, raw, now = performance.now(), centerHold = false) {
   state.pending = { x: raw.x, y: raw.y };
   if (raw.x === 0 && raw.y === 0) {
     state.latched = { x: 0, y: 0 };
@@ -102,6 +102,10 @@ export function applyStickPrecision(state, raw, now = performance.now()) {
     return state.latched;
   }
   if (heldMs < PRECISION_REST_MS) {
+    state.latched = { x: 0, y: 0 };
+    return state.latched;
+  }
+  if (!centerHold) {
     state.latched = { x: 0, y: 0 };
     return state.latched;
   }

@@ -133,6 +133,7 @@ export function Grok64App() {
   const playPayloadRef = useRef(null);
   const menuJoyGateRef = useRef(createMenuJoyGate());
   const stickPrecisionRef = useRef(createStickPrecision(20));
+  const stickCenterHoldRef = useRef(false);
   const jumpHeldRef = useRef(false);
   const arrowJoyRef = useRef({ up: false, down: false, left: false, right: false });
   const lastJoySentRef = useRef({ x: 0, y: 0, fire: false });
@@ -222,7 +223,12 @@ export function Grok64App() {
     if (st.stickGate === "4way") {
       stickPrecisionRef.current.precision = true;
       stickPrecisionRef.current.periodMs = frameMsForStandard(resolvedRef.current.standard);
-      const out = applyStickPrecision(stickPrecisionRef.current, { x, y }, performance.now());
+      const out = applyStickPrecision(
+        stickPrecisionRef.current,
+        { x, y },
+        performance.now(),
+        stickCenterHoldRef.current,
+      );
       x = out.x;
       y = out.y;
     } else {
@@ -1775,6 +1781,7 @@ export function Grok64App() {
       </div>
       <TouchControls
         onVector={onVector}
+        stickHoldRef={stickCenterHoldRef}
         onFire={onFire}
         onJump={onJump}
         onMouseDelta={(dx, dy) => {

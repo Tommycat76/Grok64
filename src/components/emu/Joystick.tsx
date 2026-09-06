@@ -2,13 +2,14 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeftRight, FastForward, Move } from "lucide-react";
 import type { JoyPort, PadSide } from "@/lib/emu/types";
 import { layoutStyle, type ControlId, type ControlLayout } from "@/lib/emu/control-layout";
-import { snapStick, STICK_TAP_HOLD_MS, STICK_TAP_MAX_MS } from "@/lib/emu/stick-precision.mjs";
+import { snapStick, STICK_OUTER_DEAD, STICK_TAP_HOLD_MS, STICK_TAP_MAX_MS } from "@/lib/emu/stick-precision.mjs";
 import { Touchpad } from "@/components/emu/Touchpad";
 
 export type StickGate = "4way" | "8way";
 
 interface Props {
-  onVector: (x: number, y: number) => void;
+  onVector: (x: number, y: number, centerHold?: boolean) => void;
+  stickHoldRef?: React.MutableRefObject<boolean>;
   onFire: (down: boolean) => void;
   onJump?: (down: boolean) => void;
   onMouseDelta?: (dx: number, dy: number) => void;
@@ -92,6 +93,7 @@ export function TouchControls({
   layoutEdit = false,
   controlLayout,
   onLayoutDrag,
+  stickHoldRef,
 }: Props) {
   const root = useRef<HTMLDivElement>(null);
   const stickEl = useRef<HTMLDivElement>(null);
@@ -129,6 +131,12 @@ export function TouchControls({
   const sentDir = useRef({ x: 0, y: 0 });
   const tapHold = useRef<number | null>(null);
   const downAt = useRef(0);
+  const stickFingerDown = useRef(false);
+  const stickCenterDrag = useRef(false);
+
+  const syncStickHold = () => {
+    if (stickHoldRef) stickHoldRef.current = stickCenterDrag.current && stickFingerDown.current;
+  };
 
   const layout = controlLayout;
 
@@ -162,8 +170,21 @@ export function TouchControls({
     const out = snapStick(dx, dy, sentDir.current, gateRef.current);
     if (out.x !== sentDir.current.x || out.y !== sentDir.current.y) {
       sentDir.current = out;
-      onVectorRef.current(out.x, out.y);
+      const centerHold = stickCenterDrag.current && stickFingerDown.current;
+      syncStickHold();
+      onVectorRef.current(out.x, out.y, centerHold);
     }
+  }
+
+  function stickMagnitude(clientX: number, clientY: number) {
+    const el = stickEl.current;
+    if (!el) return 0;
+    const r = el.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    const dx = (clientX - cx) / (r.width / 2);
+    const dy = (clientY - cy) / (r.height / 2);
+    return Math.hypot(dx, dy);
   }
 
   function setFromPoint(clientX: number, clientY: number) {
@@ -187,8 +208,11 @@ export function TouchControls({
   function centerStick() {
     lastDir.current = { x: 0, y: 0 };
     sentDir.current = { x: 0, y: 0 };
+    stickFingerDown.current = false;
+    stickCenterDrag.current = false;
+    syncStickHold();
     setKnob({ x: 0, y: 0 });
-    onVectorRef.current(0, 0);
+    onVectorRef.current(0, 0, false);
   }
 
   function buttonHits(x: number, y: number) {
@@ -275,6 +299,9 @@ export function TouchControls({
         }
         stickPid.current = id;
         downAt.current = Date.now();
+        stickFingerDown.current = true;
+        stickCenterDrag.current = stickMagnitude(x, y) < STICK_OUTER_DEAD;
+        syncStickHold();
         setFromPoint(x, y);
       }
       syncButtons();
@@ -299,6 +326,8 @@ export function TouchControls({
       active.delete(id);
       if (zones.stick && stickPid.current === id) {
         stickPid.current = null;
+        stickFingerDown.current = false;
+        syncStickHold();
         const held = Date.now() - downAt.current;
         const dir = lastDir.current;
         const stillStick = [...active.values()].some((z) => z.stick);

@@ -69,7 +69,7 @@ export function snapStick(
  * 8-way: real C64 — bits stay set while the stick is held. Direction changes
  * wait one frame. Release is instant so you can stop on a Paradroid junction.
  *
- * Cardinals: edge tap is a short pulse + brief rest; center hold latches solid
+ * Cardinals: ring tap is a short pulse + brief rest; center drag latches solid
  * after the rest gap (platformer walk speed). Paradroid tap-step stays precise.
  */
 export class CiaStick {
@@ -84,7 +84,7 @@ export class CiaStick {
     this.periodMs = periodMs;
   }
 
-  apply(desired: StickVec, now = typeof performance !== "undefined" ? performance.now() : Date.now()): StickVec {
+  apply(desired: StickVec, now = typeof performance !== "undefined" ? performance.now() : Date.now(), centerHold = false): StickVec {
     this.pending = { x: desired.x, y: desired.y };
     const idle = desired.x === 0 && desired.y === 0;
     if (idle) {
@@ -120,6 +120,10 @@ export class CiaStick {
       return this.latched;
     }
     if (heldFor < delay) {
+      this.latched = { x: 0, y: 0 };
+      return this.latched;
+    }
+    if (!centerHold) {
       this.latched = { x: 0, y: 0 };
       return this.latched;
     }
