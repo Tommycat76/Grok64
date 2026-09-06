@@ -30,7 +30,12 @@ VICE WASM cores load from `https://cdn.emulatorjs.org/stable/data/` (no bundling
 
 **grok.me / Vercel:** use `npm run build:vercel` so TanStack Start server functions stay wired (Nitro). Catalog search and Archive.org downloads go through the server-side fetch path restored from main — this bypasses IA CDN CORS in the browser.
 
-**Pure static hosts (Plex, nginx, S3):** `npm run build` flattens to a client-only `dist/`. Power-on, bundled `./software/*`, and the on-device library work. Catalog search/download needs a server; for IA titles on a static host, set **`VITE_IA_PROXY_BASE`** at build time (e.g. `https://grok64.tomsprojects.cc/api/ia`) so listing URLs and client downloads go through your Plex/nginx proxy. Server deploys can also set **`IA_PROXY_BASE`** for `downloadCatalogFile`.
+**Pure static hosts (Plex, nginx, S3):** `npm run build` flattens to a client-only `dist/`. Power-on, bundled `./software/*`, and the on-device library work. Plex co-hosts an Internet Archive proxy at **`/api/ia`** (`serve-static-ia.mjs` on the Plex server — do not relocate):
+
+- `GET /api/ia?url=${encodeURIComponent(archiveUrl)}`
+- `/api/ia/download/...`, `/api/ia/metadata/...`, `/api/ia/advancedsearch.php?...`
+
+The client defaults to same-origin `/api/ia` for IA search, metadata, and downloads (catalog falls back to client-side fetch when serverFn is unavailable). Override with **`VITE_IA_PROXY_BASE`** at build time if the proxy lives elsewhere. Server deploys can set **`IA_PROXY_BASE`** for `downloadCatalogFile`.
 
 Assembly64 and HVSC metadata/search work in-browser (CORS allowed). IA **download** CDN nodes block browser CORS — server-side fetch is required (the restored `createServerFn` path).
 

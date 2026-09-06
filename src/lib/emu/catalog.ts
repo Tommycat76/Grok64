@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { maybeProxyArchiveUrl, iaDownloadUrl } from "./ia-proxy";
+import { maybeProxyArchiveUrl, iaDownloadUrl, iaMetadataUrl, iaSearchUrl } from "./ia-proxy";
 import { z } from "zod";
 import { kindOf } from "./formats";
 import { isJunkRelease } from "./archive";
@@ -281,7 +281,7 @@ async function searchInternetArchiveRaw(query: string, kind: CatalogKind, offset
   params.set("rows", "20");
   params.set("start", String(offset));
   params.set("output", "json");
-  const res = await fetch(`https://archive.org/advancedsearch.php?${params.toString()}`, {
+  const res = await fetch(iaSearchUrl(params.toString()), {
     headers: { Accept: "application/json", "User-Agent": "Grok64Emu/1.0" },
     signal: AbortSignal.timeout(TIMEOUT),
   });
@@ -309,7 +309,7 @@ async function searchInternetArchiveRaw(query: string, kind: CatalogKind, offset
 async function listInternetArchiveRaw(identifier: string): Promise<CatalogFile[]> {
   const id = identifier.replace(/[^a-zA-Z0-9._-]/g, "");
   if (!id) throw new Error("Bad archive id.");
-  const res = await fetch(`https://archive.org/metadata/${encodeURIComponent(id)}`, {
+  const res = await fetch(iaMetadataUrl(id), {
     headers: { Accept: "application/json", "User-Agent": "Grok64Emu/1.0" },
     signal: AbortSignal.timeout(TIMEOUT),
   });
@@ -391,6 +391,50 @@ function filterSids(query: string): CatalogHit[] {
 
 const KindEnum = z.enum(["all", "games", "carts", "disks", "sid", "demos"]);
 
+/** Shared catalog search — used by serverFn and static-host client fallback. */
+export async function searchCatalogClient(data: {
+  query: string;
+  kind: CatalogKind;
+  offset?: number;
+}): Promise<{ hits: CatalogHit[]; a64: boolean }> {
+  const q = data.query.trim();
+  const kind = data.kind;
+  const jobs: Promise<CatalogHit[]>[] = [];
+  let a64ok = false;
+
+  if (kind === "sid" || kind === "all") {
+    jobs.push(Promise.resolve(kind === "sid" || !q ? filterSids(q) : filterSids(q).slice(0, 4)));
+  }
+
+  if (!q && (kind === "games" || kind === "carts" || kind === "disks" || kind === "all")) {
+    jobs.push(
+      searchClassics(kind === "all" ? "games" : kind)
+        .then((rows) => {
+          a64ok = true;
+          return rows;
+        })
+        .catch(() => [] as CatalogHit[]),
+    );
+  } else {
+    jobs.push(
+      searchAssembly64(q, kind)
+        .then((rows) => {
+          a64ok = true;
+          return rows;
+        })
+        .catch(() => [] as CatalogHit[]),
+    );
+  }
+
+  if (kind !== "sid") {
+    jobs.push(searchInternetArchiveRaw(q, kind, data.offset ?? 0).catch(() => [] as CatalogHit[]));
+  }
+
+  const parts = await Promise.all(jobs);
+  const hits = rankCatalogHits(q, pinPlayable(q, kind, mergeHits(parts)));
+  return { hits, a64: a64ok };
+}
+
 export const searchCatalog = createServerFn({ method: "POST" })
   .validator(
     z.object({
@@ -399,44 +443,7 @@ export const searchCatalog = createServerFn({ method: "POST" })
       offset: z.number().int().min(0).max(400).optional(),
     }),
   )
-  .handler(async ({ data }) => {
-    const q = data.query.trim();
-    const kind = data.kind;
-    const jobs: Promise<CatalogHit[]>[] = [];
-    let a64ok = false;
-
-    if (kind === "sid" || kind === "all") {
-      jobs.push(Promise.resolve(kind === "sid" || !q ? filterSids(q) : filterSids(q).slice(0, 4)));
-    }
-
-    if (!q && (kind === "games" || kind === "carts" || kind === "disks" || kind === "all")) {
-      jobs.push(
-        searchClassics(kind === "all" ? "games" : kind)
-          .then((rows) => {
-            a64ok = true;
-            return rows;
-          })
-          .catch(() => [] as CatalogHit[]),
-      );
-    } else {
-      jobs.push(
-        searchAssembly64(q, kind)
-          .then((rows) => {
-            a64ok = true;
-            return rows;
-          })
-          .catch(() => [] as CatalogHit[]),
-      );
-    }
-
-    if (kind !== "sid") {
-      jobs.push(searchInternetArchiveRaw(q, kind, data.offset ?? 0).catch(() => [] as CatalogHit[]));
-    }
-
-    const parts = await Promise.all(jobs);
-    const hits = rankCatalogHits(q, pinPlayable(q, kind, mergeHits(parts)));
-    return { hits, a64: a64ok };
-  });
+  .handler(async ({ data }) => searchCatalogClient(data));
 
 const HitSchema = z.object({
   key: z.string(),
@@ -450,17 +457,19 @@ const HitSchema = z.object({
   hvsc: z.object({ path: z.string(), url: z.string() }).optional(),
 });
 
+export async function listCatalogFilesClient(data: z.infer<typeof HitSchema>): Promise<CatalogFile[]> {
+  if (data.hvsc) {
+    const name = data.hvsc.path.split("/").pop() ?? "tune.sid";
+    return [{ name, size: 0, url: data.hvsc.url }] satisfies CatalogFile[];
+  }
+  if (data.ia) return listInternetArchiveRaw(data.ia.identifier);
+  if (data.a64) return listAssembly64Files(data.a64.itemId, data.a64.category);
+  return [] as CatalogFile[];
+}
+
 export const listCatalogFiles = createServerFn({ method: "POST" })
   .validator(HitSchema)
-  .handler(async ({ data }) => {
-    if (data.hvsc) {
-      const name = data.hvsc.path.split("/").pop() ?? "tune.sid";
-      return [{ name, size: 0, url: data.hvsc.url }] satisfies CatalogFile[];
-    }
-    if (data.ia) return listInternetArchiveRaw(data.ia.identifier);
-    if (data.a64) return listAssembly64Files(data.a64.itemId, data.a64.category);
-    return [] as CatalogFile[];
-  });
+  .handler(async ({ data }) => listCatalogFilesClient(data));
 
 export const downloadCatalogFile = createServerFn({ method: "POST" })
   .validator(
