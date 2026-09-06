@@ -57,6 +57,7 @@ import { toArrayBuffer } from "@/lib/emu/archive";
 import { glog, glogFire, subscribeLog } from "@/lib/emu/debug";
 import { createMenuJoyGate, menuJoyStep, resetMenuJoyGate } from "@/lib/emu/menu-joy.mjs";
 import { applyStickPrecision, createStickPrecision, resetStickPrecision } from "@/lib/emu/stick-precision.mjs";
+import { publicUrl } from "@/lib/public-url";
 import { pokeAudioUnlock } from "@/lib/emu/audio-unlock";
 
 function frameMsForStandard(standard: string) {
@@ -930,7 +931,7 @@ export function Grok64App() {
     async (title) => {
       try {
         s.setLibraryOpen(false);
-        const res = await fetch(title.path);
+        const res = await fetch(publicUrl(title.path));
         if (!res.ok) throw new Error("Could not load bundled software");
         const buf = await res.arrayBuffer();
         const name = title.path.split("/").pop() || title.name;
@@ -997,7 +998,7 @@ export function Grok64App() {
     st.setBooting(true, "Cold start…");
     st.powerOn();
     glog("power-on", { ua: navigator.userAgent.slice(0, 80) });
-    void startWithUrl("/software/blank.d64", "WORK DISK.D64", {
+    void startWithUrl(publicUrl("/software/blank.d64"), "WORK DISK.D64", {
       autostart: false,
       title: "BASIC",
     })
@@ -1025,7 +1026,7 @@ export function Grok64App() {
     st.setRunning(false);
     st.setBooting(true, "Starting Commodore 64…");
     bootKickRef.current = true;
-    void startWithUrl("/software/blank.d64", "WORK DISK.D64", {
+    void startWithUrl(publicUrl("/software/blank.d64"), "WORK DISK.D64", {
       autostart: false,
       title: "BASIC",
     }).catch((err) => {

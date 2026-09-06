@@ -15,6 +15,15 @@ export function b64ToU8(b64: string): Uint8Array {
   return out;
 }
 
+export function u8ToB64(data: Uint8Array): string {
+  let bin = "";
+  const step = 0x8000;
+  for (let i = 0; i < data.length; i += step) {
+    bin += String.fromCharCode(...data.subarray(i, i + step));
+  }
+  return btoa(bin);
+}
+
 export function explodeArchive(name: string, data: Uint8Array): { name: string; data: Uint8Array }[] {
   if (!/\.zip$/i.test(name)) return [{ name, data }];
   let files: Record<string, Uint8Array>;
