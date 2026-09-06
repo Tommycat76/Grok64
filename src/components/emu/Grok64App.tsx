@@ -7,9 +7,44 @@ import { TouchControls } from "@/components/emu/Joystick";
 import { LibrarySheet } from "@/components/emu/LibrarySheet";
 import { DiskMountSheet } from "@/components/emu/DiskMountSheet";
 import { SettingsSheet } from "@/components/emu/SettingsSheet";
+import { applyRecipe, saveSnapshot, SnapshotsSheet } from "@/components/emu/SnapshotsSheet";
 import { copyBuffer, getFile, listLibrary, putSaveState, deleteSaveState, touchPlayed, updateFileData, ensureWorkDisk, isWorkDisk, removeFile } from "@/lib/emu/library";
 import { useEmu } from "@/lib/emu/store";
-import { applyRuntimeOptions, audioLocked, autostartReset, bootEmulator, bootFileOf, captureState, clearRetroSaves, coreHasFs, destroyEmu, dismissEjsPrompts, ensureRuntime, fitEmu, hardReset, hasRealGamepad, joyInput, listRealGamepads, plugJoysticks, readMountedMedia, recycleCore, resetEmu, setJoyVector, setPaused, setWarp, unlockAudio, viceJoyOptions, writeBootFile } from "@/lib/emu/host";
+import {
+  applyRuntimeOptions,
+  audioLocked,
+  autostartReset,
+  bootEmulator,
+  bootFileOf,
+  captureState,
+  clearRetroSaves,
+  coreHasFs,
+  destroyEmu,
+  dismissEjsPrompts,
+  ensureRuntime,
+  fitEmu,
+  hardReset,
+  hasRealGamepad,
+  injectRoms,
+  injectSdWork,
+  joyInput,
+  listRealGamepads,
+  plugJoysticks,
+  probeCore,
+  readMountedMedia,
+  recycleCore,
+  resetEmu,
+  restoreState,
+  setJoyVector,
+  setPaused,
+  setWarp,
+  unlockAudio,
+  viceJoyOptions,
+  writeBootFile,
+} from "@/lib/emu/host";
+import { hasJiffyPair, prefetchBundledRoms, romFileMap } from "@/lib/emu/roms";
+import { installSd2iecHooks, partitionsForMount, tickSd2iec } from "@/lib/emu/sd2iec";
+import { buildViceExtras, wantsLargeReu, wantsSuperCpu } from "@/lib/emu/vice-extras";
 import { detectLine, resolveMachine } from "@/lib/emu/machines";
 import { snapshotDevice, readViewport, applyViewport } from "@/lib/emu/detect";
 import { detectJoyPort, detectSoftwareStandard } from "@/lib/emu/region";
@@ -67,6 +102,8 @@ export function Grok64App() {
   const workDiskBytesRef = useRef(null);
   const playLockRef = useRef(false);
   const playLockGen = useRef(0);
+  const pendingSnapshotRef = useRef(null);
+  const playPayloadRef = useRef(null);
   const menuJoyGateRef = useRef(createMenuJoyGate());
   const stickPrecisionRef = useRef(createStickPrecision(20));
   const jumpHeldRef = useRef(false);
@@ -214,6 +251,14 @@ export function Grok64App() {
   }, [s.showKeyboard, view.orient]);
   useEffect(() => {
     void ensureRuntime().catch(() => undefined);
+    prefetchBundledRoms()
+      .then(async (added) => {
+        if (added.length && (await hasJiffyPair())) {
+          useEmu.getState().setJiffyDos(true);
+          toast.message(`JiffyDOS ready — C64 + 1541${added.includes("jiffy-1571") ? " + 1571/1581" : ""}`);
+        }
+      })
+      .catch(() => undefined);
   }, []);
   useEffect(() => {
     void listLibrary().then(s.setLibrary);
@@ -558,11 +603,28 @@ export function Grok64App() {
         destroyEmu(null, el);
       }
       bootHoldRef.current = opts.autostart === false;
+      const wantsScpu = res.machineId === "scpu" || wantsSuperCpu(gameName);
+      let core = res.core;
+      let scpuActive = false;
+      if (wantsScpu) {
+        const hasScpu = await probeCore("vice_xscpu64");
+        if (hasScpu) {
+          core = "vice_xscpu64";
+          scpuActive = true;
+        } else {
+          core = res.fallbackCore || "c64";
+          toast.message("SuperCPU WASM isn't in EmulatorJS — staying on C64. REU still works.");
+        }
+      }
+      if (wantsLargeReu(gameName) && st.reuSize === "none") {
+        toast.message("16 MB REU on — Nuvie / C64 OS");
+      }
+      const jiffyReady = st.jiffyDos && (await hasJiffyPair());
       try {
         const emu = await bootEmulator(el, {
           gameUrl,
           gameName,
-          core: res.core,
+          core,
           machineOptions: res.options,
           sidEngine: st.sidEngine,
           sidModel: st.sidModel,
@@ -570,6 +632,13 @@ export function Grok64App() {
           joyPort: st.joyPort,
           volume: st.muted ? 0 : st.volume,
           autostart: opts.autostart !== false,
+          reu: wantsLargeReu(gameName) && st.reuSize === "none" ? "16384kB" : st.reuSize,
+          iec: st.iecDrive,
+          mouse: st.mouseMode,
+          scpu: scpuActive,
+          scpuSimm: st.scpuSimm,
+          scpuTurbo: st.scpuTurbo,
+          jiffy: jiffyReady,
           onStart: () => {
             if (loadGenRef.current !== gen) return;
             bootPathRef.current = bootFileOf(emu) || gameName;
@@ -589,6 +658,31 @@ export function Grok64App() {
             const finish = () => {
               if (loadGenRef.current !== gen) return;
               bootHoldRef.current = false;
+              void (async () => {
+                try {
+                  const roms = await romFileMap();
+                  if (Object.keys(roms).length) injectRoms(emu, roms);
+                  const parts = await partitionsForMount();
+                  if (parts.length) injectSdWork(emu, parts);
+                } catch {
+                  /* optional */
+                }
+                const pending = pendingSnapshotRef.current;
+                if (pending) {
+                  restoreState(emu, pending.data);
+                  pendingSnapshotRef.current = null;
+                }
+                if (useEmu.getState().iecDrive === "sd2iec") {
+                  window.setTimeout(() => {
+                    const ok = installSd2iecHooks(emu);
+                    toast.message(
+                      ok
+                        ? 'SD2IEC on device 8 — LOAD"$",8  CD://n:'
+                        : "SD2IEC card mounted; C64 RAM hook unavailable this core",
+                    );
+                  }, 2200);
+                }
+              })();
               s.setBooting(false);
               s.setRunning(true);
               s.setCurrentTitle(opts.title ?? gameName);
@@ -686,6 +780,7 @@ export function Grok64App() {
     async (filename, data, opts = {}) => {
       await persistNow();
       libIdRef.current = opts.libraryId ?? null;
+      playPayloadRef.current = { filename, data, opts };
       let payload = data;
       let bootName = bootFileName(filename, kindOf(filename));
       const raw = new Uint8Array(data);
@@ -1069,20 +1164,41 @@ export function Grok64App() {
     let raf = 0;
     const tick = () => {
       raf = requestAnimationFrame(tick);
-      if (!emuRef.current) return;
+      const emu = emuRef.current;
+      if (!emu) return;
+      if (useEmu.getState().iecDrive === "sd2iec") void tickSd2iec(emu);
       emitJoyVector();
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [emitJoyVector]);
+  const expansionOpts = useCallback(() => {
+    const st = useEmu.getState();
+    return buildViceExtras({
+      reu: st.reuSize,
+      iec: st.iecDrive,
+      mouse: st.mouseMode,
+      joyPort: st.joyPort,
+      scpu: st.machineId === "scpu",
+      scpuSimm: st.scpuSimm,
+      scpuTurbo: st.scpuTurbo,
+      jiffy: st.jiffyDos,
+    });
+  }, []);
   const swapJoyPort = useCallback(() => {
-    const next = s.joyPort === 2 ? 1 : 2;
-    s.setJoyPort(next);
-    applyRuntimeOptions(emuRef.current, viceJoyOptions(next));
+    const st = useEmu.getState();
+    const next = st.joyPort === 2 ? 1 : 2;
+    st.setJoyPort(next);
+    applyRuntimeOptions(emuRef.current, expansionOpts());
     plugJoysticks(emuRef.current, next);
-    glog("port-swap", { next });
-    toast.message(`Joystick → Port ${next}`);
-  }, [s]);
+    glog("port-swap", { next, mouse: st.mouseMode });
+    toast.message(st.mouseMode ? `Mouse → Port ${next}` : `Joystick → Port ${next}`);
+  }, [expansionOpts]);
+  useEffect(() => {
+    applyRuntimeOptions(emuRef.current, expansionOpts());
+    const st = useEmu.getState();
+    if (st.mouseMode) plugJoysticks(emuRef.current, st.joyPort);
+  }, [s.reuSize, s.iecDrive, s.mouseMode, s.joyPort, s.machineId, s.scpuSimm, s.scpuTurbo, s.jiffyDos, expansionOpts]);
   useEffect(() => {
     const binds = s.binds;
     const setPadName = s.setPadName;
@@ -1335,6 +1451,41 @@ export function Grok64App() {
           >
             JUMP
           </button>
+          <button
+            type="button"
+            className="g64-chip g64-chip-gate"
+            data-on={s.mouseMode ? "true" : "false"}
+            title={s.mouseMode ? "1351 mouse on — tap for joystick" : "1351 mouse + touchpad"}
+            onClick={() => {
+              const next = !s.mouseMode;
+              s.setMouseMode(next);
+              toast.message(next ? `1351 mouse on port ${s.joyPort} — tap P1/P2 to swap` : "Joystick");
+            }}
+          >
+            MOUSE
+          </button>
+          <button
+            type="button"
+            className="g64-chip g64-chip-gate"
+            data-on={s.machineId === "scpu" ? "true" : "false"}
+            title={s.machineId === "scpu" ? "SuperCPU on — tap for C64" : "CMD SuperCPU (65816, 20 MHz)"}
+            onClick={() => {
+              const next = s.machineId !== "scpu";
+              s.setMachine(next ? "scpu" : "c64-auto");
+              toast.message(next ? "SuperCPU — applies on next load" : "C64");
+            }}
+          >
+            SCPU
+          </button>
+          <button
+            type="button"
+            className="g64-chip g64-chip-gate"
+            data-on={s.snapsOpen ? "true" : "false"}
+            title="Hardware freeze and memory snapshots"
+            onClick={() => s.setSnapsOpen(true)}
+          >
+            SNAP
+          </button>
           {padConnected ? (
             <button
               type="button"
@@ -1475,6 +1626,32 @@ export function Grok64App() {
       <LibrarySheet onPlayBundled={(t) => void playBundled(t)} onPlayLocal={(i) => void playLocal(i)} onInsert={(i) => void insertDisk(i)} />
       <DiskMountSheet open={diskOpen} onOpenChange={setDiskOpen} onInsert={(i) => void insertDisk(i)} onBrowse={() => s.setLibraryOpen(true)} />
       <SettingsSheet resolved={resolved} />
+      <SnapshotsSheet
+        canCapture={s.powered && s.running && !s.booting}
+        onCapture={async (kind, id) => {
+          const st = await captureState(emuRef.current);
+          if (!st || st.byteLength < 16) {
+            toast.error("Nothing to freeze yet");
+            return;
+          }
+          await saveSnapshot(kind, id, st, s.currentTitle || (kind === "hardware" ? "Freeze" : "Memory"));
+        }}
+        onRestore={async (snap) => {
+          applyRecipe(snap.recipe);
+          s.setSnapsOpen(false);
+          toast.message(`Restoring ${snap.recipe.machineId === "scpu" ? "SCPU" : "C64"} · ${snap.recipe.iecDrive.toUpperCase()}`);
+          const payload = playPayloadRef.current;
+          pendingSnapshotRef.current = snap;
+          if (payload) {
+            await playBuffer(payload.filename, payload.data, payload.opts);
+          } else if (emuRef.current) {
+            restoreState(emuRef.current, snap.data);
+            pendingSnapshotRef.current = null;
+          } else {
+            toast.message("Load a title, then tap Load again");
+          }
+        }}
+      />
     </div>
   );
 }

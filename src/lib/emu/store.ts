@@ -5,9 +5,13 @@ import type {
   ControlBinding,
   CorePref,
   DriveMode,
+  IecDrive,
   JoyPort,
   LibraryItem,
   MachineId,
+  PadSide,
+  ReuSize,
+  ScpuSimm,
   SidEngine,
   SidModel,
   VideoPref,
@@ -53,6 +57,13 @@ interface SettingsSlice {
   arrowsAreJoy: boolean;
   stickGate: "4way" | "8way";
   jumpBtn: boolean;
+  reuSize: ReuSize;
+  iecDrive: IecDrive;
+  mouseMode: boolean;
+  padSide: PadSide;
+  scpuSimm: ScpuSimm;
+  scpuTurbo: boolean;
+  jiffyDos: boolean;
   volume: number;
   binds: ControlBinding[];
   setMachine: (id: MachineId) => void;
@@ -68,6 +79,13 @@ interface SettingsSlice {
   setArrowsAreJoy: (v: boolean) => void;
   setStickGate: (g: "4way" | "8way") => void;
   setJumpBtn: (v: boolean) => void;
+  setReuSize: (v: ReuSize) => void;
+  setIecDrive: (v: IecDrive) => void;
+  setMouseMode: (v: boolean) => void;
+  setPadSide: (v: PadSide) => void;
+  setScpuSimm: (v: ScpuSimm) => void;
+  setScpuTurbo: (v: boolean) => void;
+  setJiffyDos: (v: boolean) => void;
   setVolume: (v: number) => void;
   setBind: (action: ActionId, patch: Partial<ControlBinding>) => void;
   resetBinds: () => void;
@@ -85,6 +103,7 @@ interface SessionSlice {
   settingsOpen: boolean;
   mapperOpen: boolean;
   aboutOpen: boolean;
+  snapsOpen: boolean;
   padName: string | null;
   library: LibraryItem[];
   currentTitle: string | null;
@@ -98,6 +117,7 @@ interface SessionSlice {
   setSettingsOpen: (v: boolean) => void;
   setMapperOpen: (v: boolean) => void;
   setAboutOpen: (v: boolean) => void;
+  setSnapsOpen: (v: boolean) => void;
   setPadName: (n: string | null) => void;
   setLibrary: (items: LibraryItem[]) => void;
   setCurrentTitle: (n: string | null) => void;
@@ -119,6 +139,13 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       arrowsAreJoy: false,
       stickGate: "4way",
       jumpBtn: false,
+      reuSize: "none",
+      iecDrive: "1541",
+      mouseMode: false,
+      padSide: "left",
+      scpuSimm: "16",
+      scpuTurbo: true,
+      jiffyDos: false,
       volume: 0.7,
       binds: DEFAULT_BINDS,
       setMachine: (machineId) => set({ machineId }),
@@ -134,6 +161,13 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       setArrowsAreJoy: (arrowsAreJoy) => set({ arrowsAreJoy }),
       setStickGate: (stickGate) => set({ stickGate }),
       setJumpBtn: (jumpBtn) => set({ jumpBtn }),
+      setReuSize: (reuSize) => set({ reuSize }),
+      setIecDrive: (iecDrive) => set({ iecDrive }),
+      setMouseMode: (mouseMode) => set({ mouseMode }),
+      setPadSide: (padSide) => set({ padSide }),
+      setScpuSimm: (scpuSimm) => set({ scpuSimm }),
+      setScpuTurbo: (scpuTurbo) => set({ scpuTurbo }),
+      setJiffyDos: (jiffyDos) => set({ jiffyDos }),
       setVolume: (volume) => set({ volume }),
       setBind: (action, patch) =>
         set((s) => ({
@@ -152,6 +186,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       settingsOpen: false,
       mapperOpen: false,
       aboutOpen: false,
+      snapsOpen: false,
       padName: null,
       library: [],
       currentTitle: null,
@@ -165,13 +200,14 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
       setMapperOpen: (mapperOpen) => set({ mapperOpen }),
       setAboutOpen: (aboutOpen) => set({ aboutOpen }),
+      setSnapsOpen: (snapsOpen) => set({ snapsOpen }),
       setPadName: (padName) => set({ padName }),
       setLibrary: (library) => set({ library }),
       setCurrentTitle: (currentTitle) => set({ currentTitle }),
     }),
     {
       name: "grok64-settings",
-      version: 6,
+      version: 7,
       storage: createJSONStorage(() =>
         typeof window === "undefined"
           ? {
@@ -194,6 +230,13 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         arrowsAreJoy: s.arrowsAreJoy,
         stickGate: s.stickGate,
         jumpBtn: s.jumpBtn,
+        reuSize: s.reuSize,
+        iecDrive: s.iecDrive,
+        mouseMode: s.mouseMode,
+        padSide: s.padSide,
+        scpuSimm: s.scpuSimm,
+        scpuTurbo: s.scpuTurbo,
+        jiffyDos: s.jiffyDos,
         volume: s.volume,
         binds: s.binds,
       }),
@@ -212,6 +255,13 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
           "arrowsAreJoy",
           "stickGate",
           "jumpBtn",
+          "reuSize",
+          "iecDrive",
+          "mouseMode",
+          "padSide",
+          "scpuSimm",
+          "scpuTurbo",
+          "jiffyDos",
           "volume",
           "binds",
         ] as const;
@@ -241,6 +291,17 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         if (version < 6) {
           if (!p.stickGate) p.stickGate = "4way";
           if (p.jumpBtn === undefined) p.jumpBtn = false;
+        }
+        if (version < 7) {
+          if (!p.reuSize) p.reuSize = "none";
+          if (!p.iecDrive || !["1541", "1581", "sd2iec", "cmdhd"].includes(p.iecDrive as string)) {
+            p.iecDrive = "1541";
+          }
+          if (typeof p.mouseMode !== "boolean") p.mouseMode = false;
+          if (p.padSide !== "right") p.padSide = "left";
+          if (!["0", "1", "2", "4", "8", "16"].includes(p.scpuSimm as string)) p.scpuSimm = "16";
+          if (typeof p.scpuTurbo !== "boolean") p.scpuTurbo = true;
+          if (typeof p.jiffyDos !== "boolean") p.jiffyDos = false;
         }
         delete p.powered;
         delete p.running;

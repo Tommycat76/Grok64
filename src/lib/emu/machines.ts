@@ -81,7 +81,7 @@ export const MACHINES: MachineDef[] = [
     fallbackCore: "c64",
     family: "c64",
     focus: true,
-    blurb: "CMD SuperCPU (65816). Falls back to C64 if the WASM core is missing.",
+    blurb: "CMD SuperCPU (65816 at 20 MHz) plus onboard SIMM. Needs the vice_xscpu64 WASM — EmulatorJS often lacks it, so Grok64 falls back to C64 and keeps REU.",
     options: {},
   },
   {

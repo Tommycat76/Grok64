@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
+import { toast } from "sonner";
 import { Drawer } from "vaul";
+import { ExpansionPanel } from "@/components/emu/ExpansionPanel";
 import { detectLine, MACHINES, type ResolvedMachine } from "@/lib/emu/machines";
 import { ACTION_LABEL, useEmu } from "@/lib/emu/store";
-import type { ActionId, CorePref, DriveMode, SidEngine, SidModel, VideoPref } from "@/lib/emu/types";
+import type { ActionId, CorePref, DriveMode, IecDrive, ReuSize, ScpuSimm, SidEngine, SidModel, VideoPref } from "@/lib/emu/types";
+import { IEC_LABEL, REU_LABEL, SCPU_SIMM_LABEL } from "@/lib/emu/vice-extras";
 
 function Switch({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (
@@ -31,6 +34,40 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               Auto picks PAL or NTSC from the software — filename tags, SID flags, and known releases — so it runs as the coder intended. Fast core on phones and budget tablets. Video and core apply on the next load. Joystick port swaps immediately.
             </p>
             {resolved ? <p className="g64-detect-inline">{detectLine(resolved)}</p> : null}
+
+            <div className="g64-row">
+              <span>1351 mouse + touchpad</span>
+              <Switch on={s.mouseMode} onToggle={() => s.setMouseMode(!s.mouseMode)} />
+            </div>
+            {s.mouseMode ? (
+              <div className="g64-field">
+                <label>Touchpad side</label>
+                <div className="g64-seg">
+                  <button type="button" data-on={s.padSide === "left"} onClick={() => s.setPadSide("left")}>
+                    Pad left
+                  </button>
+                  <button type="button" data-on={s.padSide === "right"} onClick={() => s.setPadSide("right")}>
+                    Pad right
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            <button
+              type="button"
+              className="g64-btn g64-btn-primary mb-3"
+              onClick={() => {
+                s.setReuSize("16384kB");
+                s.setIecDrive("sd2iec");
+                s.setMouseMode(true);
+                s.setJoyPort(1);
+                s.setDriveMode("true");
+                s.setJiffyDos(true);
+                toast.message('C64 OS kit — 16 MB REU, SD2IEC #8, 1351. Add system files to //0:os then LOAD"C64OS",8,1');
+              }}
+            >
+              C64 OS kit
+            </button>
 
             <div className="g64-field">
               <label>Video</label>
@@ -141,6 +178,58 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               </p>
             </div>
 
+            <div className="g64-field">
+              <label>REU (RAM expansion)</label>
+              <div className="g64-seg">
+                {(["none", "256kB", "512kB", "2048kB", "16384kB"] as ReuSize[]).map((id) => (
+                  <button key={id} type="button" data-on={s.reuSize === id} onClick={() => s.setReuSize(id)}>
+                    {REU_LABEL[id]}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-fg-subtle">
+                GeoRAM-style cartridge on the expansion port — not SuperCPU RAM. 16 MB is what C64 OS and Nuvie need. .reu / nuvie / C64 OS filenames auto-enable 16 MB. Changing size usually needs a reload.
+              </p>
+            </div>
+
+            <div className="g64-field">
+              <label>SuperCPU</label>
+              <div className="g64-row" style={{ marginBottom: 8 }}>
+                <span>CMD SuperCPU (65816)</span>
+                <Switch on={s.machineId === "scpu"} onToggle={() => s.setMachine(s.machineId === "scpu" ? "c64-auto" : "scpu")} />
+              </div>
+              <div className="g64-seg">
+                {(["0", "1", "2", "4", "8", "16"] as ScpuSimm[]).map((id) => (
+                  <button key={id} type="button" data-on={s.scpuSimm === id} onClick={() => s.setScpuSimm(id)}>
+                    {SCPU_SIMM_LABEL[id]}
+                  </button>
+                ))}
+              </div>
+              <div className="g64-row" style={{ marginTop: 8 }}>
+                <span>20 MHz turbo</span>
+                <Switch on={s.scpuTurbo} onToggle={() => s.setScpuTurbo(!s.scpuTurbo)} />
+              </div>
+              <p className="text-xs text-fg-subtle">
+                SuperCPU is a different VICE core (xscpu64): 20 MHz 65816 + onboard SIMM, separate from the REU. EmulatorJS stable/latest often does not ship that WASM — if it's missing, Grok64 stays on C64 and these settings wait for the core. Applies on next load.
+              </p>
+            </div>
+
+            <div className="g64-field">
+              <label>Storage / IEC</label>
+              <div className="g64-seg">
+                {(["1541", "1581", "sd2iec", "cmdhd"] as IecDrive[]).map((id) => (
+                  <button key={id} type="button" data-on={s.iecDrive === id} onClick={() => s.setIecDrive(id)}>
+                    {IEC_LABEL[id]}
+                  </button>
+                ))}
+              </div>
+              <p className="text-xs text-fg-subtle">
+                SD2IEC is device 8 after READY (`LOAD"$=P",8`, `CD://0:`, `CD:os`). CMD HD still wants your Boot ROM 2.80. 1581 for .d81. C64 OS: kit above, then put the system files on partition 0 in folder os.
+              </p>
+            </div>
+
+            <ExpansionPanel />
+
             <div className="g64-row">
               <span>Pause</span>
               <Switch
@@ -234,7 +323,7 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               Emulation: VICE (GPLv2+) · libretro vice cores · EmulatorJS WASM loader. SID: reSID (Dag Lem). Palette: Pepto PAL/NTSC. Catalog: Assembly64, HVSC, Internet Archive. Downloads are stored on this device.
             </p>
             <p className="text-sm leading-6 text-fg-muted">
-              PAL vs NTSC follows the title, not your timezone. SuperCPU uses the xscpu64 core when the WASM build is present; otherwise it falls back to C64. C128 dual-screen (VIC-II + VDC) is available by selecting C128.
+              PAL vs NTSC follows the title, not your timezone. SuperCPU uses the xscpu64 core when the WASM build is present; otherwise it falls back to C64. JiffyDOS and CMD HD Boot ROM 2.80 are yours to upload — Grok64 never bundles them. C128 dual-screen (VIC-II + VDC) is available by selecting C128.
             </p>
           </Drawer.Content>
         </Drawer.Portal>

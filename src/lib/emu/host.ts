@@ -1,5 +1,6 @@
 import { sidOptions } from "./machines";
-import type { DriveMode, JoyPort, SidEngine, SidModel } from "./types";
+import { buildViceExtras } from "./vice-extras";
+import type { DriveMode, IecDrive, JoyPort, ReuSize, ScpuSimm, SidEngine, SidModel } from "./types";
 import { RETRO_BTN } from "./types";
 import { glog } from "./debug";
 
@@ -29,6 +30,7 @@ interface EmscriptenFS {
   isDir?: (mode: number) => boolean;
   readFile: (p: string, opts?: { encoding?: string }) => Uint8Array | string;
   writeFile: (p: string, d: Uint8Array | string) => void;
+  mkdir?: (p: string) => void;
   unlink?: (p: string) => void;
   syncfs?: (populate: boolean, cb?: (err?: unknown) => void) => void;
 }
@@ -458,9 +460,25 @@ export interface BootConfig {
   joyPort: JoyPort;
   volume: number;
   autostart?: boolean;
+  reu?: ReuSize;
+  iec?: IecDrive;
+  mouse?: boolean;
+  scpu?: boolean;
+  scpuSimm?: ScpuSimm;
+  scpuTurbo?: boolean;
+  jiffy?: boolean;
   onStart: () => void;
   onReady?: () => void;
   onError?: (msg: string) => void;
+}
+
+function isIosPhone(): boolean {
+  return typeof navigator !== "undefined" && /iP(hone|ad|od)/.test(navigator.userAgent);
+}
+
+function effectiveReu(reu: ReuSize = "none"): ReuSize {
+  if (isIosPhone() && (reu === "16384kB" || reu === "2048kB")) return "512kB";
+  return reu;
 }
 
 function coreOptions(cfg: BootConfig): Record<string, string> {
@@ -479,6 +497,16 @@ function coreOptions(cfg: BootConfig): Record<string, string> {
     vice_keyboard_input: "enabled",
     vice_physical_keyboard_pass_through: "enabled",
     ...viceJoyOptions(cfg.joyPort),
+    ...buildViceExtras({
+      reu: effectiveReu(cfg.reu),
+      iec: cfg.iec ?? "1541",
+      mouse: !!cfg.mouse,
+      joyPort: cfg.joyPort,
+      scpu: !!cfg.scpu,
+      scpuSimm: cfg.scpuSimm,
+      scpuTurbo: cfg.scpuTurbo,
+      jiffy: !!cfg.jiffy,
+    }),
     shader: "disabled",
   };
 }
@@ -863,6 +891,82 @@ export function hardReset(emu: EjsInstance | null) {
 
 function fsOf(emu: EjsInstance | null): EmscriptenFS | null {
   return emu?.gameManager?.FS ?? emu?.Module?.FS ?? null;
+}
+
+export function mkdirFs(FS: EmscriptenFS, path: string) {
+  const parts = path.split("/").filter(Boolean);
+  let cur = "";
+  for (const part of parts) {
+    cur += `/${part}`;
+    try {
+      FS.mkdir?.(cur);
+    } catch {
+      /* exists */
+    }
+  }
+}
+
+export function injectRoms(emu: EjsInstance | null, files: Record<string, Uint8Array>): number {
+  const FS = fsOf(emu);
+  if (!FS?.writeFile) return 0;
+  const roots = [
+    "/home/web_user/retroarch/userdata/system/vice",
+    "/home/web_user/retroarch/system/vice",
+    "/system/vice",
+    "/vice",
+  ];
+  for (const root of roots) mkdirFs(FS, root);
+  let count = 0;
+  for (const [name, data] of Object.entries(files)) {
+    for (const root of roots) {
+      try {
+        FS.writeFile(`${root}/${name}`, data);
+        count += 1;
+      } catch {
+        /* try next */
+      }
+    }
+  }
+  return count;
+}
+
+export function injectSdWork(
+  emu: EjsInstance | null,
+  parts: { id: number; files: { name: string; data: Uint8Array }[] }[],
+): number {
+  const FS = fsOf(emu);
+  if (!FS?.writeFile) return 0;
+  const roots = ["/vice_work", "/home/web_user/retroarch/userdata/saves/vice_work", "/data/vice_work"];
+  for (const root of roots) mkdirFs(FS, root);
+  let count = 0;
+  for (const part of parts) {
+    for (const root of roots) {
+      const dir = `${root}/${part.id}`;
+      mkdirFs(FS, dir);
+      for (const file of part.files) {
+        try {
+          FS.writeFile(`${dir}/${file.name}`, file.data);
+          count += 1;
+        } catch {
+          /* try next */
+        }
+      }
+    }
+  }
+  return count;
+}
+
+export async function probeCore(core: string): Promise<boolean> {
+  const bases = ["https://cdn.emulatorjs.org/stable/data/", "https://cdn.emulatorjs.org/latest/data/"];
+  for (const base of bases) {
+    try {
+      const res = await fetch(`${base}cores/${core}-wasm.data`, { method: "HEAD" });
+      if (res.ok) return true;
+    } catch {
+      /* next */
+    }
+  }
+  return false;
 }
 
 const SAVE_JUNK = /\.(srm|sav|state|rtc|auto)$/i;

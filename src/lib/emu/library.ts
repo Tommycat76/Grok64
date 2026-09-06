@@ -9,7 +9,7 @@ export const WORK_DISK_NAME = "WORK DISK.D64";
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 2);
+    const req = indexedDB.open(DB_NAME, 3);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) {
@@ -17,6 +17,15 @@ function openDb(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(STATES)) {
         db.createObjectStore(STATES, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains("roms")) {
+        db.createObjectStore("roms", { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains("sdpart")) {
+        db.createObjectStore("sdpart", { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains("snaps")) {
+        db.createObjectStore("snaps", { keyPath: "id" });
       }
     };
     req.onsuccess = () => resolve(req.result);

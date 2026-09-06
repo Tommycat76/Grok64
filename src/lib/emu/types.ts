@@ -35,6 +35,10 @@ export type DriveMode = "auto" | "true" | "fast";
 export type VideoPref = "auto" | "pal" | "ntsc";
 export type CorePref = "auto" | "accurate" | "fast";
 export type JoyPort = 1 | 2;
+export type ReuSize = "none" | "256kB" | "512kB" | "2048kB" | "16384kB";
+export type IecDrive = "1541" | "1581" | "sd2iec" | "cmdhd";
+export type ScpuSimm = "0" | "1" | "2" | "4" | "8" | "16";
+export type PadSide = "left" | "right";
 
 export interface LibraryItem {
   id: string;
