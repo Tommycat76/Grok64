@@ -868,17 +868,17 @@ div[class*="ejs_virtual"] {
 }
 .g64-app[data-device="phone"] .g64-key,
 .g64-app[data-device="tablet"] .g64-key {
-  overflow: visible;
+  overflow: hidden;
 }
 .g64-key-petscii {
   position: absolute;
-  top: 2px;
+  top: 3px;
   left: 0;
   right: 0;
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  padding: 0 3px;
+  padding: 0 2px;
   pointer-events: none;
   line-height: 1;
   opacity: 1;
@@ -893,8 +893,8 @@ div[class*="ejs_virtual"] {
   color: var(--color-phosphor);
   opacity: 1;
   display: flex;
-  min-width: 10px;
-  min-height: 10px;
+  min-width: 14px;
+  min-height: 14px;
 }
 .g64-key-petscii em[data-side="sh"] {
   font-size: 8px;
@@ -1525,8 +1525,8 @@ div[class*="ejs_virtual"] {
   height: 112px;
 }
 .g64-app[data-device="tablet"] .g64-key {
-  min-height: 48px;
-  height: 48px;
+  min-height: 52px;
+  height: 52px;
   font-size: 17px;
   border-radius: 10px;
 }
@@ -1541,21 +1541,21 @@ div[class*="ejs_virtual"] {
   opacity: 1;
 }
 .g64-app[data-device="phone"] .g64-key-petscii .g64-petg {
-  width: 9px;
-  height: 9px;
-}
-.g64-app[data-device="tablet"] .g64-key-petscii .g64-petg {
   width: 11px;
   height: 11px;
 }
+.g64-app[data-device="tablet"] .g64-key-petscii .g64-petg {
+  width: 16px;
+  height: 16px;
+}
 .g64-app[data-device="phone"] .g64-key[data-petscii="true"] .g64-key-main,
 .g64-app[data-device="tablet"] .g64-key[data-petscii="true"] .g64-key-main {
-  margin-top: 10px;
+  margin-top: 13px;
 }
 .g64-app[data-device="phone"] .g64-kb[data-layer="abc"] .g64-key,
 .g64-app[data-device="phone"] .g64-kb[data-layer="sym"] .g64-key {
-  min-height: 40px;
-  height: 40px;
+  min-height: 44px;
+  height: 44px;
 }
 .g64-app[data-device="phone"] .g64-kb-cursors {
   padding: 0 36px;
@@ -1748,11 +1748,11 @@ html[data-g64os="ios"] .g64-kb {
   background: color-mix(in oklab, var(--color-bg) 94%, transparent);
 }
 html[data-g64os="ios"] .g64-key {
-  overflow: visible;
+  overflow: hidden;
 }
 .g64-app[data-device="phone"] .g64-key,
 .g64-app[data-device="tablet"] .g64-key {
-  overflow: visible;
+  overflow: hidden;
 }
 html[data-g64os="ios"] .g64-top {
   margin-top: 0;

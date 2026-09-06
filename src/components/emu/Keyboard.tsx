@@ -58,9 +58,9 @@ function KeyBtn({
     >
       {petscii ? (
         <span className="g64-key-petscii" aria-hidden="true">
-          <em data-side="cbm">{k.cbmPetscii != null ? <PetsciiGlyph petscii={k.cbmPetscii} size={10} /> : null}</em>
+          <em data-side="cbm">{k.cbmPetscii != null ? <PetsciiGlyph petscii={k.cbmPetscii} size={14} /> : null}</em>
           <em data-side="sh">
-            {k.shiftPetscii != null ? <PetsciiGlyph petscii={k.shiftPetscii} size={10} /> : (k.shift ?? "")}
+            {k.shiftPetscii != null ? <PetsciiGlyph petscii={k.shiftPetscii} size={14} /> : (k.shift ?? "")}
           </em>
         </span>
       ) : null}
