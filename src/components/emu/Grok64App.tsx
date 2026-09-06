@@ -57,6 +57,7 @@ import { toArrayBuffer } from "@/lib/emu/archive";
 import { glog, glogFire, subscribeLog } from "@/lib/emu/debug";
 import { createMenuJoyGate, menuJoyStep, resetMenuJoyGate } from "@/lib/emu/menu-joy.mjs";
 import { applyStickPrecision, createStickPrecision, resetStickPrecision } from "@/lib/emu/stick-precision.mjs";
+import { pokeAudioUnlock } from "@/lib/emu/audio-unlock";
 
 function frameMsForStandard(standard: string) {
   return standard === "ntsc" ? 1000 / 60 : 20;
@@ -207,25 +208,33 @@ export function Grok64App() {
   const emitJoyRef = useRef(() => {});
   emitJoyRef.current = emitJoyVector;
   useEffect(() => {
-    let busy = false;
+    let raf = 0;
     const last = { width: 0, height: 0, orient: "" };
     const update = () => {
-      if (busy) return;
-      busy = true;
-      try {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
         const next = snapshotDevice();
-        setSnap(next);
-        snapRef.current = next;
+        const cur = snapRef.current;
+        if (
+          next.device !== cur.device ||
+          next.preferFast !== cur.preferFast ||
+          next.os !== cur.os ||
+          next.label !== cur.label
+        ) {
+          setSnap(next);
+          snapRef.current = next;
+          if (typeof document !== "undefined") document.documentElement.dataset.g64os = next.os;
+        }
         const vp = applyViewport(readViewport());
         const changed = last.width !== vp.width || last.height !== vp.height || last.orient !== vp.orient;
+        if (!changed) return;
         last.width = vp.width;
         last.height = vp.height;
         last.orient = vp.orient;
-        if (changed) setView(vp);
+        setView(vp);
         scheduleFit();
-      } finally {
-        busy = false;
-      }
+      });
     };
     update();
     const mq = window.matchMedia("(orientation: landscape)");
@@ -233,15 +242,14 @@ export function Grok64App() {
     window.addEventListener("resize", update);
     window.addEventListener("orientationchange", update);
     window.visualViewport?.addEventListener("resize", update);
-    window.visualViewport?.addEventListener("scroll", update);
     const so = screen.orientation;
     so?.addEventListener?.("change", update);
     return () => {
+      if (raf) cancelAnimationFrame(raf);
       mq.removeEventListener?.("change", update);
       window.removeEventListener("resize", update);
       window.removeEventListener("orientationchange", update);
       window.visualViewport?.removeEventListener("resize", update);
-      window.visualViewport?.removeEventListener("scroll", update);
       so?.removeEventListener?.("change", update);
     };
   }, []);
@@ -967,11 +975,7 @@ export function Grok64App() {
       return;
     }
     bootKickRef.current = true;
-    try {
-      const Ctx = window.AudioContext || window.webkitAudioContext;
-      const ctx = new Ctx({ latencyHint: "interactive" });
-      if (ctx.state === "suspended") void ctx.resume();
-    } catch {}
+    pokeAudioUnlock();
     st.setBooting(true, "Cold start…");
     st.powerOn();
     glog("power-on", { ua: navigator.userAgent.slice(0, 80) });
@@ -1102,11 +1106,7 @@ export function Grok64App() {
     const vis = () => {
       if (document.visibilityState === "visible") {
         unlockAudio(emuRef.current);
-        try {
-          const Ctx = window.AudioContext || window.webkitAudioContext;
-          const dummy = new Ctx();
-          if (dummy.state === "suspended") void dummy.resume();
-        } catch {}
+        pokeAudioUnlock();
       }
     };
     document.addEventListener("visibilitychange", vis);

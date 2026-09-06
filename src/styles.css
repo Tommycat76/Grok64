@@ -638,10 +638,12 @@ div[class*="ejs_virtual"] {
 }
 .g64-fire-row {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  flex-wrap: nowrap;
   align-items: center;
+  justify-content: center;
   gap: 10px;
-  width: 100%;
+  width: auto;
 }
 .g64-controls[data-jump="true"] .g64-fire-row .g64-fire {
   width: 108px;
@@ -1126,13 +1128,6 @@ div[class*="ejs_virtual"] {
     min-width: 0;
     -webkit-overflow-scrolling: touch;
     scroll-snap-type: x proximity;
-    mask-image: linear-gradient(
-      90deg,
-      transparent 0,
-      #000 6px,
-      #000 calc(100% - 10px),
-      transparent 100%
-    );
   }
   .g64-chip {
     flex-shrink: 0;
@@ -1208,6 +1203,11 @@ div[class*="ejs_virtual"] {
     width: 68px;
     height: 68px;
     justify-self: center;
+  }
+  .g64-app[data-orient="landscape"] .g64-controls[data-jump="true"] .g64-fire-row .g64-fire {
+    width: 64px;
+    height: 64px;
+    font-size: 9px;
   }
   .g64-app[data-orient="landscape"] .g64-key {
     min-height: 40px;
@@ -1448,6 +1448,20 @@ div[class*="ejs_virtual"] {
   width: 100%;
   aspect-ratio: 4 / 3;
   flex: 1 1 auto;
+}
+
+/* iOS WebKit: backdrop-filter on many touch targets can GPU-crash; use solid fills. */
+html[data-g64os="ios"] .g64-fire,
+html[data-g64os="ios"] .g64-port,
+html[data-g64os="ios"] .g64-top {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+html[data-g64os="ios"] .g64-fire {
+  background: color-mix(in oklab, var(--color-bg-elevated) 94%, transparent);
+}
+html[data-g64os="ios"] .g64-port {
+  background: color-mix(in oklab, var(--color-bg-elevated) 90%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {
