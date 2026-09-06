@@ -2,15 +2,19 @@
 /** 4-way / 8-way stick snap + precision gate for Cardinals mode (Paradroid, Boulder Dash). */
 
 /** Perimeter tap: engage direction from rest (fraction of stick radius). */
-export const STICK_OUTER_DEAD = 0.4;
+export const STICK_OUTER_DEAD = 0.34;
 /** Center release: return to neutral when thumb relaxes inside this radius. */
-export const STICK_INNER_DEAD = 0.18;
+export const STICK_INNER_DEAD = 0.15;
 /** Second axis for diagonals — keeps 22° off-axis pushes cardinal. */
-export const STICK_AXIS_HOLD = 0.55;
-/** Gap after the first step before crawl repeat (edge tap should finish before this). */
-export const PRECISION_REST_MS = 150;
-/** Crawl off-time multiplier (× frame period) while holding in the middle ring. */
-export const PRECISION_CRAWL_OFF_MULT = 6;
+export const STICK_AXIS_HOLD = 0.48;
+/** Gap after the first step before center-hold walk (edge tap should finish before this). */
+export const PRECISION_REST_MS = 50;
+/** First-step pulse length as a multiple of the CIA frame period. */
+export const PRECISION_FIRST_MULT = 1.5;
+/** Touch shorter than this counts as an edge tap (not a center hold). */
+export const STICK_TAP_MAX_MS = 175;
+/** Post-tap direction latch after finger-up (must stay under PRECISION_REST_MS budget). */
+export const STICK_TAP_HOLD_MS = 48;
 
 const OUTER_DEAD = STICK_OUTER_DEAD;
 const INNER_DEAD = STICK_INNER_DEAD;
@@ -65,7 +69,10 @@ export function createStickPrecision(periodMs = 20) {
   };
 }
 
-/** Cardinals crawl: first step immediate, brief rest, then slow repeat pulses. */
+/**
+ * Cardinals: edge tap = one short pulse + brief rest. Center hold latches solid
+ * after the rest gap so platformers walk at game speed on phone and tablet.
+ */
 export function applyStickPrecision(state, raw, now = performance.now()) {
   state.pending = { x: raw.x, y: raw.y };
   if (raw.x === 0 && raw.y === 0) {
@@ -89,9 +96,7 @@ export function applyStickPrecision(state, raw, now = performance.now()) {
   if (state.holdStart < 0) state.holdStart = now;
   const heldMs = now - state.holdStart;
   const r = state.periodMs;
-  const first = r * 2;
-  const pulse = r;
-  const cycle = pulse + r * PRECISION_CRAWL_OFF_MULT;
+  const first = r * PRECISION_FIRST_MULT;
   if (heldMs < first) {
     state.latched = { x: raw.x, y: raw.y };
     return state.latched;
@@ -100,8 +105,7 @@ export function applyStickPrecision(state, raw, now = performance.now()) {
     state.latched = { x: 0, y: 0 };
     return state.latched;
   }
-  const phase = (heldMs - PRECISION_REST_MS) % cycle;
-  state.latched = phase < pulse ? { x: raw.x, y: raw.y } : { x: 0, y: 0 };
+  state.latched = { x: raw.x, y: raw.y };
   return state.latched;
 }
 

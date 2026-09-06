@@ -3,7 +3,6 @@ import { test } from "node:test";
 import {
   applyStickPrecision,
   createStickPrecision,
-  PRECISION_CRAWL_OFF_MULT,
   PRECISION_REST_MS,
   snapStick,
   STICK_INNER_DEAD,
@@ -26,16 +25,13 @@ test("precision tap emits one immediate step then rests", () => {
   assert.deepEqual(duringRest, { x: 0, y: 0 });
 });
 
-test("precision hold crawls after rest gap", () => {
+test("precision center hold latches solid after rest gap", () => {
   const state = createStickPrecision(20);
   state.precision = true;
   applyStickPrecision(state, { x: 1, y: 0 }, 0);
-  const crawlOn = applyStickPrecision(state, { x: 1, y: 0 }, PRECISION_REST_MS + 1);
-  assert.deepEqual(crawlOn, { x: 1, y: 0 });
-  const crawlOff = applyStickPrecision(
-    state,
-    { x: 1, y: 0 },
-    PRECISION_REST_MS + 1 + 20 * PRECISION_CRAWL_OFF_MULT,
-  );
-  assert.deepEqual(crawlOff, { x: 0, y: 0 });
+  applyStickPrecision(state, { x: 1, y: 0 }, PRECISION_REST_MS - 1);
+  const walk = applyStickPrecision(state, { x: 1, y: 0 }, PRECISION_REST_MS + 1);
+  assert.deepEqual(walk, { x: 1, y: 0 });
+  const still = applyStickPrecision(state, { x: 1, y: 0 }, PRECISION_REST_MS + 50);
+  assert.deepEqual(still, { x: 1, y: 0 });
 });

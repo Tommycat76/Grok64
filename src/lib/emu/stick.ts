@@ -1,12 +1,12 @@
 export type StickGate = "4way" | "8way";
 export type StickVec = { x: number; y: number };
 
-/** Must push this far from rest to leave center. ~40% of the pad radius (perimeter tap). */
-export const STICK_ENGAGE = 0.4;
+/** Must push this far from rest to leave center. ~34% of the pad radius (perimeter tap). */
+export const STICK_ENGAGE = 0.34;
 /** Once held, stay on until the thumb is this close to center. */
-export const STICK_RELEASE = 0.18;
+export const STICK_RELEASE = 0.15;
 /** Second axis (diagonal) needs a clear corner push so 22° off-axis stays cardinal. */
-export const STICK_DIAGONAL = 0.55;
+export const STICK_DIAGONAL = 0.48;
 
 export function ciaPeriodMs(standard: string | undefined): number {
   return standard === "ntsc" ? 1000 / 60 : 1000 / 50;
@@ -69,9 +69,8 @@ export function snapStick(
  * 8-way: real C64 — bits stay set while the stick is held. Direction changes
  * wait one frame. Release is instant so you can stop on a Paradroid junction.
  *
- * Cardinals: slow D-pad. A tap is a 2-frame pulse (one cell). Holding crawls
- * (1 frame on, 10 off ≈ 4.5 steps/s) and never goes solid — a continuous hold
- * is what made the transfer game race.
+ * Cardinals: edge tap is a short pulse + brief rest; center hold latches solid
+ * after the rest gap (platformer walk speed). Paradroid tap-step stays precise.
  */
 export class CiaStick {
   latched: StickVec = { x: 0, y: 0 };
@@ -113,13 +112,10 @@ export class CiaStick {
     if (this.holdStart < 0) this.holdStart = now;
     const heldFor = now - this.holdStart;
     const p = this.periodMs;
-    const pulse = p * 2;
-    const delay = 150;
-    const crawlOn = p;
-    const crawlOff = p * 6;
-    const cycle = crawlOn + crawlOff;
+    const first = p * 1.5;
+    const delay = 50;
 
-    if (heldFor < pulse) {
+    if (heldFor < first) {
       this.latched = { x: desired.x, y: desired.y };
       return this.latched;
     }
@@ -127,8 +123,7 @@ export class CiaStick {
       this.latched = { x: 0, y: 0 };
       return this.latched;
     }
-    const t = (heldFor - delay) % cycle;
-    this.latched = t < crawlOn ? { x: desired.x, y: desired.y } : { x: 0, y: 0 };
+    this.latched = { x: desired.x, y: desired.y };
     return this.latched;
   }
 

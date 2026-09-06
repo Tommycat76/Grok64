@@ -2,11 +2,11 @@
 /** Classic menu key-repeat: first step on edge, then delayed auto-repeat while held. */
 
 /** Delay before auto-repeat while the stick is held (center / sustained hold). */
-export const MENU_JOY_INITIAL_MS = 210;
+export const MENU_JOY_INITIAL_MS = 130;
 /** Auto-repeat interval after the initial delay. */
-export const MENU_JOY_REPEAT_MS = 100;
+export const MENU_JOY_REPEAT_MS = 62;
 /** How long each menu step pulse stays asserted to the core (≈2 frames @ 50 Hz PAL). */
-export const MENU_JOY_PULSE_MS = 38;
+export const MENU_JOY_PULSE_MS = 34;
 
 export function createMenuJoyGate() {
   return {
