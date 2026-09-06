@@ -62,8 +62,10 @@ import {
   installIosPaintHooks,
   kickIosPaint,
   scheduleIosPaintKicks,
+  shotDisplayCanvas,
   startIosPaintWatchdog,
   stopIosPaintWatchdog,
+  stopIosViceMirror,
 } from "@/lib/emu/ios-paint";
 
 function frameMsForStandard(standard: string) {
@@ -129,6 +131,7 @@ export function Grok64App() {
   const lastJoySentRef = useRef({ x: 0, y: 0, fire: false });
   const fireArmedAt = useRef(0);
   const [awaitingStart, setAwaitingStart] = useState(false);
+  const [iosResume, setIosResume] = useState(false);
   const [diskOpen, setDiskOpen] = useState(false);
   const [logLines, setLogLines] = useState([]);
   const [softwareStd, setSoftwareStd] = useState(null);
@@ -298,7 +301,10 @@ export function Grok64App() {
       emu: emuRef.current,
       root: document.getElementById("grok64-player"),
     }));
-    return () => stopIosPaintWatchdog();
+    return () => {
+      stopIosPaintWatchdog();
+      stopIosViceMirror();
+    };
   }, []);
   useEffect(() => {
     const w = window;
@@ -391,11 +397,11 @@ export function Grok64App() {
       },
       canvasShot: () => {
         try {
-          const c = document.querySelector("#grok64-player canvas");
+          const c = shotDisplayCanvas(document.getElementById("grok64-player"));
           if (!c || c.width < 8) return null;
           const url = c.toDataURL("image/png");
           const b64 = url.split(",")[1] || "";
-          return { b64, w: c.width, h: c.height, bytes: b64.length };
+          return { b64, w: c.width, h: c.height, bytes: b64.length, mirror: c.classList.contains("g64-ios-mirror") };
         } catch {
           return null;
         }
@@ -499,6 +505,19 @@ export function Grok64App() {
       await updateFileData(id, toArrayBuffer(disk.data));
     } catch {}
   }, []);
+  const startIosAutoPaint = useCallback((onPainted?: () => void) => {
+    const playerEl = document.getElementById("grok64-player");
+    startIosPaintWatchdog(emuRef.current, playerEl, {
+      onPainted: () => {
+        setIosResume(false);
+        onPainted?.();
+      },
+      onTimeout: () => {
+        glog("ios-resume-needed");
+        setIosResume(true);
+      },
+    });
+  }, []);
   const beginPlayLock = useCallback(
     (ms, msg) => {
       playLockGen.current += 1;
@@ -535,7 +554,7 @@ export function Grok64App() {
           if (isIosPhone()) {
             const playerEl = document.getElementById("grok64-player");
             kickIosPaint(emuRef.current, playerEl, "play-unlock");
-            startIosPaintWatchdog(emuRef.current, playerEl);
+            startIosAutoPaint();
           }
         }, lockMs),
       );
@@ -547,7 +566,7 @@ export function Grok64App() {
         }, gameplayReadyDelay(lockMs)),
       );
     },
-    [s, clearMenuJoyInput],
+    [s, clearMenuJoyInput, startIosAutoPaint],
   );
   const kickAutostart = useCallback(() => {
     glog("kickAutostart", { mode: playModeRef.current, title: useEmu.getState().currentTitle });
@@ -566,27 +585,28 @@ export function Grok64App() {
   const resumePlayback = useCallback(() => {
     unlockAudio(emuRef.current);
     const playerEl = document.getElementById("grok64-player");
-    kickIosPaint(emuRef.current, playerEl, "resume");
-    startIosPaintWatchdog(emuRef.current, playerEl);
+    kickIosPaint(emuRef.current, playerEl, "resume", true);
+    startIosAutoPaint();
     dismissEjsPrompts(playerEl, "play");
     s.setPaused(false);
     setPaused(emuRef.current, false);
     pendingKickRef.current = false;
     setAwaitingStart(false);
+    setIosResume(false);
     glog("resumePlayback");
-  }, [s]);
+  }, [s, startIosAutoPaint]);
   const kickIosAfterEmuAction = useCallback((emu: typeof emuRef.current, tag: string, gen?: number) => {
     if (!isIosPhone() || !emu) return;
     const playerEl = document.getElementById("grok64-player");
     fitEmu(playerEl, emu);
     kickIosPaint(emu, playerEl, tag);
     scheduleIosPaintKicks(emu, playerEl);
-    startIosPaintWatchdog(emu, playerEl, () => {
+    startIosAutoPaint(() => {
       if (gen != null && loadGenRef.current !== gen) return;
       useEmu.getState().setBooting(false);
       glog("ios-frame-ok", { tag });
     });
-  }, []);
+  }, [startIosAutoPaint]);
   const clearBootTimers = () => {
     for (const t of bootTimersRef.current) window.clearTimeout(t);
     bootTimersRef.current = [];
@@ -1126,12 +1146,12 @@ export function Grok64App() {
     const playerEl = document.getElementById("grok64-player");
     if (s.booting || s.running) {
       kickIosPaint(emuRef.current, playerEl, s.booting ? "booting" : "running");
-      startIosPaintWatchdog(emuRef.current, playerEl, () => {
+      startIosAutoPaint(() => {
         if (bootHoldRef.current || playLockRef.current) return;
         useEmu.getState().setBooting(false);
       });
     }
-  }, [s.powered, s.booting, s.running]);
+  }, [s.powered, s.booting, s.running, startIosAutoPaint]);
   useEffect(() => {
     if (!s.running) return;
     const kick = () => {
@@ -1631,6 +1651,10 @@ export function Grok64App() {
             className={s.running ? "g64-screen is-on" : "g64-screen"}
             onPointerDown={(e) => {
               unlockAudio(emuRef.current);
+              if (iosResume) {
+                resumePlayback();
+                return;
+              }
               if (playLockRef.current || !s.running) return;
               if (s.booting) {
                 resumePlayback();
@@ -1654,6 +1678,16 @@ export function Grok64App() {
               <div className="g64-boot" aria-live="polite">
                 {s.bootMsg || "**** GROK64 EMU ****"}
               </div>
+            ) : null}
+            {iosResume && !s.booting ? (
+              <button
+                type="button"
+                className="g64-unlock"
+                onPointerDown={() => resumePlayback()}
+                onClick={() => resumePlayback()}
+              >
+                Tap screen to show READY
+              </button>
             ) : null}
           </div>
         </div>
