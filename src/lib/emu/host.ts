@@ -1,4 +1,4 @@
-import { detectOs, isIos, isIosPhone, isTouchMobile } from "./detect";
+import { detectDevice, detectOs, isIos, isIosPhone, isTouchMobile } from "./detect";
 import { sidOptions } from "./machines";
 import { hasJiffyPair, romFileMap } from "./roms";
 import { buildViceExtras, workDiskFor } from "./vice-extras";
@@ -936,6 +936,7 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       const cw = Math.max(parent.clientWidth, el.clientWidth, 200);
       const ch = Math.max(parent.clientHeight, el.clientHeight, 160);
       const touchMobile = isTouchMobile();
+      const tablet = detectDevice() === "tablet";
       const boxStable =
         !force &&
         Math.abs(cw - lastFitBox.pw) < 3 &&
@@ -946,7 +947,12 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       const dpr = touchMobile ? 1 : Math.min(window.devicePixelRatio || 1, 2);
       let bw = Math.max(384, Math.round(cw * dpr));
       let bh = Math.max(272, Math.round(ch * dpr));
-      if (touchMobile) {
+      if (tablet) {
+        // VICE framebuffer is 384×272. Stretching the canvas past that leaves the
+        // C64 picture in the top-left with a black gap (Onn tablet + log/keyboard).
+        bw = 384;
+        bh = 272;
+      } else if (touchMobile) {
         const maxW = 960;
         const maxH = 600;
         if (bw > maxW || bh > maxH) {
@@ -955,7 +961,8 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
           bh = Math.max(272, Math.round(bh * scale));
         }
       }
-      if (!boxStable && (canvas.width < 64 || canvas.height < 64 || touchMobile)) {
+      const sizeDrift = tablet && (canvas.width !== bw || canvas.height !== bh);
+      if (sizeDrift || (!boxStable && (canvas.width < 64 || canvas.height < 64 || touchMobile))) {
         canvas.width = bw;
         canvas.height = bh;
         lastFitBox = { pw: cw, ph: ch, bw, bh };
@@ -1168,9 +1175,12 @@ export function clearUnitMounts() {
 
 export function applyIecUnit(emu: EjsInstance | null, iec: IecDrive, unit: IecUnit) {
   const work = workDiskFor(iec, unit);
-  if (work !== "disabled") {
-    applyRuntimeOptions(emu, { vice_work_disk: work });
+  if (work === "disabled") return;
+  const opts: Record<string, string> = { vice_work_disk: work };
+  if (iec === "sd2iec" || iec === "cmdhd") {
+    opts.vice_virtual_device_traps = "enabled";
   }
+  applyRuntimeOptions(emu, opts);
 }
 
 function removeMediaFile(FS: EmscriptenFS, name: string) {
@@ -1226,6 +1236,26 @@ function pruneExtraDisks(emu: EjsInstance | null) {
 export function swapBootDisk(emu: EjsInstance | null, data: Uint8Array, fallbackName?: string | null): boolean {
   const target = bootFileOf(emu) ?? fallbackName ?? null;
   return writeBootFile(emu, data, target);
+}
+
+/**
+ * Attach a floppy for VICE autostart: force 1541/1581 on the given unit
+ * (unit 8 for LOAD"*",8,1), then overwrite the current boot file.
+ */
+export function attachAutostartDisk(
+  emu: EjsInstance | null,
+  data: Uint8Array,
+  fallbackName?: string | null,
+  iec: IecDrive = "1541",
+  unit: IecUnit = 8,
+): boolean {
+  applyIecUnit(emu, iec, unit);
+  const wrote = swapBootDisk(emu, data, fallbackName);
+  if (wrote) {
+    const boot = bootFileOf(emu) ?? fallbackName?.replace(/^\//, "") ?? null;
+    if (boot) unitMounts.set(unit, boot);
+  }
+  return wrote;
 }
 
 export function coreHasFs(emu: EjsInstance | null): boolean {

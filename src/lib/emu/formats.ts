@@ -1,4 +1,4 @@
-import type { MediaKind } from "./types";
+import type { IecDrive, IecUnit, MediaKind } from "./types";
 
 export const ACCEPT_EXT =
   ".prg,.p00,.d64,.d71,.d81,.g64,.g71,.t64,.tap,.crt,.bin,.zip,.vsf,.sav,.m3u,.sid,.n64";
@@ -95,6 +95,18 @@ export function needsTypedBoot(kind: MediaKind): boolean {
 
 export function isDiskKind(kind: MediaKind): boolean {
   return kind === "d64" || kind === "d71" || kind === "d81" || kind === "g64" || kind === "g71" || kind === "m3u";
+}
+
+/**
+ * VICE autostart always types LOAD"*",8,1. Floppy Play must attach a 1541/1581
+ * on unit 8 — never SD2IEC/CMD HD `*_fs`, which leaves device 8 missing.
+ */
+export function iecForAutostart(kind: MediaKind): { iec: IecDrive; unit: IecUnit } | null {
+  if (kind === "d81") return { iec: "1581", unit: 8 };
+  if (kind === "d64" || kind === "d71" || kind === "g64" || kind === "g71" || kind === "m3u") {
+    return { iec: "1541", unit: 8 };
+  }
+  return null;
 }
 
 export function driveForPlay(
