@@ -20,6 +20,7 @@ import { wrapForDiskSwap } from "@/lib/emu/d64";
 import { isSid, psidToPrg } from "@/lib/emu/psid";
 import { toArrayBuffer } from "@/lib/emu/archive";
 import { glog, glogFire, subscribeLog } from "@/lib/emu/debug";
+import { createMenuJoyGate, menuJoyStep, resetMenuJoyGate } from "@/lib/emu/menu-joy.mjs";
 
 const PlayerMount = memo(function PlayerMount() {
   return <div id="grok64-player" />;
@@ -61,6 +62,9 @@ export function Grok64App() {
   const workDiskBytesRef = useRef(null);
   const playLockRef = useRef(false);
   const playLockGen = useRef(0);
+  const menuJoyGateRef = useRef(createMenuJoyGate());
+  const arrowJoyRef = useRef({ up: false, down: false, left: false, right: false });
+  const lastJoySentRef = useRef({ x: 0, y: 0, fire: false });
   const fireArmedAt = useRef(0);
   const [needsUnlock, setNeedsUnlock] = useState(false);
   const [awaitingStart, setAwaitingStart] = useState(false);
@@ -97,6 +101,56 @@ export function Grok64App() {
   );
   const resolvedRef = useRef(resolved);
   resolvedRef.current = resolved;
+  const isMenuJoyMode = useCallback(() => {
+    const st = useEmu.getState();
+    return st.running && !st.booting && !playLockRef.current && !inGameplayRef.current;
+  }, []);
+  const clearMenuJoyInput = useCallback(() => {
+    arrowJoyRef.current = { up: false, down: false, left: false, right: false };
+    resetMenuJoyGate(menuJoyGateRef.current);
+    lastJoySentRef.current = { x: 0, y: 0, fire: false };
+  }, []);
+  const emitJoyVector = useCallback((fireOverride) => {
+    const emu = emuRef.current;
+    if (!emu) return;
+    if (playLockRef.current || useEmu.getState().booting) {
+      const j = joyRef.current;
+      if (j.x !== 0 || j.y !== 0 || j.fire) {
+        j.x = 0;
+        j.y = 0;
+        j.fire = false;
+        lastJoySentRef.current = { x: 0, y: 0, fire: false };
+        setJoyVector(emu, 0, 0, false);
+      }
+      return;
+    }
+    const j = joyRef.current;
+    const fire = fireOverride ?? j.fire;
+    let x = j.x;
+    let y = j.y;
+    const a = arrowJoyRef.current;
+    if (a.left) x = -1;
+    if (a.right) x = 1;
+    if (a.up) y = -1;
+    if (a.down) y = 1;
+    if (isMenuJoyMode()) {
+      const out = menuJoyStep(menuJoyGateRef.current, x, y, performance.now());
+      if (out.x === 0 && out.y === 0) {
+        const last = lastJoySentRef.current;
+        if (last.x === 0 && last.y === 0 && fire === last.fire) return;
+      }
+      lastJoySentRef.current = { x: out.x, y: out.y, fire };
+      setJoyVector(emu, out.x, out.y, fire);
+      return;
+    }
+    resetMenuJoyGate(menuJoyGateRef.current);
+    const last = lastJoySentRef.current;
+    if (x === last.x && y === last.y && fire === last.fire) return;
+    lastJoySentRef.current = { x, y, fire };
+    setJoyVector(emu, x, y, fire);
+  }, [isMenuJoyMode]);
+  const emitJoyRef = useRef(() => {});
+  emitJoyRef.current = emitJoyVector;
   useEffect(() => {
     let busy = false;
     const last = { width: 0, height: 0, orient: "" };
@@ -172,13 +226,13 @@ export function Grok64App() {
           joyRef.current.x = 0;
           joyRef.current.y = 0;
         }
-        setJoyVector(emuRef.current, joyRef.current.x, joyRef.current.y, down);
+        emitJoyRef.current(down);
       },
       stick: (x, y) => {
         joyRef.current.x = x;
         joyRef.current.y = y;
         setStickViz({ x, y });
-        setJoyVector(emuRef.current, x, y, joyRef.current.fire);
+        emitJoyRef.current();
       },
       load: async (path, name) => {
         const res = await fetch(path);
@@ -352,6 +406,7 @@ export function Grok64App() {
       bootHoldRef.current = true;
       persistGateRef.current = false;
       inGameplayRef.current = false;
+      clearMenuJoyInput();
       joyRef.current.fire = false;
       joyRef.current.x = 0;
       joyRef.current.y = 0;
@@ -381,10 +436,11 @@ export function Grok64App() {
         window.setTimeout(() => {
           if (playLockGen.current !== gen) return;
           inGameplayRef.current = true;
+          clearMenuJoyInput();
         }, Math.max(ms + 4e3, 2e4)),
       );
     },
-    [s],
+    [s, clearMenuJoyInput],
   );
   const kickAutostart = useCallback(() => {
     glog("kickAutostart", { mode: playModeRef.current, title: useEmu.getState().currentTitle });
@@ -552,6 +608,7 @@ export function Grok64App() {
                       if (loadGenRef.current === gen) {
                         persistGateRef.current = true;
                         inGameplayRef.current = true;
+                        clearMenuJoyInput();
                       }
                     }, 2e3),
                   );
@@ -709,6 +766,7 @@ export function Grok64App() {
               window.setTimeout(() => {
                 persistGateRef.current = true;
                 inGameplayRef.current = true;
+                clearMenuJoyInput();
               }, 2e3),
             );
           } else {
@@ -956,8 +1014,8 @@ export function Grok64App() {
     joyRef.current.x = x;
     joyRef.current.y = y;
     setStickViz({ x, y });
-    setJoyVector(emuRef.current, x, y, joyRef.current.fire);
-  }, []);
+    emitJoyVector();
+  }, [emitJoyVector]);
   const onFire = useCallback((down, clearStick = false) => {
     const st = useEmu.getState();
     if (playLockRef.current || st.booting || !st.running) {
@@ -971,30 +1029,18 @@ export function Grok64App() {
       joyRef.current.y = 0;
       setStickViz({ x: 0, y: 0 });
     }
-    setJoyVector(emuRef.current, joyRef.current.x, joyRef.current.y, down);
-  }, []);
+    emitJoyVector(down);
+  }, [emitJoyVector]);
   useEffect(() => {
     let raf = 0;
     const tick = () => {
       raf = requestAnimationFrame(tick);
-      const j = joyRef.current;
       if (!emuRef.current) return;
-      if (playLockRef.current || useEmu.getState().booting) {
-        if (j.x !== 0 || j.y !== 0 || j.fire) {
-          j.x = 0;
-          j.y = 0;
-          j.fire = false;
-          setJoyVector(emuRef.current, 0, 0, false);
-        }
-        return;
-      }
-      if (j.x !== 0 || j.y !== 0 || j.fire) {
-        setJoyVector(emuRef.current, j.x, j.y, j.fire);
-      }
+      emitJoyVector();
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [emitJoyVector]);
   const swapJoyPort = useCallback(() => {
     const next = s.joyPort === 2 ? 1 : 2;
     s.setJoyPort(next);
@@ -1018,6 +1064,7 @@ export function Grok64App() {
       else if (!pad && named) setPadName(null);
       if (!pad || !emuRef.current) return;
       if (playLockRef.current || useEmu.getState().booting) return;
+      const menuJoy = isMenuJoyMode();
       const pressed = (action, on) => {
         const key = action;
         if (prev.get(key) === on) return;
@@ -1030,10 +1077,11 @@ export function Grok64App() {
           fire: RETRO_BTN.B,
           fire2: RETRO_BTN.A,
         };
-        if (map[action] != null) joyInput(emuRef.current, map[action], on);
+        const dirAction = action === "up" || action === "down" || action === "left" || action === "right";
+        if (map[action] != null && (!menuJoy || !dirAction)) joyInput(emuRef.current, map[action], on);
         if (action === "fire") {
           joyRef.current.fire = on;
-          setJoyVector(emuRef.current, joyRef.current.x, joyRef.current.y, on);
+          emitJoyVector(on);
         }
         if (action === "space") dispatchC64Key("Space", " ", on);
         if (action === "runstop") dispatchC64Key("Escape", "Escape", on);
@@ -1059,8 +1107,8 @@ export function Grok64App() {
         joyRef.current.x = x;
         joyRef.current.y = y;
         setStickViz({ x, y });
-        setJoyVector(emuRef.current, x, y, joyRef.current.fire);
       }
+      emitJoyVector();
     };
     raf = requestAnimationFrame(tick);
     const connect = (e) => {
@@ -1073,7 +1121,7 @@ export function Grok64App() {
         joyRef.current.x = 0;
         joyRef.current.y = 0;
         setStickViz({ x: 0, y: 0 });
-        setJoyVector(emuRef.current, 0, 0, joyRef.current.fire);
+        emitJoyVector();
       }
     };
     window.addEventListener("gamepadconnected", connect);
@@ -1083,7 +1131,40 @@ export function Grok64App() {
       window.removeEventListener("gamepadconnected", connect);
       window.removeEventListener("gamepaddisconnected", disconnect);
     };
-  }, [s.binds, s.setPadName]);
+  }, [s.binds, s.setPadName, emitJoyVector, isMenuJoyMode]);
+  useEffect(() => {
+    const ARROW = {
+      ArrowUp: "up",
+      ArrowDown: "down",
+      ArrowLeft: "left",
+      ArrowRight: "right",
+    };
+    const onArrow = (e) => {
+      if (!s.running) return;
+      const tag = e.target?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      const dir = ARROW[e.code];
+      if (!dir) return;
+      if (!isMenuJoyMode()) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const on = e.type === "keydown";
+      if (on && e.repeat) return;
+      arrowJoyRef.current[dir] = on;
+      emitJoyVector();
+    };
+    const onBlur = () => {
+      arrowJoyRef.current = { up: false, down: false, left: false, right: false };
+    };
+    window.addEventListener("keydown", onArrow, true);
+    window.addEventListener("keyup", onArrow, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onArrow, true);
+      window.removeEventListener("keyup", onArrow, true);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [s.running, emitJoyVector, isMenuJoyMode]);
   useEffect(() => {
     const onKey = (e) => {
       if (!s.running) return;
@@ -1095,12 +1176,12 @@ export function Grok64App() {
       const on = e.type === "keydown";
       if (on && e.repeat) return;
       joyRef.current.fire = on;
-      setJoyVector(emuRef.current, joyRef.current.x, joyRef.current.y, on);
+      emitJoyVector(on);
     };
     const onBlur = () => {
       if (!joyRef.current.fire) return;
       joyRef.current.fire = false;
-      setJoyVector(emuRef.current, joyRef.current.x, joyRef.current.y, false);
+      emitJoyVector(false);
     };
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("keyup", onKey, true);
@@ -1110,7 +1191,7 @@ export function Grok64App() {
       window.removeEventListener("keyup", onKey, true);
       window.removeEventListener("blur", onBlur);
     };
-  }, [s.running]);
+  }, [s.running, emitJoyVector]);
   useEffect(() => {
     setPaused(emuRef.current, s.paused);
   }, [s.paused]);
