@@ -1522,6 +1522,10 @@ html[data-g64os="ios"] #grok64-player .g64-ios-mirror {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
+html[data-g64os="ios"] #grok64-player:not(.g64-ios-mirror-on) canvas:not(.g64-ios-mirror) {
+  opacity: 0 !important;
+  visibility: hidden !important;
+}
 html[data-g64os="ios"] #grok64-player.g64-ios-mirror-on canvas:not(.g64-ios-mirror) {
   opacity: 0 !important;
   visibility: hidden !important;
