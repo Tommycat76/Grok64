@@ -12,6 +12,7 @@ import {
   type CatalogKind,
 } from "@/lib/emu/catalog";
 import { explodeArchive, pickBootFile, toArrayBuffer, b64ToU8 } from "@/lib/emu/archive";
+import { iaProxyBase } from "@/lib/emu/ia-proxy";
 import { listLibrary, putFile } from "@/lib/emu/library";
 import { useEmu } from "@/lib/emu/store";
 import type { LibraryItem } from "@/lib/emu/types";
@@ -22,14 +23,28 @@ interface Props {
 }
 
 async function fetchRemote(file: CatalogFile): Promise<{ name: string; data: Uint8Array }> {
-  const res = await downloadCatalogFile({
-    data: {
-      name: file.name,
-      ...(file.url ? { url: file.url } : {}),
-      ...(file.a64 ? { a64: file.a64 } : {}),
-    },
-  });
-  return { name: res.name || file.name, data: b64ToU8(res.base64) };
+  try {
+    const res = await downloadCatalogFile({
+      data: {
+        name: file.name,
+        ...(file.url ? { url: file.url } : {}),
+        ...(file.a64 ? { a64: file.a64 } : {}),
+      },
+    });
+    return { name: res.name || file.name, data: b64ToU8(res.base64) };
+  } catch (err) {
+    const proxy = iaProxyBase();
+    if (proxy && file.url && /^https?:\/\//i.test(file.url)) {
+      const direct = await fetch(file.url, {
+        headers: { Accept: "application/octet-stream,*/*" },
+      });
+      if (!direct.ok) throw new Error(`Download failed (${direct.status})`);
+      const buf = new Uint8Array(await direct.arrayBuffer());
+      if (buf.byteLength < 16) throw new Error("File was empty.");
+      return { name: file.name, data: buf };
+    }
+    throw err instanceof Error ? err : new Error("Download failed");
+  }
 }
 
 export function CatalogPanel({ onPlay, onInsert }: Props) {

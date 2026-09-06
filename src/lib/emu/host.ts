@@ -115,9 +115,9 @@ let webglPatched = false;
 let userJoyPort: JoyPort = 2;
 
 function preserveWebglBuffer() {
-  // preserveDrawingBuffer doubles WebGL framebuffer RAM — iOS WebKit kills the tab.
-  if (detectOs() === "ios" || webglPatched || typeof HTMLCanvasElement === "undefined") return;
+  if (webglPatched || typeof HTMLCanvasElement === "undefined") return;
   webglPatched = true;
+  const ios = detectOs() === "ios";
   const proto = HTMLCanvasElement.prototype;
   const orig = proto.getContext;
   proto.getContext = function patchedContext(
@@ -126,7 +126,10 @@ function preserveWebglBuffer() {
     attrs?: Record<string, unknown>,
   ) {
     if (type === "webgl" || type === "webgl2" || type === "experimental-webgl") {
-      return orig.call(this, type, { ...attrs, preserveDrawingBuffer: true, antialias: false });
+      // preserveDrawingBuffer doubles framebuffer RAM — skip on iOS to avoid tab kills.
+      const merged: Record<string, unknown> = { ...attrs, antialias: false, alpha: false };
+      if (!ios) merged.preserveDrawingBuffer = true;
+      return orig.call(this, type, merged);
     }
     return orig.call(this, type, attrs as never);
   } as typeof proto.getContext;
@@ -849,12 +852,26 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null) {
     (el.querySelector("canvas") as HTMLCanvasElement | null);
   try {
     if (canvas) {
+      const parent = canvas.parentElement ?? el;
+      const cw = Math.max(parent.clientWidth, el.clientWidth, 200);
+      const ch = Math.max(parent.clientHeight, el.clientHeight, 160);
+      const dpr = isIosPhone() ? Math.min(window.devicePixelRatio || 1, 2) : 1;
+      const bw = Math.max(384, Math.round(cw * dpr));
+      const bh = Math.max(272, Math.round(ch * dpr));
       if (canvas.width < 64 || canvas.height < 64) {
-        canvas.width = 384;
-        canvas.height = 272;
+        canvas.width = bw;
+        canvas.height = bh;
       }
       canvas.style.width = "100%";
       canvas.style.height = "100%";
+      canvas.style.display = "block";
+      canvas.style.visibility = "visible";
+    }
+    const parent = el.querySelector(".ejs_canvas_parent") as HTMLElement | null;
+    if (parent) {
+      parent.style.width = "100%";
+      parent.style.height = "100%";
+      parent.style.display = "block";
     }
   } catch {
     /* ignore */

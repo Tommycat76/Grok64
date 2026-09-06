@@ -30,7 +30,7 @@ VICE WASM cores load from `https://cdn.emulatorjs.org/stable/data/` (no bundling
 
 **grok.me / Vercel:** use `npm run build:vercel` so TanStack Start server functions stay wired (Nitro). Catalog search and Archive.org downloads go through the server-side fetch path restored from main — this bypasses IA CDN CORS in the browser.
 
-**Pure static hosts (Plex, nginx, S3):** `npm run build` flattens to a client-only `dist/`. Power-on, bundled `./software/*`, and the on-device library work. Catalog search/download needs a server; for IA titles on a static host, run behind any reverse proxy that can forward `/api` (or deploy the Vercel build) or use grok.me for catalog fetch then play from library.
+**Pure static hosts (Plex, nginx, S3):** `npm run build` flattens to a client-only `dist/`. Power-on, bundled `./software/*`, and the on-device library work. Catalog search/download needs a server; for IA titles on a static host, set **`VITE_IA_PROXY_BASE`** at build time (e.g. `https://grok64.tomsprojects.cc/api/ia`) so listing URLs and client downloads go through your Plex/nginx proxy. Server deploys can also set **`IA_PROXY_BASE`** for `downloadCatalogFile`.
 
 Assembly64 and HVSC metadata/search work in-browser (CORS allowed). IA **download** CDN nodes block browser CORS — server-side fetch is required (the restored `createServerFn` path).
 

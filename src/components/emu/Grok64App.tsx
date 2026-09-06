@@ -59,6 +59,7 @@ import { createMenuJoyGate, menuJoyStep, resetMenuJoyGate } from "@/lib/emu/menu
 import { applyStickPrecision, createStickPrecision, resetStickPrecision } from "@/lib/emu/stick-precision.mjs";
 import { publicUrl } from "@/lib/public-url";
 import { pokeAudioUnlock } from "@/lib/emu/audio-unlock";
+import { kickIosPaint, scheduleIosPaintKicks, waitForViceFrame } from "@/lib/emu/ios-paint";
 
 function frameMsForStandard(standard: string) {
   return standard === "ntsc" ? 1000 / 60 : 20;
@@ -114,6 +115,7 @@ export function Grok64App() {
   const fireArmedAt = useRef(0);
   const [needsUnlock, setNeedsUnlock] = useState(false);
   const [awaitingStart, setAwaitingStart] = useState(false);
+  const [iosResume, setIosResume] = useState(false);
   const [diskOpen, setDiskOpen] = useState(false);
   const [logLines, setLogLines] = useState([]);
   const [softwareStd, setSoftwareStd] = useState(null);
@@ -540,8 +542,10 @@ export function Grok64App() {
   }, [beginPlayLock]);
   const resumePlayback = useCallback(() => {
     unlockAudio(emuRef.current);
+    kickIosPaint(emuRef.current, document.getElementById("grok64-player"), "tap");
     dismissEjsPrompts(document.getElementById("grok64-player"), "play");
     setNeedsUnlock(false);
+    setIosResume(false);
     s.setPaused(false);
     setPaused(emuRef.current, false);
     pendingKickRef.current = false;
@@ -729,8 +733,24 @@ export function Grok64App() {
                 emu.paused = false;
                 emu.gameManager?.toggleMainLoop(1);
               } catch {}
-              fitEmu(document.getElementById("grok64-player"), emu);
-              bootTimersRef.current.push(window.setTimeout(() => fitEmu(document.getElementById("grok64-player"), emu), 250));
+              const playerEl = document.getElementById("grok64-player");
+              fitEmu(playerEl, emu);
+              bootTimersRef.current.push(window.setTimeout(() => fitEmu(playerEl, emu), 250));
+              if (isIosPhone()) {
+                scheduleIosPaintKicks(emu, playerEl);
+                setIosResume(true);
+                void waitForViceFrame(emu, playerEl, 14_000).then((ok) => {
+                  if (loadGenRef.current !== gen) return;
+                  if (ok) {
+                    setIosResume(false);
+                    setNeedsUnlock(false);
+                  } else {
+                    setIosResume(true);
+                    setNeedsUnlock(true);
+                    glog("ios-resume-needed");
+                  }
+                });
+              }
               if (audioLocked(emu)) {
                 pendingKickRef.current = false;
                 setAwaitingStart(false);
@@ -1588,7 +1608,7 @@ export function Grok64App() {
                 return;
               }
               e.preventDefault();
-              if (needsUnlock) resumePlayback();
+              if (needsUnlock || iosResume) resumePlayback();
               onFire(true, true);
             }}
             onPointerUp={() => {
@@ -1608,17 +1628,20 @@ export function Grok64App() {
                 className="g64-boot"
                 onPointerDown={() => {
                   dismissEjsPrompts(document.getElementById("grok64-player"), "boot");
+                  kickIosPaint(emuRef.current, document.getElementById("grok64-player"), "boot-tap");
                   resumePlayback();
                 }}
               >
                 {s.bootMsg || "**** GROK64 EMU ****"}
               </button>
             ) : null}
-            {(awaitingStart || needsUnlock) && !s.booting ? (
+            {(awaitingStart || needsUnlock || iosResume) && !s.booting ? (
               <button type="button" className="g64-unlock" onPointerDown={() => resumePlayback()} onClick={() => resumePlayback()}>
                 {awaitingStart
                   ? `Tap to start${s.currentTitle && s.currentTitle !== "BASIC" ? ` ${s.currentTitle.replace(/\.[a-z0-9]{2,4}$/i, "")}` : ""}`
-                  : "Tap to play"}
+                  : iosResume
+                    ? "Tap screen to show READY"
+                    : "Tap to play"}
               </button>
             ) : null}
           </div>

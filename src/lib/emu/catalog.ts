@@ -1,4 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
+import { maybeProxyArchiveUrl, iaDownloadUrl } from "./ia-proxy";
 import { z } from "zod";
 import { kindOf } from "./formats";
 import { isJunkRelease } from "./archive";
@@ -321,7 +322,7 @@ async function listInternetArchiveRaw(identifier: string): Promise<CatalogFile[]
       return {
         name: (f.name ?? "file").split("/").pop() ?? "file",
         size,
-        url: `https://archive.org/download/${encodeURIComponent(id)}/${f.name!.split("/").map(encodeURIComponent).join("/")}`,
+        url: iaDownloadUrl(id, f.name!),
       } satisfies CatalogFile;
     })
     .filter((f) => f.size <= MAX_FILE && kindOf(f.name) !== "unknown");
@@ -488,7 +489,7 @@ export const downloadCatalogFile = createServerFn({ method: "POST" })
       if (!res.ok) throw new Error(`Assembly64 download failed (${res.status})`);
       buf = new Uint8Array(await res.arrayBuffer());
     } else if (data.url && /^https?:\/\//i.test(data.url)) {
-      const target = new URL(data.url);
+      const target = new URL(maybeProxyArchiveUrl(data.url));
       if (/^(localhost|127\.|10\.|192\.168\.|0\.|169\.254\.)/i.test(target.hostname)) {
         throw new Error("That address cannot be fetched.");
       }

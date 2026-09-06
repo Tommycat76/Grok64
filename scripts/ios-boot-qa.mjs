@@ -47,18 +47,26 @@ for (let i = 0; i < 60; i++) {
   await page.waitForTimeout(500);
 }
 
-const ready = await page.evaluate(() => ({
-  title: window.__g64?.title?.(),
-  fs: window.__g64?.hasFs?.(),
-  running: window.__g64?.running?.(),
-  canvas: document.querySelectorAll("#grok64-player canvas").length,
-  g64os: document.documentElement.dataset.g64os,
-  core: (() => {
-    const log = (window.__g64log || []).find((l) => String(l).includes("boot-begin"));
-    const m = log ? String(log).match(/"core":"([^"]+)"/) : null;
-    return m?.[1] ?? null;
-  })(),
-}));
+const ready = await page.evaluate(async () => {
+  let frame = false;
+  try {
+    const shot = await window.__g64?.shot?.();
+    frame = Boolean(shot && shot.bytes > 2500);
+  } catch {}
+  return {
+    title: window.__g64?.title?.(),
+    fs: window.__g64?.hasFs?.(),
+    running: window.__g64?.running?.(),
+    canvas: document.querySelectorAll("#grok64-player canvas").length,
+    g64os: document.documentElement.dataset.g64os,
+    frame,
+    core: (() => {
+      const log = (window.__g64log || []).find((l) => String(l).includes("boot-begin"));
+      const m = log ? String(log).match(/"core":"([^"]+)"/) : null;
+      return m?.[1] ?? null;
+    })(),
+  };
+});
 console.log("READY", JSON.stringify(ready));
 
 if (ready.core !== "c64") {
@@ -68,6 +76,11 @@ if (ready.core !== "c64") {
 }
 if (!ready.fs || !ready.running || ready.title !== "BASIC") {
   console.log("FAIL never reached BASIC READY");
+  await browser.close();
+  process.exit(2);
+}
+if (!ready.frame) {
+  console.log("FAIL VICE framebuffer empty (blank CRT)");
   await browser.close();
   process.exit(2);
 }
