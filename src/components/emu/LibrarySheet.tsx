@@ -5,11 +5,12 @@ import { toast } from "sonner";
 import { CatalogPanel } from "./CatalogPanel";
 import { BUNDLED } from "@/lib/emu/software";
 import { ACCEPT_EXT, KIND_LABEL, isDiskKind } from "@/lib/emu/formats";
-import { isWorkDisk, listLibrary, putFile, removeFile } from "@/lib/emu/library";
+import { isWorkDisk, listLibrary, putFile, removeFile, updateFileUnit } from "@/lib/emu/library";
 import { importFromUrl } from "@/lib/emu/import-url";
 import { b64ToU8, explodeArchive, pickBootFile, toArrayBuffer } from "@/lib/emu/archive";
 import { useEmu } from "@/lib/emu/store";
 import type { BundledTitle, LibraryItem } from "@/lib/emu/types";
+import { IecUnitSeg } from "@/components/emu/IecUnitSeg";
 
 interface Props {
   onPlayBundled: (title: BundledTitle) => void;
@@ -23,6 +24,7 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
   const library = useEmu((s) => s.library);
   const setLibrary = useEmu((s) => s.setLibrary);
   const running = useEmu((s) => s.running);
+  const defaultUnit = useEmu((s) => s.iecUnit);
   const fileRef = useRef<HTMLInputElement>(null);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -193,6 +195,15 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
                           </span>
                         </button>
                         <div className="g64-card-tools">
+                          {isDiskKind(item.kind) ? (
+                            <IecUnitSeg
+                              compact
+                              value={item.iecUnit ?? defaultUnit}
+                              onChange={(unit) => {
+                                void updateFileUnit(item.id, unit).then(refresh);
+                              }}
+                            />
+                          ) : null}
                           <button
                             type="button"
                             className="g64-iconbtn"

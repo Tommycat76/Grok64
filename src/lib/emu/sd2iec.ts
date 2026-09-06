@@ -1,4 +1,5 @@
 import { openExpansionDb, STORES, txDone } from "./expansion-db";
+import type { IecUnit } from "./types";
 
 const SECTOR = 512;
 const CLUSTER_BYTES = 4;
@@ -389,7 +390,16 @@ const CMD_SETIN = 6;
 const CMD_SETOUT = 7;
 const CMD_CLRCH = 8;
 const CMD_TALK = 9;
-const DEVICE = 8;
+let deviceUnit: IecUnit = 8;
+
+export function setIecDevice(unit: IecUnit) {
+  deviceUnit = unit;
+  hooksInstalled = false;
+}
+
+export function iecDevice(): IecUnit {
+  return deviceUnit;
+}
 
 interface OpenFile {
   sa: number;
@@ -575,7 +585,7 @@ function patchVector(ram: Uint8Array, off: number, target: number) {
 function installReadStub(ram: Uint8Array, at: number, cmd: number) {
   ram.set(
     [
-      173, 186, 0, 201, DEVICE, 240, 3, 76, 0, 0, 141, 2, 200, 169, cmd, 141, 1, 200, 173, 185, 0, 141, 3, 200, 173, 184,
+      173, 186, 0, 201, deviceUnit, 240, 3, 76, 0, 0, 141, 2, 200, 169, cmd, 141, 1, 200, 173, 185, 0, 141, 3, 200, 173, 184,
       0, 141, 4, 200, 173, 183, 0, 141, 5, 200, 160, 0, 196, 183, 240, 8, 177, 187, 153, 16, 200, 200, 208, 244, 169, 1,
       141, 0, 200, 173, 0, 200, 201, 1, 240, 249, 201, 3, 240, 12, 174, 10, 200, 172, 11, 200, 169, 0, 24, 96, 173, 8,
       200, 141, 144, 0, 56, 96,
@@ -586,14 +596,14 @@ function installReadStub(ram: Uint8Array, at: number, cmd: number) {
 
 function installGetinStub(ram: Uint8Array, at: number, cmd: number, dev: number) {
   ram.set(
-    [173, dev, 0, 201, DEVICE, 240, 3, 76, 0, 0, 169, cmd, 141, 1, 200, 169, 1, 141, 0, 200, 173, 0, 200, 201, 1, 240, 249, 173, 9, 200, 96],
+    [173, dev, 0, 201, deviceUnit, 240, 3, 76, 0, 0, 169, cmd, 141, 1, 200, 169, 1, 141, 0, 200, 173, 0, 200, 201, 1, 240, 249, 173, 9, 200, 96],
     at,
   );
 }
 
 function installClrStub(ram: Uint8Array, at: number) {
   ram.set(
-    [72, 173, 154, 0, 201, DEVICE, 240, 4, 104, 76, 0, 0, 104, 141, 9, 200, 169, CMD_SETIN, 141, 1, 200, 169, 1, 141, 0, 200, 173, 0, 200, 201, 1, 240, 249, 96],
+    [72, 173, 154, 0, 201, deviceUnit, 240, 4, 104, 76, 0, 0, 104, 141, 9, 200, 169, CMD_SETIN, 141, 1, 200, 169, 1, 141, 0, 200, 173, 0, 200, 201, 1, 240, 249, 96],
     at,
   );
 }
@@ -601,7 +611,7 @@ function installClrStub(ram: Uint8Array, at: number) {
 function installTalkStub(ram: Uint8Array, at: number, cmd: number) {
   ram.set(
     [
-      142, 4, 200, 138, 160, 0, 217, 89, 2, 240, 7, 200, 192, 10, 208, 246, 76, 0, 0, 185, 99, 2, 201, DEVICE, 240, 3, 76, 0, 0, 169, cmd, 141, 1, 200, 169, 1, 141, 0, 200, 173, 0, 200, 201, 1, 240, 249, 201, 3, 240, 6, 24, 96, 174, 4, 200, 76, 0, 0,
+      142, 4, 200, 138, 160, 0, 217, 89, 2, 240, 7, 200, 192, 10, 208, 246, 76, 0, 0, 185, 99, 2, 201, deviceUnit, 240, 3, 76, 0, 0, 169, cmd, 141, 1, 200, 169, 1, 141, 0, 200, 173, 0, 200, 201, 1, 240, 249, 201, 3, 240, 6, 24, 96, 174, 4, 200, 76, 0, 0,
     ],
     at,
   );
@@ -650,7 +660,7 @@ function queueFile(ram: Uint8Array, sa: number, mode: number) {
   const count = ram[152] || 0;
   if (count >= 10) return;
   ram[601 + count] = sa;
-  ram[611 + count] = DEVICE;
+  ram[611 + count] = deviceUnit;
   ram[621 + count] = mode;
   ram[152] = count + 1;
 }
@@ -822,7 +832,7 @@ function handleTalk(ram: Uint8Array) {
     ram[IEC_Y] = 3;
     return;
   }
-  ram[153] = DEVICE;
+  ram[153] = deviceUnit;
   ram[184] = sa;
   ram[IEC_Y] = 2;
 }
@@ -833,7 +843,7 @@ function handleListen(ram: Uint8Array) {
     ram[IEC_Y] = 3;
     return;
   }
-  ram[154] = DEVICE;
+  ram[154] = deviceUnit;
   ram[184] = sa;
   ram[IEC_Y] = 2;
 }

@@ -1,14 +1,22 @@
-import type { IecDrive, JoyPort, ReuSize, ScpuSimm } from "./types";
+import type { IecDrive, IecUnit, JoyPort, ReuSize, ScpuSimm } from "./types";
 
 export interface ViceExtrasInput {
   reu: ReuSize;
   iec: IecDrive;
+  iecUnit?: IecUnit;
   mouse: boolean;
   joyPort: JoyPort;
   scpu: boolean;
   scpuSimm?: ScpuSimm;
   scpuTurbo?: boolean;
   jiffy?: boolean;
+}
+
+/** VICE libretro `vice_work_disk` value for SD2IEC, CMD HD, or 1581 on units 8–11. */
+export function workDiskFor(iec: IecDrive, unit: IecUnit = 8): string {
+  if (iec === "sd2iec" || iec === "cmdhd") return `${unit}_fs`;
+  if (iec === "1581") return `${unit}_d81`;
+  return "disabled";
 }
 
 /** VICE libretro options for REU, IEC storage, mouse, SuperCPU, JiffyDOS. */
@@ -18,11 +26,12 @@ export function buildViceExtras(input: ViceExtrasInput): Record<string, string> 
     vice_floppy_multidrive: input.iec === "1541" ? "disabled" : "enabled",
   };
 
+  const unit = input.iecUnit ?? 8;
   if (input.iec === "sd2iec" || input.iec === "cmdhd") {
-    opts.vice_work_disk = "8_fs";
+    opts.vice_work_disk = workDiskFor(input.iec, unit);
     opts.vice_virtual_device_traps = "enabled";
   } else {
-    opts.vice_work_disk = input.iec === "1581" ? "8_d81" : "disabled";
+    opts.vice_work_disk = workDiskFor(input.iec, unit);
   }
 
   if (input.mouse) {

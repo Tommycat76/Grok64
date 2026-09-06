@@ -2,6 +2,7 @@ import type { JoyPort } from "./types";
 
 export type ReuSize = "none" | "256kB" | "512kB" | "2048kB" | "16384kB";
 export type IecDrive = "1541" | "1581" | "sd2iec" | "cmdhd";
+export type IecUnit = 8 | 9 | 10 | 11;
 export type ScpuSimm = "0" | "1" | "2" | "4" | "8" | "16";
 
 export const REU_LABEL: Record<ReuSize, string> = {
@@ -36,9 +37,16 @@ export function needsScpu(name: string): boolean {
   return /super[\s._-]?cpu|\bscpu\b|metal[\s._-]?dust/i.test(name);
 }
 
+function workDiskFor(iec: IecDrive, unit: IecUnit = 8): string {
+  if (iec === "sd2iec" || iec === "cmdhd") return `${unit}_fs`;
+  if (iec === "1581") return `${unit}_d81`;
+  return "disabled";
+}
+
 export function viceExpandOptions(opts: {
   reu: ReuSize;
   iec: IecDrive;
+  iecUnit?: IecUnit;
   mouse: boolean;
   joyPort: JoyPort;
   scpu?: boolean;
@@ -46,17 +54,16 @@ export function viceExpandOptions(opts: {
   scpuTurbo?: boolean;
   jiffy?: boolean;
 }): Record<string, string> {
+  const unit = opts.iecUnit ?? 8;
   const o: Record<string, string> = {
     vice_ram_expansion_unit: opts.reu,
     vice_floppy_multidrive: opts.iec === "1541" ? "disabled" : "enabled",
   };
   if (opts.iec === "sd2iec" || opts.iec === "cmdhd") {
-    o.vice_work_disk = "8_fs";
+    o.vice_work_disk = workDiskFor(opts.iec, unit);
     o.vice_virtual_device_traps = "enabled";
-  } else if (opts.iec === "1581") {
-    o.vice_work_disk = "8_d81";
   } else {
-    o.vice_work_disk = "disabled";
+    o.vice_work_disk = workDiskFor(opts.iec, unit);
   }
   if (opts.mouse) {
     const p1 = opts.joyPort === 1;

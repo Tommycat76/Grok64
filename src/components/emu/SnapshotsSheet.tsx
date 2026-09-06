@@ -23,6 +23,7 @@ function readRecipe(): HardwareRecipe {
     driveMode: s.driveMode,
     reuSize: s.reuSize,
     iecDrive: s.iecDrive,
+    iecUnit: s.iecUnit,
     mouseMode: s.mouseMode,
     scpuSimm: s.scpuSimm,
     scpuTurbo: s.scpuTurbo,
@@ -39,6 +40,7 @@ function applyRecipe(recipe: HardwareRecipe) {
   s.setDriveMode(recipe.driveMode as typeof s.driveMode);
   s.setReuSize(recipe.reuSize);
   s.setIecDrive(recipe.iecDrive);
+  s.setIecUnit(recipe.iecUnit ?? 8);
   s.setMouseMode(recipe.mouseMode);
   s.setScpuSimm(recipe.scpuSimm);
   s.setScpuTurbo(recipe.scpuTurbo);

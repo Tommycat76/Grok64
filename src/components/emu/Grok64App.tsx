@@ -42,7 +42,7 @@ import {
   writeBootFile,
 } from "@/lib/emu/host";
 import { hasJiffyPair, prefetchBundledRoms, romFileMap } from "@/lib/emu/roms";
-import { installSd2iecHooks, partitionsForMount, tickSd2iec } from "@/lib/emu/sd2iec";
+import { installSd2iecHooks, partitionsForMount, setIecDevice, tickSd2iec } from "@/lib/emu/sd2iec";
 import { buildViceExtras, wantsLargeReu, wantsSuperCpu } from "@/lib/emu/vice-extras";
 import { detectLine, resolveMachine } from "@/lib/emu/machines";
 import { snapshotDevice, readViewport, applyViewport, isIosPhone } from "@/lib/emu/detect";
@@ -736,6 +736,7 @@ export function Grok64App() {
           autostart: opts.autostart !== false,
           reu: wantsLargeReu(gameName) && st.reuSize === "none" ? "16384kB" : st.reuSize,
           iec: st.iecDrive,
+          iecUnit: opts.iecUnit ?? st.iecUnit,
           mouse: st.mouseMode,
           scpu: scpuActive,
           scpuSimm: st.scpuSimm,
@@ -775,11 +776,13 @@ export function Grok64App() {
                   pendingSnapshotRef.current = null;
                 }
                 if (useEmu.getState().iecDrive === "sd2iec") {
+                  const unit = opts.iecUnit ?? useEmu.getState().iecUnit;
+                  setIecDevice(unit);
                   window.setTimeout(() => {
                     const ok = installSd2iecHooks(emu);
                     toast.message(
                       ok
-                        ? 'SD2IEC on device 8 — LOAD"$",8  CD://n:'
+                        ? `SD2IEC on device ${unit} — LOAD"$",${unit}  CD://n:`
                         : "SD2IEC card mounted; C64 RAM hook unavailable this core",
                     );
                   }, 2200);
@@ -889,6 +892,8 @@ export function Grok64App() {
       await persistNow();
       libIdRef.current = opts.libraryId ?? null;
       playPayloadRef.current = { filename, data, opts };
+      const playUnit = opts.iecUnit ?? useEmu.getState().iecUnit;
+      setIecDevice(playUnit);
       let payload = data;
       let bootName = bootFileName(filename, kindOf(filename));
       const raw = new Uint8Array(data);
@@ -1004,6 +1009,7 @@ export function Grok64App() {
         autostart: work ? false : opts.autostart !== false,
         diskLoad,
         title,
+        iecUnit: playUnit,
       });
     },
     [s, persistNow, startWithUrl, beginPlayLock],
@@ -1032,7 +1038,12 @@ export function Grok64App() {
         toast.error("That file is missing.");
         return;
       }
-      await playBuffer(file.name, file.data, { autostart: true, title: item.name, libraryId: item.id });
+      await playBuffer(file.name, file.data, {
+        autostart: true,
+        title: item.name,
+        libraryId: item.id,
+        iecUnit: item.iecUnit,
+      });
       await touchPlayed(item.id);
     },
     [playBuffer, s],
@@ -1290,6 +1301,7 @@ export function Grok64App() {
     return buildViceExtras({
       reu: st.reuSize,
       iec: st.iecDrive,
+      iecUnit: st.iecUnit,
       mouse: st.mouseMode,
       joyPort: st.joyPort,
       scpu: st.machineId === "scpu",
@@ -1311,7 +1323,14 @@ export function Grok64App() {
     applyRuntimeOptions(emuRef.current, expansionOpts());
     const st = useEmu.getState();
     if (st.mouseMode) plugJoysticks(emuRef.current, st.joyPort);
-  }, [s.reuSize, s.iecDrive, s.mouseMode, s.joyPort, s.machineId, s.scpuSimm, s.scpuTurbo, s.jiffyDos, expansionOpts]);
+  }, [s.reuSize, s.iecDrive, s.iecUnit, s.mouseMode, s.joyPort, s.machineId, s.scpuSimm, s.scpuTurbo, s.jiffyDos, expansionOpts]);
+  useEffect(() => {
+    setIecDevice(useEmu.getState().iecUnit);
+    const st = useEmu.getState();
+    if (st.iecDrive === "sd2iec" && emuRef.current) {
+      installSd2iecHooks(emuRef.current);
+    }
+  }, [s.iecUnit]);
   useEffect(() => {
     const binds = s.binds;
     const setPadName = s.setPadName;

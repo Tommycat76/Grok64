@@ -1,9 +1,10 @@
 import { Disc3, FolderOpen, Play } from "lucide-react";
 import { Drawer } from "vaul";
 import { KIND_LABEL, isDiskKind } from "@/lib/emu/formats";
-import { isWorkDisk } from "@/lib/emu/library";
+import { isWorkDisk, listLibrary, updateFileUnit } from "@/lib/emu/library";
 import { useEmu } from "@/lib/emu/store";
 import type { LibraryItem } from "@/lib/emu/types";
+import { IecUnitSeg } from "@/components/emu/IecUnitSeg";
 
 interface Props {
   open: boolean;
@@ -16,7 +17,13 @@ interface Props {
 export function DiskMountSheet({ open, onOpenChange, onPlay, onInsert, onBrowse }: Props) {
   const library = useEmu((s) => s.library);
   const running = useEmu((s) => s.running);
+  const defaultUnit = useEmu((s) => s.iecUnit);
+  const setLibrary = useEmu((s) => s.setLibrary);
   const disks = library.filter((i) => isDiskKind(i.kind) && !isWorkDisk(i.name));
+
+  async function refreshLibrary() {
+    setLibrary(await listLibrary());
+  }
 
   return (
     <Drawer.Root open={open} onOpenChange={onOpenChange}>
@@ -42,6 +49,13 @@ export function DiskMountSheet({ open, onOpenChange, onPlay, onInsert, onBrowse 
                   <strong>{item.name}</strong>
                   <em className="g64-tag not-italic">{KIND_LABEL[item.kind]}</em>
                   <span>{(item.size / 1024).toFixed(0)} KB</span>
+                  <IecUnitSeg
+                    compact
+                    value={item.iecUnit ?? defaultUnit}
+                    onChange={(unit) => {
+                      void updateFileUnit(item.id, unit).then(refreshLibrary);
+                    }}
+                  />
                   <div className="g64-card-tools col-start-2 row-start-1">
                     <button
                       type="button"

@@ -37,6 +37,9 @@ export type CorePref = "auto" | "accurate" | "fast";
 export type JoyPort = 1 | 2;
 export type ReuSize = "none" | "256kB" | "512kB" | "2048kB" | "16384kB";
 export type IecDrive = "1541" | "1581" | "sd2iec" | "cmdhd";
+export type IecUnit = 8 | 9 | 10 | 11;
+
+export const IEC_UNITS: IecUnit[] = [8, 9, 10, 11];
 export type ScpuSimm = "0" | "1" | "2" | "4" | "8" | "16";
 export type PadSide = "left" | "right";
 
@@ -49,6 +52,8 @@ export interface LibraryItem {
   addedAt: number;
   lastPlayed?: number;
   bundledPath?: string;
+  /** IEC bus unit for SD2IEC / CMD HD / 1581 mounts (defaults to settings). */
+  iecUnit?: IecUnit;
 }
 
 export interface StoredFile extends LibraryItem {

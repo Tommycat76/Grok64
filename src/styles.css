@@ -998,6 +998,17 @@ div[class*="ejs_virtual"] {
   background: var(--color-bg-subtle);
   color: var(--color-fg);
 }
+.g64-seg-inline {
+  display: inline-flex;
+  margin-top: 4px;
+}
+.g64-seg-inline button {
+  flex: 0;
+  min-width: 2rem;
+  min-height: 28px;
+  padding: 4px 6px;
+  font-size: 11px;
+}
 
 .g64-catalog {
   display: flex;

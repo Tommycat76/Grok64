@@ -6,6 +6,7 @@ import type {
   CorePref,
   DriveMode,
   IecDrive,
+  IecUnit,
   JoyPort,
   LibraryItem,
   MachineId,
@@ -59,6 +60,7 @@ interface SettingsSlice {
   jumpBtn: boolean;
   reuSize: ReuSize;
   iecDrive: IecDrive;
+  iecUnit: IecUnit;
   mouseMode: boolean;
   padSide: PadSide;
   scpuSimm: ScpuSimm;
@@ -81,6 +83,7 @@ interface SettingsSlice {
   setJumpBtn: (v: boolean) => void;
   setReuSize: (v: ReuSize) => void;
   setIecDrive: (v: IecDrive) => void;
+  setIecUnit: (v: IecUnit) => void;
   setMouseMode: (v: boolean) => void;
   setPadSide: (v: PadSide) => void;
   setScpuSimm: (v: ScpuSimm) => void;
@@ -141,6 +144,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       jumpBtn: false,
       reuSize: "none",
       iecDrive: "1541",
+      iecUnit: 8,
       mouseMode: false,
       padSide: "left",
       scpuSimm: "16",
@@ -163,6 +167,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       setJumpBtn: (jumpBtn) => set({ jumpBtn }),
       setReuSize: (reuSize) => set({ reuSize }),
       setIecDrive: (iecDrive) => set({ iecDrive }),
+      setIecUnit: (iecUnit) => set({ iecUnit }),
       setMouseMode: (mouseMode) => set({ mouseMode }),
       setPadSide: (padSide) => set({ padSide }),
       setScpuSimm: (scpuSimm) => set({ scpuSimm }),
@@ -207,7 +212,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
     }),
     {
       name: "grok64-settings",
-      version: 7,
+      version: 8,
       storage: createJSONStorage(() =>
         typeof window === "undefined"
           ? {
@@ -232,6 +237,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         jumpBtn: s.jumpBtn,
         reuSize: s.reuSize,
         iecDrive: s.iecDrive,
+        iecUnit: s.iecUnit,
         mouseMode: s.mouseMode,
         padSide: s.padSide,
         scpuSimm: s.scpuSimm,
@@ -257,6 +263,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
           "jumpBtn",
           "reuSize",
           "iecDrive",
+          "iecUnit",
           "mouseMode",
           "padSide",
           "scpuSimm",
@@ -291,6 +298,9 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         if (version < 6) {
           if (!p.stickGate) p.stickGate = "4way";
           if (p.jumpBtn === undefined) p.jumpBtn = false;
+        }
+        if (version < 8) {
+          if (![8, 9, 10, 11].includes(p.iecUnit as number)) p.iecUnit = 8;
         }
         if (version < 7) {
           if (!p.reuSize) p.reuSize = "none";
