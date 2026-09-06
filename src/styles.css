@@ -1153,7 +1153,8 @@ div[class*="ejs_virtual"] {
     max-height: min(92dvh, calc(100dvh - env(safe-area-inset-top, 0px)));
   }
   .g64-sheet-body {
-    padding-bottom: calc(40px + env(safe-area-inset-bottom, 0px));
+    /* Chrome iOS bottom toolbar (~50–80px) sits below safe-area */
+    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
   }
 }
 
