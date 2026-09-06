@@ -30,7 +30,7 @@ export const MACHINES: MachineDef[] = [
     core: "c64",
     family: "c64",
     focus: true,
-    blurb: "Picks PAL or NTSC from the software so it runs as the coder intended. Fast core on phones and budget tablets (Onn, iPhone).",
+    blurb: "Picks PAL or NTSC from the software so it runs as the coder intended. Fast core on budget Android tablets (Onn); iPhone uses the stable x64sc core.",
     options: {},
   },
   {

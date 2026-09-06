@@ -60,6 +60,13 @@ export function detectDevice(): DeviceClass {
   return "desktop";
 }
 
+/** True on iPhone/iPod (WebKit — includes Chrome/Firefox on iOS). */
+export function isIosPhone(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = uaString();
+  return /iPhone|iPod/.test(ua);
+}
+
 export function detectPreferFast(device: DeviceClass = detectDevice()): boolean {
   if (typeof navigator === "undefined") return false;
   const ua = uaString();
@@ -67,10 +74,11 @@ export function detectPreferFast(device: DeviceClass = detectDevice()): boolean 
   const cores = navigator.hardwareConcurrency || null;
   const saveData = (navigator as Navigator & { connection?: { saveData?: boolean } }).connection
     ?.saveData;
-  const iPhone = /iPhone|iPod/.test(ua);
+  const iPhone = isIosPhone();
   const onn = isOnnTablet(ua);
 
-  if (iPhone) return true;
+  // vice_x64 (fast) is unstable on real iOS — tab OOM/GPU kills; use vice_x64sc instead.
+  if (iPhone) return false;
   if (onn) return true;
   if (device === "phone") return true;
   if (device === "tablet") {

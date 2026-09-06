@@ -69,6 +69,13 @@ async function readState() {
   }));
 }
 
+async function touchMove(points) {
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: points.map((p) => ({ x: p.x, y: p.y, id: p.id })),
+  });
+}
+
 async function touchStart(points) {
   await cdp.send("Input.dispatchTouchEvent", {
     type: "touchStart",
@@ -96,7 +103,16 @@ await touchStart([{ ...pt.fat, id: 3 }]);
 const fatHold = await readState();
 await touchEnd();
 
-console.log("MULTITOUCH", JSON.stringify({ layout, fireHold, jumpHold, bothHold, fatHold }));
+// NES chord: hold FIRE, roll thumb onto JUMP without lifting — FIRE stays down.
+await touchStart([{ ...pt.fire, id: 10 }]);
+const chordFireOnly = await readState();
+await touchMove([{ ...pt.jump, id: 10 }]);
+const chordBoth = await readState();
+await touchMove([{ ...pt.fire, id: 10 }]);
+const chordFireAgain = await readState();
+await touchEnd();
+
+console.log("MULTITOUCH", JSON.stringify({ layout, fireHold, jumpHold, bothHold, fatHold, chordFireOnly, chordBoth, chordFireAgain }));
 
 await browser.close();
 
@@ -111,11 +127,17 @@ const pass =
   bothHold.fire &&
   bothHold.jump &&
   fatHold.fire &&
-  fatHold.jump;
+  fatHold.jump &&
+  chordFireOnly.fire &&
+  !chordFireOnly.jump &&
+  chordBoth.fire &&
+  chordBoth.jump &&
+  chordFireAgain.fire &&
+  !chordFireAgain.jump;
 
 if (!pass) {
   console.log("FAIL multitouch QA");
   process.exit(2);
 }
-console.log("PASS multitouch FIRE left of JUMP with dual-thumb overlap");
+console.log("PASS multitouch FIRE left of JUMP with dual-thumb overlap + hold-fire roll-jump chord");
 process.exit(0);

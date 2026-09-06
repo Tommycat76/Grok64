@@ -1463,6 +1463,9 @@ html[data-g64os="ios"] .g64-fire {
 html[data-g64os="ios"] .g64-port {
   background: color-mix(in oklab, var(--color-bg-elevated) 90%, transparent);
 }
+html[data-g64os="ios"] .g64-scan {
+  display: none;
+}
 
 @media (prefers-reduced-motion: reduce) {
   * {

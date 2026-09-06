@@ -23,7 +23,14 @@ interface Props {
   frameMs?: number;
 }
 
-type PointerZones = { stick?: boolean; fire?: boolean; jump?: boolean };
+type PointerZones = {
+  stick?: boolean;
+  /** Stays down until pointerup (hold Run / FIRE while rolling thumb). */
+  latchedFire?: boolean;
+  latchedJump?: boolean;
+  fire?: boolean;
+  jump?: boolean;
+};
 
 function capture(el: Element, id: number) {
   try {
@@ -116,10 +123,23 @@ export function TouchControls({
     onVectorRef.current(0, 0);
   }
 
+  function buttonHits(x: number, y: number) {
+    return {
+      fire: hitRect(fireEl.current, x, y, 6),
+      jump: jumpRef.current && hitRect(jumpEl.current, x, y, 6),
+    };
+  }
+
   function zonesAt(target: EventTarget | null, x: number, y: number): PointerZones | null {
-    const fire = hitRect(fireEl.current, x, y, 6);
-    const jump = jumpRef.current && hitRect(jumpEl.current, x, y, 6);
-    if (fire || jump) return { fire, jump };
+    const hits = buttonHits(x, y);
+    if (hits.fire || hits.jump) {
+      return {
+        latchedFire: hits.fire,
+        latchedJump: hits.jump,
+        fire: hits.fire,
+        jump: hits.jump,
+      };
+    }
     let el = target instanceof Element ? target : null;
     if (!el) el = document.elementFromPoint(x, y);
     if (stickEl.current?.contains(el) || el?.closest(".g64-stick")) return { stick: true };
@@ -133,6 +153,16 @@ export function TouchControls({
     const active = new Map<number, PointerZones>();
     let fireOn = false;
     let jumpOn = false;
+
+    const applyButtonZones = (id: number, x: number, y: number) => {
+      const z = active.get(id);
+      if (!z || z.stick) return;
+      const hits = buttonHits(x, y);
+      z.fire = z.latchedFire ? true : hits.fire;
+      // Latched jump holds; otherwise jump follows thumb (roll FIRE → tap JUMP chord).
+      z.jump = z.latchedJump ? true : hits.jump;
+      active.set(id, z);
+    };
 
     const syncButtons = () => {
       let nextFire = false;
@@ -170,7 +200,15 @@ export function TouchControls({
 
     const move = (id: number, x: number, y: number) => {
       const zones = active.get(id);
-      if (zones?.stick && stickPid.current === id) setFromPoint(x, y);
+      if (!zones) return;
+      if (zones.stick && stickPid.current === id) {
+        setFromPoint(x, y);
+        return;
+      }
+      if (zones.latchedFire || zones.latchedJump || zones.fire || zones.jump) {
+        applyButtonZones(id, x, y);
+        syncButtons();
+      }
     };
 
     const up = (id: number) => {
@@ -209,7 +247,7 @@ export function TouchControls({
     };
     const onTouchMove = (e: TouchEvent) => {
       let hit = false;
-      for (const t of Array.from(e.changedTouches)) {
+      for (const t of Array.from(e.touches)) {
         if (active.has(t.identifier)) {
           hit = true;
           move(t.identifier, t.clientX, t.clientY);
@@ -225,7 +263,7 @@ export function TouchControls({
       const z = zonesAt(e.target, e.clientX, e.clientY);
       if (!z) return;
       e.preventDefault();
-      if (z.stick) capture(host, e.pointerId);
+      if (z.stick || z.latchedFire || z.latchedJump) capture(host, e.pointerId);
       down(e.pointerId, z, e.clientX, e.clientY);
     };
     const onPointerMove = (e: PointerEvent) => {

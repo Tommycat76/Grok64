@@ -1,3 +1,4 @@
+import { detectOs, isIosPhone } from "./detect";
 import { sidOptions } from "./machines";
 import { buildViceExtras } from "./vice-extras";
 import type { DriveMode, IecDrive, JoyPort, ReuSize, ScpuSimm, SidEngine, SidModel } from "./types";
@@ -114,7 +115,8 @@ let webglPatched = false;
 let userJoyPort: JoyPort = 2;
 
 function preserveWebglBuffer() {
-  if (webglPatched || typeof HTMLCanvasElement === "undefined") return;
+  // preserveDrawingBuffer doubles WebGL framebuffer RAM — iOS WebKit kills the tab.
+  if (detectOs() === "ios" || webglPatched || typeof HTMLCanvasElement === "undefined") return;
   webglPatched = true;
   const proto = HTMLCanvasElement.prototype;
   const orig = proto.getContext;
@@ -472,12 +474,10 @@ export interface BootConfig {
   onError?: (msg: string) => void;
 }
 
-function isIosPhone(): boolean {
-  return typeof navigator !== "undefined" && /iP(hone|ad|od)/.test(navigator.userAgent);
-}
-
 function effectiveReu(reu: ReuSize = "none"): ReuSize {
-  if (isIosPhone() && (reu === "16384kB" || reu === "2048kB")) return "512kB";
+  if (isIosPhone()) {
+    if (reu === "16384kB" || reu === "2048kB" || reu === "512kB") return "256kB";
+  }
   return reu;
 }
 
@@ -865,7 +865,7 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null) {
 
 export async function recycleCore(emu: EjsInstance | null, el: HTMLElement | null) {
   destroyEmu(emu, el);
-  await new Promise((r) => setTimeout(r, 250));
+  await new Promise((r) => setTimeout(r, isIosPhone() ? 700 : 250));
 }
 
 export function applyRuntimeOptions(emu: EjsInstance | null, opts: Record<string, string>) {
@@ -909,12 +909,14 @@ export function mkdirFs(FS: EmscriptenFS, path: string) {
 export function injectRoms(emu: EjsInstance | null, files: Record<string, Uint8Array>): number {
   const FS = fsOf(emu);
   if (!FS?.writeFile) return 0;
-  const roots = [
-    "/home/web_user/retroarch/userdata/system/vice",
-    "/home/web_user/retroarch/system/vice",
-    "/system/vice",
-    "/vice",
-  ];
+  const roots = isIosPhone()
+    ? ["/home/web_user/retroarch/userdata/system/vice"]
+    : [
+        "/home/web_user/retroarch/userdata/system/vice",
+        "/home/web_user/retroarch/system/vice",
+        "/system/vice",
+        "/vice",
+      ];
   for (const root of roots) mkdirFs(FS, root);
   let count = 0;
   for (const [name, data] of Object.entries(files)) {
@@ -936,7 +938,9 @@ export function injectSdWork(
 ): number {
   const FS = fsOf(emu);
   if (!FS?.writeFile) return 0;
-  const roots = ["/vice_work", "/home/web_user/retroarch/userdata/saves/vice_work", "/data/vice_work"];
+  const roots = isIosPhone()
+    ? ["/vice_work"]
+    : ["/vice_work", "/home/web_user/retroarch/userdata/saves/vice_work", "/data/vice_work"];
   for (const root of roots) mkdirFs(FS, root);
   let count = 0;
   for (const part of parts) {
