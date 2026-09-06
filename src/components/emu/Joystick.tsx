@@ -221,11 +221,11 @@ export function TouchControls({
         const dir = lastDir.current;
         const stillStick = [...active.values()].some((z) => z.stick);
         if (!stillStick) {
-          if (held < 140 && (dir.x !== 0 || dir.y !== 0)) {
+          if (held < 155 && (dir.x !== 0 || dir.y !== 0)) {
             tapHold.current = window.setTimeout(() => {
               tapHold.current = null;
               centerStick();
-            }, 90);
+            }, 62);
           } else {
             centerStick();
           }
