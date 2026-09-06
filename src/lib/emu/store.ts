@@ -17,6 +17,7 @@ import type {
   SidModel,
   VideoPref,
 } from "./types";
+import { clampLayout, DEFAULT_CONTROL_LAYOUT, type ControlId, type ControlLayout } from "./control-layout";
 
 const DEFAULT_BINDS: ControlBinding[] = [
   { action: "up", keys: [], padButtons: [12], padAxes: [{ axis: 1, dir: -1 }] },
@@ -63,6 +64,8 @@ interface SettingsSlice {
   iecUnit: IecUnit;
   mouseMode: boolean;
   padSide: PadSide;
+  layoutEdit: boolean;
+  controlLayout: ControlLayout;
   scpuSimm: ScpuSimm;
   scpuTurbo: boolean;
   jiffyDos: boolean;
@@ -86,6 +89,9 @@ interface SettingsSlice {
   setIecUnit: (v: IecUnit) => void;
   setMouseMode: (v: boolean) => void;
   setPadSide: (v: PadSide) => void;
+  setLayoutEdit: (v: boolean) => void;
+  setControlPos: (id: ControlId, pos: Partial<ControlLayout[ControlId]>) => void;
+  resetControlLayout: () => void;
   setScpuSimm: (v: ScpuSimm) => void;
   setScpuTurbo: (v: boolean) => void;
   setJiffyDos: (v: boolean) => void;
@@ -147,6 +153,8 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       iecUnit: 8,
       mouseMode: false,
       padSide: "left",
+      layoutEdit: false,
+      controlLayout: { ...DEFAULT_CONTROL_LAYOUT },
       scpuSimm: "16",
       scpuTurbo: true,
       jiffyDos: false,
@@ -170,6 +178,15 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       setIecUnit: (iecUnit) => set({ iecUnit }),
       setMouseMode: (mouseMode) => set({ mouseMode }),
       setPadSide: (padSide) => set({ padSide }),
+      setLayoutEdit: (layoutEdit) => set({ layoutEdit }),
+      setControlPos: (id, pos) =>
+        set((s) => ({
+          controlLayout: clampLayout({
+            ...s.controlLayout,
+            [id]: { ...s.controlLayout[id], ...pos },
+          }),
+        })),
+      resetControlLayout: () => set({ controlLayout: { ...DEFAULT_CONTROL_LAYOUT } }),
       setScpuSimm: (scpuSimm) => set({ scpuSimm }),
       setScpuTurbo: (scpuTurbo) => set({ scpuTurbo }),
       setJiffyDos: (jiffyDos) => set({ jiffyDos }),
@@ -212,7 +229,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
     }),
     {
       name: "grok64-settings",
-      version: 8,
+      version: 9,
       storage: createJSONStorage(() =>
         typeof window === "undefined"
           ? {
@@ -240,6 +257,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         iecUnit: s.iecUnit,
         mouseMode: s.mouseMode,
         padSide: s.padSide,
+        controlLayout: s.controlLayout,
         scpuSimm: s.scpuSimm,
         scpuTurbo: s.scpuTurbo,
         jiffyDos: s.jiffyDos,
@@ -266,6 +284,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
           "iecUnit",
           "mouseMode",
           "padSide",
+          "controlLayout",
           "scpuSimm",
           "scpuTurbo",
           "jiffyDos",
@@ -301,6 +320,9 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         }
         if (version < 8) {
           if (![8, 9, 10, 11].includes(p.iecUnit as number)) p.iecUnit = 8;
+        }
+        if (version < 9) {
+          p.controlLayout = { ...DEFAULT_CONTROL_LAYOUT };
         }
         if (version < 7) {
           if (!p.reuSize) p.reuSize = "none";

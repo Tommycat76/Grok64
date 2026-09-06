@@ -56,6 +56,26 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               </div>
             ) : null}
 
+            <div className="g64-row">
+              <span>Layout editor</span>
+              <Switch on={s.layoutEdit} onToggle={() => s.setLayoutEdit(!s.layoutEdit)} />
+            </div>
+            {s.layoutEdit ? (
+              <p className="mb-3 text-xs text-fg-subtle">
+                Drag the stick, fire, jump, trackpad, or mouse buttons to reposition them. Phone and tablet share the same layout.
+              </p>
+            ) : null}
+            <button
+              type="button"
+              className="g64-btn mb-3 w-full"
+              onClick={() => {
+                s.resetControlLayout();
+                toast.message("Control layout reset");
+              }}
+            >
+              Reset control layout
+            </button>
+
             <button
               type="button"
               className="g64-btn g64-btn-primary mb-3"
