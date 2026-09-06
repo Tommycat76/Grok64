@@ -775,6 +775,47 @@ export function setJoyVector(emu: EjsInstance | null, dx: number, dy: number, fi
   joyInput(emu, 19, false);
 }
 
+/** 1351 mouse via left analog stick (vice_analogmouse=left). */
+export function setMouseAnalog(
+  emu: EjsInstance | null,
+  ax: number,
+  ay: number,
+  leftDown: boolean,
+  rightDown: boolean,
+) {
+  const cx = Math.max(-1, Math.min(1, ax));
+  const cy = Math.max(-1, Math.min(1, ay));
+  padAxes[0] = cx;
+  padAxes[1] = cy;
+  padAxes[2] = 0;
+  padAxes[3] = 0;
+  btn(0, leftDown);
+  btn(1, rightDown);
+  btn(14, false);
+  btn(15, false);
+  btn(12, false);
+  btn(13, false);
+  virtualPad0.timestamp = performance.now();
+  try {
+    emu?.gamepadEvent?.({ type: "axis", index: 0, label: "LEFT_STICK_X", gamepadIndex: 0, value: cx });
+    emu?.gamepadEvent?.({ type: "axis", index: 1, label: "LEFT_STICK_Y", gamepadIndex: 0, value: cy });
+    if (leftDown) emu?.gamepadEvent?.({ type: "button", index: 0, label: "BUTTON_2", gamepadIndex: 0, value: 1 });
+    if (rightDown) emu?.gamepadEvent?.({ type: "button", index: 1, label: "BUTTON_4", gamepadIndex: 0, value: 1 });
+  } catch {
+    /* ignore */
+  }
+  joyInput(emu, RETRO_BTN.B, leftDown);
+  joyInput(emu, RETRO_BTN.A, rightDown);
+  joyInput(emu, RETRO_BTN.LEFT, false);
+  joyInput(emu, RETRO_BTN.RIGHT, false);
+  joyInput(emu, RETRO_BTN.UP, false);
+  joyInput(emu, RETRO_BTN.DOWN, false);
+}
+
+export function clearMouseAnalog(emu: EjsInstance | null) {
+  setMouseAnalog(emu, 0, 0, false, false);
+}
+
 export function resetEmu(emu: EjsInstance | null) {
   guardCore(emu);
   restartArmed = true;

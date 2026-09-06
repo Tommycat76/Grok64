@@ -494,13 +494,164 @@ div[class*="ejs_virtual"] {
   right: 8px;
   bottom: max(52px, calc(env(safe-area-inset-bottom) + 36px));
   z-index: 40;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 12px;
-  align-items: end;
-  min-height: 0;
+  display: block;
+  min-height: 148px;
   padding: 0;
   pointer-events: none;
+}
+
+.g64-stick-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: absolute;
+  bottom: 0;
+  pointer-events: auto;
+}
+
+.g64-controls[data-layout-edit="true"] {
+  outline: 1px dashed color-mix(in oklab, var(--color-phosphor) 35%, transparent);
+  outline-offset: 4px;
+  min-height: 148px;
+}
+
+.g64-layout-banner {
+  position: absolute;
+  top: -22px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--color-phosphor);
+  pointer-events: none;
+}
+
+.g64-layout-handle {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--color-phosphor) 22%, var(--color-bg-elevated));
+  color: var(--color-phosphor);
+  pointer-events: none;
+  z-index: 2;
+}
+
+.g64-controls[data-layout-edit="true"] .g64-stick-col,
+.g64-controls[data-layout-edit="true"] .g64-fire-col,
+.g64-controls[data-layout-edit="true"] .g64-touchpad-wrap,
+.g64-controls[data-layout-edit="true"] .g64-mouse-col {
+  outline: 1px dashed color-mix(in oklab, var(--color-fg) 25%, transparent);
+  border-radius: var(--radius-sm);
+}
+
+.g64-controls-mouse {
+  display: block;
+  min-height: 148px;
+}
+
+.g64-controls-mouse[data-pad-side="right"] .g64-touchpad-wrap {
+  left: auto;
+  right: 2%;
+  transform: translate(50%, 0);
+}
+
+.g64-controls-mouse[data-pad-side="left"] .g64-touchpad-wrap {
+  left: 2%;
+  transform: translate(-50%, 0);
+}
+
+.g64-touchpad-wrap {
+  position: absolute;
+  bottom: 0;
+  pointer-events: auto;
+}
+
+.g64-touchpad {
+  width: min(46vw, 220px);
+  height: 128px;
+  border-radius: var(--radius-md);
+  border: 2px solid color-mix(in oklab, var(--color-fg) 18%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--color-bg-elevated) 88%, transparent), color-mix(in oklab, var(--color-bg) 92%, transparent));
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.45) inset,
+    0 8px 20px rgba(0, 0, 0, 0.45);
+  touch-action: none;
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 10px;
+}
+
+.g64-touchpad-grid {
+  position: absolute;
+  inset: 8px;
+  background-image:
+    linear-gradient(color-mix(in oklab, var(--color-fg) 8%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklab, var(--color-fg) 8%, transparent) 1px, transparent 1px);
+  background-size: 18px 18px;
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.g64-touchpad-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: color-mix(in oklab, var(--color-phosphor) 72%, var(--color-fg));
+  pointer-events: none;
+}
+
+.g64-mouse-col {
+  position: absolute;
+  bottom: 0;
+  right: 2%;
+  transform: translate(50%, 0);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  pointer-events: auto;
+}
+
+.g64-controls-mouse[data-pad-side="right"] .g64-mouse-col {
+  right: auto;
+  left: 2%;
+  transform: translate(-50%, 0);
+}
+
+.g64-controls-mouse[data-pad-side="left"] .g64-mouse-col {
+  right: 2%;
+  left: auto;
+  transform: translate(50%, 0);
+}
+
+.g64-mouse-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+.g64-mouse-btn {
+  width: 88px;
+  height: 88px;
+  font-size: 10px;
+}
+
+.g64-app[data-mouse="true"] .g64-screen {
+  cursor: crosshair;
 }
 
 .g64-stick {
@@ -515,13 +666,6 @@ div[class*="ejs_virtual"] {
     0 10px 22px rgba(0, 0, 0, 0.62);
   position: relative;
   touch-action: none;
-  justify-self: start;
-  pointer-events: auto;
-}
-.g64-stick-col {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
   justify-self: start;
   pointer-events: auto;
 }
@@ -579,7 +723,8 @@ div[class*="ejs_virtual"] {
   align-items: center;
   justify-content: flex-end;
   gap: 10px;
-  justify-self: end;
+  position: absolute;
+  bottom: 0;
   pointer-events: auto;
 }
 .g64-play-tools {
@@ -638,6 +783,11 @@ div[class*="ejs_virtual"] {
 .g64-fire[data-locked="true"] {
   opacity: 0.4;
   pointer-events: none;
+}
+.g64-jump-wrap {
+  position: absolute;
+  bottom: 0;
+  pointer-events: auto;
 }
 .g64-fire-row {
   display: flex;
@@ -1278,10 +1428,15 @@ div[class*="ejs_virtual"] {
   border-radius: var(--radius-2xl);
 }
 .g64-app[data-device="tablet"] .g64-controls {
-  min-height: 0;
-  grid-template-columns: 1fr auto;
-  gap: 24px;
-  align-items: end;
+  min-height: 168px;
+}
+.g64-app[data-device="tablet"] .g64-touchpad {
+  width: min(42vw, 300px);
+  height: 156px;
+}
+.g64-app[data-device="tablet"] .g64-mouse-btn {
+  width: 104px;
+  height: 104px;
 }
 .g64-app[data-device="tablet"] .g64-stick {
   width: 176px;

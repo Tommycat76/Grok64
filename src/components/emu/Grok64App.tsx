@@ -37,6 +37,8 @@ import {
   setJoyVector,
   setPaused,
   setWarp,
+  setMouseAnalog,
+  clearMouseAnalog,
   unlockAudio,
   viceJoyOptions,
   writeBootFile,
@@ -135,6 +137,8 @@ export function Grok64App() {
   const arrowJoyRef = useRef({ up: false, down: false, left: false, right: false });
   const lastJoySentRef = useRef({ x: 0, y: 0, fire: false });
   const fireArmedAt = useRef(0);
+  const mouseVelRef = useRef({ x: 0, y: 0 });
+  const mouseBtnRef = useRef({ left: false, right: false });
   const [awaitingStart, setAwaitingStart] = useState(false);
   const [iosResume, setIosResume] = useState(false);
   const [diskOpen, setDiskOpen] = useState(false);
@@ -1291,7 +1295,20 @@ export function Grok64App() {
       const emu = emuRef.current;
       if (!emu) return;
       if (useEmu.getState().iecDrive === "sd2iec") void tickSd2iec(emu);
-      emitJoyVector();
+      const st = useEmu.getState();
+      if (st.mouseMode && !playLockRef.current && !st.booting && st.running) {
+        const v = mouseVelRef.current;
+        const b = mouseBtnRef.current;
+        setMouseAnalog(emu, v.x, v.y, b.left, b.right);
+        mouseVelRef.current.x *= 0.72;
+        mouseVelRef.current.y *= 0.72;
+        if (Math.abs(mouseVelRef.current.x) < 0.01) mouseVelRef.current.x = 0;
+        if (Math.abs(mouseVelRef.current.y) < 0.01) mouseVelRef.current.y = 0;
+      } else if (st.mouseMode) {
+        clearMouseAnalog(emu);
+      } else {
+        emitJoyVector();
+      }
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
@@ -1495,14 +1512,17 @@ export function Grok64App() {
     "data-media": playModeRef.current,
     "data-kb": s.powered && s.showKeyboard ? "true" : "false",
     "data-pad": s.padName ? "true" : "false",
+    "data-mouse": s.mouseMode ? "true" : "false",
+    "data-layout-edit": s.layoutEdit ? "true" : "false",
     "data-running": s.running ? "true" : "false",
     "data-booting": s.booting ? "true" : "false",
     style: { ["--app-h"]: `${view.height}px` },
     suppressHydrationWarning: true,
   };
   const padConnected = Boolean(s.padName);
-  const showStick = s.powered && !s.booting && s.showJoystick && !padConnected;
+  const showStick = s.powered && !s.booting && s.showJoystick && !padConnected && !s.mouseMode;
   const showJoyChrome = s.powered && !s.booting;
+  const showMousePad = s.powered && !s.booting && s.mouseMode && !padConnected;
   return (
     <div {...appAttrs}>
       {!s.powered ? (
@@ -1707,14 +1727,29 @@ export function Grok64App() {
                 return;
               }
               e.preventDefault();
-              onFire(true, true);
+              if (s.mouseMode) {
+                mouseBtnRef.current.left = true;
+                setMouseAnalog(emuRef.current, 0, 0, true, mouseBtnRef.current.right);
+              } else {
+                onFire(true, true);
+              }
             }}
             onPointerUp={() => {
               if (playLockRef.current || !s.running || s.booting) return;
+              if (s.mouseMode) {
+                mouseBtnRef.current.left = false;
+                setMouseAnalog(emuRef.current, mouseVelRef.current.x, mouseVelRef.current.y, false, mouseBtnRef.current.right);
+                return;
+              }
               if (!pendingKickRef.current) onFire(false);
             }}
             onPointerCancel={() => {
               if (playLockRef.current || !s.running || s.booting) return;
+              if (s.mouseMode) {
+                mouseBtnRef.current.left = false;
+                setMouseAnalog(emuRef.current, mouseVelRef.current.x, mouseVelRef.current.y, false, mouseBtnRef.current.right);
+                return;
+              }
               if (!pendingKickRef.current) onFire(false);
             }}
           >
@@ -1742,6 +1777,20 @@ export function Grok64App() {
         onVector={onVector}
         onFire={onFire}
         onJump={onJump}
+        onMouseDelta={(dx, dy) => {
+          unlockAudio(emuRef.current);
+          if (playLockRef.current || useEmu.getState().booting) return;
+          mouseVelRef.current.x = dx;
+          mouseVelRef.current.y = dy;
+        }}
+        onMouseEnd={() => {
+          mouseVelRef.current = { x: 0, y: 0 };
+        }}
+        onMouseBtn={(left, right) => {
+          unlockAudio(emuRef.current);
+          if (playLockRef.current || useEmu.getState().booting || !useEmu.getState().running) return;
+          mouseBtnRef.current = { left, right };
+        }}
         jumpEnabled={s.jumpBtn}
         joyPort={s.joyPort}
         onSwap={swapJoyPort}
@@ -1749,11 +1798,16 @@ export function Grok64App() {
         onWarp={toggleWarp}
         hidden={!showJoyChrome}
         padActive={padConnected}
-        stickHidden={!showStick}
+        stickHidden={!showStick && !showMousePad}
         locked={!s.running}
         vector={stickViz}
         gate={s.stickGate}
         frameMs={frameMsForStandard(resolved.standard)}
+        mouseMode={s.mouseMode}
+        padSide={s.padSide}
+        layoutEdit={s.layoutEdit}
+        controlLayout={s.controlLayout}
+        onLayoutDrag={(id, left, bottom) => s.setControlPos(id, { left, bottom })}
       />
       {s.powered && s.showKeyboard ? <C64Keyboard /> : null}
       <LibrarySheet onPlayBundled={(t) => void playBundled(t)} onPlayLocal={(i) => void playLocal(i)} onInsert={(i) => void insertDisk(i)} />
