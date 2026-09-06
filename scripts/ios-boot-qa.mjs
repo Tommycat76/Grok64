@@ -1,12 +1,51 @@
 #!/usr/bin/env node
 /**
  * iPhone boot QA: READY at power-on + Boulder Dash hot-swap without restart.
- * Verifies vice_x64sc (accurate) core path and stable boot on mobile UA.
+ * Asserts non-black CRT canvas pixels (not just emulator state / PNG byte size).
  */
 import { chromium } from "playwright";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 
 const url = process.argv[2] || "http://127.0.0.1:8080/";
-const browser = await chromium.launch({ args: ["--no-sandbox"] });
+mkdirSync("/workspace/screenshots", { recursive: true });
+
+function analyzePng(path) {
+  const out = execFileSync(
+    "python3",
+    [
+      "-c",
+      `
+from PIL import Image
+im=Image.open("${path}").convert("RGB")
+px=list(im.getdata())
+lum=sum(sum(p)/3 for p in px)/len(px)
+uniq=len({(p[0]//16,p[1]//16,p[2]//16) for p in px})
+print(f"{lum:.1f} {uniq}")
+`,
+    ],
+    { encoding: "utf8" },
+  ).trim();
+  const [lum, uniq] = out.split(" ").map(Number);
+  return { lum, uniq };
+}
+
+function frameAlive(metrics) {
+  return Boolean(metrics && metrics.lum > 4 && metrics.uniq >= 2);
+}
+
+async function grabCanvasFrame(page, name) {
+  const grabbed = await page.evaluate(() => window.__g64?.canvasShot?.() ?? null);
+  if (!grabbed?.b64) return { ok: false, reason: "no-canvas-shot" };
+  const path = `/workspace/screenshots/${name}.png`;
+  writeFileSync(path, Buffer.from(grabbed.b64, "base64"));
+  const px = analyzePng(path);
+  return { ok: frameAlive(px), path, ...px, bytes: grabbed.bytes };
+}
+
+const browser = await chromium.launch({
+  args: ["--no-sandbox", "--use-gl=angle", "--use-angle=swiftshader", "--enable-webgl", "--ignore-gpu-blocklist"],
+});
 const context = await browser.newContext({
   viewport: { width: 390, height: 844 },
   isMobile: true,
@@ -29,44 +68,39 @@ if (osTag !== "ios") {
 }
 
 await page.evaluate(() => window.__g64.power());
-let bootCore = null;
 for (let i = 0; i < 60; i++) {
-  const st = await page.evaluate(() => {
-    const log = (window.__g64log || []).find((l) => String(l).includes("boot-begin"));
-    const m = log ? String(log).match(/"core":"([^"]+)"/) : null;
-    return {
-      core: m?.[1] ?? null,
-      fs: window.__g64?.hasFs?.() ?? false,
-      title: window.__g64?.title?.() ?? null,
-      running: window.__g64?.running?.() ?? false,
-      canvas: document.querySelectorAll("#grok64-player canvas").length,
-    };
-  });
-  bootCore = st.core;
+  const st = await page.evaluate(() => ({
+    fs: window.__g64?.hasFs?.() ?? false,
+    title: window.__g64?.title?.() ?? null,
+    running: window.__g64?.running?.() ?? false,
+    canvas: document.querySelectorAll("#grok64-player canvas").length,
+  }));
   if (st.fs && st.canvas && st.running && st.title === "BASIC") break;
   await page.waitForTimeout(500);
 }
 
-const ready = await page.evaluate(async () => {
-  let frame = false;
-  try {
-    const shot = await window.__g64?.shot?.();
-    frame = Boolean(shot && shot.bytes > 2500);
-  } catch {}
-  return {
+const unlock = page.locator(".g64-unlock");
+if (await unlock.count()) {
+  await unlock.click({ force: true }).catch(() => undefined);
+  await page.waitForTimeout(1200);
+}
+
+const readyFrame = await grabCanvasFrame(page, "ios-qa-ready-canvas");
+const ready = {
+  ...(await page.evaluate(() => ({
     title: window.__g64?.title?.(),
     fs: window.__g64?.hasFs?.(),
     running: window.__g64?.running?.(),
     canvas: document.querySelectorAll("#grok64-player canvas").length,
     g64os: document.documentElement.dataset.g64os,
-    frame,
     core: (() => {
       const log = (window.__g64log || []).find((l) => String(l).includes("boot-begin"));
       const m = log ? String(log).match(/"core":"([^"]+)"/) : null;
       return m?.[1] ?? null;
     })(),
-  };
-});
+  }))),
+  frame: readyFrame,
+};
 console.log("READY", JSON.stringify(ready));
 
 if (ready.core !== "c64") {
@@ -79,8 +113,8 @@ if (!ready.fs || !ready.running || ready.title !== "BASIC") {
   await browser.close();
   process.exit(2);
 }
-if (!ready.frame) {
-  console.log("FAIL VICE framebuffer empty (blank CRT)");
+if (!ready.frame.ok) {
+  console.log("FAIL CRT canvas blank at READY", ready.frame);
   await browser.close();
   process.exit(2);
 }
@@ -106,20 +140,20 @@ for (let i = 0; i < 40; i++) {
   await page.waitForTimeout(500);
 }
 await page.waitForTimeout(6000);
-const after = await page.evaluate(async () => {
-  let frame = false;
-  try {
-    const shot = await window.__g64?.shot?.();
-    frame = Boolean(shot && shot.bytes > 2500);
-  } catch {}
-  return {
+if (await unlock.count()) {
+  await unlock.click({ force: true }).catch(() => undefined);
+  await page.waitForTimeout(1200);
+}
+const bdFrame = await grabCanvasFrame(page, "ios-qa-bd-canvas");
+const after = {
+  ...(await page.evaluate(() => ({
     title: window.__g64?.title?.(),
     boots: (window.__g64log || []).filter((l) => /boot-begin|power-on/.test(String(l))).length,
     running: window.__g64?.running?.(),
     splash: !!document.querySelector(".g64-splash"),
-    frame,
-  };
-});
+  }))),
+  frame: bdFrame,
+};
 console.log("BD", JSON.stringify(after));
 await browser.close();
 
@@ -135,8 +169,8 @@ if (after.boots > bootsBefore) {
   console.log("FAIL full core recycle during hot-swap");
   process.exit(2);
 }
-if (!after.frame) {
-  console.log("FAIL VICE framebuffer empty after hot-swap (blank CRT)");
+if (!after.frame.ok) {
+  console.log("FAIL CRT canvas blank after hot-swap", after.frame);
   process.exit(2);
 }
 console.log("PASS ios boot READY + boulder dash hot-swap");
