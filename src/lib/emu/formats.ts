@@ -3,6 +3,13 @@ import type { MediaKind } from "./types";
 export const ACCEPT_EXT =
   ".prg,.p00,.d64,.d71,.d81,.g64,.g71,.t64,.tap,.crt,.bin,.zip,.vsf,.sav,.m3u,.sid,.n64";
 
+/** ROM upload — extensions plus MIME types so iOS Files enables .bin picks. */
+export const ROM_ACCEPT =
+  ".bin,.rom,.256,.img,.dsk,application/octet-stream,application/macbinary";
+
+/** SD card image import. */
+export const SD_IMAGE_ACCEPT = ".img,.dsk,.bin,application/octet-stream";
+
 export const KIND_LABEL: Record<MediaKind, string> = {
   prg: "Program",
   p00: "PC64 PRG",

@@ -52,7 +52,7 @@ export interface LibraryItem {
   addedAt: number;
   lastPlayed?: number;
   bundledPath?: string;
-  /** IEC bus unit for SD2IEC / CMD HD / 1581 mounts (defaults to settings). */
+  /** IEC bus unit for 1541 / 1581 / SD2IEC / CMD HD mounts (defaults to settings). */
   iecUnit?: IecUnit;
 }
 

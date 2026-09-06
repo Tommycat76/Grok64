@@ -17,6 +17,7 @@ import {
   bootFileOf,
   captureState,
   clearRetroSaves,
+  clearUnitMounts,
   coreHasFs,
   destroyEmu,
   dismissEjsPrompts,
@@ -28,6 +29,8 @@ import {
   injectSdWork,
   joyInput,
   listRealGamepads,
+  mountDiskOnUnit,
+  applyIecUnit,
   plugJoysticks,
   probeCore,
   readMountedMedia,
@@ -49,7 +52,7 @@ import { hasJiffyPair, prefetchBundledRoms, romFileMap } from "@/lib/emu/roms";
 import { installSd2iecHooks, partitionsForMount, setIecDevice, tickSd2iec } from "@/lib/emu/sd2iec";
 import { buildViceExtras, wantsLargeReu, wantsSuperCpu } from "@/lib/emu/vice-extras";
 import { detectLine, resolveMachine } from "@/lib/emu/machines";
-import { snapshotDevice, readViewport, applyViewport, isIosPhone } from "@/lib/emu/detect";
+import { snapshotDevice, readViewport, applyViewport, isIosPhone, isTouchMobile } from "@/lib/emu/detect";
 import { detectJoyPort, detectSoftwareStandard } from "@/lib/emu/region";
 import { RETRO_BTN } from "@/lib/emu/types";
 import { dispatchC64Key, isJoyFireKey } from "@/lib/emu/keys";
@@ -82,12 +85,12 @@ function frameMsForStandard(standard: string) {
 }
 
 function playLockDuration(mode: string): number {
-  if (isIosPhone()) return mode === "disk" ? 5000 : 1600;
+  if (isTouchMobile()) return mode === "disk" ? 4500 : 1400;
   return mode === "disk" ? 12_000 : 3500;
 }
 
 function gameplayReadyDelay(lockMs: number): number {
-  if (isIosPhone()) return lockMs + 250;
+  if (isTouchMobile()) return lockMs + 300;
   return Math.max(lockMs + 4000, 20_000);
 }
 
@@ -547,7 +550,7 @@ export function Grok64App() {
     (ms, msg) => {
       playLockGen.current += 1;
       const gen = playLockGen.current;
-      const lockMs = isIosPhone() ? playLockDuration(playModeRef.current) : ms;
+      const lockMs = isTouchMobile() ? playLockDuration(playModeRef.current) : ms;
       playLockRef.current = true;
       bootHoldRef.current = false;
       persistGateRef.current = false;
@@ -716,6 +719,7 @@ export function Grok64App() {
         resetIosPaintState();
         destroyEmu(null, el);
       }
+      clearUnitMounts();
       bootHoldRef.current = opts.autostart === false;
       const wantsScpu = res.machineId === "scpu" || wantsSuperCpu(gameName);
       let core = res.core;
@@ -773,6 +777,7 @@ export function Grok64App() {
             const finish = () => {
               if (loadGenRef.current !== gen) return;
               bootHoldRef.current = false;
+              applyIecUnit(emu, useEmu.getState().iecDrive, opts.iecUnit ?? useEmu.getState().iecUnit);
               const injectExtras = async () => {
                 try {
                   const roms = await romFileMap();
@@ -975,7 +980,8 @@ export function Grok64App() {
       const wrapped = wrapForDiskSwap(origKind, media, bootName);
       if (live && emuRef.current && (wrapped || origKind === "d64")) {
         const payloadDisk = wrapped ?? media;
-        const wrote = writeBootFile(emuRef.current, payloadDisk, bootFileOf(emuRef.current));
+        const iec = useEmu.getState().iecDrive;
+        const wrote = mountDiskOnUnit(emuRef.current, playUnit, payloadDisk, bootName, iec);
         if (wrote) {
           glog("hot-swap", { filename, title, kind: origKind });
           persistGateRef.current = false;
@@ -1077,14 +1083,16 @@ export function Grok64App() {
       toast.error("Power on first, then insert the next disk.");
       return;
     }
-    const ok = writeBootFile(emuRef.current, media, bootFileOf(emuRef.current));
+    const unit = item.iecUnit ?? useEmu.getState().iecUnit;
+    const iec = useEmu.getState().iecDrive;
+    const ok = mountDiskOnUnit(emuRef.current, unit, media, bootFileName(file.name, kind), iec);
     if (!ok) {
       toast.error("Could not mount that disk");
       return;
     }
     await touchPlayed(item.id);
     const label = d64DiskName(media) ?? item.name.replace(/\.[a-z0-9]{2,4}$/i, "");
-    toast.success(`Inserted ${label}`);
+    toast.success(`Inserted ${label} on drive ${unit}`);
   }, []);
   const toggleWarp = useCallback(() => {
     const next = !useEmu.getState().warped;
@@ -1194,7 +1202,8 @@ export function Grok64App() {
     if (!s.powered || !isIosPhone()) return;
     if (isIosPaintSettled() && isIosMirrorPainted()) return;
     const playerEl = document.getElementById("grok64-player");
-    if (s.booting || s.running) {
+    if (!s.booting && !s.running) return;
+    if (s.booting || (s.running && !isIosPaintSettled())) {
       kickIosPaint(emuRef.current, playerEl, s.booting ? "booting" : "running");
       startIosAutoPaint(() => {
         if (bootHoldRef.current || playLockRef.current) return;
