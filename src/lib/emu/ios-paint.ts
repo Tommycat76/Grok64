@@ -42,9 +42,30 @@ export async function frameImageMetrics(raw: Uint8Array | null): Promise<{ lum: 
 
 function playerCanvas(root: HTMLElement | null): HTMLCanvasElement | null {
   return (
-    (root?.querySelector("canvas") as HTMLCanvasElement | null) ??
-    (document.querySelector("#grok64-player canvas") as HTMLCanvasElement | null)
+    (root?.querySelector("canvas:not(.g64-ios-mirror)") as HTMLCanvasElement | null) ??
+    (document.querySelector("#grok64-player canvas:not(.g64-ios-mirror)") as HTMLCanvasElement | null)
   );
+}
+
+function mirrorCanvas(root: HTMLElement | null): HTMLCanvasElement | null {
+  return (
+    (root?.querySelector(".g64-ios-mirror") as HTMLCanvasElement | null) ??
+    (document.querySelector("#grok64-player .g64-ios-mirror") as HTMLCanvasElement | null)
+  );
+}
+
+async function elementHasFrame(el: HTMLCanvasElement | null): Promise<boolean> {
+  if (!el || el.width < 8 || el.height < 8) return false;
+  try {
+    const url = el.toDataURL("image/png");
+    const bin = atob(url.split(",")[1] || "");
+    const raw = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
+    const m = await frameImageMetrics(raw);
+    return Boolean(m && m.lum > 4 && m.uniq >= 2);
+  } catch {
+    return false;
+  }
 }
 
 /** Nudge iOS WebKit to composite a preserveDrawingBuffer WebGL framebuffer. */
@@ -59,35 +80,37 @@ export function forceCanvasPresent(canvas: HTMLCanvasElement | null) {
       const buf = new Uint8Array(4);
       gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
     }
-    // Readback is the reliable iOS compositor kick for black CRT shells.
     canvas.toDataURL("image/png");
   } catch {
     /* ignore */
   }
 }
 
-export async function canvasHasFrame(emu: EjsInstance | null, root?: HTMLElement | null): Promise<boolean> {
+/** True when the GL canvas has composited pixels (not a black shell). */
+export async function canvasHasFrame(_emu: EjsInstance | null, root?: HTMLElement | null): Promise<boolean> {
   const canvas = playerCanvas(root ?? null);
   if (!canvas || canvas.width < 8 || canvas.height < 8) return false;
   forceCanvasPresent(canvas);
-  try {
-    const url = canvas.toDataURL("image/png");
-    const bin = atob(url.split(",")[1] || "");
-    const raw = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
-    const m = await frameImageMetrics(raw);
-    if (m && m.lum > 4 && m.uniq >= 2) return true;
-  } catch {
-    /* fall through */
-  }
-  // VICE screenshot can paint before the GL canvas composites on iOS WebKit.
-  return await viceHasFrame(emu);
+  return elementHasFrame(canvas);
 }
 
-/** Kick WebGL/main-loop on iOS WebKit — does not require a user gesture. */
-export function kickIosPaint(emu: EjsInstance | null, root: HTMLElement | null, tag = "kick") {
+/** True when either native GL or the iOS VICE mirror shows a non-black frame. */
+export async function displayHasFrame(emu: EjsInstance | null, root?: HTMLElement | null): Promise<boolean> {
+  if (await canvasHasFrame(emu, root)) return true;
+  return elementHasFrame(mirrorCanvas(root ?? null));
+}
+
+/** Kick WebGL/main-loop on iOS WebKit — pass fromUserGesture=true inside tap handlers. */
+export function kickIosPaint(
+  emu: EjsInstance | null,
+  root: HTMLElement | null,
+  tag = "kick",
+  fromUserGesture = false,
+) {
   if (!isIosPhone() || !emu) return;
-  dismissEjsPrompts(root, "boot");
+  unlockAudio(emu);
+  if (fromUserGesture) dismissEjsPrompts(root, "play");
+  else dismissEjsPrompts(root, "boot");
   try {
     emu.paused = false;
   } catch {
@@ -102,6 +125,7 @@ export function kickIosPaint(emu: EjsInstance | null, root: HTMLElement | null, 
     const canvas = (emu.Module?.canvas as HTMLCanvasElement | undefined) ?? playerCanvas(root);
     if (canvas) {
       if (canvas.tabIndex < 0) canvas.tabIndex = 0;
+      canvas.focus?.();
       forceCanvasPresent(canvas);
     }
   } catch {
@@ -145,7 +169,7 @@ export async function waitForViceFrame(
   const t0 = performance.now();
   while (performance.now() - t0 < timeoutMs) {
     kickIosPaint(emu, root, "wait");
-    if (await canvasHasFrame(emu, root)) {
+    if (await displayHasFrame(emu, root)) {
       glog("ios-frame-ok", { ms: Math.round(performance.now() - t0) });
       return true;
     }
@@ -155,12 +179,119 @@ export async function waitForViceFrame(
   return false;
 }
 
+/* ── VICE → 2D mirror (auto-paint when WebGL won't composite on CriOS) ── */
+
+let mirrorGen = 0;
+let mirrorRaf = 0;
+let mirrorActive = false;
+let mirrorPainted = false;
+
+export function isIosMirrorActive(): boolean {
+  return mirrorActive;
+}
+
+export function stopIosViceMirror() {
+  mirrorGen += 1;
+  if (mirrorRaf) cancelAnimationFrame(mirrorRaf);
+  mirrorRaf = 0;
+  mirrorActive = false;
+  mirrorPainted = false;
+  const el = document.querySelector("#grok64-player .g64-ios-mirror");
+  el?.remove();
+}
+
+function ensureMirrorCanvas(root: HTMLElement | null): HTMLCanvasElement | null {
+  const parent =
+    (root?.querySelector(".ejs_canvas_parent") as HTMLElement | null) ??
+    root ??
+    document.getElementById("grok64-player");
+  if (!parent) return null;
+  let canvas = parent.querySelector(".g64-ios-mirror") as HTMLCanvasElement | null;
+  if (!canvas) {
+    canvas = document.createElement("canvas");
+    canvas.className = "g64-ios-mirror";
+    canvas.setAttribute("aria-hidden", "true");
+    parent.appendChild(canvas);
+  }
+  canvas.style.width = "100%";
+  canvas.style.height = "100%";
+  canvas.style.display = "block";
+  return canvas;
+}
+
+/**
+ * Blit VICE screenshots to a 2D overlay — works on CriOS without user gesture
+ * when preserveDrawingBuffer WebGL stays black on screen.
+ */
+export function startIosViceMirror(
+  emu: EjsInstance | null,
+  root: HTMLElement | null,
+  onFirstPaint?: () => void,
+) {
+  if (!isIosPhone() || !emu?.gameManager?.screenshot) return;
+  stopIosViceMirror();
+  const gen = mirrorGen;
+  const canvas = ensureMirrorCanvas(root);
+  if (!canvas) return;
+  mirrorActive = true;
+  let pending = false;
+  let ticks = 0;
+  let paintedCb = onFirstPaint ?? null;
+
+  const tick = () => {
+    if (gen !== mirrorGen) return;
+    mirrorRaf = requestAnimationFrame(tick);
+    ticks += 1;
+
+    if (ticks % 20 === 0) {
+      void canvasHasFrame(emu, root).then((native) => {
+        if (gen !== mirrorGen || !native) return;
+        glog("ios-mirror-handoff-native");
+        paintedCb?.();
+        paintedCb = null;
+        stopIosViceMirror();
+      });
+      return;
+    }
+
+    if (pending || ticks % 2 !== 0) return;
+    pending = true;
+    void emu
+      .gameManager!.screenshot!()
+      .then(async (raw) => {
+        if (gen !== mirrorGen) return;
+        const u8 = raw instanceof Uint8Array ? raw : null;
+        const m = await frameImageMetrics(u8);
+        if (!m || m.lum <= 4 || !u8) return;
+        const blob = new Blob([new Uint8Array(u8)], { type: "image/png" });
+        const bmp = await createImageBitmap(blob);
+        if (canvas.width !== bmp.width) canvas.width = bmp.width;
+        if (canvas.height !== bmp.height) canvas.height = bmp.height;
+        const ctx = canvas.getContext("2d", { alpha: false });
+        ctx?.drawImage(bmp, 0, 0);
+        bmp.close?.();
+        if (!mirrorPainted) {
+          mirrorPainted = true;
+          glog("ios-mirror-painted");
+          paintedCb?.();
+          paintedCb = null;
+        }
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        pending = false;
+      });
+  };
+  mirrorRaf = requestAnimationFrame(tick);
+}
+
 type PaintTarget = { emu: EjsInstance | null; root: HTMLElement | null };
 let watchdogGen = 0;
 let watchdogRaf = 0;
 let hooksInstalled = false;
 let activeTarget: PaintTarget = { emu: null, root: null };
 let onPaintedCb: (() => void) | null = null;
+let onTimeoutCb: (() => void) | null = null;
 
 export function stopIosPaintWatchdog() {
   watchdogGen += 1;
@@ -168,19 +299,42 @@ export function stopIosPaintWatchdog() {
   watchdogRaf = 0;
 }
 
-/** rAF paint loop until the CRT canvas composites — no tap required. */
+export type IosPaintWatchdogOpts = {
+  onPainted?: () => void;
+  /** Last resort when auto-paint (mirror + native kicks) fails — show tap-to-wake. */
+  onTimeout?: () => void;
+  maxFrames?: number;
+};
+
+/** Auto-paint: VICE mirror + native compositor kicks; tap fallback only on timeout. */
 export function startIosPaintWatchdog(
   emu: EjsInstance | null,
   root: HTMLElement | null,
-  onPainted?: () => void,
+  opts?: IosPaintWatchdogOpts | (() => void),
 ) {
   if (!isIosPhone() || !emu) return;
+  const resolved: IosPaintWatchdogOpts =
+    typeof opts === "function" ? { onPainted: opts } : (opts ?? {});
   activeTarget = { emu, root };
-  onPaintedCb = onPainted ?? null;
+  onPaintedCb = resolved.onPainted ?? null;
+  onTimeoutCb = resolved.onTimeout ?? null;
   stopIosPaintWatchdog();
+
+  let painted = false;
+  const signalPainted = () => {
+    if (painted) return;
+    painted = true;
+    onPaintedCb?.();
+    onPaintedCb = null;
+    onTimeoutCb = null;
+    stopIosPaintWatchdog();
+  };
+
+  startIosViceMirror(emu, root, signalPainted);
+
   const gen = watchdogGen;
   let frames = 0;
-  const maxFrames = 720;
+  const maxFrames = resolved.maxFrames ?? 360;
 
   const tick = () => {
     if (gen !== watchdogGen) return;
@@ -188,20 +342,19 @@ export function startIosPaintWatchdog(
     const { emu: e, root: r } = activeTarget;
     if (!e) return;
     kickIosPaint(e, r, `wd${frames}`);
-    void canvasHasFrame(e, r).then((ok) => {
+    void displayHasFrame(e, r).then((ok) => {
       if (gen !== watchdogGen) return;
       if (ok) {
-        glog("ios-watchdog-painted", { frames });
-        onPaintedCb?.();
-        onPaintedCb = null;
-        stopIosPaintWatchdog();
+        glog("ios-watchdog-painted", { frames, mirror: mirrorActive });
+        signalPainted();
         return;
       }
       if (frames < maxFrames) {
         watchdogRaf = requestAnimationFrame(tick);
       } else {
-        glog("ios-watchdog-timeout", { frames });
-        // Keep kicking on a slow timer — canvas may appear without another tap.
+        glog("ios-watchdog-timeout", { frames, mirror: mirrorActive, mirrorPainted });
+        if (!painted && !mirrorPainted) onTimeoutCb?.();
+        onTimeoutCb = null;
         scheduleIosPaintKicks(e, r);
       }
     });
@@ -250,4 +403,11 @@ export function installIosPaintHooks(getTarget: () => PaintTarget) {
   const player = document.getElementById("grok64-player");
   if (player) obs.observe(player, { childList: true, subtree: true });
   watchCanvas();
+}
+
+/** Prefer mirror canvas for QA readback when native GL is still black. */
+export function shotDisplayCanvas(root?: HTMLElement | null): HTMLCanvasElement | null {
+  const mirror = mirrorCanvas(root ?? null);
+  if (mirror && mirror.width >= 8) return mirror;
+  return playerCanvas(root ?? null);
 }
