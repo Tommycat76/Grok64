@@ -39,7 +39,9 @@ import {
   setWarp,
   setMouseAnalog,
   clearMouseAnalog,
+  audioLocked,
   unlockAudio,
+  suspendAudio,
   viceJoyOptions,
   writeBootFile,
 } from "@/lib/emu/host";
@@ -491,7 +493,7 @@ export function Grok64App() {
         kickIosPaint(emuRef.current, root, "poll");
       }
       if (isIosPhone() && emuRef.current && useEmu.getState().running && !useEmu.getState().muted) {
-        unlockAudio(emuRef.current);
+        if (audioLocked(emuRef.current)) unlockAudio(emuRef.current);
       }
       if (!pendingKickRef.current) setAwaitingStart(false);
     }, 350);
@@ -1238,12 +1240,16 @@ export function Grok64App() {
   useEffect(() => {
     const vis = () => {
       if (document.visibilityState === "visible") {
-        unlockAudio(emuRef.current);
+        if (audioLocked(emuRef.current)) unlockAudio(emuRef.current);
         pokeAudioUnlock();
+      } else {
+        suspendAudio(emuRef.current);
       }
     };
     document.addEventListener("visibilitychange", vis);
-    const unlock = () => unlockAudio(emuRef.current);
+    const unlock = () => {
+      if (audioLocked(emuRef.current)) unlockAudio(emuRef.current);
+    };
     window.addEventListener("g64-unlock", unlock);
     return () => {
       document.removeEventListener("visibilitychange", vis);
