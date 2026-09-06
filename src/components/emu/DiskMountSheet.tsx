@@ -1,4 +1,4 @@
-import { Disc3, FolderOpen } from "lucide-react";
+import { Disc3, FolderOpen, Play } from "lucide-react";
 import { Drawer } from "vaul";
 import { KIND_LABEL, isDiskKind } from "@/lib/emu/formats";
 import { isWorkDisk } from "@/lib/emu/library";
@@ -8,12 +8,14 @@ import type { LibraryItem } from "@/lib/emu/types";
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onPlay: (item: LibraryItem) => void;
   onInsert: (item: LibraryItem) => void;
   onBrowse: () => void;
 }
 
-export function DiskMountSheet({ open, onOpenChange, onInsert, onBrowse }: Props) {
+export function DiskMountSheet({ open, onOpenChange, onPlay, onInsert, onBrowse }: Props) {
   const library = useEmu((s) => s.library);
+  const running = useEmu((s) => s.running);
   const disks = library.filter((i) => isDiskKind(i.kind) && !isWorkDisk(i.name));
 
   return (
@@ -40,17 +42,32 @@ export function DiskMountSheet({ open, onOpenChange, onInsert, onBrowse }: Props
                   <strong>{item.name}</strong>
                   <em className="g64-tag not-italic">{KIND_LABEL[item.kind]}</em>
                   <span>{(item.size / 1024).toFixed(0)} KB</span>
-                  <button
-                    type="button"
-                    className="g64-btn g64-btn-primary col-start-2 row-start-1"
-                    onClick={() => {
-                      onInsert(item);
-                      onOpenChange(false);
-                    }}
-                  >
-                    <Disc3 className="size-4" />
-                    Insert
-                  </button>
+                  <div className="g64-card-tools col-start-2 row-start-1">
+                    <button
+                      type="button"
+                      className="g64-btn g64-btn-primary"
+                      onClick={() => {
+                        onPlay(item);
+                        onOpenChange(false);
+                      }}
+                    >
+                      <Play className="size-4" />
+                      Run
+                    </button>
+                    {running ? (
+                      <button
+                        type="button"
+                        className="g64-btn"
+                        onClick={() => {
+                          onInsert(item);
+                          onOpenChange(false);
+                        }}
+                      >
+                        <Disc3 className="size-4" />
+                        Insert
+                      </button>
+                    ) : null}
+                  </div>
                 </div>
               ))}
             </div>

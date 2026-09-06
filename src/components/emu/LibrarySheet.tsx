@@ -1,13 +1,13 @@
 import { useRef, useState } from "react";
 import { Drawer } from "vaul";
-import { Cloud, Disc3, FolderOpen, Trash2, Upload } from "lucide-react";
+import { Cloud, Disc3, FolderOpen, Play, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { CatalogPanel } from "./CatalogPanel";
 import { BUNDLED } from "@/lib/emu/software";
 import { ACCEPT_EXT, KIND_LABEL, isDiskKind } from "@/lib/emu/formats";
-import { listLibrary, putFile, removeFile } from "@/lib/emu/library";
+import { isWorkDisk, listLibrary, putFile, removeFile } from "@/lib/emu/library";
 import { importFromUrl } from "@/lib/emu/import-url";
-import { b64ToU8, explodeArchive, toArrayBuffer } from "@/lib/emu/archive";
+import { b64ToU8, explodeArchive, pickBootFile, toArrayBuffer } from "@/lib/emu/archive";
 import { useEmu } from "@/lib/emu/store";
 import type { BundledTitle, LibraryItem } from "@/lib/emu/types";
 
@@ -32,21 +32,30 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
     setLibrary(await listLibrary());
   }
 
+  function runSaved(items: LibraryItem[]) {
+    const boot = pickBootFile(items.filter((i) => !isWorkDisk(i.name)));
+    if (!boot) return false;
+    setOpen(false);
+    onPlayLocal(boot);
+    return true;
+  }
+
   async function ingest(files: FileList | File[], source: "local" | "cloud") {
     const list = Array.from(files);
     if (!list.length) return;
     setBusy(true);
     try {
+      const saved: LibraryItem[] = [];
       for (const f of list) {
         const buf = new Uint8Array(await f.arrayBuffer());
         const parts = explodeArchive(f.name, buf);
         for (const part of parts) {
-          await putFile(part.name, toArrayBuffer(part.data), source);
+          saved.push(await putFile(part.name, toArrayBuffer(part.data), source));
         }
       }
       await refresh();
       toast.success(list.length === 1 ? `Saved ${list[0]!.name}` : `Saved ${list.length} files`);
-      setTab("library");
+      if (!runSaved(saved)) setTab("library");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not import");
     } finally {
@@ -62,13 +71,14 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
       const res = await importFromUrl({ data: { url: trimmed } });
       const bin = b64ToU8(res.base64);
       const parts = explodeArchive(res.name, bin);
+      const saved: LibraryItem[] = [];
       for (const part of parts) {
-        await putFile(part.name, toArrayBuffer(part.data), "cloud");
+        saved.push(await putFile(part.name, toArrayBuffer(part.data), "cloud"));
       }
       await refresh();
       setUrl("");
       toast.success(`Saved ${res.name}`);
-      setTab("library");
+      if (!runSaved(saved)) setTab("library");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Download failed");
     } finally {
@@ -183,15 +193,25 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
                           </span>
                         </button>
                         <div className="g64-card-tools">
+                          <button
+                            type="button"
+                            className="g64-iconbtn"
+                            aria-label={isDiskKind(item.kind) ? `Run ${item.name}` : `Play ${item.name}`}
+                            onClick={() => {
+                              setOpen(false);
+                              onPlayLocal(item);
+                            }}
+                          >
+                            <Play className="size-4" />
+                          </button>
                           {onInsert && running && isDiskKind(item.kind) ? (
                             <button
                               type="button"
-                              className="g64-btn"
+                              className="g64-iconbtn"
                               aria-label={`Insert ${item.name}`}
                               onClick={() => onInsert(item)}
                             >
                               <Disc3 className="size-4" />
-                              Insert
                             </button>
                           ) : null}
                           <button
