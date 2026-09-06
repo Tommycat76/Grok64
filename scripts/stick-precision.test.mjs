@@ -28,10 +28,21 @@ test("precision tap emits one immediate step then rests", () => {
 test("precision center hold latches solid after rest gap", () => {
   const state = createStickPrecision(20);
   state.precision = true;
-  applyStickPrecision(state, { x: 1, y: 0 }, 0);
-  applyStickPrecision(state, { x: 1, y: 0 }, PRECISION_REST_MS - 1);
-  const walk = applyStickPrecision(state, { x: 1, y: 0 }, PRECISION_REST_MS + 1);
+  applyStickPrecision(state, { x: 1, y: 0 }, 0, true);
+  applyStickPrecision(state, { x: 1, y: 0 }, PRECISION_REST_MS - 1, true);
+  const walk = applyStickPrecision(state, { x: 1, y: 0 }, PRECISION_REST_MS + 1, true);
   assert.deepEqual(walk, { x: 1, y: 0 });
-  const still = applyStickPrecision(state, { x: 1, y: 0 }, PRECISION_REST_MS + 50);
+  const still = applyStickPrecision(state, { x: 1, y: 0 }, PRECISION_REST_MS + 50, true);
   assert.deepEqual(still, { x: 1, y: 0 });
+});
+
+test("precision ring tap does not solid-latch after rest", () => {
+  const state = createStickPrecision(20);
+  state.precision = true;
+  applyStickPrecision(state, { x: 0, y: 1 }, 0, false);
+  applyStickPrecision(state, { x: 0, y: 1 }, PRECISION_REST_MS - 1, false);
+  const afterRest = applyStickPrecision(state, { x: 0, y: 1 }, PRECISION_REST_MS + 1, false);
+  assert.deepEqual(afterRest, { x: 0, y: 0 });
+  const duringTapHold = applyStickPrecision(state, { x: 0, y: 1 }, PRECISION_REST_MS + 48, false);
+  assert.deepEqual(duringTapHold, { x: 0, y: 0 });
 });
