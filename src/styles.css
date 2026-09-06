@@ -876,15 +876,17 @@ div[class*="ejs_virtual"] {
   text-size-adjust: none;
 }
 .g64-key-petscii em {
+  font-family: var(--font-petscii);
   font-style: normal;
   font-size: 8px;
   font-weight: 700;
   color: var(--color-phosphor);
+  opacity: 1;
 }
 .g64-key-petscii em[data-side="sh"] {
   font-size: 7px;
   font-weight: 700;
-  color: var(--color-fg-muted);
+  color: color-mix(in oklab, var(--color-phosphor) 90%, var(--color-fg));
 }
 .g64-key-main {
   margin-top: auto;
@@ -1463,23 +1465,26 @@ div[class*="ejs_virtual"] {
   font-size: 18px;
   border-radius: 10px;
 }
+/* Touch keyboard PETSCII — shared phone + tablet path */
+.g64-app[data-device="phone"] .g64-key-petscii,
 .g64-app[data-device="tablet"] .g64-key-petscii {
-  font-size: 9px;
+  top: 2px;
+  font-size: 12px;
+  text-shadow: none;
+  -webkit-font-smoothing: antialiased;
 }
+.g64-app[data-device="phone"] .g64-key-petscii em,
 .g64-app[data-device="tablet"] .g64-key-petscii em {
-  font-size: 9px;
+  font-family: var(--font-petscii);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-phosphor);
+  opacity: 1;
 }
+.g64-app[data-device="phone"] .g64-key-petscii em[data-side="sh"],
 .g64-app[data-device="tablet"] .g64-key-petscii em[data-side="sh"] {
-  font-size: 8px;
-}
-.g64-app[data-device="phone"] .g64-key-petscii {
-  font-size: 9px;
-}
-.g64-app[data-device="phone"] .g64-key-petscii em {
-  font-size: 9px;
-}
-.g64-app[data-device="phone"] .g64-key-petscii em[data-side="sh"] {
-  font-size: 8px;
+  font-size: 11px;
+  color: var(--color-phosphor);
 }
 .g64-app[data-device="tablet"] .g64-kb-bar .g64-key {
   min-height: 56px;
