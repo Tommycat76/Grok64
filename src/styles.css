@@ -492,9 +492,9 @@ div[class*="ejs_virtual"] {
 
 .g64-controls {
   position: absolute;
-  left: 8px;
-  right: 8px;
-  bottom: max(52px, calc(env(safe-area-inset-bottom) + 36px));
+  left: max(8px, env(safe-area-inset-left, 0px));
+  right: max(8px, env(safe-area-inset-right, 0px));
+  bottom: max(56px, calc(env(safe-area-inset-bottom, 0px) + 44px));
   z-index: 40;
   display: grid;
   grid-template-columns: 1fr auto;
@@ -906,6 +906,10 @@ div[class*="ejs_virtual"] {
   margin-top: auto;
   font-size: inherit;
   line-height: 1;
+  z-index: 1;
+}
+.g64-key[data-petscii="true"] .g64-key-main {
+  margin-top: 10px;
 }
 .g64-key.mod {
   flex: 1.15 1 0;
@@ -936,8 +940,7 @@ div[class*="ejs_virtual"] {
   padding: 0 48px;
 }
 
-.g64-app[data-kb="true"] .g64-controls,
-.g64-app[data-device="tablet"] .g64-controls {
+.g64-app[data-kb="true"] .g64-controls {
   position: relative;
   left: auto;
   right: auto;
@@ -956,8 +959,7 @@ div[class*="ejs_virtual"] {
   background: color-mix(in oklab, var(--color-chassis) 82%, transparent);
   border-top: 1px solid color-mix(in oklab, var(--color-fg) 10%, transparent);
 }
-.g64-app[data-kb="true"] .g64-controls[data-layout-edit="true"],
-.g64-app[data-device="tablet"] .g64-controls[data-layout-edit="true"] {
+.g64-app[data-kb="true"] .g64-controls[data-layout-edit="true"] {
   display: block;
   min-height: 148px;
 }
@@ -971,8 +973,7 @@ div[class*="ejs_virtual"] {
   min-height: 0;
   min-width: 0;
 }
-.g64-app[data-kb="true"] .g64-kb,
-.g64-app[data-device="tablet"] .g64-kb {
+.g64-app[data-kb="true"] .g64-kb {
   position: relative;
   left: auto;
   right: auto;
@@ -980,6 +981,22 @@ div[class*="ejs_virtual"] {
   z-index: 6;
   flex: 0 0 auto;
   background: color-mix(in oklab, var(--color-bg) 92%, transparent);
+}
+.g64-app[data-device="tablet"]:not([data-kb="true"]) .g64-controls {
+  bottom: max(64px, calc(env(safe-area-inset-bottom, 0px) + 48px));
+}
+.g64-app[data-device="tablet"]:not([data-kb="true"]) .g64-stick {
+  width: 168px;
+  height: 168px;
+}
+.g64-app[data-device="phone"]:not([data-kb="true"]) .g64-stage {
+  max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 168px);
+}
+.g64-app[data-device="tablet"]:not([data-kb="true"]) .g64-stage {
+  max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 188px);
+}
+.g64-app[data-booting="true"] .g64-controls {
+  opacity: 0.72;
 }
 .g64-app[data-device="tablet"]:not([data-kb="true"]) .g64-controls {
   padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
@@ -1066,6 +1083,9 @@ div[class*="ejs_virtual"] {
   text-transform: uppercase;
   color: var(--color-fg-subtle);
   align-self: start;
+}
+.g64-tag-region {
+  color: var(--color-phosphor);
 }
 .g64-card-tools {
   grid-column: 2;
@@ -1494,26 +1514,30 @@ div[class*="ejs_virtual"] {
   font-size: 18px;
   border-radius: 10px;
 }
-/* Touch keyboard PETSCII — shared phone + tablet path (restored from 66a5091) */
+/* Touch keyboard PETSCII — corner glyphs from PR #4 / 746d44d */
 .g64-app[data-device="phone"] .g64-key-petscii,
 .g64-app[data-device="tablet"] .g64-key-petscii {
   top: 2px;
-  font-size: 12px;
-  text-shadow: none;
+  font-size: 9px;
+  text-shadow: 0 0 3px color-mix(in oklab, var(--color-phosphor) 55%, transparent);
   -webkit-font-smoothing: antialiased;
 }
 .g64-app[data-device="phone"] .g64-key-petscii em,
 .g64-app[data-device="tablet"] .g64-key-petscii em {
   font-family: var(--font-petscii);
-  font-size: 12px;
+  font-size: 9px;
   font-weight: 700;
   color: var(--color-phosphor);
   opacity: 1;
 }
 .g64-app[data-device="phone"] .g64-key-petscii em[data-side="sh"],
 .g64-app[data-device="tablet"] .g64-key-petscii em[data-side="sh"] {
-  font-size: 11px;
-  color: var(--color-phosphor);
+  font-size: 8px;
+  color: color-mix(in oklab, var(--color-phosphor) 90%, var(--color-fg));
+}
+.g64-app[data-device="phone"] .g64-key[data-petscii="true"] .g64-key-main,
+.g64-app[data-device="tablet"] .g64-key[data-petscii="true"] .g64-key-main {
+  margin-top: 11px;
 }
 .g64-app[data-device="phone"] .g64-key,
 .g64-app[data-device="tablet"] .g64-key {

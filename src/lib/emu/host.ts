@@ -1,5 +1,6 @@
 import { detectOs, isIos, isIosPhone, isTouchMobile } from "./detect";
 import { sidOptions } from "./machines";
+import { hasJiffyPair, romFileMap } from "./roms";
 import { buildViceExtras, workDiskFor } from "./vice-extras";
 import type { DriveMode, IecDrive, IecUnit, JoyPort, ReuSize, ScpuSimm, SidEngine, SidModel } from "./types";
 import { RETRO_BTN } from "./types";
@@ -393,15 +394,13 @@ function patchEjsInput() {
     const orig = proto.getRetroArchCfg;
     proto.getRetroArchCfg = function patchedCfg(this: unknown) {
       const iosAudio = isIosPhone()
-        ? "audio_latency = 256\n" + "audio_block_frames = 512\n" + "audio_out_rate = 48000\n"
+        ? "audio_latency = 320\n" + "audio_block_frames = 512\n" + "audio_out_rate = 48000\n"
         : isTouchMobile()
-          ? "audio_latency = 128\n" + "audio_block_frames = 256\n"
+          ? "audio_latency = 224\n" + "audio_block_frames = 384\n" + "audio_out_rate = 48000\n"
           : "audio_latency = 160\n";
-      const sync = isIosPhone()
-        ? "audio_sync = true\n" + "audio_max_timing_skew = 0.05\n" + "audio_rate_control = true\n"
-        : isTouchMobile()
-          ? "audio_sync = false\n" + "video_frame_delay = 0\n"
-          : "audio_sync = true\n" + "audio_max_timing_skew = 0.05\n" + "audio_rate_control = true\n";
+      const sync = isTouchMobile()
+        ? "audio_sync = true\n" + "audio_max_timing_skew = 0.08\n" + "audio_rate_control = true\n"
+        : "audio_sync = true\n" + "audio_max_timing_skew = 0.05\n" + "audio_rate_control = true\n";
       return (
         orig.call(this) +
         "video_gpu_screenshot = false\n" +
@@ -883,6 +882,7 @@ export function setWarp(emu: EjsInstance | null, on: boolean) {
 }
 
 export function destroyEmu(emu: EjsInstance | null, el: HTMLElement | null) {
+  resetFitCache();
   keyboardArmed = false;
   try {
     emu?.gameManager?.toggleMainLoop(0);
@@ -918,8 +918,13 @@ export function destroyEmu(emu: EjsInstance | null, el: HTMLElement | null) {
 }
 
 let fitting = false;
+let lastFitBox = { pw: 0, ph: 0, bw: 0, bh: 0 };
 
-export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null) {
+export function resetFitCache() {
+  lastFitBox = { pw: 0, ph: 0, bw: 0, bh: 0 };
+}
+
+export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = false) {
   if (!el || fitting) return;
   fitting = true;
   const canvas =
@@ -931,6 +936,12 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null) {
       const cw = Math.max(parent.clientWidth, el.clientWidth, 200);
       const ch = Math.max(parent.clientHeight, el.clientHeight, 160);
       const touchMobile = isTouchMobile();
+      const boxStable =
+        !force &&
+        Math.abs(cw - lastFitBox.pw) < 3 &&
+        Math.abs(ch - lastFitBox.ph) < 3 &&
+        lastFitBox.bw >= 384 &&
+        lastFitBox.bh >= 272;
       // Touch mobile: DPR 1 keeps fill-rate sane on Onn tablets and iPhone alike.
       const dpr = touchMobile ? 1 : Math.min(window.devicePixelRatio || 1, 2);
       let bw = Math.max(384, Math.round(cw * dpr));
@@ -944,9 +955,12 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null) {
           bh = Math.max(272, Math.round(bh * scale));
         }
       }
-      if (canvas.width < 64 || canvas.height < 64 || touchMobile) {
+      if (!boxStable && (canvas.width < 64 || canvas.height < 64 || touchMobile)) {
         canvas.width = bw;
         canvas.height = bh;
+        lastFitBox = { pw: cw, ph: ch, bw, bh };
+      } else if (!boxStable) {
+        lastFitBox = { pw: cw, ph: ch, bw: canvas.width, bh: canvas.height };
       }
       canvas.style.width = "100%";
       canvas.style.height = "100%";
@@ -1033,6 +1047,22 @@ export function injectRoms(emu: EjsInstance | null, files: Record<string, Uint8A
     }
   }
   return count;
+}
+
+/** Inject Jiffy ROMs and flip vice_jiffydos — returns true when both ROMs are present. */
+export async function applyJiffyDos(emu: EjsInstance | null, want: boolean): Promise<boolean> {
+  if (!emu) return false;
+  const on = want && (await hasJiffyPair());
+  if (on) {
+    try {
+      const roms = await romFileMap();
+      if (Object.keys(roms).length) injectRoms(emu, roms);
+    } catch {
+      /* optional */
+    }
+  }
+  applyRuntimeOptions(emu, { vice_jiffydos: on ? "enabled" : "disabled" });
+  return on;
 }
 
 export function injectSdWork(

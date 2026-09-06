@@ -7,7 +7,7 @@ const server = await createServer({
   appType: "custom",
   logLevel: "error",
 });
-const { detectSoftwareStandard, resolveSoftwareVideo, detectJoyPort } = await server.ssrLoadModule("/src/lib/emu/region.ts");
+const { detectSoftwareStandard, resolveSoftwareVideo, detectJoyPort, regionBadge } = await server.ssrLoadModule("/src/lib/emu/region.ts");
 const { isWorkDiskImage, d64DiskName, bootFileName } = await server.ssrLoadModule("/src/lib/emu/formats.ts");
 const { pickBootFile, isJunkRelease } = await server.ssrLoadModule("/src/lib/emu/archive.ts");
 await server.close();
@@ -138,6 +138,12 @@ test("pickBootFile prefers original Boulder Dash over kit, trainer and A Wally",
   assert.equal(pickBootFile(files)?.name, "Boulder Dash (1984)(First Star Software).d64");
   assert.equal(isJunkRelease("Boulder Dash Construction Kit.d64"), true);
   assert.equal(isJunkRelease("Boulder Dash (1984)(First Star Software).d64"), false);
+});
+
+test("region badges for catalog rows", () => {
+  assert.equal(regionBadge("Paradroid (Europe).d64"), "PAL");
+  assert.equal(regionBadge("Summer Games (USA).d64"), "NTSC");
+  assert.equal(regionBadge("random.d64"), null);
 });
 
 test("Boulder Dash family plugs into CIA port 1, everything else port 2", () => {
