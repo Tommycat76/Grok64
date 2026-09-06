@@ -3,9 +3,8 @@ import test from "node:test";
 import { createServer } from "vite";
 
 const server = await createServer({ server: { middlewareMode: true }, appType: "custom" });
-const { swapBootDisk, bootFileOf, mountDiskOnUnit, clearUnitMounts } = await server.ssrLoadModule(
-  "/src/lib/emu/host.ts",
-);
+const { swapBootDisk, bootFileOf, mountDiskOnUnit, clearUnitMounts, attachAutostartDisk, applyIecUnit } =
+  await server.ssrLoadModule("/src/lib/emu/host.ts");
 await server.close();
 
 function mockFs(files = new Map()) {
@@ -22,10 +21,16 @@ function mockFs(files = new Map()) {
   };
 }
 
-function mockEmu(fileName, files) {
+function mockEmu(fileName, files, vars = new Map()) {
   return {
     fileName,
-    gameManager: { FS: mockFs(files) },
+    gameManager: {
+      FS: mockFs(files),
+      setVariable: (k, v) => {
+        vars.set(k, v);
+      },
+    },
+    __vars: vars,
   };
 }
 
@@ -38,6 +43,20 @@ test("swapBootDisk overwrites current boot file for autostart", () => {
   assert.equal(bootFileOf(emu), "WORK DISK.D64");
   assert.equal(files.get("WORK DISK.D64")?.[0], 0x42);
   assert.equal(files.has("Paradroid.d64"), false);
+});
+
+test("attachAutostartDisk forces 1541 unit 8 even after SD2IEC 8_fs", () => {
+  clearUnitMounts();
+  const vars = new Map([["vice_work_disk", "8_fs"]]);
+  const files = new Map([["WORK DISK.D64", new Uint8Array([1])]]);
+  const emu = mockEmu("WORK DISK.D64", files, vars);
+  applyIecUnit(emu, "sd2iec", 8);
+  assert.equal(vars.get("vice_work_disk"), "8_fs");
+  const game = new Uint8Array(174848).fill(0x42);
+  assert.equal(attachAutostartDisk(emu, game, "Burger_Time.d64", "1541", 8), true);
+  assert.equal(vars.get("vice_work_disk"), "8_d64");
+  assert.equal(bootFileOf(emu), "WORK DISK.D64");
+  assert.equal(files.get("WORK DISK.D64")?.[0], 0x42);
 });
 
 test("mountDiskOnUnit keeps boot file when pruning extras", () => {

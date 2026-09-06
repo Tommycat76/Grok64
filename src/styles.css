@@ -1490,6 +1490,32 @@ div[class*="ejs_virtual"] {
 .g64-app[data-device="tablet"] .g64-bezel {
   padding: 14px;
   border-radius: var(--radius-2xl);
+  container-type: size;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+/* Largest 384/272 CRT that fits under the log / above the locked keyboard. */
+.g64-app[data-device="tablet"] .g64-screen {
+  flex: 0 1 auto;
+  width: min(100%, calc(100cqh * 384 / 272));
+  height: auto;
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 384 / 272;
+}
+.g64-app[data-device="tablet"] .g64-screen #grok64-player,
+.g64-app[data-device="tablet"] .g64-screen #grok64-player > div,
+.g64-app[data-device="tablet"] .g64-screen canvas {
+  object-fit: contain !important;
+  object-position: center !important;
+}
+.g64-app[data-device="tablet"][data-kb="true"] .g64-log {
+  max-height: 3.4em;
+  margin-bottom: 4px;
+}
+.g64-app[data-device="tablet"][data-kb="true"] .g64-stage {
+  padding-bottom: 4px;
 }
 .g64-app[data-device="tablet"] .g64-controls {
   min-height: 0;
