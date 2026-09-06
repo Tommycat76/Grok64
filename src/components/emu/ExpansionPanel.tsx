@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { ROM_ACCEPT, SD_IMAGE_ACCEPT } from "@/lib/emu/formats";
 import { formatBytes, hasJiffyPair, listRoms, prefetchBundledRoms, putRom, removeRom, ROM_CATALOG } from "@/lib/emu/roms";
 import {
   addSdFile,
@@ -71,7 +72,7 @@ export function ExpansionPanel() {
         <input
           ref={romInput}
           type="file"
-          accept=".bin,.rom,.256,.img"
+          accept={ROM_ACCEPT}
           hidden
           onChange={async (e) => {
             const file = e.target.files?.[0];
@@ -198,7 +199,7 @@ export function ExpansionPanel() {
             onClick={() => {
               const input = document.createElement("input");
               input.type = "file";
-              input.accept = ".img,.dsk,.bin";
+              input.accept = SD_IMAGE_ACCEPT;
               input.onchange = async () => {
                 const file = input.files?.[0];
                 if (!file) return;

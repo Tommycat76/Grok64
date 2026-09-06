@@ -12,10 +12,11 @@ export interface ViceExtrasInput {
   jiffy?: boolean;
 }
 
-/** VICE libretro `vice_work_disk` value for SD2IEC, CMD HD, or 1581 on units 8–11. */
+/** VICE libretro `vice_work_disk` value for IEC units 8–11 (1541/1581/SD2IEC/CMD HD). */
 export function workDiskFor(iec: IecDrive, unit: IecUnit = 8): string {
   if (iec === "sd2iec" || iec === "cmdhd") return `${unit}_fs`;
   if (iec === "1581") return `${unit}_d81`;
+  if (iec === "1541") return `${unit}_d64`;
   return "disabled";
 }
 
@@ -23,7 +24,7 @@ export function workDiskFor(iec: IecDrive, unit: IecUnit = 8): string {
 export function buildViceExtras(input: ViceExtrasInput): Record<string, string> {
   const opts: Record<string, string> = {
     vice_ram_expansion_unit: input.reu,
-    vice_floppy_multidrive: input.iec === "1541" ? "disabled" : "enabled",
+    vice_floppy_multidrive: "enabled",
   };
 
   const unit = input.iecUnit ?? 8;

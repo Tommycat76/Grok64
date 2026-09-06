@@ -178,14 +178,14 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
                   </button>
                 ))}
               </div>
-              {s.iecDrive === "sd2iec" || s.iecDrive === "cmdhd" || s.iecDrive === "1581" ? (
+              {s.iecDrive === "1541" || s.iecDrive === "1581" || s.iecDrive === "sd2iec" || s.iecDrive === "cmdhd" ? (
                 <div className="g64-field" style={{ marginTop: 8 }}>
                   <label>Drive unit</label>
                   <IecUnitSeg value={s.iecUnit} onChange={(u) => s.setIecUnit(u)} />
                 </div>
               ) : null}
               <p className="text-xs text-fg-subtle">
-                SD2IEC / CMD HD mount on the unit you pick (`LOAD"$",8` → use 8, or 9–11 for a second device). CMD HD still wants your Boot ROM 2.80. 1581 for .d81. C64 OS: kit above, then put the system files on partition 0 in folder os.
+                1541 / 1581 / SD2IEC / CMD HD mount on the unit you pick (`LOAD"$",8` → use 8, or 9–11 for a second device). One disk per unit — remounting replaces the prior image on that drive. CMD HD still wants your Boot ROM 2.80.
               </p>
             </div>
 

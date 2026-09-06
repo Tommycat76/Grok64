@@ -40,6 +40,7 @@ export function needsScpu(name: string): boolean {
 function workDiskFor(iec: IecDrive, unit: IecUnit = 8): string {
   if (iec === "sd2iec" || iec === "cmdhd") return `${unit}_fs`;
   if (iec === "1581") return `${unit}_d81`;
+  if (iec === "1541") return `${unit}_d64`;
   return "disabled";
 }
 
@@ -57,7 +58,7 @@ export function viceExpandOptions(opts: {
   const unit = opts.iecUnit ?? 8;
   const o: Record<string, string> = {
     vice_ram_expansion_unit: opts.reu,
-    vice_floppy_multidrive: opts.iec === "1541" ? "disabled" : "enabled",
+    vice_floppy_multidrive: "enabled",
   };
   if (opts.iec === "sd2iec" || opts.iec === "cmdhd") {
     o.vice_work_disk = workDiskFor(opts.iec, unit);

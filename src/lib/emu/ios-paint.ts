@@ -364,6 +364,7 @@ export function stopIosViceMirror() {
   mirrorActive = false;
   mirrorPainted = false;
   mirrorEmu = null;
+  mirrorLastCapture = 0;
   setMirrorVisible(null, false);
   const el = document.querySelector("#grok64-player .g64-ios-mirror");
   el?.remove();
@@ -386,6 +387,35 @@ function ensureMirrorCanvas(root: HTMLElement | null): HTMLCanvasElement | null 
   canvas.style.height = "100%";
   canvas.style.display = "block";
   return canvas;
+}
+
+async function blitGlToMirror(root: HTMLElement | null): Promise<boolean> {
+  const src = playerCanvas(root ?? null);
+  const canvas = ensureMirrorCanvas(root);
+  if (!src || !canvas || src.width < 8 || src.height < 8) return false;
+  try {
+    const gl = cachedGl(src);
+    if (!gl) return false;
+    gl.finish?.();
+    const w = src.width;
+    const h = src.height;
+    const buf = new Uint8Array(w * h * 4);
+    gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+    if (canvas.width !== w) canvas.width = w;
+    if (canvas.height !== h) canvas.height = h;
+    const ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) return false;
+    const imageData = ctx.createImageData(w, h);
+    const row = w * 4;
+    for (let y = 0; y < h; y++) {
+      imageData.data.set(buf.subarray((h - 1 - y) * row, (h - y) * row), y * row);
+    }
+    ctx.putImageData(imageData, 0, 0);
+    setMirrorVisible(root, true);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function blitPngToMirror(
@@ -461,6 +491,10 @@ function signalMirrorPainted(onFirstPaint?: (() => void) | null) {
  * Blit VICE screenshots to a 2D overlay — works on CriOS without user gesture
  * when preserveDrawingBuffer WebGL stays black on screen.
  */
+let mirrorLastCapture = 0;
+const MIRROR_PAINT_MS = 20;
+const MIRROR_GAME_MS = 33;
+
 export function startIosViceMirror(
   emu: EjsInstance | null,
   root: HTMLElement | null,
@@ -481,7 +515,7 @@ export function startIosViceMirror(
   let ticks = 0;
   let paintedCb = onFirstPaint ?? null;
 
-  const capture = () => {
+  const captureScreenshot = () => {
     if (gen !== mirrorGen || pending) return;
     pending = true;
     void emu
@@ -490,14 +524,8 @@ export function startIosViceMirror(
         if (gen !== mirrorGen) return;
         const u8 = copyBytes(raw);
         if (!u8 || !pngLooksValid(u8)) return;
-        if (mirrorPainted) {
-          const ok = await blitPngToMirror(root, u8, null, true);
-          if (!ok) return;
-          signalMirrorPainted(null);
-          return;
-        }
         const m = await frameImageMetrics(u8);
-        if (!frameLooksReady(m)) return;
+        if (!mirrorPainted && !frameLooksReady(m)) return;
         const ok = await blitPngToMirror(root, u8, m, true);
         if (!ok) return;
         signalMirrorPainted(paintedCb);
@@ -515,12 +543,25 @@ export function startIosViceMirror(
     if (gen !== mirrorGen) return;
     mirrorRaf = requestAnimationFrame(tick);
     ticks += 1;
-    const cadence = mirrorPainted ? 4 : 1;
-    if (ticks % cadence === 0) capture();
-    // CriOS WebGL never composites reliably — keep the VICE mirror, no native handoff.
+    const now = performance.now();
+ const minGap = mirrorPainted ? MIRROR_GAME_MS : MIRROR_PAINT_MS;
+    if (now - mirrorLastCapture < minGap) return;
+    if (mirrorPainted) {
+      void blitGlToMirror(root).then((ok) => {
+        if (ok) {
+          mirrorLastCapture = performance.now();
+          signalMirrorPainted(null);
+        }
+      });
+      return;
+    }
+    if (ticks % 2 === 0) {
+      mirrorLastCapture = now;
+      captureScreenshot();
+    }
   };
   mirrorRaf = requestAnimationFrame(tick);
-  capture();
+  captureScreenshot();
 }
 
 type PaintTarget = { emu: EjsInstance | null; root: HTMLElement | null };
@@ -583,7 +624,7 @@ export function startIosPaintWatchdog(
 
   const gen = watchdogGen;
   let frames = 0;
-  const maxFrames = resolved.maxFrames ?? 480;
+  const maxFrames = resolved.maxFrames ?? 180;
   const started = performance.now();
 
   const tick = () => {

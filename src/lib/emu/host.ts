@@ -1,6 +1,6 @@
-import { detectOs, isIosPhone } from "./detect";
+import { detectOs, isIos, isIosPhone, isTouchMobile } from "./detect";
 import { sidOptions } from "./machines";
-import { buildViceExtras } from "./vice-extras";
+import { buildViceExtras, workDiskFor } from "./vice-extras";
 import type { DriveMode, IecDrive, IecUnit, JoyPort, ReuSize, ScpuSimm, SidEngine, SidModel } from "./types";
 import { RETRO_BTN } from "./types";
 import { glog } from "./debug";
@@ -117,6 +117,7 @@ let userJoyPort: JoyPort = 2;
 function preserveWebglBuffer() {
   if (webglPatched || typeof HTMLCanvasElement === "undefined") return;
   webglPatched = true;
+  const ios = isIos();
   const proto = HTMLCanvasElement.prototype;
   const orig = proto.getContext;
   proto.getContext = function patchedContext(
@@ -125,15 +126,11 @@ function preserveWebglBuffer() {
     attrs?: Record<string, unknown>,
   ) {
     if (type === "webgl" || type === "webgl2" || type === "experimental-webgl") {
-      // iOS WebKit will not composite the C64 framebuffer without preserveDrawingBuffer
-      // (VICE screenshot succeeds while the CRT canvas stays black). Costs extra VRAM but
-      // x64sc + capped REU on iPhone is stable; skipping this regresses blank CRT on iOS.
-      return orig.call(this, type, {
-        ...attrs,
-        antialias: false,
-        alpha: false,
-        preserveDrawingBuffer: true,
-      });
+      // iOS WebKit needs preserveDrawingBuffer for CRT compositing; Android tablets do not
+      // and pay a large fill-rate cost when it is forced on every WebGL context.
+      const merged: Record<string, unknown> = { ...attrs, antialias: false, alpha: false };
+      if (ios) merged.preserveDrawingBuffer = true;
+      return orig.call(this, type, merged);
     }
     return orig.call(this, type, attrs as never);
   } as typeof proto.getContext;
@@ -397,17 +394,23 @@ function patchEjsInput() {
     proto.getRetroArchCfg = function patchedCfg(this: unknown) {
       const iosAudio = isIosPhone()
         ? "audio_latency = 256\n" + "audio_block_frames = 512\n" + "audio_out_rate = 48000\n"
-        : "audio_latency = 160\n";
+        : isTouchMobile()
+          ? "audio_latency = 128\n" + "audio_block_frames = 256\n"
+          : "audio_latency = 160\n";
+      const sync = isIosPhone()
+        ? "audio_sync = true\n" + "audio_max_timing_skew = 0.05\n" + "audio_rate_control = true\n"
+        : isTouchMobile()
+          ? "audio_sync = false\n" + "video_frame_delay = 0\n"
+          : "audio_sync = true\n" + "audio_max_timing_skew = 0.05\n" + "audio_rate_control = true\n";
       return (
         orig.call(this) +
         "video_gpu_screenshot = false\n" +
+        "video_vsync = true\n" +
         "autosave_interval = 0\n" +
         "savestate_auto_load = false\n" +
         "savestate_auto_save = false\n" +
         iosAudio +
-        "audio_sync = true\n" +
-        "audio_max_timing_skew = 0.05\n" +
-        "audio_rate_control = true\n" +
+        sync +
         'input_libretro_device_p1 = "1"\n' +
         'input_libretro_device_p2 = "0"\n' +
         "input_player1_analog_dpad_mode = 0\n" +
@@ -927,11 +930,21 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null) {
       const parent = canvas.parentElement ?? el;
       const cw = Math.max(parent.clientWidth, el.clientWidth, 200);
       const ch = Math.max(parent.clientHeight, el.clientHeight, 160);
-      // iPhone: DPR 1 limits VRAM with preserveDrawingBuffer (tab-kill mitigation).
-      const dpr = isIosPhone() ? 1 : Math.min(window.devicePixelRatio || 1, 2);
-      const bw = Math.max(384, Math.round(cw * dpr));
-      const bh = Math.max(272, Math.round(ch * dpr));
-      if (canvas.width < 64 || canvas.height < 64) {
+      const touchMobile = isTouchMobile();
+      // Touch mobile: DPR 1 keeps fill-rate sane on Onn tablets and iPhone alike.
+      const dpr = touchMobile ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+      let bw = Math.max(384, Math.round(cw * dpr));
+      let bh = Math.max(272, Math.round(ch * dpr));
+      if (touchMobile) {
+        const maxW = 960;
+        const maxH = 600;
+        if (bw > maxW || bh > maxH) {
+          const scale = Math.min(maxW / bw, maxH / bh);
+          bw = Math.max(384, Math.round(bw * scale));
+          bh = Math.max(272, Math.round(bh * scale));
+        }
+      }
+      if (canvas.width < 64 || canvas.height < 64 || touchMobile) {
         canvas.width = bw;
         canvas.height = bh;
       }
@@ -1114,6 +1127,67 @@ export function bootFileOf(emu: EjsInstance | null): string | null {
   const media = readMountedMedia(emu);
   const disk = media.find((m) => /\.d64$/i.test(m.name)) ?? media[0];
   return disk?.name ?? null;
+}
+
+const unitMounts = new Map<IecUnit, string>();
+const WORK_DISK_NAMES = new Set(["WORK DISK.D64", "work disk.d64"]);
+
+export function clearUnitMounts() {
+  unitMounts.clear();
+}
+
+export function applyIecUnit(emu: EjsInstance | null, iec: IecDrive, unit: IecUnit) {
+  const work = workDiskFor(iec, unit);
+  if (work !== "disabled") {
+    applyRuntimeOptions(emu, { vice_work_disk: work });
+  }
+}
+
+function removeMediaFile(FS: EmscriptenFS, name: string) {
+  const paths = [name, name.startsWith("/") ? name : `/${name}`];
+  for (const p of paths) {
+    try {
+      FS.unlink?.(p);
+    } catch {
+      /* missing */
+    }
+  }
+}
+
+/** Enforce one disk image per IEC unit; remounting replaces the prior disk on that unit. */
+export function mountDiskOnUnit(
+  emu: EjsInstance | null,
+  unit: IecUnit,
+  data: Uint8Array,
+  filename: string,
+  iec: IecDrive = "1541",
+): boolean {
+  const FS = fsOf(emu);
+  if (!FS?.writeFile) return false;
+  const base = filename.replace(/^\//, "");
+  const prev = unitMounts.get(unit);
+  if (prev && prev !== base) removeMediaFile(FS, prev);
+  for (const [u, name] of unitMounts) {
+    if (u !== unit && name === base) unitMounts.delete(u);
+  }
+  applyIecUnit(emu, iec, unit);
+  const wrote = writeBootFile(emu, data, base);
+  if (wrote) {
+    unitMounts.set(unit, base);
+    pruneExtraDisks(emu);
+  }
+  return wrote;
+}
+
+function pruneExtraDisks(emu: EjsInstance | null) {
+  const FS = fsOf(emu);
+  if (!FS?.readdir || !FS.unlink) return;
+  const keep = new Set([...unitMounts.values(), ...WORK_DISK_NAMES]);
+  for (const m of readMountedMedia(emu)) {
+    if (!keep.has(m.name) && /\.(d64|d71|d81|g64|g71)$/i.test(m.name)) {
+      removeMediaFile(FS, m.name);
+    }
+  }
 }
 
 export function coreHasFs(emu: EjsInstance | null): boolean {

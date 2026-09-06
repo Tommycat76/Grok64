@@ -67,6 +67,16 @@ export function isIosPhone(): boolean {
   return /iPhone|iPod/.test(ua);
 }
 
+/** True on any iOS browser (iPhone, iPad, iPod). */
+export function isIos(): boolean {
+  return detectOs() === "ios";
+}
+
+/** Phone or tablet with coarse touch — shared mobile perf + play-lock path. */
+export function isTouchMobile(device: DeviceClass = detectDevice()): boolean {
+  return device === "phone" || device === "tablet";
+}
+
 export function detectPreferFast(device: DeviceClass = detectDevice()): boolean {
   if (typeof navigator === "undefined") return false;
   const ua = uaString();

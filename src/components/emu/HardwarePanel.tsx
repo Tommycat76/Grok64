@@ -17,6 +17,7 @@ import {
   type SdPartition,
 } from "@/lib/emu/hardware";
 import { dosCommand, exportSdImage } from "@/lib/emu/sd2iec";
+import { ROM_ACCEPT, SD_IMAGE_ACCEPT } from "@/lib/emu/formats";
 import { parseMbrDisk, fromP00 } from "@/lib/emu/fat16";
 
 function kb(n: number) {
@@ -91,7 +92,7 @@ export function HardwarePanel() {
         <input
           ref={fileRef}
           type="file"
-          accept=".bin,.rom,.256,.img"
+          accept={ROM_ACCEPT}
           hidden
           onChange={async (e) => {
             const file = e.target.files?.[0];
@@ -221,7 +222,7 @@ export function HardwarePanel() {
             onClick={() => {
               const inp = document.createElement("input");
               inp.type = "file";
-              inp.accept = ".img,.dsk,.bin";
+              inp.accept = SD_IMAGE_ACCEPT;
               inp.onchange = async () => {
                 const f = inp.files?.[0];
                 if (!f) return;
