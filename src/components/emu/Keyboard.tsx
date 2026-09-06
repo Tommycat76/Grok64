@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { C64_ROWS, dispatchC64Key, type C64Key } from "@/lib/emu/keys";
 
 const BY_ID = new Map<string, C64Key>();
@@ -27,6 +27,7 @@ function KeyBtn({
   className,
   held,
   glyph,
+  petscii,
   onDown,
   onUp,
 }: {
@@ -34,9 +35,11 @@ function KeyBtn({
   className?: string;
   held: boolean;
   glyph: string;
+  petscii?: boolean;
   onDown: (k: C64Key) => void;
   onUp: (k: C64Key) => void;
 }) {
+  const downAt = useRef(0);
   return (
     <button
       type="button"
@@ -46,12 +49,22 @@ function KeyBtn({
       onPointerDown={(e) => {
         e.preventDefault();
         (e.currentTarget as HTMLButtonElement).setPointerCapture(e.pointerId);
+        downAt.current = Date.now();
         onDown(k);
       }}
-      onPointerUp={() => onUp(k)}
+      onPointerUp={() => {
+        const delay = Math.max(0, 70 - (Date.now() - downAt.current));
+        window.setTimeout(() => onUp(k), delay);
+      }}
       onPointerCancel={() => onUp(k)}
     >
-      {glyph}
+      {petscii ? (
+        <span className="g64-key-petscii" aria-hidden="true">
+          <em data-side="cbm">{k.gfx ?? ""}</em>
+          <em data-side="sh">{k.shift && k.shift.length <= 2 ? k.shift : ""}</em>
+        </span>
+      ) : null}
+      <span className="g64-key-main">{glyph}</span>
     </button>
   );
 }
@@ -135,12 +148,14 @@ export function C64Keyboard() {
           ) : null}
           {row.map((id) => {
             const k = key(id);
+            const showPetscii = !sym && !k.modifier && Boolean(k.gfx || (k.shift && k.shift.length <= 2));
             return (
               <KeyBtn
                 key={k.id}
                 k={k}
                 held={held(k)}
                 glyph={glyph(k)}
+                petscii={showPetscii}
                 onDown={down}
                 onUp={up}
               />
