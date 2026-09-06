@@ -525,6 +525,7 @@ export function Grok64App() {
         onPainted?.();
       },
       onTimeout: () => {
+        if (useEmu.getState().booting || playLockRef.current) return;
         glog("ios-resume-needed");
         setIosResume(true);
       },
