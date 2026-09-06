@@ -1,12 +1,12 @@
 export type StickGate = "4way" | "8way";
 export type StickVec = { x: number; y: number };
 
-/** Must push this far from rest to leave center. ~45% of the pad radius. */
-export const STICK_ENGAGE = 0.45;
+/** Must push this far from rest to leave center. ~40% of the pad radius (perimeter tap). */
+export const STICK_ENGAGE = 0.4;
 /** Once held, stay on until the thumb is this close to center. */
-export const STICK_RELEASE = 0.2;
+export const STICK_RELEASE = 0.18;
 /** Second axis (diagonal) needs a clear corner push so 22° off-axis stays cardinal. */
-export const STICK_DIAGONAL = 0.58;
+export const STICK_DIAGONAL = 0.55;
 
 export function ciaPeriodMs(standard: string | undefined): number {
   return standard === "ntsc" ? 1000 / 60 : 1000 / 50;
@@ -114,9 +114,9 @@ export class CiaStick {
     const heldFor = now - this.holdStart;
     const p = this.periodMs;
     const pulse = p * 2;
-    const delay = 220;
+    const delay = 150;
     const crawlOn = p;
-    const crawlOff = p * 10;
+    const crawlOff = p * 6;
     const cycle = crawlOn + crawlOff;
 
     if (heldFor < pulse) {

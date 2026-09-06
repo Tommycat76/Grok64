@@ -1,9 +1,20 @@
 // @ts-nocheck
 /** 4-way / 8-way stick snap + precision gate for Cardinals mode (Paradroid, Boulder Dash). */
 
-const OUTER_DEAD = 0.45;
-const INNER_DEAD = 0.2;
-const AXIS_HOLD = 0.58;
+/** Perimeter tap: engage direction from rest (fraction of stick radius). */
+export const STICK_OUTER_DEAD = 0.4;
+/** Center release: return to neutral when thumb relaxes inside this radius. */
+export const STICK_INNER_DEAD = 0.18;
+/** Second axis for diagonals — keeps 22° off-axis pushes cardinal. */
+export const STICK_AXIS_HOLD = 0.55;
+/** Gap after the first step before crawl repeat (edge tap should finish before this). */
+export const PRECISION_REST_MS = 150;
+/** Crawl off-time multiplier (× frame period) while holding in the middle ring. */
+export const PRECISION_CRAWL_OFF_MULT = 6;
+
+const OUTER_DEAD = STICK_OUTER_DEAD;
+const INNER_DEAD = STICK_INNER_DEAD;
+const AXIS_HOLD = STICK_AXIS_HOLD;
 
 function axisStep(value, prev, outer = INNER_DEAD) {
   if (Math.abs(value) < (prev === 0 ? outer : INNER_DEAD)) return 0;
@@ -80,16 +91,16 @@ export function applyStickPrecision(state, raw, now = performance.now()) {
   const r = state.periodMs;
   const first = r * 2;
   const pulse = r;
-  const cycle = pulse + r * 10;
+  const cycle = pulse + r * PRECISION_CRAWL_OFF_MULT;
   if (heldMs < first) {
     state.latched = { x: raw.x, y: raw.y };
     return state.latched;
   }
-  if (heldMs < 220) {
+  if (heldMs < PRECISION_REST_MS) {
     state.latched = { x: 0, y: 0 };
     return state.latched;
   }
-  const phase = (heldMs - 220) % cycle;
+  const phase = (heldMs - PRECISION_REST_MS) % cycle;
   state.latched = phase < pulse ? { x: raw.x, y: raw.y } : { x: 0, y: 0 };
   return state.latched;
 }
