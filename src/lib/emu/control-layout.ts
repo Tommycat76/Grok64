@@ -11,30 +11,48 @@ export interface ControlPos {
 
 export type ControlLayout = Record<ControlId, ControlPos>;
 
-/** Factory defaults — matches the pre-sync phone/tablet dock layout. */
-export const DEFAULT_CONTROL_LAYOUT: ControlLayout = {
-  stick: { left: 2, bottom: 0 },
-  fire: { left: 78, bottom: 0 },
-  jump: { left: 62, bottom: 0 },
-  touchpad: { left: 2, bottom: 0 },
-  mouseL: { left: 72, bottom: 0 },
-  mouseR: { left: 86, bottom: 0 },
+/** Edge anchor keeps wide controls inside the strip when layout edit is on. */
+const ANCHOR: Record<ControlId, "start" | "end" | "center"> = {
+  stick: "start",
+  touchpad: "start",
+  fire: "end",
+  jump: "end",
+  mouseL: "end",
+  mouseR: "end",
 };
 
-export function layoutStyle(pos: ControlPos): { position: "absolute"; left: string; bottom: string; transform: string } {
+/** Factory defaults — used only in layout-edit drag mode (normal play uses CSS grid dock). */
+export const DEFAULT_CONTROL_LAYOUT: ControlLayout = {
+  stick: { left: 4, bottom: 0 },
+  fire: { left: 96, bottom: 0 },
+  jump: { left: 72, bottom: 0 },
+  touchpad: { left: 4, bottom: 0 },
+  mouseL: { left: 78, bottom: 0 },
+  mouseR: { left: 96, bottom: 0 },
+};
+
+export function layoutStyle(
+  pos: ControlPos,
+  id: ControlId,
+): { position: "absolute"; left: string; bottom: string; transform: string } {
+  const anchor = ANCHOR[id];
+  const tx = anchor === "start" ? "0" : anchor === "end" ? "-100%" : "-50%";
   return {
     position: "absolute",
     left: `${pos.left}%`,
     bottom: `${pos.bottom}%`,
-    transform: "translate(-50%, 0)",
+    transform: `translate(${tx}, 0)`,
   };
 }
 
 export function clampLayout(layout: ControlLayout): ControlLayout {
   const out = { ...layout };
   for (const id of Object.keys(out) as ControlId[]) {
+    const anchor = ANCHOR[id];
+    const minL = anchor === "start" ? 0 : anchor === "end" ? 18 : 8;
+    const maxL = anchor === "start" ? 82 : anchor === "end" ? 100 : 92;
     out[id] = {
-      left: Math.max(2, Math.min(98, out[id].left)),
+      left: Math.max(minL, Math.min(maxL, out[id].left)),
       bottom: Math.max(0, Math.min(40, out[id].bottom)),
     };
   }

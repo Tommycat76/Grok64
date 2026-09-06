@@ -327,6 +327,7 @@ export function TouchControls({
       if (zones.stick && stickPid.current === id) {
         stickPid.current = null;
         stickFingerDown.current = false;
+        stickCenterDrag.current = false;
         syncStickHold();
         const held = Date.now() - downAt.current;
         const dir = lastDir.current;
@@ -562,8 +563,8 @@ export function TouchControls({
     );
   }
 
-  const useLayout = Boolean(layout);
-  const pos = (id: ControlId) => (useLayout && layout ? layoutStyle(layout[id]) : undefined);
+  /** Normal play uses the CSS grid dock; saved positions apply only while editing. */
+  const pos = (id: ControlId) => (layoutEdit && layout ? layoutStyle(layout[id], id) : undefined);
 
   if (mouseMode) {
     return (
@@ -674,23 +675,23 @@ export function TouchControls({
             <LayoutHandle show={layoutEdit} />
             FIRE
           </div>
+          {jumpEnabled ? (
+            <div
+              ref={jumpEl}
+              className="g64-fire g64-jump"
+              style={layoutEdit ? pos("jump") : undefined}
+              data-down={jumpDown ? "true" : "false"}
+              data-locked={locked ? "true" : "false"}
+              role="button"
+              aria-label="Jump, stick up"
+              onPointerDown={(e) => startLayoutDrag("jump", e)}
+            >
+              <LayoutHandle show={layoutEdit} />
+              JUMP
+            </div>
+          ) : null}
         </div>
       </div>
-      {jumpEnabled ? (
-        <div className="g64-jump-wrap" style={pos("jump")} onPointerDown={(e) => startLayoutDrag("jump", e)}>
-          <LayoutHandle show={layoutEdit} />
-          <div
-            ref={jumpEl}
-            className="g64-fire g64-jump"
-            data-down={jumpDown ? "true" : "false"}
-            data-locked={locked ? "true" : "false"}
-            role="button"
-            aria-label="Jump, stick up"
-          >
-            JUMP
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

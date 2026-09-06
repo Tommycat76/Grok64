@@ -229,7 +229,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
     }),
     {
       name: "grok64-settings",
-      version: 9,
+      version: 10,
       storage: createJSONStorage(() =>
         typeof window === "undefined"
           ? {
@@ -322,6 +322,9 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
           if (![8, 9, 10, 11].includes(p.iecUnit as number)) p.iecUnit = 8;
         }
         if (version < 9) {
+          p.controlLayout = { ...DEFAULT_CONTROL_LAYOUT };
+        }
+        if (version < 10) {
           p.controlLayout = { ...DEFAULT_CONTROL_LAYOUT };
         }
         if (version < 7) {

@@ -1272,9 +1272,10 @@ export function Grok64App() {
   useEffect(() => {
     stickPrecisionRef.current.periodMs = frameMsForStandard(resolved.standard);
   }, [resolved.standard]);
-  const onVector = useCallback((x, y) => {
+  const onVector = useCallback((x: number, y: number, centerHold?: boolean) => {
     unlockAudio(emuRef.current);
     if (playLockRef.current || useEmu.getState().booting) return;
+    if (typeof centerHold === "boolean") stickCenterHoldRef.current = centerHold;
     setPaused(emuRef.current, false);
     try {
       emuRef.current && (emuRef.current.paused = false);
