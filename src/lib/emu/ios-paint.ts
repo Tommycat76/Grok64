@@ -8,7 +8,7 @@ export async function frameImageMetrics(raw: Uint8Array | null): Promise<{ lum: 
   if (!raw || raw.byteLength < 2500) return null;
   if (typeof createImageBitmap !== "function") return { lum: raw.byteLength > 8000 ? 40 : 0, uniq: 2 };
   try {
-    const blob = new Blob([raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength)], {
+    const blob = new Blob([new Uint8Array(raw)], {
       type: "image/png",
     });
     const bmp = await createImageBitmap(blob);
@@ -40,25 +40,53 @@ export async function frameImageMetrics(raw: Uint8Array | null): Promise<{ lum: 
   }
 }
 
-export async function canvasHasFrame(emu: EjsInstance | null): Promise<boolean> {
-  const canvas = document.querySelector("#grok64-player canvas") as HTMLCanvasElement | null;
+function playerCanvas(root: HTMLElement | null): HTMLCanvasElement | null {
+  return (
+    (root?.querySelector("canvas") as HTMLCanvasElement | null) ??
+    (document.querySelector("#grok64-player canvas") as HTMLCanvasElement | null)
+  );
+}
+
+/** Nudge iOS WebKit to composite a preserveDrawingBuffer WebGL framebuffer. */
+export function forceCanvasPresent(canvas: HTMLCanvasElement | null) {
+  if (!canvas || canvas.width < 8 || canvas.height < 8) return;
+  try {
+    const gl =
+      (canvas.getContext("webgl2", { preserveDrawingBuffer: true }) as WebGL2RenderingContext | null) ??
+      (canvas.getContext("webgl", { preserveDrawingBuffer: true }) as WebGLRenderingContext | null);
+    if (gl) {
+      gl.finish?.();
+      const buf = new Uint8Array(4);
+      gl.readPixels(0, 0, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+    }
+    // Readback is the reliable iOS compositor kick for black CRT shells.
+    canvas.toDataURL("image/png");
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function canvasHasFrame(emu: EjsInstance | null, root?: HTMLElement | null): Promise<boolean> {
+  const canvas = playerCanvas(root ?? null);
   if (!canvas || canvas.width < 8 || canvas.height < 8) return false;
+  forceCanvasPresent(canvas);
   try {
     const url = canvas.toDataURL("image/png");
     const bin = atob(url.split(",")[1] || "");
     const raw = new Uint8Array(bin.length);
     for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
     const m = await frameImageMetrics(raw);
-    return Boolean(m && m.lum > 4 && m.uniq >= 2);
+    if (m && m.lum > 4 && m.uniq >= 2) return true;
   } catch {
-    return false;
+    /* fall through */
   }
+  // VICE screenshot can paint before the GL canvas composites on iOS WebKit.
+  return await viceHasFrame(emu);
 }
 
-/** Kick WebGL/audio/main-loop on iOS WebKit after the user-gesture window closes. */
+/** Kick WebGL/main-loop on iOS WebKit — does not require a user gesture. */
 export function kickIosPaint(emu: EjsInstance | null, root: HTMLElement | null, tag = "kick") {
   if (!isIosPhone() || !emu) return;
-  unlockAudio(emu);
   dismissEjsPrompts(root, "boot");
   try {
     emu.paused = false;
@@ -71,12 +99,10 @@ export function kickIosPaint(emu: EjsInstance | null, root: HTMLElement | null, 
     /* ignore */
   }
   try {
-    const canvas =
-      (emu.Module?.canvas as HTMLCanvasElement | undefined) ??
-      (root?.querySelector("canvas") as HTMLCanvasElement | null);
+    const canvas = (emu.Module?.canvas as HTMLCanvasElement | undefined) ?? playerCanvas(root);
     if (canvas) {
       if (canvas.tabIndex < 0) canvas.tabIndex = 0;
-      canvas.focus?.();
+      forceCanvasPresent(canvas);
     }
   } catch {
     /* ignore */
@@ -92,7 +118,7 @@ export function kickIosPaint(emu: EjsInstance | null, root: HTMLElement | null, 
 
 export function scheduleIosPaintKicks(emu: EjsInstance | null, root: HTMLElement | null) {
   if (!isIosPhone() || !emu) return;
-  const delays = [0, 80, 200, 450, 900, 1800, 3200];
+  const delays = [0, 50, 120, 250, 500, 1000, 2000, 4000];
   for (const ms of delays) {
     window.setTimeout(() => kickIosPaint(emu, root, `t${ms}`), ms);
   }
@@ -119,12 +145,109 @@ export async function waitForViceFrame(
   const t0 = performance.now();
   while (performance.now() - t0 < timeoutMs) {
     kickIosPaint(emu, root, "wait");
-    if ((await viceHasFrame(emu)) || (await canvasHasFrame(emu))) {
+    if (await canvasHasFrame(emu, root)) {
       glog("ios-frame-ok", { ms: Math.round(performance.now() - t0) });
       return true;
     }
-    await new Promise((r) => window.setTimeout(r, 280));
+    await new Promise((r) => window.setTimeout(r, 120));
   }
   glog("ios-frame-timeout", { ms: timeoutMs });
   return false;
+}
+
+type PaintTarget = { emu: EjsInstance | null; root: HTMLElement | null };
+let watchdogGen = 0;
+let watchdogRaf = 0;
+let hooksInstalled = false;
+let activeTarget: PaintTarget = { emu: null, root: null };
+let onPaintedCb: (() => void) | null = null;
+
+export function stopIosPaintWatchdog() {
+  watchdogGen += 1;
+  if (watchdogRaf) cancelAnimationFrame(watchdogRaf);
+  watchdogRaf = 0;
+}
+
+/** rAF paint loop until the CRT canvas composites — no tap required. */
+export function startIosPaintWatchdog(
+  emu: EjsInstance | null,
+  root: HTMLElement | null,
+  onPainted?: () => void,
+) {
+  if (!isIosPhone() || !emu) return;
+  activeTarget = { emu, root };
+  onPaintedCb = onPainted ?? null;
+  stopIosPaintWatchdog();
+  const gen = watchdogGen;
+  let frames = 0;
+  const maxFrames = 720;
+
+  const tick = () => {
+    if (gen !== watchdogGen) return;
+    frames += 1;
+    const { emu: e, root: r } = activeTarget;
+    if (!e) return;
+    kickIosPaint(e, r, `wd${frames}`);
+    void canvasHasFrame(e, r).then((ok) => {
+      if (gen !== watchdogGen) return;
+      if (ok) {
+        glog("ios-watchdog-painted", { frames });
+        onPaintedCb?.();
+        onPaintedCb = null;
+        stopIosPaintWatchdog();
+        return;
+      }
+      if (frames < maxFrames) {
+        watchdogRaf = requestAnimationFrame(tick);
+      } else {
+        glog("ios-watchdog-timeout", { frames });
+        // Keep kicking on a slow timer — canvas may appear without another tap.
+        scheduleIosPaintKicks(e, r);
+      }
+    });
+  };
+  watchdogRaf = requestAnimationFrame(tick);
+}
+
+export function installIosPaintHooks(getTarget: () => PaintTarget) {
+  if (!isIosPhone() || hooksInstalled || typeof window === "undefined") return;
+  hooksInstalled = true;
+
+  const resume = () => {
+    const { emu, root } = getTarget();
+    if (!emu) return;
+    kickIosPaint(emu, root, "resume");
+    startIosPaintWatchdog(emu, root);
+  };
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible") resume();
+  });
+  window.addEventListener("pageshow", (ev) => {
+    if ((ev as PageTransitionEvent).persisted) resume();
+  });
+  window.addEventListener("focus", resume);
+
+  const onCtxLost = (ev: Event) => {
+    glog("webgl-context-lost");
+    ev.preventDefault();
+    const { emu, root } = getTarget();
+    if (emu) scheduleIosPaintKicks(emu, root);
+  };
+  const onCtxRestored = () => {
+    glog("webgl-context-restored");
+    resume();
+  };
+
+  const watchCanvas = () => {
+    const canvas = playerCanvas(getTarget().root);
+    if (!canvas) return;
+    canvas.addEventListener("webglcontextlost", onCtxLost, false);
+    canvas.addEventListener("webglcontextrestored", onCtxRestored, false);
+  };
+
+  const obs = new MutationObserver(() => watchCanvas());
+  const player = document.getElementById("grok64-player");
+  if (player) obs.observe(player, { childList: true, subtree: true });
+  watchCanvas();
 }

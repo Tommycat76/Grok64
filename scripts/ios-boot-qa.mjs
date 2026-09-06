@@ -79,13 +79,16 @@ for (let i = 0; i < 60; i++) {
   await page.waitForTimeout(500);
 }
 
+let readyFrame = { ok: false, reason: "timeout" };
+for (let i = 0; i < 40; i++) {
+  readyFrame = await grabCanvasFrame(page, "ios-qa-ready-canvas");
+  if (readyFrame.ok) break;
+  await page.waitForTimeout(400);
+}
 const unlock = page.locator(".g64-unlock");
 if (await unlock.count()) {
-  await unlock.click({ force: true }).catch(() => undefined);
-  await page.waitForTimeout(1200);
+  console.log("WARN unexpected unlock overlay at READY");
 }
-
-const readyFrame = await grabCanvasFrame(page, "ios-qa-ready-canvas");
 const ready = {
   ...(await page.evaluate(() => ({
     title: window.__g64?.title?.(),
@@ -141,8 +144,7 @@ for (let i = 0; i < 40; i++) {
 }
 await page.waitForTimeout(6000);
 if (await unlock.count()) {
-  await unlock.click({ force: true }).catch(() => undefined);
-  await page.waitForTimeout(1200);
+  console.log("WARN unexpected unlock overlay after hot-swap");
 }
 const bdFrame = await grabCanvasFrame(page, "ios-qa-bd-canvas");
 const after = {

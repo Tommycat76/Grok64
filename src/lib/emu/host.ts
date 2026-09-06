@@ -859,7 +859,8 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null) {
       const parent = canvas.parentElement ?? el;
       const cw = Math.max(parent.clientWidth, el.clientWidth, 200);
       const ch = Math.max(parent.clientHeight, el.clientHeight, 160);
-      const dpr = isIosPhone() ? Math.min(window.devicePixelRatio || 1, 2) : 1;
+      // iPhone: DPR 1 limits VRAM with preserveDrawingBuffer (tab-kill mitigation).
+      const dpr = isIosPhone() ? 1 : Math.min(window.devicePixelRatio || 1, 2);
       const bw = Math.max(384, Math.round(cw * dpr));
       const bh = Math.max(272, Math.round(ch * dpr));
       if (canvas.width < 64 || canvas.height < 64) {
