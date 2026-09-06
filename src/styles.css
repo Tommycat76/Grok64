@@ -279,6 +279,7 @@ html, body, #app {
 .g64-iconbtn.extra {
   display: none;
 }
+.g64-app[data-device="phone"] .g64-iconbtn.g64-reset,
 .g64-app[data-device="tablet"] .g64-iconbtn.extra,
 .g64-app[data-device="desktop"] .g64-iconbtn.extra {
   display: grid;
@@ -1493,27 +1494,26 @@ div[class*="ejs_virtual"] {
   font-size: 18px;
   border-radius: 10px;
 }
-/* Touch keyboard PETSCII — shared phone + tablet path */
+/* Touch keyboard PETSCII — shared phone + tablet path (restored from 66a5091) */
 .g64-app[data-device="phone"] .g64-key-petscii,
 .g64-app[data-device="tablet"] .g64-key-petscii {
   top: 2px;
-  font-size: 14px;
-  color: #ffffff;
-  text-shadow: 0 0 1px #000, 0 1px 2px rgba(0, 0, 0, 0.85);
+  font-size: 12px;
+  text-shadow: none;
   -webkit-font-smoothing: antialiased;
 }
 .g64-app[data-device="phone"] .g64-key-petscii em,
 .g64-app[data-device="tablet"] .g64-key-petscii em {
   font-family: var(--font-petscii);
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 700;
-  color: #ffffff;
+  color: var(--color-phosphor);
   opacity: 1;
 }
 .g64-app[data-device="phone"] .g64-key-petscii em[data-side="sh"],
 .g64-app[data-device="tablet"] .g64-key-petscii em[data-side="sh"] {
-  font-size: 12px;
-  color: #f2f2f3;
+  font-size: 11px;
+  color: var(--color-phosphor);
 }
 .g64-app[data-device="phone"] .g64-key,
 .g64-app[data-device="tablet"] .g64-key {
