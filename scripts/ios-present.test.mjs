@@ -13,54 +13,40 @@ const css = readFileSync(join(root, "src/styles.css"), "utf8");
 const gate = readFileSync(join(root, "scripts/crt-fill-gate.mjs"), "utf8");
 
 const server = await createServer({ server: { middlewareMode: true }, appType: "custom" });
-const { presentBufferSize, IOS_PRESENT_MIN_FRAME_MS, IOS_PRESENT_W, IOS_PRESENT_H, IOS_PRESENT_FAIL_LIMIT } =
-  await server.ssrLoadModule("/src/lib/emu/ios-present.ts");
+const { presentBufferSize, isIosPresentActive, isIosPresentLooping } = await server.ssrLoadModule(
+  "/src/lib/emu/ios-present.ts",
+);
 await server.close();
 
-test("present copies live WebGL with readPixels, never PNG or VICE getContext", () => {
-  assert.match(present, /readPixels/);
-  assert.match(present, /putImageData/);
+const presentCode = present.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+
+test("present module is a stripper — no readPixels / 2D blit loop (#47)", () => {
+  assert.doesNotMatch(presentCode, /readPixels/);
+  assert.doesNotMatch(presentCode, /putImageData/);
+  assert.doesNotMatch(presentCode, /drawImage/);
+  assert.doesNotMatch(presentCode, /toDataURL|readFsPng|viceScreenshot/);
+  assert.doesNotMatch(presentCode, /getContext\(/);
+  assert.doesNotMatch(presentCode, /requestAnimationFrame/);
   assert.match(present, /g64-ios-present/);
-  assert.match(present, /getContext\("2d"/);
-  assert.doesNotMatch(present.replace(/\/\*[\s\S]*?\*\//g, ""), /drawImage/);
-  assert.doesNotMatch(present, /toDataURL|readFsPng|viceScreenshot/);
-  assert.doesNotMatch(present, /getContext\("webgl/);
-  assert.match(host, /startIosPresent/);
-  assert.match(paint, /stopIosPresent/);
-  assert.match(gate, /g64-ios-present/);
+  assert.match(present, /stripPresentNodes|querySelectorAll/);
+  assert.match(host, /stripIosPresent/);
+  assert.match(paint, /stopIosPresent|stripIosPresent/);
+  assert.match(gate, /no 2D present canvas/);
 });
 
-test("present bitmap stays 384x272 even for a tall iPhone bezel", () => {
-  assert.deepEqual(presentBufferSize(374, 652), { w: 384, h: 272 });
-  assert.deepEqual(presentBufferSize(390, 844), { w: 384, h: 272 });
-  assert.equal(IOS_PRESENT_W, 384);
-  assert.equal(IOS_PRESENT_H, 272);
-  assert.doesNotMatch(present, /dest\.width = sw/);
-  assert.doesNotMatch(present, /box\.clientWidth/);
-  assert.doesNotMatch(present, /box\.clientHeight/);
+test("no present bitmap — live GL is the picture", () => {
+  assert.deepEqual(presentBufferSize(374, 652), { w: 0, h: 0 });
+  assert.equal(isIosPresentActive(), false);
+  assert.equal(isIosPresentLooping(), false);
 });
 
-test("present copies are throttled (~14fps) and stop on context loss", () => {
-  assert.ok(IOS_PRESENT_MIN_FRAME_MS >= 50, "must not copy every rAF on CriOS");
-  assert.ok(IOS_PRESENT_FAIL_LIMIT >= 3);
-  assert.match(present, /readPixels/);
-  assert.match(present, /isContextLost/);
-  assert.match(present, /pauseIosPresentKeepFrame/);
-  assert.match(present, /visibilitychange/);
-  assert.match(present, /webglcontextlost/);
-  assert.match(paint, /pauseIosPresentKeepFrame/);
-  assert.match(paint, /resumeIosPresent/);
-  assert.doesNotMatch(paint, /resetIosPaintState\(\);\s*\n\s*\}/);
-});
-
-test("empty present canvas cannot cover READY", () => {
-  assert.match(present, /g64-ios-present-on/);
-  assert.match(css, /g64-ios-present:not\(\.g64-ios-present-on\)/);
-  assert.match(css, /visibility: hidden/);
-});
-
-test("present CSS overrides .g64-screen canvas object-fit:contain (letterbox stamp)", () => {
-  const rule = css.slice(css.indexOf(".g64-screen > canvas.g64-ios-present"));
-  assert.match(rule.slice(0, 700), /object-fit: fill !important/);
-  assert.match(css, /\.g64-screen canvas \{[\s\S]*?object-fit: contain/);
+test("CSS hides leftover 2D present nodes; live GL fills the bezel", () => {
+  assert.match(css, /canvas\.g64-ios-present/);
+  assert.match(css, /display: none !important/);
+  const iosCanvas = css.slice(css.indexOf('html[data-g64os="ios"] #grok64-player canvas'));
+  assert.match(iosCanvas, /width: 100% !important/);
+  assert.match(iosCanvas, /height: 100% !important/);
+  assert.match(iosCanvas, /object-fit: fill !important/);
+  assert.match(iosCanvas, /transform: none !important/);
+  assert.doesNotMatch(iosCanvas.slice(0, 800), /width: 384px/);
 });

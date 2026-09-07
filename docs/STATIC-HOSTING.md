@@ -36,8 +36,12 @@ node scripts/flatten-dist.mjs dist
 # confirm the on-screen build id matches the git short SHA
 ```
 
+**Read `docs/IOS_CRT_KNOWN_FAILURES.md` first.**
+
 Do not claim an iPhone CRT PASS from this box. Tom’s real CriOS is the only PASS.
-**Chromium-on-Plex still is not CriOS PASS** — #46’s painted gate went green while real iPhone Chrome went solid black (~5s) then remounted the power splash (~15s).
+**Chromium-on-Plex still is not CriOS PASS** — #46 and **#47** painted gates went
+green while real iPhone Chrome went solid black after the cold-start message
+(`main@8876d8a`, `routes-BggHfyUX.js`). Zero PASS without Tom.
 
 ### CRT fill gate (required after deploy)
 
@@ -51,16 +55,19 @@ node scripts/crt-fill-gate.mjs http://127.0.0.1:8091/
 
 It launches Playwright Chromium at an iPhone viewport (390×844, touch, CriOS UA), powers on, then:
 
-1. Hides on-screen chrome, crops `.g64-screen`, and measures the **painted** pixel bbox **and coverage** of the live-GL present canvas. A 384×272 stamp (Tom #44 photo: top-right; GL-origin: bottom-left) or joystick-only / solid-black pixels **fail**, even when wrapper rects report fill 1.00.
-2. Compares **untransformed** computed CSS px of the present canvas (not the transformed DOM rect) to the bezel. The old #44 `384×272` + `scale()` layout fails this on a tall phone bezel.
-3. Fails if the boot overlay is missing / blank, or if power → first READY frame takes longer than 18s (flags the ~39s iPhone blank). Plex Chromium may not reproduce iPhone WASM time.
-4. **Session hold** (~8s after first READY): still powered (no splash remount), `__g64` still mounted, no full page reload / tab crash, present bitmap still 384×272 (not a bezel-sized GPU readback), CRT still painted (not #46’s solid black).
+1. Hides on-screen chrome, crops `.g64-screen`, and measures the **painted** pixel bbox **and coverage** of the **live WebGL** canvas. A 384×272 stamp (Tom #44 photo: top-right; GL-origin: bottom-left) or joystick-only / solid-black pixels **fail**, even when wrapper rects report fill 1.00.
+2. Compares **untransformed** computed CSS px of the live GL canvas and `#grok64-player` (not a 2D present overlay, not a transformed DOM rect) to the bezel. The old #44 `384×272` + `scale()` layout and the #47 2D present path fail this on a tall phone bezel.
+3. Fails if the boot overlay is a full-bezel black sheet, or if power → first READY frame takes longer than 18s (flags the ~39s iPhone blank). Plex Chromium may not reproduce iPhone WASM time.
+4. **Session hold** (~8s after first READY): still powered (no splash remount), `__g64` still mounted, no full page reload / tab crash, **no 2D present canvas covering GL**, VICE backing still 384×272, CRT still painted (not #46/#47 solid black).
 
 Screenshots land in `screenshots/crt-fill-gate-*.png` (including `*-bezel.png` and `*-hold-bezel.png` crops).
 
 Needs Playwright's Chromium once: `npx playwright install chromium`. If Chromium is already installed, set `G64_CHROME` to that executable.
 
-A green gate is a **painted-layout + hold check**, **not** a real CriOS PASS. Chromium-on-Plex can still pass while CriOS OOM-kills the tab. Optional later: BrowserStack real CriOS. Tom hard-refresh remains the CRT picture sign-off.
+A green gate is a **painted-layout + hold check**, **not** a real CriOS PASS.
+**Tom’s phone is the only PASS.** Chromium-on-Plex can still pass while CriOS
+goes black (#47). Optional later: BrowserStack real CriOS. Tom hard-refresh
+remains the CRT picture sign-off. Never print PASS from the gate.
 
 
 ## EmulatorJS

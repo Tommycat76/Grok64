@@ -1,37 +1,32 @@
 /**
- * CriOS CRT presentation — rewritten WebGL-first path.
+ * CriOS CRT presentation — live WebGL CSS fill (after #47).
  *
- * Ground truth is real iPhone Chrome (CriOS). Desktop Chromium / box Playwright
- * cannot PASS this. Do not stack screenshot.png, paint-poll, or empty-mirror
- * overlays on top of this module.
+ * Read `docs/IOS_CRT_KNOWN_FAILURES.md` first. Desktop Chromium / Plex
+ * Playwright cannot PASS this.
  *
  * Architecture
  * ------------
- * 1. The RetroArch/VICE WebGL canvas stays in the DOM at 384×272 (the only
- *    CSS size that blits). CriOS ignores CSS transform on the GL layer — #44's
- *    scale on #grok64-player was a stamp (photo: top-right) with DOM fill 1.0.
- *    A 2D present canvas (ios-present.ts) readPixels the live 384×272 GL
- *    buffer at ~14fps and CSS-fills .g64-screen. Not drawImage(GL) and not
- *    a 60fps bezel-sized readback (#46 CriOS black→splash). Not PNG /
- *    paint-poll / getContext on VICE.
- * 2. Never call getContext on that canvas. host.ts already captured
- *    VICE's context on `__g64gl`. A second WebGL context on WebKit returns null
- *    or steals the canvas (solid black CRT).
- * 3. Never drive presentation from VICE PNG capture. That capture is dead after
- *    play-recycle on real CriOS and used to deadlock the old watchdog.
- * 4. If a leftover 2D overlay exists (old cached JS), strip it. A mirror may
- *    only exist if a future path can prove pixels — this build does not create
- *    one.
- * 5. After power-on, play-recycle (unit 8), Reset, or Jiffy apply: unpause,
- *    keep the main loop running, fit CSS (do not wipe the backing store),
- *    and nudge the compositor. Do not recycle the core or Autostart from here.
+ * 1. Show the live VICE WebGL canvas itself filling .g64-screen via CSS
+ *    100% layout (inset 0, width/height 100%, object-fit fill). Not
+ *    wrapper scale (#43/#44), not a 2D present (#46/#47).
+ * 2. Backing store and the JS-visible client box stay 384×272 so VICE
+ *    keeps blitting. Never resize the GL drawing buffer to the bezel.
+ * 3. Never call getContext on that canvas. host.ts already captured
+ *    VICE's context on `__g64gl`. A second WebGL context on WebKit returns
+ *    null or steals the canvas (solid black CRT).
+ * 4. Never PNG / toDataURL poll / readPixels present loop / drawImage(GL).
+ * 5. Strip leftover 2D present/mirror nodes from cached builds so they
+ *    cannot cover READY with black after cold start.
+ * 6. After power-on, play-recycle (unit 8), Reset, or Jiffy apply: unpause,
+ *    keep the main loop running, fit CSS (do not wipe the backing store).
+ *    Do not recycle the core or Autostart from here.
  *
  * Tom's phone remains the only PASS.
  */
 
 import type { EjsInstance } from "./host";
 import { applyIosCrtStyle, dismissEjsPrompts, fitEmu, unlockAudio } from "./host";
-import { pauseIosPresentKeepFrame, resumeIosPresent, stopIosPresent } from "./ios-present";
+import { stopIosPresent, stripIosPresent } from "./ios-present";
 import { isIosPhone } from "./detect";
 import { glog } from "./debug";
 
@@ -98,8 +93,10 @@ export function stripIosOverlay(root?: HTMLElement | null) {
   const el = playerRoot(root ?? null);
   el?.classList.remove("g64-ios-mirror-on");
   el?.classList.add("g64-ios-crt-live");
-  const stale = el?.querySelectorAll(".g64-ios-mirror") ?? [];
+  const stale = el?.querySelectorAll(".g64-ios-mirror, canvas.g64-ios-present") ?? [];
   stale.forEach((node) => node.remove());
+  const screen = el?.closest(".g64-screen") ?? (typeof document !== "undefined" ? document.querySelector(".g64-screen") : null);
+  stripIosPresent(screen as HTMLElement | null);
 }
 
 function revealLiveCanvas(canvas: HTMLCanvasElement) {
@@ -108,7 +105,7 @@ function revealLiveCanvas(canvas: HTMLCanvasElement) {
   canvas.style.setProperty("display", "block", "important");
   canvas.style.setProperty("visibility", "visible", "important");
   canvas.style.setProperty("opacity", "1", "important");
-  // Native 384×272 CSS on the GL canvas — present canvas fills the bezel.
+  // Live GL fills the bezel; JS client box stays 384×272.
   const el =
     (canvas.closest("#grok64-player") as HTMLElement | null) ??
     (typeof document !== "undefined" ? document.getElementById("grok64-player") : null);
@@ -345,13 +342,12 @@ export function installIosPaintHooks(getTarget: () => PaintTarget) {
   const onCtxLost = (ev: Event) => {
     glog("webgl-context-lost");
     ev.preventDefault();
-    // Keep the last 2D frame and paintSettled. Resetting settled made the
-    // 350ms poll call presentIosCrt again and restart the crash loop.
-    pauseIosPresentKeepFrame();
+    // Do not reset paintSettled — that made the 350ms poll call
+    // presentIosCrt again and restart a crash loop. Live GL has no 2D frame.
+    stopIosPresent();
   };
   const onCtxRestored = () => {
     glog("webgl-context-restored");
-    resumeIosPresent();
     resume("ctx-restored");
   };
 

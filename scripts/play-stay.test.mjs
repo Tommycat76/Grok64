@@ -77,20 +77,22 @@ test("iOS WebGL backing is locked to 384x272 before the first context", () => {
   );
 });
 
-test("iPhone CRT fills with a live-GL present canvas, not wrapper scale", () => {
+test("iPhone CRT fills with live-GL CSS 100%, not wrapper scale or 2D present", () => {
   assert.match(host, /applyIosCrtStyle/);
   assert.match(host, /g64-ios-fb/);
   assert.match(host, /if \(isIos\(\)\) applyIosCrtStyle/);
-  assert.match(host, /lockNativeFbCss/);
-  assert.match(host, /startIosPresent/);
+  assert.match(host, /fillBezelCss/);
+  assert.match(host, /stripIosPresent/);
   assert.match(host, /#grok64-player/);
   assert.match(host, /remapViceViewport/);
   assert.doesNotMatch(host, /translate3d\(0,0,0\) scale\(/);
   assert.doesNotMatch(host, /klass === "g64-ios-fb" \? Math.max\(1, window.devicePixelRatio/);
   assert.doesNotMatch(host, /sw \* dpr/);
   const present = readFileSync(join(root, "src/lib/emu/ios-present.ts"), "utf8");
-  assert.match(present, /IOS_PRESENT_MIN_FRAME_MS/);
-  assert.doesNotMatch(present, /dest\.width = sw/);
+  const presentCode = present.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  assert.doesNotMatch(presentCode, /readPixels/);
+  assert.doesNotMatch(presentCode, /dest\.width = sw/);
+  assert.match(host, /IOS_CRT_KNOWN_FAILURES/);
 });
 
 test("iPhone floppy Play still recycles — never hot-swap (locked)", () => {

@@ -2,26 +2,27 @@
 /**
  * Deploy CRT-fill gate — run on PLEXnTORRENT_HP after pull/build/restart.
  *
+ * Read docs/IOS_CRT_KNOWN_FAILURES.md first.
+ *
  * Chromium (or G64_CHROME) at an iPhone viewport + touch + CriOS UA.
  * This is NOT real iPhone Safari/CriOS. A green run is a painted-layout
- * check, not a Tom PASS. Cursor-sandbox WebKit is a dead end; this script
- * exists so the coordinator can gate the live host from Windows.
+ * check, not a Tom PASS. #47 stayed green on Plex while Tom's phone went
+ * cold-start → solid black. Cursor-sandbox WebKit is a dead end.
  *
  *   node scripts/crt-fill-gate.mjs
  *   node scripts/crt-fill-gate.mjs https://grok64.tomsprojects.cc/
  *   node scripts/crt-fill-gate.mjs http://127.0.0.1:8091/
  *
- * HARD: asserts the *painted* picture fills the bezel. DOM wrapper /
+ * HARD: asserts the *painted* live-GL picture fills the bezel. DOM wrapper /
  * getBoundingClientRect fill of 1.0 is not enough — that was the #45
  * false green on #44's wrapper-scale stamp. Tom's photo is top-right
  * (L-shaped purple left+bottom); a GL-origin stamp is bottom-left.
  *
  * Also holds after first READY paint and fails if the session remounts
  * to the power splash, __g64 is torn down, the page reloads, or the CRT
- * goes solid black. That is the #46 CriOS failure (black ~5s, splash ~15s)
- * — Chromium-on-Plex can still pass while real CriOS crashes.
+ * goes solid black. That is the #46/#47 CriOS failure.
  *
- * Optional later: BrowserStack real CriOS — not required this PR.
+ * Tom’s phone is the only PASS. Never print PASS from this script.
  *
  * Env:
  *   G64_GATE_URL     default live URL
@@ -248,9 +249,11 @@ page.on("crash", () => {
 
 console.log("GATE url", url);
 console.log("GATE viewport", JSON.stringify({ ...IPHONE, dpr: 3, ua: "CriOS-iPhone" }));
+console.log("GATE read docs/IOS_CRT_KNOWN_FAILURES.md first.");
 console.log("GATE note Cursor-sandbox WebKit is not a ship gate. This script is the Plex painted-CRT check.");
 console.log("GATE note DOM getBoundingClientRect fill of 1.0 is not a pass — painted bbox + untransformed CSS px must fill.");
-console.log("GATE this is NOT a real CriOS PASS. Chromium-on-Plex can go green while CriOS blacks out and remounts.");
+console.log("GATE this is NOT a real CriOS PASS. Chromium-on-Plex can go green while CriOS blacks out (#47).");
+console.log("GATE Tom's phone is the only PASS. This script must never claim PASS.");
 
 await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
 await page.waitForFunction(() => typeof window.__g64?.power === "function", { timeout: 25000 });
@@ -284,14 +287,19 @@ if (bootGeom) {
     fill: bootShot.paint.fill,
     corner: bootShot.paint.corner,
   });
-  assertCssFill("boot overlay vs bezel (untransformed CSS)", bootGeom.bootCss?.w, bootGeom.bootCss?.h, bootGeom.bezelInner, {
-    msg: bootGeom.title,
+  note(Boolean(bootGeom.boot), "cold-start copy is visible (compact chip, not a full-bezel black sheet)", {
+    boot: bootGeom.boot,
+    bootCss: bootGeom.bootCss,
   });
   assertCssFill("screen vs bezel (boot, untransformed CSS)", bootGeom.screenCss?.w, bootGeom.screenCss?.h, bootGeom.bezelInner);
-  // Overlay text bbox is small; require the overlay *box* to fill, and some pixels.
   if (bootGeom.boot && bootGeom.bezelInner) {
     const dom = boxFill(bootGeom.boot.w, bootGeom.boot.h, bootGeom.bezelInner.w, bootGeom.bezelInner.h);
-    console.log("INFO boot DOM-rect fill (may be 1.0 even on a stamp)", JSON.stringify(dom));
+    console.log("INFO boot chip DOM-rect (must not be a full-bezel black cover)", JSON.stringify(dom));
+    note(
+      dom.area < 0.85,
+      "boot overlay is a compact chip (full-bezel black sheet hid READY on #47)",
+      { area: dom.area, boot: bootGeom.boot, bezelInner: bootGeom.bezelInner },
+    );
   }
 } else {
   console.log("WARN boot overlay already gone — skip overlay fill (canvas check still runs)");
@@ -345,15 +353,18 @@ const readyShot = await shotPaint(page, "crt-fill-gate-ready-bezel.png");
 note(Boolean(ready?.build), "build id visible after power", { build: ready?.build });
 note(!ready?.log, "debug log still off");
 note(!ready?.overlay, "no PNG/paint-poll overlay covering WebGL");
-note(Boolean(ready?.present), "live-GL present canvas fills the bezel (not a PNG mirror)");
-note(Boolean(ready?.presentOn), "present canvas revealed after a lit copy (does not cover READY with black)", {
+note(!ready?.present, "no 2D present canvas covering live GL (#47 black cover)", {
+  present: ready?.present,
   presentOn: ready?.presentOn,
 });
-note(ready?.presentBuf?.w === 384 && ready?.presentBuf?.h === 272, "present bitmap stays 384x272 (not a bezel-sized readback)", ready?.presentBuf);
+note(!ready?.booting, "cold-start overlay dismissed after READY (must not stay as a black cover)", {
+  booting: ready?.booting,
+  boot: ready?.boot,
+});
 note(ready?.buf?.w === 384 && ready?.buf?.h === 272, "VICE backing 384x272", ready?.buf);
 note(
   ready?.canvasClient?.w === 384 && ready?.canvasClient?.h === 272,
-  "GL clientWidth is native 384x272 (VICE blit size)",
+  "GL clientWidth is native 384x272 (VICE blit size; CSS layout may be 100%)",
   ready?.canvasClient,
 );
 
@@ -372,8 +383,8 @@ if (ready?.canvasCss && bezelInner) {
   const cssW = cssPx(ready.canvasCss.w);
   const cssH = cssPx(ready.canvasCss.h);
   note(
-    oldStampLayoutFails(cssW || 384, cssH || 272, bezelInner.w, bezelInner.h),
-    "GL canvas CSS is the native 384x272 stamp box (must not be what Tom sees)",
+    !oldStampLayoutFails(cssW || 0, cssH || 0, bezelInner.w, bezelInner.h),
+    "live GL canvas CSS fills the bezel (not a 384x272 stamp Tom cannot see)",
     { bezelInner, glCss: { w: cssW, h: cssH } },
   );
   note(
@@ -381,6 +392,7 @@ if (ready?.canvasCss && bezelInner) {
     "old #44 384x272 CSS box would fail this bezel (gate would have caught Tom stamp)",
     { bezelInner, locked: { w: 384, h: 272 } },
   );
+  assertCssFill("live GL CSS px vs bezel (untransformed)", ready.canvasCss.w, ready.canvasCss.h, bezelInner);
   if (ready.canvas) {
     const dom = boxFill(ready.canvas.w, ready.canvas.h, bezelInner.w, bezelInner.h);
     console.log(
@@ -389,17 +401,8 @@ if (ready?.canvasCss && bezelInner) {
     );
   }
 }
-if (ready?.presentCss && bezelInner) {
-  assertCssFill("present CSS px vs bezel (untransformed)", ready.presentCss.w, ready.presentCss.h, bezelInner);
-}
 if (ready?.playerCss && bezelInner) {
-  const pw = cssPx(ready.playerCss.w);
-  const ph = cssPx(ready.playerCss.h);
-  note(
-    oldStampLayoutFails(pw || 384, ph || 272, bezelInner.w, bezelInner.h),
-    "player wrapper stays native 384x272 (no CriOS-ignored scale)",
-    { playerCss: { w: pw, h: ph } },
-  );
+  assertCssFill("player wrapper CSS px vs bezel (untransformed, no scale)", ready.playerCss.w, ready.playerCss.h, bezelInner);
 }
 if (ready?.screenCss && bezelInner) {
   assertCssFill("screen CSS px vs bezel (untransformed)", ready.screenCss.w, ready.screenCss.h, bezelInner);
@@ -446,7 +449,8 @@ if (hold) {
     running: hold.running,
     title: hold.title,
   });
-  note(hold.presentBuf?.w === 384 && hold.presentBuf?.h === 272, "present bitmap still 384x272 after hold", hold.presentBuf);
+  note(!hold.present, "no 2D present canvas after hold", { present: hold.present });
+  note(hold.buf?.w === 384 && hold.buf?.h === 272, "VICE backing still 384x272 after hold", hold.buf);
 }
 if (holdShot) {
   const holdPaint = assertPainted("READY hold", holdShot, { title: hold?.title });
@@ -477,7 +481,8 @@ console.log(
   }),
 );
 console.log("GATE this is a Plex painted-layout check, not a real CriOS PASS.");
-console.log("GATE Chromium-on-Plex still is not CriOS PASS — Tom hard-refresh on the phone is the only CRT sign-off.");
+console.log("GATE Chromium-on-Plex still is not CriOS PASS — Tom's phone is the only PASS.");
+console.log("GATE Read docs/IOS_CRT_KNOWN_FAILURES.md first. Do not claim PASS from this run.");
 if (failures.length) process.exit(2);
-console.log("GATE painted layout + session hold OK — coordinator still needs Tom hard-refresh on the phone.");
+console.log("GATE painted layout + session hold OK — not a PASS. Coordinator still needs Tom hard-refresh on the phone.");
 process.exit(0);

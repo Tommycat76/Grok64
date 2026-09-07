@@ -16,7 +16,7 @@ import { cmdDriveMap, cmdSwapUnits, sd2iecSwapUnit } from "./hw-buttons";
 import type { DriveMode, IecDrive, IecMap, IecUnit, JoyPort, ReuSize, ScpuSimm, SidEngine, SidModel } from "./types";
 import { RETRO_BTN } from "./types";
 import { glog } from "./debug";
-import { startIosPresent, stopIosPresent } from "./ios-present";
+import { stopIosPresent, stripIosPresent } from "./ios-present";
 
 const DATA = "https://cdn.emulatorjs.org/stable/data/";
 
@@ -1277,17 +1277,21 @@ function watchIosCrtBox(box: HTMLElement, apply: () => void) {
   }
 }
 
-/** VICE only blits when the WebGL canvas CSS box is the native 384×272. */
-function lockNativeFbCss(el: HTMLElement) {
+/**
+ * Layout-fill the bezel. Not CSS transform scale (#43/#44 stamp) and not a
+ * 384×272 CSS lock (that was the #47 2D-present reason). VICE still blits
+ * because lockIosClientBox lies about clientWidth at 384×272.
+ */
+function fillBezelCss(el: HTMLElement) {
   el.style.setProperty("position", "absolute", "important");
-  el.style.setProperty("inset", "auto", "important");
+  el.style.setProperty("inset", "0", "important");
   el.style.setProperty("left", "0", "important");
   el.style.setProperty("top", "0", "important");
-  el.style.setProperty("right", "auto", "important");
-  el.style.setProperty("bottom", "auto", "important");
+  el.style.setProperty("right", "0", "important");
+  el.style.setProperty("bottom", "0", "important");
   el.style.setProperty("margin", "0", "important");
-  el.style.setProperty("width", "384px", "important");
-  el.style.setProperty("height", "272px", "important");
+  el.style.setProperty("width", "100%", "important");
+  el.style.setProperty("height", "100%", "important");
   el.style.setProperty("min-width", "0", "important");
   el.style.setProperty("min-height", "0", "important");
   el.style.setProperty("max-width", "none", "important");
@@ -1298,15 +1302,17 @@ function lockNativeFbCss(el: HTMLElement) {
 }
 
 /**
- * CriOS CRT fill. VICE blits only when the WebGL canvas CSS is 384×272.
- * CSS 100% on that canvas is solid black. Wrapper scale() is ignored on the
- * GL layer (#43 / #44) — Tom's photo is a top-right stamp with DOM fill 1.0.
+ * CriOS CRT fill after #47.
  *
- * Keep the GL canvas at 384×272 (no transform). A 2D present canvas copies
- * the live 384×272 framebuffer with readPixels at ~14fps; CSS stretches
- * that 2D layer to fill .g64-screen (see ios-present.ts). Do not drawImage
- * the GL canvas or size the present bitmap to the bezel — that OOM-killed
- * CriOS on #46.
+ * Read `docs/IOS_CRT_KNOWN_FAILURES.md` first. This is not 1/2/3/6:
+ * show the live WebGL canvas filling .g64-screen with CSS 100% layout
+ * (no wrapper scale, no backing resize, no 2D present, no readPixels loop).
+ *
+ * VICE only blits when the *JS-visible* box is 384×272. We keep that via
+ * lockIosClientBox + lockIosBacking. CSS layout is 100% of the bezel so
+ * CriOS composites the live GL bitmap into the screen. Leftover 2D
+ * present/mirror nodes from cached builds are stripped so they cannot
+ * cover READY with black.
  */
 export function applyIosCrtStyle(
   canvas: HTMLCanvasElement,
@@ -1321,13 +1327,16 @@ export function applyIosCrtStyle(
 
   const apply = () => {
     lockIosClientBox(canvas, 384, 272);
-    lockNativeFbCss(player);
+    fillBezelCss(player);
     const canvasParent = canvas.parentElement;
-    if (canvasParent && canvasParent !== player) lockNativeFbCss(canvasParent);
-    lockNativeFbCss(canvas);
+    if (canvasParent && canvasParent !== player) fillBezelCss(canvasParent);
+    fillBezelCss(canvas);
     canvas.style.setProperty("object-fit", "fill", "important");
     canvas.style.setProperty("object-position", "0 0", "important");
-    startIosPresent(canvas, box);
+    canvas.style.setProperty("display", "block", "important");
+    canvas.style.setProperty("visibility", "visible", "important");
+    canvas.style.setProperty("opacity", "1", "important");
+    stripIosPresent(box);
     void box.getBoundingClientRect();
   };
 
