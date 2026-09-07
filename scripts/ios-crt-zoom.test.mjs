@@ -17,8 +17,8 @@ test("ios-zoom.ts is gone — #51/#52 zoom/slot path is not shipped", () => {
 });
 
 test("leftover zoom/slot class names cannot recreate a positioned slot", () => {
-  const slot = css.slice(css.indexOf(".g64-ios-slot"), css.indexOf(".g64-ios-slot") + 80);
-  assert.match(slot, /display: contents/);
+  const slot = css.slice(css.indexOf(".g64-ios-slot,\n.g64-ios-zoom"));
+  assert.match(slot.slice(0, 80), /display: contents/);
   assert.doesNotMatch(css, /data-g64-ios-slot[\s\S]{0,200}position: absolute/);
   assert.doesNotMatch(css, /data-g64-ios-zoom[\s\S]{0,200}width: 384px/);
 });
