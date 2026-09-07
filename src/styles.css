@@ -319,6 +319,24 @@ html, body, #app {
   line-height: 1.45;
 }
 
+.g64-buildid {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: color-mix(in oklab, var(--color-phosphor) 78%, var(--color-fg-muted));
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in oklab, var(--color-phosphor) 24%, transparent);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0.9;
+}
+.g64-splash .g64-buildid {
+  margin-top: 12px;
+}
 .g64-log {
   flex: 0 0 auto;
   margin: 0 10px 6px;
@@ -494,7 +512,7 @@ div[class*="ejs_virtual"] {
   display: none !important;
 }
 
-#grok64-player > :not(.ejs_canvas_parent) {
+#grok64-player > :not(.ejs_canvas_parent):not(canvas) {
   display: none !important;
   pointer-events: none !important;
 }
@@ -1889,43 +1907,41 @@ html[data-g64os="ios"] .g64-top {
 html[data-g64os="ios"] .g64-log {
   margin-top: 0;
 }
-html[data-g64os="ios"] #grok64-player .ejs_canvas_parent,
-html[data-g64os="ios"] #grok64-player canvas:not(.g64-ios-mirror) {
-  transform: translateZ(0);
-  -webkit-transform: translateZ(0);
-  min-width: 160px;
-  min-height: 120px;
-}
-html[data-g64os="ios"] #grok64-player .g64-ios-mirror {
+/* CriOS: live WebGL is the CRT. Never hide it, never cover it. */
+html[data-g64os="ios"] #grok64-player,
+html[data-g64os="ios"] #grok64-player .ejs_canvas_parent {
   position: absolute;
   inset: 0;
-  z-index: 5;
+  width: 100% !important;
+  height: 100% !important;
+  transform: translate3d(0, 0, 0);
+  -webkit-transform: translate3d(0, 0, 0);
+}
+html[data-g64os="ios"] #grok64-player canvas,
+html[data-g64os="ios"] #grok64-player canvas.g64-ios-fb {
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+  position: absolute;
+  inset: 0;
   width: 100% !important;
   height: 100% !important;
   max-width: 100% !important;
   max-height: 100% !important;
-  object-fit: contain !important;
-  pointer-events: none;
-  background: #000;
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
-  /* Empty overlay used to cover live WebGL (CriOS solid black + no-png). */
-  opacity: 0 !important;
-  visibility: hidden !important;
+  min-width: 160px;
+  min-height: 120px;
+  object-fit: fill !important;
+  background: #000 !important;
+  transform: translate3d(0, 0, 0);
+  -webkit-transform: translate3d(0, 0, 0);
 }
+html[data-g64os="ios"] #grok64-player .g64-ios-mirror,
 html[data-g64os="ios"] #grok64-player.g64-ios-mirror-on .g64-ios-mirror {
-  opacity: 1 !important;
-  visibility: visible !important;
-}
-/* Live WebGL is the CriOS READY path. Never hide it unless the 2D overlay
-   actually has pixels — PNG screenshot is dead on real iPhone Chrome. */
-html[data-g64os="ios"] #grok64-player:not(.g64-ios-mirror-on) canvas:not(.g64-ios-mirror) {
-  opacity: 1 !important;
-  visibility: visible !important;
+  display: none !important;
 }
 html[data-g64os="ios"] #grok64-player.g64-ios-mirror-on canvas:not(.g64-ios-mirror) {
-  opacity: 0 !important;
-  visibility: hidden !important;
+  opacity: 1 !important;
+  visibility: visible !important;
 }
 html[data-g64os="ios"] .g64-fire,
 html[data-g64os="ios"] .g64-port,

@@ -22,6 +22,22 @@ root /var/www/grok64/dist;
 location / { try_files $uri $uri/ /index.html; }
 ```
 
+## Plex (https://grok64.tomsprojects.cc)
+
+Repo clone on the Windows host: `C:\Users\tom\apps\Grok64`. After **main** is updated:
+
+```
+cd C:\Users\tom\apps\Grok64
+git pull --ff-only origin main
+npx vite build
+node scripts/flatten-dist.mjs dist
+# restart serve-static-ia.mjs on :8091
+# verify the new routes-*.js hash on https://grok64.tomsprojects.cc/
+# confirm the on-screen build id matches the git short SHA
+```
+
+Do not claim an iPhone CRT PASS from this box. Tom’s real CriOS is the only PASS.
+
 ## EmulatorJS
 
 VICE WASM cores load from `https://cdn.emulatorjs.org/stable/data/` (no bundling required). Power-on fetches `./software/blank.d64` relative to the app base.

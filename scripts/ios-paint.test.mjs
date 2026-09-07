@@ -1,113 +1,84 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
 
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const paintSrc = readFileSync(join(root, "src/lib/emu/ios-paint.ts"), "utf8");
+const app = readFileSync(join(root, "src/components/emu/Grok64App.tsx"), "utf8");
+const css = readFileSync(join(root, "src/styles.css"), "utf8");
+
 const server = await createServer({ server: { middlewareMode: true }, appType: "custom" });
-const { frameLooksReady, viceScreenshot, chooseIosCrtPath, resetIosPaintState, WATCHDOG_RECYCLES_CORE } = await server.ssrLoadModule("/src/lib/emu/ios-paint.ts");
+const {
+  chooseIosCrtPath,
+  frameLooksReady,
+  resetIosPaintState,
+  WATCHDOG_RECYCLES_CORE,
+  CRT_RECYCLES_CORE,
+  iosCrtPath,
+  isIosMirrorActive,
+  isIosMirrorPainted,
+} = await server.ssrLoadModule("/src/lib/emu/ios-paint.ts");
 await server.close();
 
-function fakePng(n = 400) {
-  const u8 = new Uint8Array(n);
-  u8[0] = 0x89;
-  u8[1] = 0x50;
-  u8[2] = 0x4e;
-  u8[3] = 0x47;
-  return u8;
-}
-
-function mockEmu(files = new Map(), opts = {}) {
-  let cmds = 0;
-  const emu = {
-    gameManager: {
-      FS: {
-        readFile: (p) => {
-          const key = String(p).replace(/^\//, "");
-          const hit = files.get(key);
-          if (!hit) throw new Error(`missing ${key}`);
-          return hit;
-        },
-        unlink: (p) => {
-          files.delete(String(p).replace(/^\//, ""));
-        },
-      },
-      functions: {
-        screenshot: () => {
-          cmds += 1;
-          if (opts.onCmd) opts.onCmd(files, cmds);
-        },
-      },
-    },
-    cmds: () => cmds,
-  };
-  return emu;
-}
-
-test("chooseIosCrtPath never stays on PNG when the screenshot is missing", () => {
-  assert.equal(chooseIosCrtPath({ pngValid: true, glLooksReady: false }), "png");
-  assert.equal(chooseIosCrtPath({ pngValid: false, glLooksReady: true }), "gl-blit");
+test("chooseIosCrtPath is always live-webgl (PNG/gl-blit are gone)", () => {
+  assert.equal(chooseIosCrtPath({ pngValid: true, glLooksReady: false }), "live-webgl");
+  assert.equal(chooseIosCrtPath({ pngValid: false, glLooksReady: true }), "live-webgl");
   assert.equal(chooseIosCrtPath({ pngValid: false, glLooksReady: false }), "live-webgl");
+  assert.equal(chooseIosCrtPath(), "live-webgl");
 });
 
-test("frameLooksReady accepts BASIC READY-like metrics", () => {
+test("runtime CRT path never claims a 2D overlay", () => {
+  resetIosPaintState();
+  assert.equal(iosCrtPath(), "live-webgl");
+  assert.equal(isIosMirrorActive(), false);
+  assert.equal(isIosMirrorPainted(), false);
+});
+
+test("frameLooksReady still classifies BASIC READY-like metrics for QA", () => {
   assert.equal(frameLooksReady({ lum: 48, uniq: 6 }), true);
-  assert.equal(frameLooksReady({ lum: 90, uniq: 8 }), true);
-});
-
-test("frameLooksReady rejects black, thin, and GL garbage", () => {
-  assert.equal(frameLooksReady(null), false);
   assert.equal(frameLooksReady({ lum: 2, uniq: 1 }), false);
-  assert.equal(frameLooksReady({ lum: 20, uniq: 1 }), false);
   assert.equal(frameLooksReady({ lum: 80, uniq: 80 }), false);
-  assert.equal(frameLooksReady({ lum: 180, uniq: 30 }), false);
 });
 
-test("viceScreenshot times out instead of hanging when PNG never appears", async () => {
-  resetIosPaintState();
-  const emu = mockEmu();
-  const t0 = Date.now();
-  const raw = await viceScreenshot(emu, 120);
-  assert.equal(raw, null);
-  assert.equal(emu.cmds(), 1);
-  assert.ok(Date.now() - t0 < 900, "timed-out screenshot must not spin");
-});
-
-test("viceScreenshot abandons PNG after a timeout so the CRT can fall back", async () => {
-  resetIosPaintState();
-  const emu = mockEmu();
-  assert.equal(await viceScreenshot(emu, 80), null);
-  const t0 = Date.now();
-  assert.equal(await viceScreenshot(emu, 800), null);
-  assert.equal(emu.cmds(), 1, "abandoned PNG must not keep calling cmd_take_screenshot");
-  assert.ok(Date.now() - t0 < 200, "abandoned PNG must return immediately");
-});
-
-test("viceScreenshot returns the PNG after cmd_take_screenshot", async () => {
-  resetIosPaintState();
-  const png = fakePng();
-  const emu = mockEmu(new Map(), {
-    onCmd: (files) => {
-      files.set("screenshot.png", png);
-    },
-  });
-  const raw = await viceScreenshot(emu, 200);
-  assert.ok(raw && raw[0] === 0x89 && raw.byteLength >= 350);
-  assert.equal(emu.cmds(), 1);
-});
-
-test("viceScreenshot serializes overlapping callers (no second hang)", async () => {
-  resetIosPaintState();
-  const png = fakePng();
-  const emu = mockEmu(new Map(), {
-    onCmd: (files) => {
-      files.set("screenshot.png", png);
-    },
-  });
-  const [a, b] = await Promise.all([viceScreenshot(emu, 200), viceScreenshot(emu, 200)]);
-  assert.ok(a && a.byteLength >= 350);
-  assert.ok(b && b.byteLength >= 350);
-  assert.equal(emu.cmds(), 2);
-});
-
-test("paint watchdog must never recycle or hard-reset the core", () => {
+test("CRT presentation never recycles or Autostarts the core", () => {
   assert.equal(WATCHDOG_RECYCLES_CORE, false);
+  assert.equal(CRT_RECYCLES_CORE, false);
+  assert.doesNotMatch(paintSrc, /recycleCore\(/);
+  assert.doesNotMatch(paintSrc, /hardReset\(/);
+  assert.doesNotMatch(paintSrc, /autostartAfterReady\(/);
+});
+
+test("deleted PNG poll / empty-mirror architecture", () => {
+  assert.doesNotMatch(paintSrc, /ios-paint-poll/);
+  assert.doesNotMatch(paintSrc, /ios-mirror-skip/);
+  assert.doesNotMatch(paintSrc, /readFsPng/);
+  assert.doesNotMatch(paintSrc, /viceScreenshot/);
+  assert.doesNotMatch(paintSrc, /ensureMirrorCanvas/);
+  assert.doesNotMatch(paintSrc, /blitPngToMirror/);
+  assert.doesNotMatch(paintSrc, /\.getContext\s*\(/);
+  assert.match(paintSrc, /presentIosCrt/);
+  assert.match(paintSrc, /stripIosOverlay/);
+});
+
+test("CSS never hides live WebGL behind a 2D overlay", () => {
+  assert.match(css, /g64-ios-fb/);
+  assert.match(css, /#grok64-player \.g64-ios-mirror/);
+  assert.match(css, /#grok64-player > :not\(\.ejs_canvas_parent\):not\(canvas\)/);
+  assert.doesNotMatch(
+    css,
+    /#grok64-player\.g64-ios-mirror-on canvas:not\(\.g64-ios-mirror\) \{\s*opacity: 0/,
+  );
+});
+
+test("production UI shows build id; debug log is opt-in", () => {
+  assert.match(app, /<BuildId/);
+  assert.match(app, /s\.debugLog \|\| debugQueryOn\(\)/);
+  assert.match(app, /className="g64-log"/);
+  assert.doesNotMatch(
+    app,
+    /className="g64-log" aria-live="polite" hidden=\{\!s\.powered\}/,
+  );
 });

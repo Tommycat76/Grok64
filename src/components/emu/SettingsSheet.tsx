@@ -4,6 +4,7 @@ import { Drawer } from "vaul";
 import { ExpansionPanel } from "@/components/emu/ExpansionPanel";
 import { detectLine, MACHINES, type ResolvedMachine } from "@/lib/emu/machines";
 import { ACTION_LABEL, useEmu } from "@/lib/emu/store";
+import { setDebugUi } from "@/lib/emu/debug";
 import type { ActionId, CorePref, DriveMode, IecSlot, ReuSize, ScpuSimm, SidEngine, SidModel, VideoPref } from "@/lib/emu/types";
 import { IEC_UNITS } from "@/lib/emu/types";
 import { IEC_SLOT_LABEL, REU_LABEL, SCPU_SIMM_LABEL } from "@/lib/emu/vice-extras";
@@ -312,6 +313,21 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               <span>CRT scanlines</span>
               <Switch on={s.crtFilter} onToggle={() => s.setCrtFilter(!s.crtFilter)} />
             </div>
+            <div className="g64-row">
+              <span>Verbose logs</span>
+              <Switch
+                on={s.debugLog}
+                onToggle={() => {
+                  const next = !s.debugLog;
+                  s.setDebugLog(next);
+                  setDebugUi(next);
+                }}
+              />
+            </div>
+            <p className="mb-3 text-xs text-fg-subtle">
+              Off by default. Add <code>?debug=1</code> to the URL or flip this to show the
+              scrolling emulator log. Production CRT stays clear either way.
+            </p>
             <div className="g64-row">
               <span>On-screen joystick</span>
               <Switch on={s.showJoystick} onToggle={() => s.setShowJoystick(!s.showJoystick)} />

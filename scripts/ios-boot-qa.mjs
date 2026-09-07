@@ -154,7 +154,7 @@ const after = {
     running: window.__g64?.running?.(),
     splash: !!document.querySelector(".g64-splash"),
     recycle: (window.__g64log || []).some((l) => /play-recycle/.test(String(l))),
-    painted: (window.__g64log || []).some((l) => /ios-mirror-painted|ios-frame-ok|ios-live-webgl|ios-gl-blit/.test(String(l))),
+    painted: (window.__g64log || []).some((l) => /ios-crt-present|ios-frame-ok/.test(String(l))),
   }))),
   frame: bdFrame,
 };

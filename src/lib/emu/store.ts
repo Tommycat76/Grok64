@@ -73,6 +73,7 @@ interface SettingsSlice {
   scpuSimm: ScpuSimm;
   scpuTurbo: boolean;
   jiffyDos: boolean;
+  debugLog: boolean;
   volume: number;
   binds: ControlBinding[];
   setMachine: (id: MachineId) => void;
@@ -100,6 +101,7 @@ interface SettingsSlice {
   setScpuSimm: (v: ScpuSimm) => void;
   setScpuTurbo: (v: boolean) => void;
   setJiffyDos: (v: boolean) => void;
+  setDebugLog: (v: boolean) => void;
   setVolume: (v: number) => void;
   setBind: (action: ActionId, patch: Partial<ControlBinding>) => void;
   resetBinds: () => void;
@@ -170,6 +172,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       scpuSimm: "16",
       scpuTurbo: true,
       jiffyDos: false,
+      debugLog: false,
       volume: 0.7,
       binds: DEFAULT_BINDS,
       setMachine: (machineId) => set({ machineId }),
@@ -213,6 +216,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       setScpuSimm: (scpuSimm) => set({ scpuSimm }),
       setScpuTurbo: (scpuTurbo) => set({ scpuTurbo }),
       setJiffyDos: (jiffyDos) => set({ jiffyDos }),
+      setDebugLog: (debugLog) => set({ debugLog }),
       setVolume: (volume) => set({ volume }),
       setBind: (action, patch) =>
         set((s) => ({
@@ -287,6 +291,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         scpuSimm: s.scpuSimm,
         scpuTurbo: s.scpuTurbo,
         jiffyDos: s.jiffyDos,
+        debugLog: s.debugLog,
         volume: s.volume,
         binds: s.binds,
       }),
@@ -315,6 +320,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
           "scpuSimm",
           "scpuTurbo",
           "jiffyDos",
+          "debugLog",
           "volume",
           "binds",
         ] as const;

@@ -144,9 +144,9 @@ function preserveWebglBuffer() {
       const merged: Record<string, unknown> = { ...attrs, antialias: false, alpha: false };
       if (ios) merged.preserveDrawingBuffer = true;
       const ctx = orig.call(this, type, merged);
-      // Remember VICE's context. ios-paint must never getContext() itself —
-      // a second getContext with different attrs returns null on WebKit, and a
-      // first getContext before RetroArch steals the canvas (black CRT, no PNG).
+      // Remember VICE's context. The iOS CRT path must never getContext()
+      // itself — a second getContext on WebKit returns null or steals the
+      // canvas (solid black CRT).
       if (ctx) {
         (this as HTMLCanvasElement & { __g64gl?: unknown }).__g64gl = ctx;
       }
@@ -985,9 +985,9 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       const dpr = touchMobile ? 1 : Math.min(window.devicePixelRatio || 1, 2);
       let bw = Math.max(384, Math.round(cw * dpr));
       let bh = Math.max(272, Math.round(ch * dpr));
-      if (tablet) {
-        // VICE framebuffer is 384×272. Stretching the canvas past that leaves the
-        // C64 picture in the top-left with a black gap (Onn tablet + log/keyboard).
+      if (tablet || iosPhone) {
+        // VICE framebuffer is 384×272. Stretching the backing store past that
+        // leaves a black gap. CriOS CSS fills the CRT; do not grow the buffer.
         bw = 384;
         bh = 272;
       } else if (touchMobile) {
@@ -1000,9 +1000,8 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
         }
       }
       const backingOk = canvas.width === bw && canvas.height === bh && canvas.width >= 64;
-      // Reassigning canvas.width wipes the WebGL context. On iPhone that also
-      // kills cmd_take_screenshot (paint-poll hang). Never resize an already
-      // live iPhone backing store — CSS scales the 384×272 framebuffer.
+      // Reassigning canvas.width wipes the WebGL context on CriOS. Never
+      // resize an already live iPhone backing store — CSS scales 384×272.
       const canResizeBacking = !iosPhone || canvas.width < 64 || canvas.height < 64;
       if (
         canResizeBacking &&
