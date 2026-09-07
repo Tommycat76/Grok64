@@ -165,7 +165,8 @@ const failures = [];
     }));
     const joined = (after.last || []).join("\n");
     const disk = after.workDisk === "8_d64" || after.opts?.vice_work_disk === "8_d64" || /8_d64/.test(joined);
-    if (after.sessionIec === "1541" && disk && (/play-recycle|core-start|hot-swap/.test(joined))) break;
+    const started = /paradroid/i.test(after.title || "") || (/core-start/.test(joined) && /paradroid/i.test(joined));
+    if (after.sessionIec === "1541" && disk && /play-recycle/.test(joined) && started) break;
     await page.waitForTimeout(400);
   }
   await page.screenshot({ path: "/workspace/screenshots/ios-play-attach.png" });

@@ -117,7 +117,8 @@ while (Date.now() - t0 < 32000) {
       playMode: window.__g64?.playMode?.(),
     };
   });
-  if (after.recycle && after.sessionIec === "1541" && (after.workDisk === "8_d64" || after.opts?.vice_work_disk === "8_d64")) {
+  const started = /paradroid/i.test(after.title || "") || after.play.some((l) => /core-start/.test(l) && /paradroid/i.test(l));
+  if (after.recycle && after.sessionIec === "1541" && (after.workDisk === "8_d64" || after.opts?.vice_work_disk === "8_d64") && started) {
     break;
   }
   await page.waitForTimeout(400);
@@ -130,6 +131,9 @@ if (after?.hot) failures.push("hot-swap ran on an SD2IEC/8_fs core");
 if (after?.sessionIec !== "1541") failures.push(`session IEC ${after?.sessionIec}, want 1541`);
 if (after?.workDisk !== "8_d64" && after?.opts?.vice_work_disk !== "8_d64") {
   failures.push(`work disk ${after?.workDisk || after?.opts?.vice_work_disk}, want 8_d64`);
+}
+if (!/paradroid/i.test(after?.title || "") && !(after?.play || []).some((l) => /core-start/.test(l) && /paradroid/i.test(l))) {
+  failures.push(`recycle did not start floppy Autostart (title=${after?.title})`);
 }
 
 console.log(
