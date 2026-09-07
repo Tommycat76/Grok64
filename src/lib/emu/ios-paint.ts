@@ -9,8 +9,9 @@
  * 1. Show the live VICE WebGL canvas itself filling .g64-screen via CSS
  *    100% layout (inset 0, width/height 100%, object-fit fill). Not
  *    wrapper scale (#43/#44), not a 2D present (#46/#47).
- * 2. Backing store and the JS-visible client box stay 384×272 so VICE
- *    keeps blitting. Never resize the GL drawing buffer to the bezel.
+ * 2. Backing store stays 384×272 (never assign canvas.width to the bezel).
+ *    After getContext, unlock clientWidth so it matches CSS 100% — #7's
+ *    leftover 384×272 lie made an empty black blit on Plex.
  * 3. Never call getContext on that canvas. host.ts already captured
  *    VICE's context on `__g64gl`. A second WebGL context on WebKit returns
  *    null or steals the canvas (solid black CRT).
@@ -105,7 +106,7 @@ function revealLiveCanvas(canvas: HTMLCanvasElement) {
   canvas.style.setProperty("display", "block", "important");
   canvas.style.setProperty("visibility", "visible", "important");
   canvas.style.setProperty("opacity", "1", "important");
-  // Live GL fills the bezel; JS client box stays 384×272.
+  // Live GL fills the bezel; client box matches CSS (not the #7 384 lie).
   const el =
     (canvas.closest("#grok64-player") as HTMLElement | null) ??
     (typeof document !== "undefined" ? document.getElementById("grok64-player") : null);

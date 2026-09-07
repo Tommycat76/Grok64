@@ -74,6 +74,29 @@ NOT a pass. The Plex painted gate stayed **false-green** vs real CriOS.
 Do not revive a continuous (or “throttled”) GPU readback compositor.
 Do not cover the live WebGL canvas with a 2D present layer.
 
+### 7. #48 — live WebGL CSS 100% fill while lying `clientWidth`/`clientHeight` to 384×272
+
+`main@6c10228` / `routes-Ds38oOKG.js` (Plex deploy of PR #48):
+
+- Live VICE WebGL canvas only (no 2D present, no wrapper `scale()`).
+- CSS `inset:0; width/height:100%` on `#grok64-player` and the GL canvas.
+- `lockIosClientBox` kept `clientWidth`/`clientHeight`/`offsetWidth`/
+  `offsetHeight` at **384×272** after GL existed, so RetroArch would
+  still blit native while CSS stretched.
+
+**Plex painted gate FAIL (exit 2)** vs `https://grok64.tomsprojects.cc/`:
+
+- Layout OK (GL CSS fills bezel, no present canvas, compact boot chip).
+- Session stayed powered.
+- **Paint empty black** (`count:0`): READY no painted CRT; hold no
+  painted CRT; “solid black after first paint”; boot→first CRT 20249ms
+  (limit 18000) because chroma never appeared.
+
+Do not ship CSS 100% + a 384×272 client-box lie as a CriOS fix.
+The mismatch leaves a black or empty blit that neither Plex nor Tom
+can see as painted phosphor. Do not re-lock those JS box getters to
+384×272 after `getContext`.
+
 ---
 
 ## Briefly WORKED (do not regress these unrelated wins)
@@ -98,32 +121,31 @@ Locked, unrelated:
 
 ## What a NEW approach must not be
 
-Not 1, not 2, not 3, not 6.
+Not 1, not 2, not 3, not 6, not 7.
 
 In particular:
 
 - No PNG / `toDataURL` poll / `.g64-ios-mirror`.
 - No `transform: scale(...)` on the GL canvas or `#grok64-player`.
-- No DPR / bezel-sized WebGL backing resize.
+- No DPR / bezel-sized WebGL backing resize (`canvas.width` assignment).
 - No `drawImage` of the live WebGL canvas.
 - No `readPixels` present loop (any fps) into a 2D overlay.
+- No CSS 100% fill **while** `clientWidth`/`clientHeight` stay lied at 384×272.
 
-VICE still only **blits** when the JS-visible box is native **384×272**
-(RetroArch sizes video from `clientWidth`). That constraint is handled by
-**lying about `clientWidth` / `clientHeight` / `offsetWidth` /
-`offsetHeight`**, and by locking `canvas.width` / `canvas.height` at
-384×272 **before** `getContext`. It is **not** a reason to lock the CSS
-layout box at 384×272 and then copy pixels into another canvas.
+Lock `canvas.width` / `canvas.height` at 384×272 **before** `getContext`
+so WebKit allocates a native drawing buffer (not CSS×DPR). A brief
+client-box lie **only for that allocation** is allowed. After the
+context exists, restore real `clientWidth` / `offsetWidth` so the JS
+box matches CSS 100% — #7 showed the leftover lie makes an empty blit.
 
-Current attempt after #47 (this tree): **live WebGL CSS 100% fill** —
-the VICE canvas is the only picture; `#grok64-player` and the GL canvas
-use layout `inset:0; width/height:100%` (not scale); backing + client
-box stay 384×272; leftover 2D present/mirror nodes are stripped; the
-cold-start overlay is a compact chip, not a full-bezel black sheet.
-This is not 1 / 2 / 3 / 6.
+Current attempt after #48/#7 (this tree): **live WebGL CSS 100% fill
+with the client box unlocked after GL**. Backing stays 384×272. No 2D
+present, no wrapper scale. Compact cold-start chip. If
+`drawingBuffer` grows, remap VICE’s 384×272 viewport to the default FB.
+This is not 1 / 2 / 3 / 6 / 7.
 
-If this also fails on Tom’s phone, add a new numbered item here **before**
-the next experiment. Do not silently retry 1–3 or 6.
+If this also fails (Plex paint still empty, or Tom black), add **#8**
+here before the next experiment. Do not silently retry 1–7.
 
 ---
 

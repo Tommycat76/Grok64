@@ -39,9 +39,10 @@ node scripts/flatten-dist.mjs dist
 **Read `docs/IOS_CRT_KNOWN_FAILURES.md` first.**
 
 Do not claim an iPhone CRT PASS from this box. Tom’s real CriOS is the only PASS.
-**Chromium-on-Plex still is not CriOS PASS** — #46 and **#47** painted gates went
-green while real iPhone Chrome went solid black after the cold-start message
-(`main@8876d8a`, `routes-BggHfyUX.js`). Zero PASS without Tom.
+**Chromium-on-Plex still is not CriOS PASS.** #46/#47 went green while Tom’s
+phone went black. **#48** (`main@6c10228`) was honestly red: layout filled,
+paint `count:0` solid black (CSS 100% + `clientWidth` lied to 384×272 — known
+failure #7). Zero PASS without Tom.
 
 ### CRT fill gate (required after deploy)
 
@@ -58,7 +59,7 @@ It launches Playwright Chromium at an iPhone viewport (390×844, touch, CriOS UA
 1. Hides on-screen chrome, crops `.g64-screen`, and measures the **painted** pixel bbox **and coverage** of the **live WebGL** canvas. A 384×272 stamp (Tom #44 photo: top-right; GL-origin: bottom-left) or joystick-only / solid-black pixels **fail**, even when wrapper rects report fill 1.00.
 2. Compares **untransformed** computed CSS px of the live GL canvas and `#grok64-player` (not a 2D present overlay, not a transformed DOM rect) to the bezel. The old #44 `384×272` + `scale()` layout and the #47 2D present path fail this on a tall phone bezel.
 3. Fails if the boot overlay is a full-bezel black sheet, or if power → first READY frame takes longer than 18s (flags the ~39s iPhone blank). Plex Chromium may not reproduce iPhone WASM time.
-4. **Session hold** (~8s after first READY): still powered (no splash remount), `__g64` still mounted, no full page reload / tab crash, **no 2D present canvas covering GL**, VICE backing still 384×272, CRT still painted (not #46/#47 solid black).
+4. **Session hold** (~8s after first READY): still powered (no splash remount), `__g64` still mounted, no full page reload / tab crash, **no 2D present canvas covering GL**, VICE backing still 384×272, **clientWidth is not the #7 384×272 lie**, CRT still painted (not #46/#47/#48 solid black).
 
 Screenshots land in `screenshots/crt-fill-gate-*.png` (including `*-bezel.png` and `*-hold-bezel.png` crops).
 

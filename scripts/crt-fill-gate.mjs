@@ -363,8 +363,8 @@ note(!ready?.booting, "cold-start overlay dismissed after READY (must not stay a
 });
 note(ready?.buf?.w === 384 && ready?.buf?.h === 272, "VICE backing 384x272", ready?.buf);
 note(
-  ready?.canvasClient?.w === 384 && ready?.canvasClient?.h === 272,
-  "GL clientWidth is native 384x272 (VICE blit size; CSS layout may be 100%)",
+  !(ready?.canvasClient?.w === 384 && ready?.canvasClient?.h === 272),
+  "GL clientWidth is not the #7 384x272 lie (must match CSS fill)",
   ready?.canvasClient,
 );
 
@@ -393,6 +393,9 @@ if (ready?.canvasCss && bezelInner) {
     { bezelInner, locked: { w: 384, h: 272 } },
   );
   assertCssFill("live GL CSS px vs bezel (untransformed)", ready.canvasCss.w, ready.canvasCss.h, bezelInner);
+  if (ready.canvasClient) {
+    assertCssFill("GL clientWidth vs bezel (unlocked, not the #7 384 lie)", ready.canvasClient.w, ready.canvasClient.h, bezelInner);
+  }
   if (ready.canvas) {
     const dom = boxFill(ready.canvas.w, ready.canvas.h, bezelInner.w, bezelInner.h);
     console.log(

@@ -75,6 +75,10 @@ test("iOS WebGL backing is locked to 384x272 before the first context", () => {
     patched.indexOf("lockIosClientBox(this, 384, 272)") < patched.indexOf("orig.call(this, type, merged)"),
     "clientWidth must be locked before getContext",
   );
+  assert.ok(
+    patched.indexOf("unlockIosClientBox(this)") > patched.indexOf("orig.call(this, type, merged)"),
+    "clientWidth lie must be cleared after getContext (#7)",
+  );
 });
 
 test("iPhone CRT fills with live-GL CSS 100%, not wrapper scale or 2D present", () => {
@@ -83,6 +87,7 @@ test("iPhone CRT fills with live-GL CSS 100%, not wrapper scale or 2D present", 
   assert.match(host, /if \(isIos\(\)\) applyIosCrtStyle/);
   assert.match(host, /fillBezelCss/);
   assert.match(host, /stripIosPresent/);
+  assert.match(host, /unlockIosClientBox/);
   assert.match(host, /#grok64-player/);
   assert.match(host, /remapViceViewport/);
   assert.doesNotMatch(host, /translate3d\(0,0,0\) scale\(/);
