@@ -109,6 +109,25 @@ export function iecForAutostart(kind: MediaKind): { iec: IecDrive; unit: IecUnit
   return null;
 }
 
+/** VICE `vice_work_disk` for SD2IEC / CMD HD — a FAT card, not a 1541. */
+export function isFsWorkDisk(work: string | null | undefined): boolean {
+  return typeof work === "string" && /_fs$/i.test(work.trim());
+}
+
+/**
+ * Hot-swap + setVariable(8_d64) does not create a 1541 on a live SD2IEC core.
+ * Desktop often races “win”; real CriOS keeps unit 8 missing (DEVICE NOT PRESENT).
+ * Recycle the core with 1541/1581 baked in before Autostart types LOAD"*",8,1.
+ */
+export function floppyPlayCanHotSwap(
+  currentIec: IecDrive,
+  currentWorkDisk?: string | null,
+): boolean {
+  if (currentIec === "sd2iec" || currentIec === "cmdhd") return false;
+  if (isFsWorkDisk(currentWorkDisk)) return false;
+  return currentIec === "1541" || currentIec === "1581";
+}
+
 export function driveForPlay(
   resolved: "true" | "fast",
   opts: { typedDisk?: boolean; workDisk?: boolean } = {},

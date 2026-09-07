@@ -3,8 +3,9 @@ import test from "node:test";
 import { createServer } from "vite";
 
 const server = await createServer({ server: { middlewareMode: true }, appType: "custom" });
-const { swapBootDisk, bootFileOf, mountDiskOnUnit, clearUnitMounts, attachAutostartDisk, applyIecUnit } =
+const { swapBootDisk, bootFileOf, mountDiskOnUnit, clearUnitMounts, attachAutostartDisk, applyIecUnit, flushEmuFs } =
   await server.ssrLoadModule("/src/lib/emu/host.ts");
+const { floppyPlayCanHotSwap } = await server.ssrLoadModule("/src/lib/emu/formats.ts");
 await server.close();
 
 function mockFs(files = new Map()) {
@@ -57,6 +58,36 @@ test("attachAutostartDisk forces 1541 unit 8 even after SD2IEC 8_fs", () => {
   assert.equal(vars.get("vice_work_disk"), "8_d64");
   assert.equal(bootFileOf(emu), "WORK DISK.D64");
   assert.equal(files.get("WORK DISK.D64")?.[0], 0x42);
+});
+
+test("setVariable 8_d64 after SD2IEC is not a present drive — Play must recycle", () => {
+  // Mimic #33: option cache says 8_d64, but the live core is still SD2IEC.
+  assert.equal(floppyPlayCanHotSwap("sd2iec", "8_d64"), false);
+  assert.equal(floppyPlayCanHotSwap("1541", null), true);
+});
+
+test("flushEmuFs waits for delayed IDBFS sync — Autostart must not race mount", async () => {
+  let synced = false;
+  const emu = {
+    gameManager: {
+      FS: {
+        syncfs: (_populate, cb) => {
+          setTimeout(() => {
+            synced = true;
+            cb();
+          }, 80);
+        },
+      },
+    },
+  };
+  let sawUnsynced = false;
+  const pending = flushEmuFs(emu, 500);
+  await new Promise((r) => setTimeout(r, 15));
+  if (!synced) sawUnsynced = true;
+  const ok = await pending;
+  assert.equal(ok, true);
+  assert.equal(synced, true);
+  assert.equal(sawUnsynced, true, "Play would race if it did not await flushEmuFs");
 });
 
 test("mountDiskOnUnit keeps boot file when pruning extras", () => {

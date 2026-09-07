@@ -104,41 +104,83 @@ const failures = [];
     hasTouch: true,
     isMobile: true,
   });
+  // Tom's real phone: SD2IEC persisted ON before the core boots (8_fs).
+  await context.addInitScript(() => {
+    const raw = localStorage.getItem("grok64-settings");
+    let parsed = { state: {}, version: 10 };
+    try {
+      if (raw) parsed = JSON.parse(raw);
+    } catch {
+      /* seed fresh */
+    }
+    parsed.state = { ...(parsed.state || {}), iecDrive: "sd2iec", iecUnit: 8 };
+    parsed.version = parsed.version || 10;
+    localStorage.setItem("grok64-settings", JSON.stringify(parsed));
+  });
   const page = await context.newPage();
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
   await page.locator(".g64-splash").waitFor({ timeout: 20000 });
   await page.waitForFunction(() => typeof window.__g64?.power === "function", { timeout: 15000 });
   await page.evaluate(() => window.__g64.power());
   await waitReady(page);
-
-  const sd = page.locator("button.g64-chip-gate", { hasText: "SD2IEC" });
-  if (await sd.count()) await sd.click();
-  await page.waitForTimeout(200);
+  // CriOS extras (SD2IEC hooks) land after READY — #33 raced ahead of this.
+  await page.waitForTimeout(2600);
 
   const before = await page.evaluate(() => ({
     last: (window.__g64log || []).slice(-6),
     opts: window.__g64?.opts?.(),
+    sessionIec: window.__g64?.sessionIec?.(),
+    workDisk: window.__g64?.workDisk?.(),
   }));
 
-  await page.evaluate(async () => {
-    await window.__g64.load("/software/grok64-workbench.d64", "Burger_Time.d64");
+  const playP = page.evaluate(async () => {
+    await window.__g64.load("/software/grok64-workbench.d64", "paradroidalldri.d64");
   });
-  await page.waitForTimeout(800);
+  // Must not treat Play as done before the mount/recycle settles.
+  await page.waitForTimeout(400);
+  const raced = await page.evaluate(() => {
+    const logs = (window.__g64log || []).map(String);
+    const recycle = logs.some((l) => /play-recycle/.test(l));
+    const hot = logs.some((l) => /hot-swap/.test(l));
+    const mount = logs.some((l) => /play-mount/.test(l));
+    const start = logs.some((l) => /core-start/.test(l) && /paradroid/i.test(l));
+    return { recycle, hot, mount, start, playMode: window.__g64?.playMode?.() };
+  });
+  if (raced.hot && !raced.recycle && (before.workDisk === "8_fs" || before.sessionIec === "sd2iec")) {
+    failures.push("Play hot-swapped on live SD2IEC/8_fs before recycle (CriOS race)");
+  }
+  await playP;
 
-  const after = await page.evaluate(() => ({
-    last: (window.__g64log || []).filter((l) => /play \{|hot-swap/.test(String(l))).slice(-4),
-    opts: window.__g64?.opts?.(),
-    media: window.__g64?.media?.(),
-    title: window.__g64?.title?.(),
-    playMode: window.__g64?.playMode?.(),
-  }));
+  const t0 = Date.now();
+  let after = null;
+  while (Date.now() - t0 < 28000) {
+    after = await page.evaluate(() => ({
+      last: (window.__g64log || []).filter((l) => /play \{|hot-swap|play-recycle|play-mount|core-start/.test(String(l))).slice(-8),
+      opts: window.__g64?.opts?.(),
+      media: window.__g64?.media?.(),
+      title: window.__g64?.title?.(),
+      playMode: window.__g64?.playMode?.(),
+      sessionIec: window.__g64?.sessionIec?.(),
+      workDisk: window.__g64?.workDisk?.(),
+    }));
+    const joined = (after.last || []).join("\n");
+    const disk = after.workDisk === "8_d64" || after.opts?.vice_work_disk === "8_d64" || /8_d64/.test(joined);
+    if (after.sessionIec === "1541" && disk && (/play-recycle|core-start|hot-swap/.test(joined))) break;
+    await page.waitForTimeout(400);
+  }
   await page.screenshot({ path: "/workspace/screenshots/ios-play-attach.png" });
 
-  const hot = after.last.join("\n");
-  if (!/8_d64|iec":"1541"|"unit":8/.test(hot) && after.opts?.vice_work_disk !== "8_d64") {
-    failures.push(`Play did not attach 8_d64 (logs=${hot} opts=${JSON.stringify(after.opts)})`);
+  const hot = (after?.last || []).join("\n");
+  if (/hot-swap/.test(hot) && !/play-recycle/.test(hot) && (before.workDisk === "8_fs" || before.sessionIec === "sd2iec")) {
+    failures.push(`Play hot-swapped instead of recycling 8_fs (logs=${hot})`);
   }
-  console.log("ios-play", JSON.stringify({ beforeOpts: before.opts, after, failHint: failures.slice(-1) }));
+  if (after?.sessionIec !== "1541") {
+    failures.push(`session IEC after Play is ${after?.sessionIec}, want 1541`);
+  }
+  if (after?.workDisk !== "8_d64" && after?.opts?.vice_work_disk !== "8_d64" && !/8_d64/.test(hot)) {
+    failures.push(`Play did not attach 8_d64 (logs=${hot} opts=${JSON.stringify(after?.opts)} work=${after?.workDisk})`);
+  }
+  console.log("ios-play", JSON.stringify({ before, after, raced, failHint: failures.slice(-1) }));
   await context.close();
 }
 
