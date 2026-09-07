@@ -23,6 +23,21 @@ test("Plex CRT fill gate script exists and documents iPhone viewport fill", () =
   assert.match(gate, /g64-boot/);
   assert.match(gate, /g64-screen/);
   assert.match(gate, /g64-bezel/);
+  assert.match(gate, /function hasCssScale/);
+  assert.doesNotMatch(gate, /note\(\/scale\\\(\/i\.test\(String\(ready\?\.playerXf/);
+});
+
+test("gate treats computed matrix as scale (Plex getComputedStyle)", () => {
+  const gate = readFileSync(gatePath, "utf8");
+  const fnSrc = gate.match(/function hasCssScale\([\s\S]*?\n\}/);
+  assert.ok(fnSrc, "hasCssScale missing");
+  const hasCssScale = new Function(`const SCALE_EPS = 0.02;\n${fnSrc[0]}\nreturn hasCssScale;`)();
+  assert.equal(hasCssScale("matrix(1, 0, 0, 2.39706, 0, 0)"), true);
+  assert.equal(hasCssScale("matrix(0.92, 0, 0, 2.4, 0, 0)"), true);
+  assert.equal(hasCssScale("scale(1, 2.39706)"), true);
+  assert.equal(hasCssScale("none"), false);
+  assert.equal(hasCssScale("matrix(1, 0, 0, 1, 0, 0)"), false);
+  assert.equal(hasCssScale(""), false);
 });
 
 test("hosting docs tell the coordinator how to run the fill gate", () => {

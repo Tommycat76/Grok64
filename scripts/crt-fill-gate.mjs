@@ -29,6 +29,7 @@ const shotDir = process.env.G64_GATE_SHOTS || join(repoRoot, "screenshots");
 mkdirSync(shotDir, { recursive: true });
 
 const FILL_MIN = 0.85;
+const SCALE_EPS = 0.02;
 const IPHONE = { width: 390, height: 844 };
 const CRIOS_UA =
   "Mozilla/5.0 (iPhone; CPU iPhone OS 18_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/135.0.7049.53 Mobile/15E148 Safari/604.1";
@@ -42,6 +43,24 @@ function note(ok, msg, extra) {
   }
   failures.push(msg);
   console.log("FAIL", msg, extra ? JSON.stringify(extra) : "");
+}
+
+/** getComputedStyle().transform is a matrix, not the author string scale(...). */
+function hasCssScale(xf) {
+  const s = String(xf || "").trim().toLowerCase();
+  if (!s || s === "none") return false;
+  if (s.includes("scale(")) return true;
+  const m3 = s.match(/matrix3d\(([^)]+)\)/);
+  if (m3) {
+    const n = m3[1].split(",").map((x) => Number(x.trim()));
+    if (n.length < 11 || n.some((v) => Number.isNaN(v))) return false;
+    return Math.abs(n[0] - 1) > SCALE_EPS || Math.abs(n[5] - 1) > SCALE_EPS;
+  }
+  const m2 = s.match(/matrix\(([^)]+)\)/);
+  if (!m2) return false;
+  const n = m2[1].split(",").map((x) => Number(x.trim()));
+  if (n.length < 4 || n.some((v) => Number.isNaN(v))) return false;
+  return Math.abs(n[0] - 1) > SCALE_EPS || Math.abs(n[3] - 1) > SCALE_EPS;
 }
 
 function launchOpts() {
@@ -199,7 +218,7 @@ note(Boolean(ready?.build), "build id visible after power", { build: ready?.buil
 note(!ready?.log, "debug log still off");
 note(!ready?.overlay, "no PNG/2D overlay covering WebGL");
 note(ready?.buf?.w === 384 && ready?.buf?.h === 272, "VICE backing 384x272", ready?.buf);
-note(/scale\(/i.test(String(ready?.playerXf || "")), "player wrapper has scale()", {
+note(hasCssScale(ready?.playerXf), "player wrapper has scale()", {
   playerXf: ready?.playerXf,
 });
 note(!/matrix\([^)]*\)/.test(String(ready?.canvasCss?.xf || "")) || /matrix\(1,\s*0,\s*0,\s*1/.test(String(ready?.canvasCss?.xf || "")), "canvas transform is identity (scale is on wrapper)", {
