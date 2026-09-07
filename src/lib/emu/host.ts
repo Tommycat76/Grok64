@@ -176,9 +176,9 @@ function patchGlViewportFill(gl: WebGLRenderingContext | WebGL2RenderingContext)
 }
 
 /**
- * RetroArch sizes video from clientWidth. CSS 100% would report the tall
- * bezel and the core stops blitting (solid black). Lie about the JS box
- * so VICE keeps a 384×272 blit while CSS stretches the bitmap.
+ * Lie about the JS box only while WebKit allocates the first drawing
+ * buffer. Leaving this lie on after GL exists is #7 (CSS 100% + 384
+ * clientWidth → empty black blit on Plex).
  */
 function lockIosClientBox(canvas: HTMLCanvasElement, w: number, h: number) {
   const tagged = canvas as HTMLCanvasElement & { __g64client?: boolean };
@@ -202,8 +202,23 @@ function lockIosClientBox(canvas: HTMLCanvasElement, w: number, h: number) {
   }
 }
 
+/** Restore real client/offset box so it matches CSS 100% (#7). */
+function unlockIosClientBox(canvas: HTMLCanvasElement) {
+  const tagged = canvas as HTMLCanvasElement & { __g64client?: boolean };
+  if (!tagged.__g64client) return;
+  try {
+    delete (canvas as unknown as { clientWidth?: number }).clientWidth;
+    delete (canvas as unknown as { clientHeight?: number }).clientHeight;
+    delete (canvas as unknown as { offsetWidth?: number }).offsetWidth;
+    delete (canvas as unknown as { offsetHeight?: number }).offsetHeight;
+  } catch {
+    /* keep lie if delete failed */
+    return;
+  }
+  tagged.__g64client = false;
+}
+
 function lockIosBacking(canvas: HTMLCanvasElement, w: number, h: number) {
-  lockIosClientBox(canvas, w, h);
   const tagged = canvas as HTMLCanvasElement & { __g64lock?: boolean };
   if (tagged.__g64lock) return;
   tagged.__g64lock = true;
@@ -229,6 +244,20 @@ function lockIosBacking(canvas: HTMLCanvasElement, w: number, h: number) {
   }
 }
 
+function ensureViceViewportFill(canvas: HTMLCanvasElement) {
+  const gl = (canvas as HTMLCanvasElement & { __g64gl?: WebGLRenderingContext | WebGL2RenderingContext })
+    .__g64gl;
+  if (!gl) return;
+  try {
+    if (gl.isContextLost()) return;
+  } catch {
+    return;
+  }
+  if (gl.drawingBufferWidth > 400 || gl.drawingBufferHeight > 300) {
+    patchGlViewportFill(gl);
+  }
+}
+
 function preserveWebglBuffer() {
   if (webglPatched || typeof HTMLCanvasElement === "undefined") return;
   webglPatched = true;
@@ -250,8 +279,9 @@ function preserveWebglBuffer() {
           this.width = 384;
           this.height = 272;
         }
-        // Lie about clientWidth *before* getContext so WebKit does not
-        // allocate CSS×DPR (a tall stamp: photo was top-right in the bezel).
+        // Lie about clientWidth *only for this allocation* so WebKit does
+        // not create a CSS×DPR drawing buffer. Unlock immediately after
+        // getContext — leaving the lie on is #7 (empty black blit).
         lockIosClientBox(this, 384, 272);
       }
       // iOS WebKit needs preserveDrawingBuffer for CRT compositing; Android tablets do not
@@ -266,16 +296,8 @@ function preserveWebglBuffer() {
         (this as HTMLCanvasElement & { __g64gl?: unknown }).__g64gl = ctx;
         if (ios) {
           lockIosBacking(this, 384, 272);
-          // Viewport remap is only needed if drawingBuffer ≫ 384×272.
-          // Wrapping viewport/scissor on a native 384×272 buffer made VICE
-          // paint solid black in Playwright. Call only when the buffer is tall.
-          if (
-            ctx &&
-            ((ctx as WebGLRenderingContext).drawingBufferWidth > 400 ||
-              (ctx as WebGLRenderingContext).drawingBufferHeight > 300)
-          ) {
-            patchGlViewportFill(ctx as WebGLRenderingContext);
-          }
+          unlockIosClientBox(this);
+          ensureViceViewportFill(this);
         }
       }
       return ctx;
@@ -1279,8 +1301,7 @@ function watchIosCrtBox(box: HTMLElement, apply: () => void) {
 
 /**
  * Layout-fill the bezel. Not CSS transform scale (#43/#44 stamp) and not a
- * 384×272 CSS lock (that was the #47 2D-present reason). VICE still blits
- * because lockIosClientBox lies about clientWidth at 384×272.
+ * leftover 384×272 clientWidth lie (#7 empty blit).
  */
 function fillBezelCss(el: HTMLElement) {
   el.style.setProperty("position", "absolute", "important");
@@ -1302,17 +1323,12 @@ function fillBezelCss(el: HTMLElement) {
 }
 
 /**
- * CriOS CRT fill after #47.
+ * CriOS CRT fill after #47 / #48.
  *
- * Read `docs/IOS_CRT_KNOWN_FAILURES.md` first. This is not 1/2/3/6:
- * show the live WebGL canvas filling .g64-screen with CSS 100% layout
- * (no wrapper scale, no backing resize, no 2D present, no readPixels loop).
- *
- * VICE only blits when the *JS-visible* box is 384×272. We keep that via
- * lockIosClientBox + lockIosBacking. CSS layout is 100% of the bezel so
- * CriOS composites the live GL bitmap into the screen. Leftover 2D
- * present/mirror nodes from cached builds are stripped so they cannot
- * cover READY with black.
+ * Read `docs/IOS_CRT_KNOWN_FAILURES.md` first. This is not 1/2/3/6/7:
+ * live WebGL CSS 100% layout, backing locked at 384×272, client box
+ * unlocked so it matches the CSS box (#7's leftover 384 lie was empty
+ * black on Plex). No wrapper scale, no 2D present, no readPixels loop.
  */
 export function applyIosCrtStyle(
   canvas: HTMLCanvasElement,
@@ -1326,7 +1342,7 @@ export function applyIosCrtStyle(
   const box = (player.closest(".g64-screen") as HTMLElement | null) ?? parent;
 
   const apply = () => {
-    lockIosClientBox(canvas, 384, 272);
+    unlockIosClientBox(canvas);
     fillBezelCss(player);
     const canvasParent = canvas.parentElement;
     if (canvasParent && canvasParent !== player) fillBezelCss(canvasParent);
@@ -1337,6 +1353,7 @@ export function applyIosCrtStyle(
     canvas.style.setProperty("visibility", "visible", "important");
     canvas.style.setProperty("opacity", "1", "important");
     stripIosPresent(box);
+    ensureViceViewportFill(canvas);
     void box.getBoundingClientRect();
   };
 

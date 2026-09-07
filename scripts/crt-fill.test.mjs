@@ -58,6 +58,7 @@ test("Plex CRT fill gate script exists and documents iPhone viewport fill", () =
   assert.match(gate, /Chromium-on-Plex still is not CriOS PASS|#47/);
   assert.match(gate, /function hasCssScale/);
   assert.match(gate, /IOS_CRT_KNOWN_FAILURES/);
+  assert.match(gate, /#7 384x272 lie/);
   assert.doesNotMatch(gate, /note\(\/scale\\\(\/i\.test\(String\(ready\?\.playerXf/);
   assert.doesNotMatch(gate, /GATE PASS/);
 });
@@ -182,6 +183,8 @@ test("iOS CRT fill is live-GL CSS 100%, never wrapper scale or 2D present", () =
   assert.match(iosFn, /width", "100%"/);
   assert.match(iosFn, /height", "100%"/);
   assert.match(iosFn, /stripIosPresent/);
+  assert.match(iosFn, /unlockIosClientBox/);
+  assert.doesNotMatch(iosFn, /(?<!un)lockIosClientBox\(canvas/);
   assert.doesNotMatch(iosFn, /startIosPresent/);
   assert.doesNotMatch(iosFn, /width", "384px"/);
   assert.doesNotMatch(iosFn, /translate3d\(0,0,0\) scale\(/);
