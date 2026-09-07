@@ -82,7 +82,9 @@ test("iOS GL canvas stays native 384×272; leftover 2D present is hidden", () =>
   assert.doesNotMatch(iosCanvas.slice(0, 900), /width: 100% !important/);
   assert.match(css, /canvas\.g64-ios-present/);
   assert.match(css, /g64-ios-zoom/);
+  assert.match(css, /g64-ios-slot/);
   assert.match(paintSrc, /applyIosCrtStyle/);
+  assert.match(paintSrc, /layoutIosCrtHost/);
   assert.match(paintSrc, /zoom/);
   assert.match(paintSrc, /IOS_CRT_KNOWN_FAILURES/);
 });
@@ -97,7 +99,9 @@ test("iOS phone CRT screen fills the bezel without cqh self-size", () => {
   assert.match(css, /\.g64-boot \{[\s\S]*?height: 100%/);
 });
 
-test("PlayerMount sits inside the non-GL zoom host", () => {
+test("PlayerMount sits inside the non-GL zoom host and centering slot", () => {
+  assert.match(app, /className="g64-ios-slot"/);
+  assert.match(app, /data-g64-ios-slot/);
   assert.match(app, /className="g64-ios-zoom"/);
   assert.match(app, /data-g64-ios-zoom/);
   assert.match(app, /<PlayerMount \/>/);

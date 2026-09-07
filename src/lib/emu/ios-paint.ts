@@ -1,15 +1,19 @@
 /**
- * CriOS CRT presentation — live 384×272 WebGL + non-GL CSS zoom (after #50).
+ * CriOS CRT presentation — live 384×272 WebGL + centered zoom slot (after #51).
  *
  * Read `docs/IOS_CRT_KNOWN_FAILURES.md` first. Desktop Chromium / Plex
  * Playwright cannot PASS this. Plex paint-count is not Tom geometry.
+ * Plex `zoom:3` ≠ Tom geometry (#51 / #10).
  *
  * Architecture
  * ------------
  * 1. Show the live VICE WebGL canvas at native 384×272 CSS (the #39/#50
- *    blit). CSS `zoom` on `.g64-ios-zoom` (non-GL) contain-fits that box
- *    in the bezel. Not CSS 100% (#7/#8), not wrapper/GL transform
- *    (#43/#44), not a 2D present (#46/#47), not unzoomed letterbox (#50).
+ *    blit). CSS `zoom` on `.g64-ios-zoom` (non-GL). A non-zoomed
+ *    `.g64-ios-slot` is absolutely placed at the post-zoom centering
+ *    offset so #51's top-right / L-border cannot recur. Not CSS 100%
+ *    (#7/#8), not wrapper/GL transform (#43/#44), not a 2D present
+ *    (#46/#47), not unzoomed letterbox (#50), not bare zoom-from-origin
+ *    (#51).
  * 2. Backing store stays 384×272. Real clientWidth matches the 384 CSS
  *    box — no clientWidth lie, no unlock-to-bezel game.
  * 3. Never call getContext on that canvas.
@@ -17,12 +21,14 @@
  * 5. Strip leftover 2D present/mirror nodes from cached builds.
  * 6. After power-on, play-recycle (unit 8), Reset, or Jiffy apply: unpause
  *    and refit CSS. Do not recycle the core or Autostart from here.
+ * 7. Layout the slot on power even if the emu is not up yet (cheap
+ *    READY-geometry; not a PNG path).
  *
  * Tom's phone remains the only PASS.
  */
 
 import type { EjsInstance } from "./host";
-import { applyIosCrtStyle, dismissEjsPrompts, fitEmu, unlockAudio } from "./host";
+import { applyIosCrtStyle, dismissEjsPrompts, fitEmu, layoutIosCrtHost, unlockAudio } from "./host";
 import { stopIosPresent, stripIosPresent } from "./ios-present";
 import { isIosPhone } from "./detect";
 import { glog } from "./debug";
@@ -102,7 +108,7 @@ function revealLiveCanvas(canvas: HTMLCanvasElement) {
   canvas.style.setProperty("display", "block", "important");
   canvas.style.setProperty("visibility", "visible", "important");
   canvas.style.setProperty("opacity", "1", "important");
-  // Live GL at native 384×272; non-GL wrapper zoom after #50.
+  // Live GL at native 384×272; centered non-GL zoom slot after #51.
   const el =
     (canvas.closest("#grok64-player") as HTMLElement | null) ??
     (typeof document !== "undefined" ? document.getElementById("grok64-player") : null);
@@ -154,13 +160,18 @@ export function presentIosCrt(
   tagOrOpts: string | PresentIosCrtOpts = "present",
   fromUserGesture = false,
 ) {
-  if (!isIosPhone() || !emu) return;
+  if (!isIosPhone()) return;
   const opts: PresentIosCrtOpts =
     typeof tagOrOpts === "string"
       ? { tag: tagOrOpts, fromUserGesture }
       : { fromUserGesture: false, ...tagOrOpts };
   const tag = opts.tag ?? "present";
   const gesture = Boolean(opts.fromUserGesture);
+
+  // Slot geometry does not need the emu — apply on power so first paint
+  // is not a #51 top-left zoom into a black bezel.
+  layoutIosCrtHost(root);
+  if (!emu) return;
 
   unlockAudio(emu);
   dismissEjsPrompts(root, gesture || paintSettled ? "play" : "boot");
@@ -191,7 +202,7 @@ export function presentIosCrt(
     }
   }
 
-  // Refit CSS so the live canvas stays native 384×272 inside the zoom host.
+  // Refit CSS so the live canvas stays native 384×272 inside the centered slot.
   fitEmu(playerRoot(root), emu);
   if (canvas) nudgeCompositor(canvas);
   const shouldFit =

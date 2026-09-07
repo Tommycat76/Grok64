@@ -1917,10 +1917,14 @@ html[data-g64os="ios"] .g64-log {
  * #46–#47: 2D present (drawImage / readPixels) — OOM or Tom black.
  * #48–#49 / #7–#8: CSS 100% + clientWidth lie/unlock — Plex paint count:0.
  * #50 / #9: native 384×272 + flex letterbox — Tom postage stamp, L+B border.
+ * #51 / #10: bare CSS zoom on .g64-ios-zoom — bigger stamp, still L+B /
+ * top-right flush (zoom-from-default-origin, no recenter).
  *
  * This path: live GL stays 384×272 CSS. CSS zoom on .g64-ios-zoom (non-GL).
- * No CSS transform on GL, no CSS 100% on GL. Compact boot chip.
+ * Non-zoomed .g64-ios-slot is absolutely placed at the post-zoom center
+ * offset. No CSS transform on GL, no CSS 100% on GL. Compact boot chip.
  */
+.g64-ios-slot,
 .g64-ios-zoom {
   display: contents;
 }
@@ -1977,13 +1981,25 @@ html[data-g64os="ios"] .g64-ios-mirror {
   opacity: 0 !important;
   pointer-events: none !important;
 }
+html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-ios-slot,
+html[data-g64os="ios"] .g64-ios-slot[data-g64-ios-slot] {
+  display: block;
+  position: absolute;
+  inset: auto;
+  overflow: hidden;
+  margin: 0 !important;
+  transform: none !important;
+  -webkit-transform: none !important;
+  zoom: 1;
+  z-index: 1;
+}
 html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-ios-zoom,
 html[data-g64os="ios"] .g64-ios-zoom[data-g64-ios-zoom] {
   display: block;
-  position: relative;
+  position: absolute;
   inset: auto;
-  left: auto;
-  top: auto;
+  left: 0;
+  top: 0;
   right: auto;
   bottom: auto;
   margin: 0 !important;
