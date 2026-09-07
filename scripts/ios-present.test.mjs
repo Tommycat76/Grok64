@@ -17,10 +17,12 @@ const { presentBufferSize, IOS_PRESENT_MIN_FRAME_MS, IOS_PRESENT_W, IOS_PRESENT_
   await server.ssrLoadModule("/src/lib/emu/ios-present.ts");
 await server.close();
 
-test("present copies live WebGL with drawImage, never PNG or VICE getContext", () => {
-  assert.match(present, /drawImage\(src/);
+test("present copies live WebGL with readPixels, never PNG or VICE getContext", () => {
+  assert.match(present, /readPixels/);
+  assert.match(present, /putImageData/);
   assert.match(present, /g64-ios-present/);
   assert.match(present, /getContext\("2d"/);
+  assert.doesNotMatch(present, /drawImage\(/);
   assert.doesNotMatch(present, /toDataURL|readFsPng|viceScreenshot/);
   assert.doesNotMatch(present, /getContext\("webgl/);
   assert.match(host, /startIosPresent/);
@@ -41,6 +43,7 @@ test("present bitmap stays 384x272 even for a tall iPhone bezel", () => {
 test("present copies are throttled (~14fps) and stop on context loss", () => {
   assert.ok(IOS_PRESENT_MIN_FRAME_MS >= 50, "must not copy every rAF on CriOS");
   assert.ok(IOS_PRESENT_FAIL_LIMIT >= 3);
+  assert.match(present, /readPixels/);
   assert.match(present, /isContextLost/);
   assert.match(present, /pauseIosPresentKeepFrame/);
   assert.match(present, /visibilitychange/);

@@ -1922,7 +1922,7 @@ html[data-g64os="ios"] .g64-log {
  *      A GL-origin stamp in a tall buffer would be bottom-left — fail both.
  *
  * WebGL canvas stays 384×272 (VICE blit). A .g64-ios-present canvas
- * copies that 384×272 buffer (~14fps) and CSS-fills the bezel. #46's
+ * readPixels that 384×272 buffer (~14fps) and CSS-fills the bezel. #46's
  * 60fps bezel-sized drawImage OOM-killed CriOS (black → splash remount).
  * Hidden until the first lit copy so an empty 2D layer cannot cover READY.
  */

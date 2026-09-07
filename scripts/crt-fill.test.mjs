@@ -54,6 +54,7 @@ test("Plex CRT fill gate script exists and documents iPhone viewport fill", () =
   assert.match(gate, /no full page reload/);
   assert.match(gate, /__g64 still mounted/);
   assert.match(gate, /present bitmap stays 384x272/);
+  assert.match(gate, /present canvas revealed after a lit copy/);
   assert.match(gate, /Chromium-on-Plex still is not CriOS PASS/);
   assert.match(gate, /function hasCssScale/);
   assert.doesNotMatch(gate, /note\(\/scale\\\(\/i\.test\(String\(ready\?\.playerXf/);

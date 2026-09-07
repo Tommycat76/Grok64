@@ -5,19 +5,19 @@
  * CSS 100% on that canvas is solid black. CriOS ignores CSS transform on the
  * GL layer (#43 / #44 stamp).
  *
- * #46 copied the GL canvas with 60fps drawImage into a *bezel-sized* 2D
- * canvas (tall phone ≈ 374×650). That is a GPU readback every frame on top
- * of VICE WASM — the same class of CriOS OOM as PR #19 (mirror paint loops).
- * Tom on live #46: ~5s solid black CRT, ~15s full reload back to splash
- * (`powered` is not persisted, so a tab kill looks like a remount).
+ * #46 used 60fps ctx.drawImage(webglCanvas) into a *bezel-sized* 2D bitmap.
+ * On CriOS that readback is often a black cover (READY is painting underneath)
+ * and the 60fps tall-buffer resolve OOM-kills the tab: Tom's ~5s solid black,
+ * ~15s full reload to the power splash (`powered` is not persisted).
  *
- * This build keeps a path that fills without that crash:
+ * This build keeps a fill without that crash:
+ *  - copy via `__g64gl.readPixels` + putImageData (never getContext on VICE,
+ *    never drawImage of the GL canvas — that resolve is the CriOS killer)
  *  - present *bitmap* stays 384×272; CSS 100% stretches the 2D layer
- *    (2D compositing honors CSS; WebGL does not)
- *  - copies at ~14fps, not every rAF
- *  - stays hidden until a lit copy so we never cover READY with empty black
- *  - stops the loop on context-lost / repeated drawImage failure (keeps last frame)
- *  - never PNG, never getContext on the VICE canvas, never recycle
+ *  - ~14fps, reused pixel buffers
+ *  - hidden until a lit copy so an empty 2D layer cannot cover READY
+ *  - stop on context-lost / repeated read failure (keep last frame)
+ *  - never PNG, never recycle
  */
 
 import { glog } from "./debug";
@@ -29,6 +29,9 @@ export const IOS_PRESENT_H = 272;
 /** PR #19: ~15fps was the stable CriOS blit rate. 60fps bezel-sized copies killed the tab. */
 export const IOS_PRESENT_MIN_FRAME_MS = 70;
 export const IOS_PRESENT_FAIL_LIMIT = 8;
+
+const PIXEL_BYTES = IOS_PRESENT_W * IOS_PRESENT_H * 4;
+const ROW_BYTES = IOS_PRESENT_W * 4;
 
 /** Present drawing buffer is always native VICE size — ignore the tall CSS box. */
 export function presentBufferSize(_cssW?: number, _cssH?: number) {
@@ -45,6 +48,8 @@ let fails = 0;
 let pausedLost = false;
 let hooked = false;
 let onLostBound: ((ev: Event) => void) | null = null;
+let pixelBuf: Uint8Array | null = null;
+let imageData: ImageData | null = null;
 
 export function isIosPresentActive(): boolean {
   return Boolean(presentEl?.parentElement);
@@ -79,6 +84,8 @@ export function stopIosPresent() {
   lastCopy = 0;
   fails = 0;
   pausedLost = false;
+  pixelBuf = null;
+  imageData = null;
   if (presentEl) {
     presentEl.remove();
     presentEl = null;
@@ -161,43 +168,78 @@ function ensurePresent(box: HTMLElement): HTMLCanvasElement {
   return el;
 }
 
-function glOk(src: HTMLCanvasElement): boolean {
-  const gl = (src as HTMLCanvasElement & { __g64gl?: WebGLRenderingContext }).__g64gl;
-  if (!gl) return src.width >= 8 && src.height >= 8;
+function glOf(src: HTMLCanvasElement): WebGLRenderingContext | WebGL2RenderingContext | null {
+  const gl = (src as HTMLCanvasElement & { __g64gl?: WebGLRenderingContext | WebGL2RenderingContext })
+    .__g64gl;
+  if (!gl) return null;
   try {
-    return !gl.isContextLost();
+    if (gl.isContextLost()) return null;
   } catch {
-    return false;
+    return null;
   }
+  return gl;
 }
 
-function copiedLooksLit(ctx: CanvasRenderingContext2D): boolean | "unknown" {
-  try {
-    const spots: Array<[number, number]> = [
-      [32, 32],
-      [192, 136],
-      [300, 80],
-      [80, 200],
-    ];
-    for (const [x, y] of spots) {
-      const { data } = ctx.getImageData(x, y, 8, 8);
-      for (let i = 0; i < data.length; i += 4) {
-        if (Math.max(data[i], data[i + 1], data[i + 2]) >= 28) return true;
-      }
-    }
-    return false;
-  } catch {
-    return "unknown";
+function copiedLooksLit(data: Uint8ClampedArray): boolean {
+  const spots = [32 + 32 * IOS_PRESENT_W, 192 + 136 * IOS_PRESENT_W, 300 + 80 * IOS_PRESENT_W, 80 + 200 * IOS_PRESENT_W];
+  for (const px of spots) {
+    const i = px * 4;
+    if (i + 2 >= data.length) continue;
+    if (Math.max(data[i], data[i + 1], data[i + 2]) >= 28) return true;
   }
+  return false;
 }
 
-function revealIfReady(ctx: CanvasRenderingContext2D) {
+function revealIfReady(data: Uint8ClampedArray) {
   if (paintedOnce || !presentEl) return;
-  const lit = copiedLooksLit(ctx);
-  if (lit === false) return;
+  if (!copiedLooksLit(data)) return;
   paintedOnce = true;
   presentEl.classList.add(IOS_PRESENT_ON_CLASS);
-  glog("ios-present-on", { lit });
+  glog("ios-present-on");
+}
+
+function copyFrame(
+  gl: WebGLRenderingContext | WebGL2RenderingContext,
+  ctx: CanvasRenderingContext2D,
+): boolean {
+  let prev: unknown = null;
+  try {
+    prev = gl.getParameter(gl.FRAMEBUFFER_BINDING);
+  } catch {
+    prev = null;
+  }
+  if (gl.drawingBufferWidth < 64 || gl.drawingBufferHeight < 64) return false;
+  try {
+    if (prev) gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  } catch {
+    return false;
+  }
+
+  if (!pixelBuf || pixelBuf.length !== PIXEL_BYTES) pixelBuf = new Uint8Array(PIXEL_BYTES);
+  try {
+    gl.readPixels(0, 0, IOS_PRESENT_W, IOS_PRESENT_H, gl.RGBA, gl.UNSIGNED_BYTE, pixelBuf);
+  } finally {
+    if (prev) {
+      try {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, prev as WebGLFramebuffer);
+      } catch {
+        /* VICE will rebind next frame */
+      }
+    }
+  }
+
+  if (!imageData || imageData.width !== IOS_PRESENT_W || imageData.height !== IOS_PRESENT_H) {
+    imageData = ctx.createImageData(IOS_PRESENT_W, IOS_PRESENT_H);
+  }
+  const dst = imageData.data;
+  const src = pixelBuf;
+  // WebGL origin is bottom-left; 2D canvas is top-left.
+  for (let y = 0; y < IOS_PRESENT_H; y++) {
+    const srcOff = (IOS_PRESENT_H - 1 - y) * ROW_BYTES;
+    dst.set(src.subarray(srcOff, srcOff + ROW_BYTES), y * ROW_BYTES);
+  }
+  ctx.putImageData(imageData, 0, 0);
+  return true;
 }
 
 function tick(now: number) {
@@ -214,7 +256,8 @@ function tick(now: number) {
     return;
   }
 
-  if (!glOk(src)) {
+  const gl = glOf(src);
+  if (!gl) {
     fails += 1;
     if (fails >= IOS_PRESENT_FAIL_LIMIT) {
       pauseIosPresentKeepFrame();
@@ -225,11 +268,11 @@ function tick(now: number) {
   }
 
   try {
-    ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(src, 0, 0, IOS_PRESENT_W, IOS_PRESENT_H);
-    lastCopy = now;
-    fails = 0;
-    revealIfReady(ctx);
+    if (copyFrame(gl, ctx)) {
+      lastCopy = now;
+      fails = 0;
+      if (imageData) revealIfReady(imageData.data);
+    }
   } catch {
     fails += 1;
     if (fails >= IOS_PRESENT_FAIL_LIMIT) {
@@ -249,7 +292,7 @@ export function startIosPresent(glCanvas: HTMLCanvasElement, box: HTMLElement) {
   bindSource(glCanvas);
   presentEl = ensurePresent(box);
   if (!ctx2d || ctx2d.canvas !== presentEl) {
-    ctx2d = presentEl.getContext("2d", { alpha: false });
+    ctx2d = presentEl.getContext("2d", { alpha: false, willReadFrequently: false });
   }
   lockPresentBuffer(presentEl);
   if (pausedLost) return;

@@ -346,6 +346,9 @@ note(Boolean(ready?.build), "build id visible after power", { build: ready?.buil
 note(!ready?.log, "debug log still off");
 note(!ready?.overlay, "no PNG/paint-poll overlay covering WebGL");
 note(Boolean(ready?.present), "live-GL present canvas fills the bezel (not a PNG mirror)");
+note(Boolean(ready?.presentOn), "present canvas revealed after a lit copy (does not cover READY with black)", {
+  presentOn: ready?.presentOn,
+});
 note(ready?.presentBuf?.w === 384 && ready?.presentBuf?.h === 272, "present bitmap stays 384x272 (not a bezel-sized readback)", ready?.presentBuf);
 note(ready?.buf?.w === 384 && ready?.buf?.h === 272, "VICE backing 384x272", ready?.buf);
 note(

@@ -10,9 +10,10 @@
  * 1. The RetroArch/VICE WebGL canvas stays in the DOM at 384×272 (the only
  *    CSS size that blits). CriOS ignores CSS transform on the GL layer — #44's
  *    scale on #grok64-player was a stamp (photo: top-right) with DOM fill 1.0.
- *    A 2D present canvas (ios-present.ts) copies the live 384×272 GL buffer
- *    at ~14fps and CSS-fills .g64-screen. Not a 60fps bezel-sized readback
- *    (#46 CriOS black→splash), not PNG / paint-poll / getContext on VICE.
+ *    A 2D present canvas (ios-present.ts) readPixels the live 384×272 GL
+ *    buffer at ~14fps and CSS-fills .g64-screen. Not drawImage(GL) and not
+ *    a 60fps bezel-sized readback (#46 CriOS black→splash). Not PNG /
+ *    paint-poll / getContext on VICE.
  * 2. Never call getContext on that canvas. host.ts already captured
  *    VICE's context on `__g64gl`. A second WebGL context on WebKit returns null
  *    or steals the canvas (solid black CRT).
