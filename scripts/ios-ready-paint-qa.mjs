@@ -45,16 +45,20 @@ for (let i = 0; i < 80; i++) {
       paintSettled: window.__g64?.paintSettled?.() ?? false,
       mirrorPainted: window.__g64?.mirrorPainted?.() ?? false,
       mirrorActive: window.__g64?.mirrorActive?.() ?? false,
-      painted: logs.some((l) => /ios-mirror-painted|ios-frame-ok|ios-watchdog-painted/.test(String(l))),
+      painted: logs.some((l) =>
+        /ios-mirror-painted|ios-frame-ok|ios-watchdog-painted|ios-live-webgl|ios-gl-blit/.test(String(l)),
+      ),
+      paintPath: window.__g64?.paintPath?.() ?? null,
       timeoutShot: logs.some((l) => /ios-screenshot-timeout/.test(String(l))),
+      noPngSkip: logs.some((l) => /ios-mirror-skip/.test(String(l)) && /no-png/.test(String(l))),
       pollOnly:
         logs.filter((l) => /ios-paint-poll/.test(String(l))).length >= 4 &&
-        !logs.some((l) => /ios-mirror-painted|ios-frame-ok/.test(String(l))),
+        !logs.some((l) => /ios-mirror-painted|ios-frame-ok|ios-live-webgl|ios-gl-blit/.test(String(l))),
       last: logs.slice(-8),
     };
   });
   if (paint.fs && paint.running && paint.title === "BASIC" && (paint.paintSettled || paint.mirrorPainted || paint.painted)) {
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(2500);
     paint = await page.evaluate(() => {
       const logs = window.__g64log || [];
       return {
@@ -64,12 +68,22 @@ for (let i = 0; i < 80; i++) {
         paintSettled: window.__g64?.paintSettled?.() ?? false,
         mirrorPainted: window.__g64?.mirrorPainted?.() ?? false,
         mirrorActive: window.__g64?.mirrorActive?.() ?? false,
-        painted: logs.some((l) => /ios-mirror-painted|ios-frame-ok|ios-watchdog-painted/.test(String(l))),
+        painted: logs.some((l) =>
+          /ios-mirror-painted|ios-frame-ok|ios-watchdog-painted|ios-live-webgl|ios-gl-blit/.test(String(l)),
+        ),
+        paintPath: window.__g64?.paintPath?.() ?? null,
         timeoutShot: logs.some((l) => /ios-screenshot-timeout/.test(String(l))),
+        noPngSkip: logs.some((l) => /ios-mirror-skip/.test(String(l)) && /no-png/.test(String(l))),
         pollOnly:
           logs.filter((l) => /ios-paint-poll/.test(String(l))).length >= 4 &&
-          !logs.some((l) => /ios-mirror-painted|ios-frame-ok/.test(String(l))),
+          !logs.some((l) => /ios-mirror-painted|ios-frame-ok|ios-live-webgl|ios-gl-blit/.test(String(l))),
         last: logs.slice(-8),
+        canvases: [...document.querySelectorAll("#grok64-player canvas")].map((c) => ({
+          w: c.width,
+          h: c.height,
+          cls: c.className,
+          live: document.getElementById("grok64-player")?.classList.contains("g64-ios-mirror-on") ?? false,
+        })),
       };
     });
     break;
@@ -93,6 +107,10 @@ if (!paint?.fs || paint.title !== "BASIC" || !paint.running) {
 }
 if (paint.pollOnly && !paint.paintSettled && !paint.mirrorPainted && !paint.painted) {
   console.log("FAIL stuck on ios-paint-poll with no READY paint");
+  process.exit(2);
+}
+if (paint.noPngSkip && !paint.paintSettled && !paint.painted) {
+  console.log("FAIL no-png skip left the CRT unsettled");
   process.exit(2);
 }
 console.log("BOX ios READY paint path (not a real-device PASS)");

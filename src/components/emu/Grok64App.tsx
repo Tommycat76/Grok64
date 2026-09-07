@@ -88,6 +88,7 @@ import { pokeAudioUnlock } from "@/lib/emu/audio-unlock";
 import {
   forceIosMirrorBlit,
   installIosPaintHooks,
+  iosCrtPath,
   iosTapResumeCooldown,
   isIosMirrorActive,
   isIosMirrorPainted,
@@ -373,6 +374,7 @@ export function Grok64App() {
       booting: () => useEmu.getState().booting,
       playLock: () => playLockRef.current,
       paintSettled: () => isIosPaintSettled(),
+      paintPath: () => iosCrtPath(),
       mirrorPainted: () => isIosMirrorPainted(),
       mirrorActive: () => isIosMirrorActive(),
       media: () =>
@@ -587,7 +589,7 @@ export function Grok64App() {
     } catch {}
   }, []);
   const startIosAutoPaint = useCallback((onPainted?: () => void) => {
-    if (isIosPaintSettled() && isIosMirrorPainted()) {
+    if (isIosPaintSettled()) {
       onPainted?.();
       return;
     }
@@ -1440,7 +1442,7 @@ export function Grok64App() {
   }, [s.powered, s.booting, recoverBoot]);
   useEffect(() => {
     if (!s.powered || !isIosPhone()) return;
-    if (isIosPaintSettled() && isIosMirrorPainted()) return;
+    if (isIosPaintSettled()) return;
     const playerEl = document.getElementById("grok64-player");
     if (!s.booting && !s.running) return;
     if (s.booting || (s.running && !isIosPaintSettled())) {
