@@ -52,7 +52,8 @@ test("new CRT path is live-GL CSS fill, not failed approaches 1/2/3/6", () => {
   assert.doesNotMatch(iosFn, /startIosPresent/);
   assert.doesNotMatch(iosFn, /width", "384px"/);
   assert.doesNotMatch(iosFn, /scale\(/);
-  assert.doesNotMatch(iosFn, /readPixels/);
+  const iosCode = iosFn.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  assert.doesNotMatch(iosCode, /readPixels/);
   const presentCode = present.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
   assert.doesNotMatch(presentCode, /readPixels/);
   assert.doesNotMatch(presentCode, /drawImage/);
