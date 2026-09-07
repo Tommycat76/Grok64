@@ -10,7 +10,7 @@
  * 1. The RetroArch/VICE WebGL canvas IS the screen. Keep it in the DOM,
  *    visible. CSS width/height 100% of .g64-screen (no 384×272 lock, no
  *    wrapper scale). CriOS ignores CSS transform on the GL layer — #44's
- *    scale on #grok64-player was a bottom-left stamp with DOM fill 1.0.
+ *    scale on #grok64-player was a stamp (photo: top-right) with DOM fill 1.0.
  * 2. Never call getContext on that canvas. host.ts already captured
  *    VICE's context on `__g64gl`. A second WebGL context on WebKit returns null
  *    or steals the canvas (solid black CRT).

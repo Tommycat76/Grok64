@@ -174,32 +174,38 @@ function patchGlViewportFill(gl: WebGLRenderingContext | WebGL2RenderingContext)
   };
 }
 
-/** CSS-pixel size of .g64-screen — the WebGL drawing buffer must match this. */
-export function iosDisplayBufferSize(): { w: number; h: number } {
-  if (typeof document === "undefined" || typeof window === "undefined") {
-    return { w: 384, h: 272 };
+/**
+ * RetroArch sizes video from clientWidth. CSS 100% would report the tall
+ * bezel and the core stops blitting (solid black). Lie about the JS box
+ * so VICE keeps a 384×272 blit while CSS stretches the bitmap.
+ */
+function lockIosClientBox(canvas: HTMLCanvasElement, w: number, h: number) {
+  const tagged = canvas as HTMLCanvasElement & { __g64client?: boolean };
+  if (tagged.__g64client) return;
+  tagged.__g64client = true;
+  try {
+    for (const [prop, val] of [
+      ["clientWidth", w],
+      ["clientHeight", h],
+      ["offsetWidth", w],
+      ["offsetHeight", h],
+    ] as const) {
+      Object.defineProperty(canvas, prop, {
+        configurable: true,
+        enumerable: true,
+        get: () => val,
+      });
+    }
+  } catch {
+    /* engine refused redefine */
   }
-  const box = document.querySelector(".g64-screen") as HTMLElement | null;
-  let w = Math.round(box?.clientWidth || 0);
-  let h = Math.round(box?.clientHeight || 0);
-  if (w < 160 || h < 120) {
-    const vw = Math.round(window.visualViewport?.width ?? window.innerWidth ?? 390);
-    const vh = Math.round(window.visualViewport?.height ?? window.innerHeight ?? 844);
-    w = Math.max(w, vw - 36);
-    h = Math.max(h, Math.round(vh * 0.55));
-  }
-  return { w: Math.max(384, w), h: Math.max(272, h) };
 }
 
-function lockIosBacking(canvas: HTMLCanvasElement, _reportedW: number, _reportedH: number) {
+function lockIosBacking(canvas: HTMLCanvasElement, w: number, h: number) {
+  lockIosClientBox(canvas, w, h);
   const tagged = canvas as HTMLCanvasElement & { __g64lock?: boolean };
   if (tagged.__g64lock) return;
   tagged.__g64lock = true;
-  // Freeze the *actual* drawing-buffer size (CSS box). Do not report 384×272 —
-  // some WebGL implementations resync the buffer to the getter and would
-  // shrink back into a bottom-left stamp.
-  const w = canvas.width;
-  const h = canvas.height;
   try {
     Object.defineProperty(canvas, "width", {
       configurable: true,
@@ -237,13 +243,15 @@ function preserveWebglBuffer() {
       // Size the VICE framebuffer before the first context. Assigning width
       // after GL exists wipes CriOS. CSS fills the CRT around 384×272.
       if (ios) {
-        // Drawing buffer must match the CSS box. A 384×272 buffer in a
-        // tall 100% canvas is a bottom-left GL-layer stamp on WebKit.
-        const disp = iosDisplayBufferSize();
-        if (this.width !== disp.w || this.height !== disp.h) {
-          this.width = disp.w;
-          this.height = disp.h;
+        // VICE only paints when the drawing buffer is the native 384×272.
+        // Growing it to the CSS box (Tom #46 experiment) was solid black.
+        if (this.width !== 384 || this.height !== 272) {
+          this.width = 384;
+          this.height = 272;
         }
+        // Lie about clientWidth *before* getContext so WebKit does not
+        // allocate CSS×DPR (a tall stamp: photo was top-right in the bezel).
+        lockIosClientBox(this, 384, 272);
       }
       // iOS WebKit needs preserveDrawingBuffer for CRT compositing; Android tablets do not
       // and pay a large fill-rate cost when it is forced on every WebGL context.
@@ -257,7 +265,16 @@ function preserveWebglBuffer() {
         (this as HTMLCanvasElement & { __g64gl?: unknown }).__g64gl = ctx;
         if (ios) {
           lockIosBacking(this, 384, 272);
-          patchGlViewportFill(ctx as WebGLRenderingContext);
+          // Viewport remap is only needed if drawingBuffer ≫ 384×272.
+          // Wrapping viewport/scissor on a native 384×272 buffer made VICE
+          // paint solid black in Playwright. Call only when the buffer is tall.
+          if (
+            ctx &&
+            ((ctx as WebGLRenderingContext).drawingBufferWidth > 400 ||
+              (ctx as WebGLRenderingContext).drawingBufferHeight > 300)
+          ) {
+            patchGlViewportFill(ctx as WebGLRenderingContext);
+          }
         }
       }
       return ctx;
@@ -1107,20 +1124,9 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       const glLive = Boolean((canvas as HTMLCanvasElement & { __g64gl?: unknown }).__g64gl);
       let bw = Math.max(384, Math.round(cw * dpr));
       let bh = Math.max(272, Math.round(ch * dpr));
-      if (iosPhone) {
-        // Before GL: size the drawing buffer to the CSS box. After GL: never
-        // reassign width (wipes CriOS). VICE still thinks 384×272 via the lock.
-        if (!glLive) {
-          const disp = iosDisplayBufferSize();
-          bw = disp.w;
-          bh = disp.h;
-        } else {
-          bw = canvas.width;
-          bh = canvas.height;
-        }
-      } else if (tablet) {
-        // VICE framebuffer is 384×272. Stretching the backing store past that
-        // leaves a black gap on Android. CSS scale fills the CRT.
+      if (tablet || iosPhone) {
+        // VICE framebuffer is 384×272. Growing the backing store is solid
+        // black. CSS width/height 100% (not transform) fills the CRT.
         bw = 384;
         bh = 272;
       } else if (touchMobile) {
@@ -1276,8 +1282,12 @@ function fillCssBox(el: HTMLElement) {
   el.style.setProperty("top", "0", "important");
   el.style.setProperty("right", "0", "important");
   el.style.setProperty("bottom", "0", "important");
+  el.style.setProperty("margin", "0", "important");
+  el.style.setProperty("align-self", "stretch", "important");
   el.style.setProperty("width", "100%", "important");
   el.style.setProperty("height", "100%", "important");
+  el.style.setProperty("min-width", "100%", "important");
+  el.style.setProperty("min-height", "100%", "important");
   el.style.setProperty("max-width", "none", "important");
   el.style.setProperty("max-height", "none", "important");
   el.style.setProperty("transform", "none", "important");
@@ -1288,7 +1298,7 @@ function fillCssBox(el: HTMLElement) {
 /**
  * CriOS CRT fill. Do not CSS-transform the canvas or #grok64-player —
  * WebKit ignores those transforms on the WebGL compositor layer (#43 / #44),
- * leaving a 384×272 stamp (often bottom-left) while getBoundingClientRect
+ * leaving a 384×272 stamp (Tom photo: top-right) while getBoundingClientRect
  * still reports fill 1.0.
  *
  * Stretch the locked 384×272 drawing buffer with width/height 100% so the
@@ -1307,6 +1317,7 @@ export function applyIosCrtStyle(
   const box = (player.closest(".g64-screen") as HTMLElement | null) ?? parent;
 
   const apply = () => {
+    lockIosClientBox(canvas, 384, 272);
     fillCssBox(player);
     const canvasParent = canvas.parentElement;
     if (canvasParent && canvasParent !== player) fillCssBox(canvasParent);

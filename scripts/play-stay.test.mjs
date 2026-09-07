@@ -62,11 +62,17 @@ test("iOS CRT path does not recycle or Autostart", () => {
   assert.doesNotMatch(paint, /ios-paint-poll/);
 });
 
-test("iOS WebGL backing is sized to the CSS box and frozen", () => {
-  assert.match(host, /iosDisplayBufferSize/);
-  assert.match(host, /lockIosBacking\(this, 384, 272\)/);
+test("iOS WebGL backing is locked to 384x272 before the first context", () => {
+  assert.match(host, /this\.width = 384/);
+  assert.match(host, /this\.height = 272/);
+  assert.match(host, /lockIosClientBox\(this, 384, 272\)/);
+  assert.match(host, /lockIosBacking/);
   assert.match(host, /remapViceViewport/);
-  assert.match(host, /Freeze the \*actual\* drawing-buffer size/);
+  const patched = host.slice(host.indexOf("function preserveWebglBuffer"), host.indexOf("type GuardedGm"));
+  assert.ok(
+    patched.indexOf("lockIosClientBox(this, 384, 272)") < patched.indexOf("orig.call(this, type, merged)"),
+    "clientWidth must be locked before getContext",
+  );
 });
 
 test("iPhone CRT fills with CSS 100%, not wrapper scale or canvas DPR", () => {

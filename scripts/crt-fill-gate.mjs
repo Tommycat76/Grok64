@@ -13,7 +13,8 @@
  *
  * HARD: asserts the *painted* picture fills the bezel. DOM wrapper /
  * getBoundingClientRect fill of 1.0 is not enough — that was the #45
- * false green on #44's wrapper-scale stamp (including bottom-left).
+ * false green on #44's wrapper-scale stamp. Tom's photo is top-right
+ * (L-shaped purple left+bottom); a GL-origin stamp is bottom-left.
  *
  * Optional later: BrowserStack real CriOS — not required this PR.
  *
@@ -142,6 +143,7 @@ const measureSrc = () => {
     overlay: Boolean(player?.querySelector(".g64-ios-mirror")),
     fb: canvas?.classList.contains("g64-ios-fb") ?? false,
     buf: canvas ? { w: canvas.width, h: canvas.height } : null,
+    canvasClient: canvas ? { w: canvas.clientWidth, h: canvas.clientHeight } : null,
     db: gl ? { w: gl.drawingBufferWidth, h: gl.drawingBufferHeight } : null,
     canvasCss: cs ? { w: cs.width, h: cs.height, xf: cs.transform } : null,
     playerCss: ps ? { w: ps.width, h: ps.height, xf: ps.transform } : null,
@@ -297,18 +299,12 @@ const readyShot = await shotPaint(page, "crt-fill-gate-ready-bezel.png");
 note(Boolean(ready?.build), "build id visible after power", { build: ready?.build });
 note(!ready?.log, "debug log still off");
 note(!ready?.overlay, "no PNG/2D overlay covering WebGL");
+note(ready?.buf?.w === 384 && ready?.buf?.h === 272, "VICE backing 384x272", ready?.buf);
 note(
-  Boolean(ready?.buf && ready.buf.w >= 300 && ready.buf.h >= 400 && (ready.buf.w !== 384 || ready.buf.h !== 272)),
-  "iOS drawing buffer matches tall CSS box (not a 384x272 stamp layer)",
-  ready?.buf,
+  ready?.canvasClient?.w === 384 && ready?.canvasClient?.h === 272,
+  "clientWidth locked to 384x272 (VICE blit size, not CSS box)",
+  ready?.canvasClient,
 );
-if (ready?.db && ready.buf) {
-  note(
-    ready.db.w >= 300 && ready.db.h >= 400,
-    "WebGL drawingBuffer matches CSS box",
-    ready.db,
-  );
-}
 
 // #44 stamp path: wrapper scale + 384×272 CSS. CriOS ignores that scale on GL.
 note(!hasCssScale(ready?.playerXf), "player wrapper has no CSS scale (CriOS ignores it on the GL layer)", {
@@ -347,7 +343,7 @@ if (ready?.screenCss && bezelInner) {
 
 const paint = assertPainted("READY", readyShot, { title: ready?.title, crtMs });
 if (paint.corner && paint.corner !== "full" && paint.corner !== "none") {
-  note(false, `READY painted stamp corner ${paint.corner} (Tom symptom includes bottom-left)`, {
+  note(false, `READY painted stamp corner ${paint.corner} (Tom #44 photo is top-right; GL-origin is bottom-left)`, {
     bbox: paint.bbox,
     fill: paint.fill,
   });

@@ -54,6 +54,15 @@ export function colorDist(r, g, b, bg) {
   return Math.sqrt(dr * dr + dg * dg + db * db);
 }
 
+/** C64 picture (border / phosphor / text), not a cleared black GL buffer. */
+export function isCrtPicturePixel(r, g, b, bg, thresh = PAINT_THRESH) {
+  if (colorDist(r, g, b, bg) < thresh) return false;
+  const maxc = Math.max(r, g, b);
+  const minc = Math.min(r, g, b);
+  if (maxc < 28) return false;
+  return maxc - minc >= 10 || maxc >= 48;
+}
+
 function pixel(data, i) {
   return [data[i], data[i + 1], data[i + 2]];
 }
@@ -91,8 +100,9 @@ export function medianColor(samples) {
 }
 
 /**
- * Classify where a non-full bbox sits. Tom #44: bottom-left stamp
- * (small dark CRT, large bezel showing on the right and top).
+ * Classify where a non-full bbox sits. Tom #44 photo: top-right stamp
+ * (dark CRT flush top+right, L-shaped purple left+bottom). A GL-origin
+ * stamp in a tall buffer would be bottom-left. Fail every corner.
  */
 export function classifyStampCorner(bbox, imgW, imgH) {
   if (!bbox || imgW < 1 || imgH < 1) return "none";
@@ -129,7 +139,7 @@ export function paintedContent(data, width, height, opts = {}) {
   for (let y = y0; y < y1; y++) {
     for (let x = x0; x < x1; x++) {
       const i = (y * width + x) * 4;
-      if (colorDist(data[i], data[i + 1], data[i + 2], bg) < thresh) continue;
+      if (!isCrtPicturePixel(data[i], data[i + 1], data[i + 2], bg, thresh)) continue;
       const lx = x - x0;
       const ly = y - y0;
       count += 1;
@@ -169,7 +179,7 @@ export function paintedContent(data, width, height, opts = {}) {
 }
 
 export function paintFails(paint, min = FILL_MIN, cover = COVERAGE_MIN) {
-  if (!paint || paint.empty) return "no painted CRT (blank / bezel-only)";
+  if (!paint || paint.empty) return "no painted CRT (blank / solid-black / bezel-only)";
   if ((paint.coverage ?? 0) < cover) {
     return `painted coverage ${(paint.coverage ?? 0).toFixed(3)} (stamp / chrome-only, need ${cover})`;
   }
@@ -312,8 +322,15 @@ export function fillRect(img, x, y, w, h, rgb) {
   }
 }
 
-/** Tom #44 / CoS: large bezel, small dark CRT in the bottom-left. */
+/** Tom #44 photo: large purple bezel, small dark CRT flush top-right. */
 export function tomStampFixture(w = 374, h = 652) {
+  const img = makeRgba(w, h, [0x6c, 0x5a, 0x9a, 255]);
+  fillRect(img, w - 8 - 128, 8, 128, 96, [0x12, 0x16, 0x3a, 255]);
+  return img;
+}
+
+/** GL-origin stamp in a tall buffer (bottom-left). Must also fail. */
+export function tomStampBottomLeftFixture(w = 374, h = 652) {
   const img = makeRgba(w, h, [0x6c, 0x5a, 0x9a, 255]);
   fillRect(img, 8, h - 8 - 96, 128, 96, [0x12, 0x16, 0x3a, 255]);
   return img;

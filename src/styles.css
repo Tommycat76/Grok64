@@ -1917,7 +1917,9 @@ html[data-g64os="ios"] .g64-log {
  * #43: width:auto + 100cqh collapsed the screen to min-width (stamp).
  * #43: scale(dpr) on the canvas — CriOS ignores canvas CSS transform.
  * #44: 384×272 CSS + scale() on #grok64-player — DOM rect fill 1.0, but
- *      CriOS still paints the unscaled GL layer (often bottom-left).
+ *      CriOS still paints the unscaled GL layer. Tom's #44 photo: dark CRT
+ *      flush top-right of the light-purple bezel (L-shaped purple left+bottom).
+ *      A GL-origin stamp in a tall buffer would be bottom-left — fail both.
  *
  * Stretch the locked 384×272 WebGL buffer with width/height 100%.
  * No CSS transform on the player or canvas.
@@ -1952,8 +1954,11 @@ html[data-g64os="ios"] #grok64-player {
   top: 0;
   right: 0;
   bottom: 0;
+  margin: 0 !important;
   width: 100% !important;
   height: 100% !important;
+  min-width: 100% !important;
+  min-height: 100% !important;
   max-width: none !important;
   max-height: none !important;
   transform: none !important;
@@ -1963,8 +1968,11 @@ html[data-g64os="ios"] #grok64-player {
 html[data-g64os="ios"] #grok64-player .ejs_canvas_parent {
   position: absolute;
   inset: 0;
+  margin: 0 !important;
   width: 100% !important;
   height: 100% !important;
+  min-width: 100% !important;
+  min-height: 100% !important;
   max-width: none !important;
   max-height: none !important;
   transform: none !important;
@@ -1981,12 +1989,13 @@ html[data-g64os="ios"] #grok64-player canvas.g64-ios-fb {
   top: 0 !important;
   right: 0 !important;
   bottom: 0 !important;
+  margin: 0 !important;
   width: 100% !important;
   height: 100% !important;
+  min-width: 100% !important;
+  min-height: 100% !important;
   max-width: none !important;
   max-height: none !important;
-  min-width: 0;
-  min-height: 0;
   object-fit: fill !important;
   object-position: 0 0 !important;
   transform: none !important;

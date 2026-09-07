@@ -50,7 +50,7 @@ node scripts/crt-fill-gate.mjs http://127.0.0.1:8091/
 
 It launches Playwright Chromium at an iPhone viewport (390×844, touch, CriOS UA), powers on, then:
 
-1. Hides on-screen chrome, crops `.g64-screen`, and measures the **painted** pixel bbox **and coverage**. A 384×272 stamp or joystick-only pixels **fail**, even when wrapper rects report fill 1.00.
+1. Hides on-screen chrome, crops `.g64-screen`, and measures the **painted** pixel bbox **and coverage**. A 384×272 stamp (Tom #44 photo: top-right; GL-origin: bottom-left) or joystick-only / solid-black pixels **fail**, even when wrapper rects report fill 1.00.
 2. Compares **untransformed** computed CSS px (not the transformed DOM rect) to the bezel. The old #44 `384×272` + `scale()` layout fails this on a tall phone bezel.
 3. Fails if the boot overlay is missing / blank, or if power → first READY frame takes longer than 18s (flags the ~39s iPhone blank). Plex Chromium may not reproduce iPhone WASM time.
 

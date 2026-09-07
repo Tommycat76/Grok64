@@ -15,6 +15,7 @@ import {
   oldStampLayoutFails,
   paintFails,
   paintedContent,
+  tomStampBottomLeftFixture,
   tomStampFixture,
 } from "./crt-fill-paint.mjs";
 import { deflateSync } from "node:zlib";
@@ -66,12 +67,16 @@ test("gate fails Tom's #44 stamp even when DOM wrappers report fill 1.0", () => 
   const stamp = tomStampFixture(374, 652);
   const paint = paintedContent(stamp.data, stamp.width, stamp.height);
   assert.equal(paint.empty, false);
-  assert.equal(paint.corner, "bottom-left");
+  assert.equal(paint.corner, "top-right");
   assert.ok(paint.fill < FILL_MIN || paint.coverage < 0.15, `stamp fill ${paint.fill} cov ${paint.coverage} should be ≪ bezel`);
   assert.ok(paintFails(paint), "paintFails must reject the stamp");
   // Transformed DOM boxes can still be 1.0 — that must not pass.
   assert.equal(fillsBox(374, 652, 374, 652), true);
   assert.equal(oldStampLayoutFails(384, 272, 374, 652), true);
+  const bl = tomStampBottomLeftFixture(374, 652);
+  const blPaint = paintedContent(bl.data, bl.width, bl.height);
+  assert.equal(blPaint.corner, "bottom-left");
+  assert.ok(paintFails(blPaint), "GL-origin bottom-left stamp must also fail");
 });
 
 test("gate fails every corner stamp, not only bottom-left", () => {
@@ -92,13 +97,12 @@ test("filled CRT painted bbox passes", () => {
   assert.equal(paintFails(paint), null);
 });
 
-test("filled near-black CRT on bezel still counts as painted (not 39s-blank)", () => {
+test("solid-black CRT is not a painted frame", () => {
   const img = makeRgba(374, 652, [12, 12, 14, 255]);
   fillRect(img, 8, 8, 358, 636, [0, 0, 0, 255]);
   const paint = paintedContent(img.data, img.width, img.height);
-  assert.equal(paint.empty, false);
-  assert.equal(paint.corner, "full");
-  assert.equal(paintFails(paint), null);
+  assert.equal(paint.empty, true);
+  assert.match(paintFails(paint) ?? "", /blank|solid-black|no painted/i);
 });
 
 test("sparse chrome / corner AA with a full bbox still fails coverage", () => {
@@ -162,6 +166,9 @@ test("iOS CRT fill is CSS 100%, never wrapper scale or canvas DPR", () => {
   assert.doesNotMatch(iosFn, /devicePixelRatio/);
   assert.match(host, /remapViceViewport/);
   assert.match(host, /prefetchViceCores/);
+  assert.match(host, /this\.width = 384/);
+  assert.match(host, /lockIosClientBox\(this, 384, 272\)/);
+  assert.match(host, /min-width", "100%"/);
 });
 
 test("iOS phone screen fill CSS does not use the #43 cqh or #44 384px lock", () => {
@@ -174,7 +181,9 @@ test("iOS phone screen fill CSS does not use the #43 cqh or #44 384px lock", () 
   const canvas = css.slice(css.indexOf('html[data-g64os="ios"] #grok64-player canvas'));
   assert.match(canvas, /width: 100% !important/);
   assert.match(canvas, /height: 100% !important/);
-  assert.doesNotMatch(canvas.slice(0, 700), /width: 384px !important/);
+  assert.match(canvas, /min-width: 100% !important/);
+  assert.match(canvas, /min-height: 100% !important/);
+  assert.doesNotMatch(canvas.slice(0, 900), /width: 384px !important/);
 });
 
 function crc32(buf) {

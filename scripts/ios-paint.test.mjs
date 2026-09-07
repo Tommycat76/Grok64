@@ -79,6 +79,7 @@ test("iOS canvas CSS is 100% of the screen, not a locked 384px box", () => {
   assert.match(iosCanvas, /height: 100% !important/);
   assert.match(iosCanvas, /inset: 0 !important/);
   assert.match(iosCanvas, /transform: none !important/);
+  assert.match(iosCanvas, /min-width: 100% !important/);
   assert.doesNotMatch(iosCanvas.slice(0, 900), /width: 384px !important/);
   assert.match(paintSrc, /applyIosCrtStyle/);
 });
