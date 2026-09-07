@@ -5,7 +5,7 @@
  * CSS 100% on that canvas is solid black. CriOS ignores CSS transform on the
  * GL layer (#43 / #44 stamp).
  *
- * #46 used 60fps ctx.drawImage(webglCanvas) into a *bezel-sized* 2D bitmap.
+ * #46 used 60fps 2D-copy of the GL canvas into a *bezel-sized* bitmap.
  * On CriOS that readback is often a black cover (READY is painting underneath)
  * and the 60fps tall-buffer resolve OOM-kills the tab: Tom's ~5s solid black,
  * ~15s full reload to the power splash (`powered` is not persisted).

@@ -22,7 +22,7 @@ test("present copies live WebGL with readPixels, never PNG or VICE getContext", 
   assert.match(present, /putImageData/);
   assert.match(present, /g64-ios-present/);
   assert.match(present, /getContext\("2d"/);
-  assert.doesNotMatch(present, /ctx\.drawImage|drawImage\(src/);
+  assert.doesNotMatch(present.replace(/\/\*[\s\S]*?\*\//g, ""), /drawImage/);
   assert.doesNotMatch(present, /toDataURL|readFsPng|viceScreenshot/);
   assert.doesNotMatch(present, /getContext\("webgl/);
   assert.match(host, /startIosPresent/);
