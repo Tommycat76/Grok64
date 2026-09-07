@@ -390,13 +390,16 @@ export function Grok64App() {
       buildId: () => readBuildId(),
       crt: () => {
         const root = document.getElementById("grok64-player");
-        const c = root?.querySelector("canvas");
+        const c = root?.querySelector("canvas:not(.g64-ios-present)") as HTMLCanvasElement | null;
+        const present = document.querySelector("canvas.g64-ios-present") as HTMLCanvasElement | null;
         const cs = c ? getComputedStyle(c) : null;
+        const ns = present ? getComputedStyle(present) : null;
         const gl = c && c.__g64gl;
         return {
           path: iosCrtPath(),
           settled: isIosPaintSettled(),
           overlay: Boolean(root?.querySelector(".g64-ios-mirror")),
+          present: Boolean(present),
           live: root?.classList.contains("g64-ios-crt-live") ?? false,
           w: c?.width ?? 0,
           h: c?.height ?? 0,
@@ -404,6 +407,8 @@ export function Grok64App() {
           ch: c?.clientHeight ?? 0,
           cssW: cs?.width ?? null,
           cssH: cs?.height ?? null,
+          presentCssW: ns?.width ?? null,
+          presentCssH: ns?.height ?? null,
           xf: cs?.transform ?? null,
           dbw: gl?.drawingBufferWidth ?? null,
           dbh: gl?.drawingBufferHeight ?? null,

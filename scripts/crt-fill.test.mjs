@@ -43,6 +43,7 @@ test("Plex CRT fill gate script exists and documents iPhone viewport fill", () =
   assert.match(gate, /g64-screen/);
   assert.match(gate, /g64-bezel/);
   assert.match(gate, /paintedContent|shotPaint/);
+  assert.match(gate, /g64-ios-present/);
   assert.match(gate, /hideChrome|g64-screen/);
   assert.match(gate, /untransformed/);
   assert.match(gate, /FIRST_CRT_MAX_MS/);
@@ -158,17 +159,17 @@ test("remapViceViewport expands a 384×272 stamp in a larger drawing buffer", ()
   assert.match(host, /w: drawingW, h: drawingH/);
 });
 
-test("iOS CRT fill is CSS 100%, never wrapper scale or canvas DPR", () => {
-  const iosFn = host.slice(host.indexOf("function fillCssBox"), host.indexOf("export async function recycleCore"));
-  assert.match(iosFn, /width", "100%"/);
-  assert.match(iosFn, /height", "100%"/);
+test("iOS CRT fill is native 384 CSS + present canvas, never wrapper scale", () => {
+  const iosFn = host.slice(host.indexOf("function lockNativeFbCss"), host.indexOf("export async function recycleCore"));
+  assert.match(iosFn, /width", "384px"/);
+  assert.match(iosFn, /height", "272px"/);
+  assert.match(iosFn, /startIosPresent/);
   assert.doesNotMatch(iosFn, /translate3d\(0,0,0\) scale\(/);
   assert.doesNotMatch(iosFn, /devicePixelRatio/);
   assert.match(host, /remapViceViewport/);
   assert.match(host, /prefetchViceCores/);
   assert.match(host, /this\.width = 384/);
   assert.match(host, /lockIosClientBox\(this, 384, 272\)/);
-  assert.match(host, /min-width", "100%"/);
 });
 
 test("iOS phone screen fill CSS does not use the #43 cqh or #44 384px lock", () => {
@@ -179,11 +180,11 @@ test("iOS phone screen fill CSS does not use the #43 cqh or #44 384px lock", () 
   assert.doesNotMatch(rule, /100cqh/);
   assert.doesNotMatch(rule, /container-type/);
   const canvas = css.slice(css.indexOf('html[data-g64os="ios"] #grok64-player canvas'));
-  assert.match(canvas, /width: 100% !important/);
-  assert.match(canvas, /height: 100% !important/);
-  assert.match(canvas, /min-width: 100% !important/);
-  assert.match(canvas, /min-height: 100% !important/);
-  assert.doesNotMatch(canvas.slice(0, 900), /width: 384px !important/);
+  assert.match(canvas, /width: 384px !important/);
+  assert.match(canvas, /height: 272px !important/);
+  assert.match(canvas, /transform: none !important/);
+  assert.match(css, /\.g64-ios-present/);
+  assert.match(css, /html\[data-g64os="ios"\] \.g64-screen > canvas\.g64-ios-present/);
 });
 
 function crc32(buf) {

@@ -103,8 +103,10 @@ const measureSrc = () => {
   const screen = document.querySelector(".g64-screen");
   const boot = document.querySelector(".g64-boot");
   const player = document.getElementById("grok64-player");
-  const canvas = player?.querySelector("canvas");
+  const present = document.querySelector("canvas.g64-ios-present");
+  const canvas = player?.querySelector("canvas:not(.g64-ios-present)");
   const cs = canvas ? getComputedStyle(canvas) : null;
+  const ns = present ? getComputedStyle(present) : null;
   const ps = player ? getComputedStyle(player) : null;
   const ss = screen ? getComputedStyle(screen) : null;
   const bs = boot ? getComputedStyle(boot) : null;
@@ -141,11 +143,13 @@ const measureSrc = () => {
     fs: window.__g64?.hasFs?.() ?? false,
     title: window.__g64?.title?.() ?? null,
     overlay: Boolean(player?.querySelector(".g64-ios-mirror")),
+    present: Boolean(present),
     fb: canvas?.classList.contains("g64-ios-fb") ?? false,
     buf: canvas ? { w: canvas.width, h: canvas.height } : null,
     canvasClient: canvas ? { w: canvas.clientWidth, h: canvas.clientHeight } : null,
     db: gl ? { w: gl.drawingBufferWidth, h: gl.drawingBufferHeight } : null,
     canvasCss: cs ? { w: cs.width, h: cs.height, xf: cs.transform } : null,
+    presentCss: ns ? { w: ns.width, h: ns.height, xf: ns.transform } : null,
     playerCss: ps ? { w: ps.width, h: ps.height, xf: ps.transform } : null,
     screenCss: ss ? { w: ss.width, h: ss.height } : null,
     bootCss: bs ? { w: bs.width, h: bs.height } : null,
@@ -156,6 +160,7 @@ const measureSrc = () => {
     boot: box(boot),
     player: box(player),
     canvas: box(canvas),
+    presentBox: box(present),
   };
 };
 
@@ -298,11 +303,12 @@ const readyShot = await shotPaint(page, "crt-fill-gate-ready-bezel.png");
 
 note(Boolean(ready?.build), "build id visible after power", { build: ready?.build });
 note(!ready?.log, "debug log still off");
-note(!ready?.overlay, "no PNG/2D overlay covering WebGL");
+note(!ready?.overlay, "no PNG/paint-poll overlay covering WebGL");
+note(Boolean(ready?.present), "live-GL present canvas fills the bezel (not a PNG mirror)");
 note(ready?.buf?.w === 384 && ready?.buf?.h === 272, "VICE backing 384x272", ready?.buf);
 note(
   ready?.canvasClient?.w === 384 && ready?.canvasClient?.h === 272,
-  "clientWidth locked to 384x272 (VICE blit size, not CSS box)",
+  "GL clientWidth is native 384x272 (VICE blit size)",
   ready?.canvasClient,
 );
 
@@ -320,7 +326,11 @@ const bezelInner = ready?.bezelInner;
 if (ready?.canvasCss && bezelInner) {
   const cssW = cssPx(ready.canvasCss.w);
   const cssH = cssPx(ready.canvasCss.h);
-  assertCssFill("canvas CSS px vs bezel (untransformed)", ready.canvasCss.w, ready.canvasCss.h, bezelInner);
+  note(
+    oldStampLayoutFails(cssW || 384, cssH || 272, bezelInner.w, bezelInner.h),
+    "GL canvas CSS is the native 384x272 stamp box (must not be what Tom sees)",
+    { bezelInner, glCss: { w: cssW, h: cssH } },
+  );
   note(
     oldStampLayoutFails(384, 272, bezelInner.w, bezelInner.h),
     "old #44 384x272 CSS box would fail this bezel (gate would have caught Tom stamp)",
@@ -334,8 +344,17 @@ if (ready?.canvasCss && bezelInner) {
     );
   }
 }
+if (ready?.presentCss && bezelInner) {
+  assertCssFill("present CSS px vs bezel (untransformed)", ready.presentCss.w, ready.presentCss.h, bezelInner);
+}
 if (ready?.playerCss && bezelInner) {
-  assertCssFill("player CSS px vs bezel (untransformed)", ready.playerCss.w, ready.playerCss.h, bezelInner);
+  const pw = cssPx(ready.playerCss.w);
+  const ph = cssPx(ready.playerCss.h);
+  note(
+    oldStampLayoutFails(pw || 384, ph || 272, bezelInner.w, bezelInner.h),
+    "player wrapper stays native 384x272 (no CriOS-ignored scale)",
+    { playerCss: { w: pw, h: ph } },
+  );
 }
 if (ready?.screenCss && bezelInner) {
   assertCssFill("screen CSS px vs bezel (untransformed)", ready.screenCss.w, ready.screenCss.h, bezelInner);

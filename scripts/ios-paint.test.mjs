@@ -73,14 +73,12 @@ test("CSS never hides live WebGL behind a 2D overlay", () => {
   );
 });
 
-test("iOS canvas CSS is 100% of the screen, not a locked 384px box", () => {
+test("iOS GL canvas stays 384px; present canvas fills the screen", () => {
   const iosCanvas = css.slice(css.indexOf("html[data-g64os=\"ios\"] #grok64-player canvas"));
-  assert.match(iosCanvas, /width: 100% !important/);
-  assert.match(iosCanvas, /height: 100% !important/);
-  assert.match(iosCanvas, /inset: 0 !important/);
+  assert.match(iosCanvas, /width: 384px !important/);
+  assert.match(iosCanvas, /height: 272px !important/);
   assert.match(iosCanvas, /transform: none !important/);
-  assert.match(iosCanvas, /min-width: 100% !important/);
-  assert.doesNotMatch(iosCanvas.slice(0, 900), /width: 384px !important/);
+  assert.match(css, /canvas\.g64-ios-present/);
   assert.match(paintSrc, /applyIosCrtStyle/);
 });
 

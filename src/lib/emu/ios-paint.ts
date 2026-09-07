@@ -7,10 +7,11 @@
  *
  * Architecture
  * ------------
- * 1. The RetroArch/VICE WebGL canvas IS the screen. Keep it in the DOM,
- *    visible. CSS width/height 100% of .g64-screen (no 384×272 lock, no
- *    wrapper scale). CriOS ignores CSS transform on the GL layer — #44's
+ * 1. The RetroArch/VICE WebGL canvas stays in the DOM at 384×272 (the only
+ *    CSS size that blits). CriOS ignores CSS transform on the GL layer — #44's
  *    scale on #grok64-player was a stamp (photo: top-right) with DOM fill 1.0.
+ *    A 2D present canvas (ios-present.ts) drawImages the live GL buffer into
+ *    .g64-screen. Not PNG / paint-poll / getContext on the VICE canvas.
  * 2. Never call getContext on that canvas. host.ts already captured
  *    VICE's context on `__g64gl`. A second WebGL context on WebKit returns null
  *    or steals the canvas (solid black CRT).
@@ -28,6 +29,7 @@
 
 import type { EjsInstance } from "./host";
 import { applyIosCrtStyle, dismissEjsPrompts, fitEmu, unlockAudio } from "./host";
+import { stopIosPresent } from "./ios-present";
 import { isIosPhone } from "./detect";
 import { glog } from "./debug";
 
@@ -82,9 +84,9 @@ function playerRoot(root?: HTMLElement | null): HTMLElement | null {
 export function playerCanvas(root?: HTMLElement | null): HTMLCanvasElement | null {
   const el = playerRoot(root ?? null);
   return (
-    (el?.querySelector("canvas") as HTMLCanvasElement | null) ??
+    (el?.querySelector("canvas:not(.g64-ios-present)") as HTMLCanvasElement | null) ??
     (typeof document !== "undefined"
-      ? (document.querySelector("#grok64-player canvas") as HTMLCanvasElement | null)
+      ? (document.querySelector("#grok64-player canvas:not(.g64-ios-present)") as HTMLCanvasElement | null)
       : null)
   );
 }
@@ -104,7 +106,7 @@ function revealLiveCanvas(canvas: HTMLCanvasElement) {
   canvas.style.setProperty("display", "block", "important");
   canvas.style.setProperty("visibility", "visible", "important");
   canvas.style.setProperty("opacity", "1", "important");
-  // CSS 100% fill — never scale() the wrapper or canvas (CriOS ignores it).
+  // Native 384×272 CSS on the GL canvas — present canvas fills the bezel.
   const el =
     (canvas.closest("#grok64-player") as HTMLElement | null) ??
     (typeof document !== "undefined" ? document.getElementById("grok64-player") : null);
@@ -246,6 +248,7 @@ export function scheduleIosCrtPresents(emu: EjsInstance | null, root: HTMLElemen
 export function stopIosCrt() {
   presentGen += 1;
   stripIosOverlay(null);
+  stopIosPresent();
 }
 
 export function kickIosPaint(

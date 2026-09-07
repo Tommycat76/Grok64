@@ -16,6 +16,7 @@ import { cmdDriveMap, cmdSwapUnits, sd2iecSwapUnit } from "./hw-buttons";
 import type { DriveMode, IecDrive, IecMap, IecUnit, JoyPort, ReuSize, ScpuSimm, SidEngine, SidModel } from "./types";
 import { RETRO_BTN } from "./types";
 import { glog } from "./debug";
+import { startIosPresent, stopIosPresent } from "./ios-present";
 
 const DATA = "https://cdn.emulatorjs.org/stable/data/";
 
@@ -1058,6 +1059,7 @@ export function setWarp(emu: EjsInstance | null, on: boolean) {
 export function destroyEmu(emu: EjsInstance | null, el: HTMLElement | null) {
   resetFitCache();
   lastJiffy = false;
+  stopIosPresent();
   keyboardArmed = false;
   try {
     emu?.gameManager?.toggleMainLoop(0);
@@ -1104,7 +1106,7 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
   fitting = true;
   const canvas =
     (emu?.Module?.canvas as HTMLCanvasElement | undefined) ||
-    (el.querySelector("canvas:not(.g64-ios-mirror)") as HTMLCanvasElement | null);
+    (el.querySelector("canvas:not(.g64-ios-mirror):not(.g64-ios-present)") as HTMLCanvasElement | null);
   try {
     if (canvas) {
       const parent = canvas.parentElement ?? el;
@@ -1275,19 +1277,19 @@ function watchIosCrtBox(box: HTMLElement, apply: () => void) {
   }
 }
 
-function fillCssBox(el: HTMLElement) {
+/** VICE only blits when the WebGL canvas CSS box is the native 384×272. */
+function lockNativeFbCss(el: HTMLElement) {
   el.style.setProperty("position", "absolute", "important");
-  el.style.setProperty("inset", "0", "important");
+  el.style.setProperty("inset", "auto", "important");
   el.style.setProperty("left", "0", "important");
   el.style.setProperty("top", "0", "important");
-  el.style.setProperty("right", "0", "important");
-  el.style.setProperty("bottom", "0", "important");
+  el.style.setProperty("right", "auto", "important");
+  el.style.setProperty("bottom", "auto", "important");
   el.style.setProperty("margin", "0", "important");
-  el.style.setProperty("align-self", "stretch", "important");
-  el.style.setProperty("width", "100%", "important");
-  el.style.setProperty("height", "100%", "important");
-  el.style.setProperty("min-width", "100%", "important");
-  el.style.setProperty("min-height", "100%", "important");
+  el.style.setProperty("width", "384px", "important");
+  el.style.setProperty("height", "272px", "important");
+  el.style.setProperty("min-width", "0", "important");
+  el.style.setProperty("min-height", "0", "important");
   el.style.setProperty("max-width", "none", "important");
   el.style.setProperty("max-height", "none", "important");
   el.style.setProperty("transform", "none", "important");
@@ -1296,14 +1298,12 @@ function fillCssBox(el: HTMLElement) {
 }
 
 /**
- * CriOS CRT fill. Do not CSS-transform the canvas or #grok64-player —
- * WebKit ignores those transforms on the WebGL compositor layer (#43 / #44),
- * leaving a 384×272 stamp (Tom photo: top-right) while getBoundingClientRect
- * still reports fill 1.0.
+ * CriOS CRT fill. VICE blits only when the WebGL canvas CSS is 384×272.
+ * CSS 100% on that canvas is solid black. Wrapper scale() is ignored on the
+ * GL layer (#43 / #44) — Tom's photo is a top-right stamp with DOM fill 1.0.
  *
- * Stretch the locked 384×272 drawing buffer with width/height 100% so the
- * compositor (not a transform) paints the bezel. Viewport remap covers the
- * CSS×DPR drawing-buffer stamp.
+ * Keep the GL canvas at 384×272 (no transform). A 2D present canvas copies
+ * the live framebuffer into .g64-screen (see ios-present.ts).
  */
 export function applyIosCrtStyle(
   canvas: HTMLCanvasElement,
@@ -1318,12 +1318,13 @@ export function applyIosCrtStyle(
 
   const apply = () => {
     lockIosClientBox(canvas, 384, 272);
-    fillCssBox(player);
+    lockNativeFbCss(player);
     const canvasParent = canvas.parentElement;
-    if (canvasParent && canvasParent !== player) fillCssBox(canvasParent);
-    fillCssBox(canvas);
+    if (canvasParent && canvasParent !== player) lockNativeFbCss(canvasParent);
+    lockNativeFbCss(canvas);
     canvas.style.setProperty("object-fit", "fill", "important");
     canvas.style.setProperty("object-position", "0 0", "important");
+    startIosPresent(canvas, box);
     void box.getBoundingClientRect();
   };
 
