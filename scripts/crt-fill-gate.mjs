@@ -286,17 +286,41 @@ if (overlayMs != null) {
   });
 }
 
+const glPaintedSrc = () => {
+  const c = document.querySelector("#grok64-player canvas:not(.g64-ios-present)");
+  const gl = c && /** @type {{ __g64gl?: WebGLRenderingContext }} */ (c).__g64gl;
+  if (!gl) return { max: 0, colored: 0 };
+  const w = gl.drawingBufferWidth;
+  const h = gl.drawingBufferHeight;
+  if (w < 8 || h < 8) return { max: 0, colored: 0 };
+  const buf = new Uint8Array(w * h * 4);
+  gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+  let max = 0;
+  let colored = 0;
+  for (let i = 0; i < buf.length; i += 4) {
+    const m = Math.max(buf[i], buf[i + 1], buf[i + 2]);
+    if (m > max) max = m;
+    if (m >= 40) colored += 1;
+  }
+  return { max, colored };
+};
+
 let ready = null;
 let crtMs = null;
 for (let i = 0; i < 120; i++) {
   ready = await page.evaluate(measureSrc);
   if (ready.fs && ready.running && ready.canvas && ready.buf?.w >= 64 && !ready.splash && !ready.booting) {
-    if (crtMs == null) crtMs = Date.now() - tPower;
-    break;
+    const pix = await page.evaluate(glPaintedSrc);
+    if (pix.max >= 40 && pix.colored >= 64) {
+      if (crtMs == null) crtMs = Date.now() - tPower;
+      break;
+    }
   }
+  if (Date.now() - tPower > FIRST_CRT_MAX_MS + 2000) break;
   await page.waitForTimeout(400);
 }
 if (crtMs == null) crtMs = Date.now() - tPower;
+await page.waitForTimeout(80);
 
 await page.screenshot({ path: join(shotDir, "crt-fill-gate-ready.png"), fullPage: false });
 const readyShot = await shotPaint(page, "crt-fill-gate-ready-bezel.png");

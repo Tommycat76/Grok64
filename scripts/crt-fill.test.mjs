@@ -44,6 +44,7 @@ test("Plex CRT fill gate script exists and documents iPhone viewport fill", () =
   assert.match(gate, /g64-bezel/);
   assert.match(gate, /paintedContent|shotPaint/);
   assert.match(gate, /g64-ios-present/);
+  assert.match(gate, /glPaintedSrc|readPixels/);
   assert.match(gate, /hideChrome|g64-screen/);
   assert.match(gate, /untransformed/);
   assert.match(gate, /FIRST_CRT_MAX_MS/);
