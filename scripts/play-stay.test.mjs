@@ -64,22 +64,21 @@ test("iOS CRT path does not recycle or Autostart", () => {
   assert.doesNotMatch(paint, /ios-paint-poll/);
 });
 
-test("iOS WebGL backing is locked to 384x272 before the first context", () => {
-  assert.match(host, /this\.width = 384/);
-  assert.match(host, /this\.height = 272/);
-  assert.match(host, /lockIosBacking/);
-  assert.match(host, /remapViceViewport/);
+test("iOS WebGL is the #14/#18/#39 host path (no #42 384 lock)", () => {
   const patched = host.slice(host.indexOf("function preserveWebglBuffer"), host.indexOf("type GuardedGm"));
-  assert.doesNotMatch(patched, /width", "384px"/);
-  assert.doesNotMatch(patched, /height", "272px"/);
-  assert.ok(
-    patched.indexOf("this.width = 384") < patched.indexOf("orig.call(this, type, merged)"),
-    "native backing must be set before getContext (CSS 384px lock is #50/#52)",
-  );
-  assert.doesNotMatch(patched, /lockIosClientBox\(this,\s*384,\s*272\)/);
+  const patchedCode = patched.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  const hostCode = host.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  assert.match(patched, /preserveDrawingBuffer/);
+  assert.doesNotMatch(patchedCode, /this\.width = 384/);
+  assert.doesNotMatch(patchedCode, /this\.height = 272/);
+  assert.doesNotMatch(hostCode, /lockIosBacking/);
+  assert.doesNotMatch(hostCode, /remapViceViewport/);
+  assert.doesNotMatch(patchedCode, /width", "384px"/);
+  assert.doesNotMatch(patchedCode, /height", "272px"/);
+  assert.doesNotMatch(patchedCode, /lockIosClientBox/);
 });
 
-test("iPhone CRT is restored ee0b445 glass, not zoom/slot or 2D present", () => {
+test("iPhone CRT is #14/#18 glass fill, not zoom/slot or 2D present", () => {
   assert.match(host, /applyIosCrtStyle/);
   assert.match(host, /g64-ios-fb/);
   assert.match(host, /unwrapIosZoomChrome/);
@@ -90,7 +89,8 @@ test("iPhone CRT is restored ee0b445 glass, not zoom/slot or 2D present", () => 
   assert.doesNotMatch(host, /applyIosZoomHost/);
   assert.match(host, /stripIosPresent/);
   assert.match(host, /#grok64-player/);
-  assert.match(host, /remapViceViewport/);
+  const hostCode = host.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  assert.doesNotMatch(hostCode, /remapViceViewport/);
   assert.doesNotMatch(host, /fillBezelCss/);
   assert.doesNotMatch(host, /translate3d\(0,0,0\) scale\(/);
   assert.doesNotMatch(host, /klass === "g64-ios-fb" \? Math.max\(1, window.devicePixelRatio/);

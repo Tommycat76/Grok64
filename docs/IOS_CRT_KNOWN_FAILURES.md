@@ -191,6 +191,39 @@ last-good CRT layout** from before the #42 rewrite thrash (presentation
 CSS + host present path at `ee0b445` / pre-`30d158a`), then re-apply
 only non-layout locks.
 
+### 12. #53 — restore pre-#42 **layout** (ee0b445 glass + CSS 100% of that glass) while keeping post-#42 paint stack → **solid black on CriOS**
+
+`main@3dc22be` / `routes-BD6gfM9s.js` (Plex deploy of PR #53).
+This is **not** `156a07f` (#52 bottom strip). Different build.
+
+- Restored `ee0b445` presentation CSS: `.g64-screen` is
+  `aspect-ratio: 384 / 272` glass; canvas / `#grok64-player` CSS
+  `inset:0; width/height:100%` of **that** glass.
+- Kept the post-#42 paint stack: pre-size canvas to 384×272 **before**
+  `getContext`, `lockIosBacking` (frozen width/height getters),
+  `remapViceViewport`. Live-webgl ios-paint (no PNG, no 2D present).
+- **Tom FAIL (CriOS photo):** power-on → **solid black CRT**. Header
+  chip `3dc22be` + PAL + MOUSE. Stick / FIRE / JUMP chrome rendered.
+  No READY, no stamp, no L-border, no bottom strip — unpainted glass.
+
+**Layout restore alone is insufficient.** CSS 100% of the glass plus
+the #42 384-lock family is the same empty-black class as #7 / #8
+(stretch a locked native FB). `#50`–`#52` still painted (wrong
+geometry) because CSS stayed 1:1 with the locked 384×272 box.
+
+**Strategy:** prefer **restore of the original simple CRT wiring** from
+the pre-tablet / PR **#14–#18** era over inventing another path.
+Forward thrash #42–#53 failed.
+
+- `#14` `f948687`: `preserveDrawingBuffer` on iOS `getContext`. Root
+  cause of the first blank CRT was #12 skipping that flag for VRAM.
+- `#16`–`#18` `800b6e6`: auto READY (kick / watchdog; Tom: CRT good
+  enough, BD ran). `#18` used a 2D VICE mirror — **do not restore
+  that mirror** (known failure #1 after play-recycle / OOM).
+- `#39` `79cb60b` fallback: live WebGL, never `getContext` from
+  ios-paint, VICE owns backing size. Tom: Jiffy + screen works.
+- Do **not** iterate #50–#53 zoom / slot / letterbox / CSS-100%-of-lock.
+
 ---
 
 ## Briefly WORKED (do not regress these unrelated wins)
@@ -215,7 +248,7 @@ Locked, unrelated:
 
 ## What a NEW approach must not be
 
-Not 1, not 2, not 3, not 6, not 7, not 8, not 9, not 10, not 11.
+Not 1, not 2, not 3, not 6, not 7, not 8, not 9, not 10, not 11, not 12.
 
 In particular:
 
@@ -236,31 +269,38 @@ In particular:
   recentering the post-zoom used box (#10 / #51).
 - No centered zoom slot / post-zoom used-size offset (#11 / #52).
 - No zoom-v3 / slot-v2 / another contain-fit theory.
+- No layout-only restore of `ee0b445` glass **on top of** the #42
+  384-lock / `lockIosBacking` / `remapViceViewport` stack (#12 / #53).
 
-Current attempt after #52/#11 (this tree): **restore pre-thrash CRT
-layout** from `ee0b445` (last commit before the #42 rewrite at
-`30d158a` / `162e0f9`). That is the era when READY filled the
-aspect-ratio `.g64-screen` on phone (Tom: CRT good enough after #18;
-tablet framing in #33/#40). Live WebGL paint stays the #39 path.
+Current attempt after #53/#12 (this tree): **restore the original
+simple CRT host wiring** from PR **#14–#18** (`preserveDrawingBuffer`,
+VICE owns backing, CSS 100% of the 384:272 glass, auto kick/watchdog)
+with the **#39** rule that ios-paint never `getContext()`s. That is
+the era Tom said CRT painted READY immediately (good enough after
+`#18` ~`800b6e6`; screen works at `#39` ~`79cb60b`). `#53` already
+proved the glass CSS without that host path is solid black.
 
-Why this and not 1–11:
+Why this and not 1–12:
 
-- **Not 1.** Live WebGL only. No PNG / `toDataURL` / mirror poll.
+- **Not 1.** Live WebGL only. No PNG / `toDataURL` / `#18` mirror poll.
 - **Not 2 / #43 / #44.** No CSS `transform:scale` on the GL canvas or
   `#grok64-player`. Tablet-only transform is unchanged (Android).
 - **Not 3 / #46.** No `drawImage` of live WebGL, no tall 2D present.
 - **Not 6 / #47.** No `readPixels` present loop.
 - **Not 7 / #48.** Not CSS 100% of a **tall bezel-sized** screen plus a
-  384 clientWidth lie. `.g64-screen` is again `aspect-ratio: 384 / 272`
+  384 clientWidth lie. `.g64-screen` is `aspect-ratio: 384 / 272`
   (the glass). Canvas CSS 100% fills **that** glass, not the tall bezel.
 - **Not 8 / #49.** No clientWidth unlock-to-bezel. No tall CSS 100%.
 - **Not 9 / #50.** Not a 384×272 canvas sitting in a tall absolute-inset
   `.g64-screen`. The screen itself is the 384:272 frame.
 - **Not 10 / #51.** No CSS `zoom` on `.g64-ios-zoom`.
 - **Not 11 / #52.** No centering slot, no post-zoom used-size offset.
+- **Not 12 / #53.** Not a layout-only restore. The #42 pre-size /
+  `lockIosBacking` / viewport-remap family is **removed**. VICE owns
+  the backing store again (`#14`/`#18`/`#39` `preserveWebglBuffer`).
 
-Backing store stays **384×272** (VICE blit). No 2D present. Compact
-cold-start chip. Build-id chip stays visible. Debug log off by default.
+No 2D present. Compact cold-start chip. Build-id chip stays visible.
+Debug log off by default.
 
 **Not a PASS** until Tom’s CriOS photo shows a readable, filled CRT.
 Plex paint-count ≠ Tom geometry.
@@ -278,11 +318,12 @@ on Chromium-on-Plex (iPhone viewport + CriOS UA). It must stay honest:
   not prove bezel fill or centering on CriOS.
 - Fail Tom #44 top-right and GL-origin bottom-left stamps.
 - Fail leftover 2D present/mirror covers and CSS 100% + client-box games.
-- GL canvas computed CSS and `clientWidth` stay the native 384×272 box.
 - No `.g64-ios-zoom` CSS `zoom` and no `.g64-ios-slot` centering offset
   (#10 / #11).
 - `.g64-screen` is `aspect-ratio: 384 / 272` (pre-#42 glass), not a
   tall absolute-inset bezel fill. Live GL CSS fills **that** glass.
+- Host must not pre-size / freeze canvas width×height at 384×272
+  before `getContext` (#12 / #53).
 - Hold after first READY (no splash remount, no tab death).
 
 A green gate is **not** a CriOS PASS. **Tom’s phone is the only PASS.**

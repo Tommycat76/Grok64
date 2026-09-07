@@ -14,11 +14,11 @@
  *   node scripts/crt-fill-gate.mjs http://127.0.0.1:8091/
  *
  * HARD: asserts the *painted* live-GL picture is not solid black.
- * After #52, presentation is the restored ee0b445 layout: `.g64-screen`
- * is the 384:272 glass; live GL CSS fills that glass. No CSS zoom, no
- * centering slot. Tom #44 / #51 top-right, GL-origin bottom-left, and
- * #52 bottom-strip still fail. DOM wrapper fill of 1.0 is never a pass.
- * Plex paint-count ≠ Tom geometry.
+ * After #53, presentation is the #14/#18/#39 host path on the 384:272
+ * glass: live GL CSS fills that glass. No CSS zoom, no centering slot,
+ * no #42 backing lock. Tom #44 / #51 top-right, GL-origin bottom-left,
+ * #52 bottom-strip, and #53 solid black still fail. DOM wrapper fill of
+ * 1.0 is never a pass. Plex paint-count ≠ Tom geometry.
  *
  * Also holds after first READY paint and fails if the session remounts
  * to the power splash, __g64 is torn down, the page reloads, or the CRT
@@ -395,7 +395,11 @@ note(!ready?.booting, "cold-start overlay dismissed after READY (must not stay a
   booting: ready?.booting,
   boot: ready?.boot,
 });
-note(ready?.buf?.w === 384 && ready?.buf?.h === 272, "VICE backing 384x272", ready?.buf);
+note(
+  Boolean(ready?.buf && ready.buf.w >= 64 && ready.buf.h >= 64 && ready.buf.w <= 400 && ready.buf.h <= 300),
+  "VICE backing is native-sized (not a tall CSS×DPR buffer)",
+  ready?.buf,
+);
 
 // #44 stamp path: wrapper CSS transform + 384×272 CSS. CriOS ignores that on GL.
 note(!hasCssScale(ready?.playerXf), "player wrapper has no CSS transform (CriOS ignores it on the GL layer)", {
@@ -435,7 +439,7 @@ const screenCssW = cssPx(ready?.screenCss?.w);
 const screenCssH = cssPx(ready?.screenCss?.h);
 note(
   isC64Aspect(screenCssW, screenCssH),
-  ".g64-screen is 384:272 glass (restored ee0b445, not tall inset bezel)",
+  ".g64-screen is 384:272 glass (not tall inset bezel)",
   { screenCss: { w: screenCssW, h: screenCssH }, bezelInner },
 );
 note(
@@ -525,7 +529,11 @@ if (hold) {
     title: hold.title,
   });
   note(!hold.present, "no 2D present canvas after hold", { present: hold.present });
-  note(hold.buf?.w === 384 && hold.buf?.h === 272, "VICE backing still 384x272 after hold", hold.buf);
+  note(
+    Boolean(hold.buf && hold.buf.w >= 64 && hold.buf.h >= 64 && hold.buf.w <= 400 && hold.buf.h <= 300),
+    "VICE backing still native-sized after hold (not a tall CSS×DPR buffer)",
+    hold.buf,
+  );
 }
 if (holdShot) {
   const holdPaint = assertPainted("READY hold", holdShot, { title: hold?.title });
