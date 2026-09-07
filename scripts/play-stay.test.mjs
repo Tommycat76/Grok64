@@ -73,6 +73,7 @@ test("iPhone CRT scales the native 384x272 box (DPR), not CSS 100%", () => {
   assert.match(host, /g64-ios-fb/);
   assert.match(host, /if \(isIos\(\)\) applyIosCrtStyle/);
   assert.match(host, /klass === "g64-ios-fb" \? Math.max\(1, window.devicePixelRatio/);
+  assert.match(host, /\$\{NATIVE_FB_W\}px/);
   assert.doesNotMatch(paint, /setProperty\("width", "100%"/);
 });
 

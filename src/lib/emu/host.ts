@@ -1111,8 +1111,11 @@ function applyNativeFbCrtStyle(
   const sw = Math.max(box.clientWidth || 0, el.clientWidth || 0, 1);
   const sh = Math.max(box.clientHeight || 0, el.clientHeight || 0, 1);
   // CriOS WebGL ignores CSS 100% / object-fit and blits 384×272 in device
-  // pixels (Tom's postage stamp). Scale by DPR so that blit fills the CRT.
-  // Android tablets blit 1:1 in CSS pixels — do not multiply those by DPR.
+  // pixels (Tom's postage stamp). Keep the CSS box at native FB size so
+  // RetroArch's viewport (clientWidth × clientHeight) matches the locked
+  // backing store — a 384/dpr box made VICE paint a stamp into the buffer.
+  // Scale by DPR on iOS so that device-pixel blit fills the CRT.
+  // Android tablets blit 1:1 in CSS pixels — dpr stays 1.
   const dpr = klass === "g64-ios-fb" ? Math.max(1, window.devicePixelRatio || 1) : 1;
   const sx = (sw * dpr) / NATIVE_FB_W;
   const sy = (sh * dpr) / NATIVE_FB_H;
