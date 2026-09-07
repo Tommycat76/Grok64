@@ -616,22 +616,18 @@ export function startIosViceMirror(
         if (!u8 || !pngLooksValid(u8)) {
           misses += 1;
           if (misses === 1 || misses % 8 === 0) glog("ios-mirror-skip", { reason: "no-png", misses });
-          if (misses >= 2) {
-            const glOk = await blitGlToMirror(root);
-            if (glOk) {
-              const src = playerCanvas(root);
-              const live = src ? pixelsLookLive(sampleGlCanvas(src)) : false;
-              if (live) {
-                signalMirrorPainted(paintedCb);
-                paintedCb = null;
-              }
+          if (misses >= 6) {
+            const src = playerCanvas(root);
+            const glm = src ? sampleGlCanvas(src) : null;
+            if (frameLooksReady(glm) && (await blitGlToMirror(root))) {
+              signalMirrorPainted(paintedCb);
+              paintedCb = null;
             }
           }
           return;
         }
         const m = await frameImageMetrics(u8);
-        const accept = frameLooksReady(m) || (misses >= 4 && pixelsLookLive(m));
-        if (!mirrorPainted && !accept) {
+        if (!mirrorPainted && !frameLooksReady(m)) {
           misses += 1;
           if (misses === 1 || misses % 6 === 0) {
             glog("ios-mirror-skip", { lum: m?.lum, uniq: m?.uniq, misses });
@@ -640,6 +636,7 @@ export function startIosViceMirror(
         }
         const ok = await blitPngToMirror(root, u8, m, true);
         if (!ok) return;
+        if (!mirrorPainted) glog("ios-mirror-metrics", { lum: m?.lum, uniq: m?.uniq });
         signalMirrorPainted(paintedCb);
         paintedCb = null;
       })
@@ -660,10 +657,14 @@ export function startIosViceMirror(
     if (now - mirrorLastCapture < minGap) return;
     if (mirrorPainted) {
       const src = playerCanvas(root);
-      if (src && pixelsLookLive(sampleGlCanvas(src))) {
+      const glm = src ? sampleGlCanvas(src) : null;
+      if (glm && frameLooksReady(glm)) {
         void blitGlToMirror(root).then((ok) => {
           if (ok) mirrorLastCapture = performance.now();
         });
+      } else if (now - mirrorLastCapture >= 200) {
+        mirrorLastCapture = now;
+        captureScreenshot();
       }
       return;
     }

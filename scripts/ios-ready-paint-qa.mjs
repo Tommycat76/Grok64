@@ -54,6 +54,24 @@ for (let i = 0; i < 80; i++) {
     };
   });
   if (paint.fs && paint.running && paint.title === "BASIC" && (paint.paintSettled || paint.mirrorPainted || paint.painted)) {
+    await page.waitForTimeout(800);
+    paint = await page.evaluate(() => {
+      const logs = window.__g64log || [];
+      return {
+        fs: window.__g64?.hasFs?.() ?? false,
+        title: window.__g64?.title?.() ?? null,
+        running: window.__g64?.running?.() ?? false,
+        paintSettled: window.__g64?.paintSettled?.() ?? false,
+        mirrorPainted: window.__g64?.mirrorPainted?.() ?? false,
+        mirrorActive: window.__g64?.mirrorActive?.() ?? false,
+        painted: logs.some((l) => /ios-mirror-painted|ios-frame-ok|ios-watchdog-painted/.test(String(l))),
+        timeoutShot: logs.some((l) => /ios-screenshot-timeout/.test(String(l))),
+        pollOnly:
+          logs.filter((l) => /ios-paint-poll/.test(String(l))).length >= 4 &&
+          !logs.some((l) => /ios-mirror-painted|ios-frame-ok/.test(String(l))),
+        last: logs.slice(-8),
+      };
+    });
     break;
   }
   await page.waitForTimeout(400);
