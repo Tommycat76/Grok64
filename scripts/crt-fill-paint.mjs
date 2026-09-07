@@ -191,6 +191,28 @@ export function paintFails(paint, min = FILL_MIN, cover = COVERAGE_MIN) {
   return null;
 }
 
+/**
+ * After #7/#8, bezel fill is deferred. Require chroma, reject #44
+ * top-right and GL-origin bottom-left, allow a centered 384×272 letterbox.
+ */
+export function letterboxPaintFails(paint, cover = COVERAGE_MIN) {
+  if (!paint || paint.empty) return "no painted CRT (blank / solid-black / bezel-only)";
+  if ((paint.coverage ?? 0) < cover) {
+    return `painted coverage ${(paint.coverage ?? 0).toFixed(3)} (chrome-only, need ${cover})`;
+  }
+  if (paint.corner === "top-right") {
+    return "READY painted stamp corner top-right (Tom #44)";
+  }
+  if (paint.corner === "bottom-left") {
+    return "READY painted stamp corner bottom-left (GL-origin)";
+  }
+  return null;
+}
+
+export function isNativeFbCssBox(w, h, slop = 12) {
+  return Math.abs((w || 0) - 384) <= slop && Math.abs((h || 0) - 272) <= slop;
+}
+
 /** #44 layout: locked 384×272 CSS box inside a taller phone bezel. */
 export function oldStampLayoutFails(canvasCssW, canvasCssH, bezelW, bezelH, min = FILL_MIN) {
   return !fillsBox(canvasCssW, canvasCssH, bezelW, bezelH, min);
@@ -344,5 +366,18 @@ export function filledCrtFixture(w = 374, h = 652) {
   fillRect(img, 6, 6, w - 12, h - 12, [0xa5, 0xa4, 0xe0, 255]);
   fillRect(img, 28, 24, w - 56, h - 48, [0x3e, 0x31, 0xa2, 255]);
   fillRect(img, 40, 40, 90, 14, [0xf0, 0xf0, 0xf0, 255]);
+  return img;
+}
+
+/** Centered native-size READY — accepted letterbox after #7/#8. */
+export function letterboxedCrtFixture(w = 374, h = 652) {
+  const img = makeRgba(w, h, [12, 12, 14, 255]);
+  const cw = Math.min(360, w - 8);
+  const ch = 272;
+  const x = Math.round((w - cw) / 2);
+  const y = Math.round((h - ch) / 2);
+  fillRect(img, x, y, cw, ch, [0xa5, 0xa4, 0xe0, 255]);
+  fillRect(img, x + 16, y + 16, cw - 32, ch - 32, [0x3e, 0x31, 0xa2, 255]);
+  fillRect(img, x + 24, y + 28, 80, 12, [0xf0, 0xf0, 0xf0, 255]);
   return img;
 }

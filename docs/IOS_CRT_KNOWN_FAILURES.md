@@ -97,6 +97,25 @@ The mismatch leaves a black or empty blit that neither Plex nor Tom
 can see as painted phosphor. Do not re-lock those JS box getters to
 384×272 after `getContext`.
 
+### 8. #49 — unlock client box after GL + CSS 100% fill
+
+`main@9c35eb7` / `routes-DwWw0zTW.js` (Plex deploy of PR #49):
+
+- Same CSS 100% live-GL fill as #48.
+- `clientWidth` unlocked after `getContext` so the JS box matched CSS
+  (Plex measured **354×652**). Backing stayed 384×272.
+
+**Plex painted gate FAIL (exit 2)** — **same empty black as #7**:
+
+- Layout OK (unlocked clientWidth, CSS fills bezel, no present, session holds).
+- **Paint `count:0`**: READY no painted CRT; hold no painted CRT;
+  “solid black after first paint”; boot→first CRT ~20212ms.
+
+Unlock did **not** restore paint. The **CSS 100% + clientWidth lie/unlock
+family is dead** until Tom’s phone produces new evidence. Do not iterate
+another variant of stretching the live GL canvas to the bezel via CSS
+100% and client-box tricks.
+
 ---
 
 ## Briefly WORKED (do not regress these unrelated wins)
@@ -121,7 +140,7 @@ Locked, unrelated:
 
 ## What a NEW approach must not be
 
-Not 1, not 2, not 3, not 6, not 7.
+Not 1, not 2, not 3, not 6, not 7, not 8.
 
 In particular:
 
@@ -130,22 +149,25 @@ In particular:
 - No DPR / bezel-sized WebGL backing resize (`canvas.width` assignment).
 - No `drawImage` of the live WebGL canvas.
 - No `readPixels` present loop (any fps) into a 2D overlay.
-- No CSS 100% fill **while** `clientWidth`/`clientHeight` stay lied at 384×272.
+- No CSS 100% fill + `clientWidth` **lie** (#7).
+- No CSS 100% fill + `clientWidth` **unlock** (#8).
+- No further CSS-100% + client-box games on the live GL canvas.
 
-Lock `canvas.width` / `canvas.height` at 384×272 **before** `getContext`
-so WebKit allocates a native drawing buffer (not CSS×DPR). A brief
-client-box lie **only for that allocation** is allowed. After the
-context exists, restore real `clientWidth` / `offsetWidth` so the JS
-box matches CSS 100% — #7 showed the leftover lie makes an empty blit.
+Current attempt after #49/#8 (this tree): **paint over fill**.
 
-Current attempt after #48/#7 (this tree): **live WebGL CSS 100% fill
-with the client box unlocked after GL**. Backing stays 384×272. No 2D
-present, no wrapper scale. Compact cold-start chip. If
-`drawingBuffer` grows, remap VICE’s 384×272 viewport to the default FB.
-This is not 1 / 2 / 3 / 6 / 7.
+Live WebGL canvas at **native 384×272 CSS**, centered in the bezel
+(flex, no `scale()`, no CSS 100% on GL). Backing 384×272. Real
+`clientWidth` matches the 384×272 CSS box (not a lie). No 2D present.
+Compact cold-start chip.
 
-If this also fails (Plex paint still empty, or Tom black), add **#8**
-here before the next experiment. Do not silently retry 1–7.
+**Tradeoff:** READY should paint (Plex chroma `count > 0`) but the
+picture is **letterboxed** in the tall phone bezel. Bezel fill is
+deferred until there is a path that is not 1–8. Future fill ideas
+(only after Plex shows paint): `zoom` on a **non-GL** wrapper around
+this native canvas — not `scale()` on the GL layer.
+
+If letterbox is still `count:0` on Plex, add **#9** before the next
+experiment. Do not silently retry 1–8.
 
 ---
 
@@ -154,9 +176,12 @@ here before the next experiment. Do not silently retry 1–7.
 `scripts/crt-fill-gate.mjs` is a **painted-layout + session-hold** check
 on Chromium-on-Plex (iPhone viewport + CriOS UA). It must stay honest:
 
-- Painted bbox + coverage of the **live GL** picture, not wrapper fill.
-- Fail 384×272 stamps (top-right or bottom-left) and solid black.
-- Fail leftover 2D present/mirror covers.
+- **First:** non-empty painted READY (`count > 0`). Solid black fails.
+- Letterboxed 384×272 (centered) is an **accepted tradeoff** after #7/#8.
+  Fail Tom #44 top-right and GL-origin bottom-left stamps, not a
+  centered native-size picture.
+- Fail leftover 2D present/mirror covers and CSS 100% + client-box games.
 - Hold after first READY (no splash remount, no tab death).
+- Bezel fill is **not** required until a non-1–8 fill path exists.
 
 A green gate is **not** a CriOS PASS. **Tom’s phone is the only PASS.**

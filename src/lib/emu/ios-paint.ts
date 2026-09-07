@@ -1,26 +1,21 @@
 /**
- * CriOS CRT presentation — live WebGL CSS fill (after #47).
+ * CriOS CRT presentation — native 384×272 letterbox (after #7/#8).
  *
  * Read `docs/IOS_CRT_KNOWN_FAILURES.md` first. Desktop Chromium / Plex
  * Playwright cannot PASS this.
  *
  * Architecture
  * ------------
- * 1. Show the live VICE WebGL canvas itself filling .g64-screen via CSS
- *    100% layout (inset 0, width/height 100%, object-fit fill). Not
- *    wrapper scale (#43/#44), not a 2D present (#46/#47).
- * 2. Backing store stays 384×272 (never assign canvas.width to the bezel).
- *    After getContext, unlock clientWidth so it matches CSS 100% — #7's
- *    leftover 384×272 lie made an empty black blit on Plex.
- * 3. Never call getContext on that canvas. host.ts already captured
- *    VICE's context on `__g64gl`. A second WebGL context on WebKit returns
- *    null or steals the canvas (solid black CRT).
+ * 1. Show the live VICE WebGL canvas at native 384×272 CSS, centered in
+ *    the bezel (flex). Paint over fill. Not CSS 100% (#7/#8), not wrapper
+ *    scale (#43/#44), not a 2D present (#46/#47).
+ * 2. Backing store stays 384×272. Real clientWidth matches the 384 CSS
+ *    box — no clientWidth lie, no unlock-to-bezel game.
+ * 3. Never call getContext on that canvas.
  * 4. Never PNG / toDataURL poll / readPixels present loop / drawImage(GL).
- * 5. Strip leftover 2D present/mirror nodes from cached builds so they
- *    cannot cover READY with black after cold start.
- * 6. After power-on, play-recycle (unit 8), Reset, or Jiffy apply: unpause,
- *    keep the main loop running, fit CSS (do not wipe the backing store).
- *    Do not recycle the core or Autostart from here.
+ * 5. Strip leftover 2D present/mirror nodes from cached builds.
+ * 6. After power-on, play-recycle (unit 8), Reset, or Jiffy apply: unpause
+ *    and refit CSS. Do not recycle the core or Autostart from here.
  *
  * Tom's phone remains the only PASS.
  */
@@ -106,7 +101,7 @@ function revealLiveCanvas(canvas: HTMLCanvasElement) {
   canvas.style.setProperty("display", "block", "important");
   canvas.style.setProperty("visibility", "visible", "important");
   canvas.style.setProperty("opacity", "1", "important");
-  // Live GL fills the bezel; client box matches CSS (not the #7 384 lie).
+  // Live GL at native 384×272, centered (letterbox after #7/#8).
   const el =
     (canvas.closest("#grok64-player") as HTMLElement | null) ??
     (typeof document !== "undefined" ? document.getElementById("grok64-player") : null);
@@ -195,7 +190,7 @@ export function presentIosCrt(
     }
   }
 
-  // Always refit CSS so the canvas fills .g64-screen.
+  // Refit CSS so the live canvas stays a native 384×272 letterbox.
   fitEmu(playerRoot(root), emu);
   if (canvas) nudgeCompositor(canvas);
   const shouldFit =

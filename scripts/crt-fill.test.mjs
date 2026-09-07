@@ -12,6 +12,9 @@ import {
   fillRect,
   filledCrtFixture,
   fillsBox,
+  isNativeFbCssBox,
+  letterboxPaintFails,
+  letterboxedCrtFixture,
   makeRgba,
   oldStampLayoutFails,
   paintFails,
@@ -53,14 +56,16 @@ test("Plex CRT fill gate script exists and documents iPhone viewport fill", () =
   assert.match(gate, /session still powered/);
   assert.match(gate, /no full page reload/);
   assert.match(gate, /__g64 still mounted/);
-  assert.match(gate, /live GL CSS px vs bezel/);
+  assert.match(gate, /letterbox/);
+  assert.match(gate, /letterboxPaintFails/);
   assert.match(gate, /Tom's phone is the only PASS/);
   assert.match(gate, /Chromium-on-Plex still is not CriOS PASS|#47/);
   assert.match(gate, /function hasCssScale/);
   assert.match(gate, /IOS_CRT_KNOWN_FAILURES/);
-  assert.match(gate, /#7 384x272 lie/);
+  assert.match(gate, /GL clientWidth is native 384x272/);
   assert.doesNotMatch(gate, /note\(\/scale\\\(\/i\.test\(String\(ready\?\.playerXf/);
   assert.doesNotMatch(gate, /GATE PASS/);
+  assert.doesNotMatch(gate, /live GL CSS px vs bezel/);
 });
 
 test("gate treats computed matrix as scale (Plex getComputedStyle)", () => {
@@ -178,38 +183,71 @@ test("remapViceViewport expands a 384×272 stamp in a larger drawing buffer", ()
   assert.match(host, /w: drawingW, h: drawingH/);
 });
 
-test("iOS CRT fill is live-GL CSS 100%, never wrapper scale or 2D present", () => {
-  const iosFn = host.slice(host.indexOf("function fillBezelCss"), host.indexOf("export async function recycleCore"));
-  assert.match(iosFn, /width", "100%"/);
-  assert.match(iosFn, /height", "100%"/);
+test("iOS CRT is a native 384×272 letterbox, never wrapper scale or 2D present", () => {
+  const iosFn = host.slice(host.indexOf("function letterboxNativeCss"), host.indexOf("export async function recycleCore"));
+  assert.match(iosFn, /width", "384px"/);
+  assert.match(iosFn, /height", "272px"/);
+  assert.match(iosFn, /flex", "0 0 384px"/);
   assert.match(iosFn, /stripIosPresent/);
-  assert.match(iosFn, /unlockIosClientBox/);
+  assert.doesNotMatch(iosFn, /fillBezelCss/);
   assert.doesNotMatch(iosFn, /(?<!un)lockIosClientBox\(canvas/);
   assert.doesNotMatch(iosFn, /startIosPresent/);
-  assert.doesNotMatch(iosFn, /width", "384px"/);
+  assert.doesNotMatch(iosFn, /width", "100%"/);
   assert.doesNotMatch(iosFn, /translate3d\(0,0,0\) scale\(/);
   assert.doesNotMatch(iosFn, /devicePixelRatio/);
   assert.match(host, /remapViceViewport/);
   assert.match(host, /prefetchViceCores/);
   assert.match(host, /this\.width = 384/);
-  assert.match(host, /lockIosClientBox\(this, 384, 272\)/);
+  assert.doesNotMatch(host, /lockIosClientBox\(this, 384, 272\)/);
 });
 
-test("iOS phone screen fill CSS does not use the #43 cqh or #44 384px lock", () => {
+test("iOS phone screen CSS letterboxes 384×272 — no #43 cqh, no CSS 100%", () => {
   const idx = css.indexOf('html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-screen {');
   assert.ok(idx >= 0);
   const rule = css.slice(idx, css.indexOf("}", idx) + 1);
   assert.match(rule, /inset: 8px/);
+  assert.match(rule, /display: flex/);
   assert.doesNotMatch(rule, /100cqh/);
   assert.doesNotMatch(rule, /container-type/);
   const canvas = css.slice(css.indexOf('html[data-g64os="ios"] #grok64-player canvas'));
-  assert.match(canvas, /width: 100% !important/);
-  assert.match(canvas, /height: 100% !important/);
+  assert.match(canvas, /width: 384px !important/);
+  assert.match(canvas, /height: 272px !important/);
   assert.match(canvas, /transform: none !important/);
-  assert.match(canvas, /object-fit: fill !important/);
-  assert.doesNotMatch(canvas.slice(0, 900), /width: 384px/);
+  assert.match(canvas, /object-fit: contain !important/);
+  assert.doesNotMatch(canvas.slice(0, 900), /width: 100% !important/);
   assert.match(css, /\.g64-ios-present/);
   assert.match(css, /html\[data-g64os="ios"\] \.g64-screen > canvas\.g64-ios-present/);
+});
+
+test("letterboxPaintFails accepts a centered native READY and rejects black / #44", () => {
+  const box = letterboxedCrtFixture(374, 652);
+  const paint = paintedContent(box.data, box.width, box.height);
+  assert.equal(paint.empty, false);
+  assert.ok(paint.count > 0);
+  assert.notEqual(paint.corner, "top-right");
+  assert.notEqual(paint.corner, "bottom-left");
+  assert.equal(letterboxPaintFails(paint), null);
+  assert.ok(paintFails(paint), "bezel-fill paintFails still rejects letterbox (tradeoff)");
+
+  const black = makeRgba(374, 652, [12, 12, 14, 255]);
+  fillRect(black, 8, 8, 358, 636, [0, 0, 0, 255]);
+  assert.match(letterboxPaintFails(paintedContent(black.data, black.width, black.height)) ?? "", /blank|solid-black|no painted/i);
+
+  const stamp = tomStampFixture(374, 652);
+  assert.ok(letterboxPaintFails(paintedContent(stamp.data, stamp.width, stamp.height)), "#44 postage stamp must fail");
+  const bigTr = makeRgba(374, 652, [0x6c, 0x5a, 0x9a, 255]);
+  fillRect(bigTr, 374 - 8 - 220, 8, 220, 180, [0x12, 0x16, 0x3a, 255]);
+  assert.match(letterboxPaintFails(paintedContent(bigTr.data, bigTr.width, bigTr.height)) ?? "", /top-right|#44/);
+  const bigBl = makeRgba(374, 652, [0x6c, 0x5a, 0x9a, 255]);
+  fillRect(bigBl, 8, 652 - 8 - 180, 220, 180, [0x12, 0x16, 0x3a, 255]);
+  assert.match(letterboxPaintFails(paintedContent(bigBl.data, bigBl.width, bigBl.height)) ?? "", /bottom-left/);
+});
+
+test("isNativeFbCssBox is the real 384×272 box, not a bezel-sized unlock", () => {
+  assert.equal(isNativeFbCssBox(384, 272), true);
+  assert.equal(isNativeFbCssBox(380, 268), true);
+  assert.equal(isNativeFbCssBox(354, 652), false);
+  assert.equal(isNativeFbCssBox(374, 652), false);
 });
 
 function crc32(buf) {
