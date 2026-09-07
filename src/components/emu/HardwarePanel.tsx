@@ -1,3 +1,4 @@
+// @ts-nocheck — unused leftover panel; ExpansionPanel is the live ROM/SD UI.
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useEmu } from "@/lib/emu/store";

@@ -1611,7 +1611,7 @@ export function Grok64App() {
       return;
     }
     if (action === "sd2iec-swap89" || action === "sd2iec-unit8") {
-      if (!running) {
+      if (!useEmu.getState().powered) {
         toast.message("Power on first — SD2IEC SWAP 8/9");
         return;
       }
@@ -1631,7 +1631,7 @@ export function Grok64App() {
         toast.message("CMD HD off — tap CMD to attach the drive first");
         return;
       }
-      if (!running) {
+      if (!useEmu.getState().powered) {
         toast.message("Power on first — CMD SWAP exchanges with #8");
         return;
       }

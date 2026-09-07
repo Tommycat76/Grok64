@@ -126,7 +126,7 @@ export function planPlay(input: {
     live,
     attach: null,
     recycle: false,
-    autostartAfterReady: autostart && kind !== "basic",
+    autostartAfterReady: autostart,
     trueDrive: live.iec === "1541" || live.iec === "1581" || user.iec === "cmdhd",
     softIec: false,
     status:

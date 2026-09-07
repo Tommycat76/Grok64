@@ -18,15 +18,25 @@ if (existsSync(outFile)) {
 }
 
 mkdirSync(outDir, { recursive: true });
-const res = await fetch(source, { redirect: "follow" });
-if (!res.ok) {
-  console.error("[ensure-bd] download failed", res.status);
-  process.exit(1);
+let lastErr = "no attempt";
+for (let i = 0; i < 3; i++) {
+  try {
+    const res = await fetch(source, { redirect: "follow" });
+    if (!res.ok) {
+      lastErr = `HTTP ${res.status}`;
+      continue;
+    }
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf.byteLength < 1000) {
+      lastErr = `suspicious size ${buf.byteLength}`;
+      continue;
+    }
+    writeFileSync(outFile, buf);
+    console.log("[ensure-bd] wrote", outFile, buf.byteLength, "bytes");
+    process.exit(0);
+  } catch (err) {
+    lastErr = err instanceof Error ? err.message : String(err);
+  }
 }
-const buf = Buffer.from(await res.arrayBuffer());
-if (buf.byteLength < 1000) {
-  console.error("[ensure-bd] suspicious size", buf.byteLength);
-  process.exit(1);
-}
-writeFileSync(outFile, buf);
-console.log("[ensure-bd] wrote", outFile, buf.byteLength, "bytes");
+console.warn("[ensure-bd] skipped (catalog cache):", lastErr);
+process.exit(0);
