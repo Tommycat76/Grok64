@@ -90,6 +90,15 @@ test("filled CRT painted bbox passes", () => {
   assert.equal(paintFails(paint), null);
 });
 
+test("filled near-black CRT on bezel still counts as painted (not 39s-blank)", () => {
+  const img = makeRgba(374, 652, [12, 12, 14, 255]);
+  fillRect(img, 8, 8, 358, 636, [0, 0, 0, 255]);
+  const paint = paintedContent(img.data, img.width, img.height);
+  assert.equal(paint.empty, false);
+  assert.equal(paint.corner, "full");
+  assert.equal(paintFails(paint), null);
+});
+
 test("blank bezel (39s no CRT) fails", () => {
   const img = makeRgba(374, 652, [12, 12, 14, 255]);
   const paint = paintedContent(img.data, img.width, img.height);
