@@ -176,9 +176,8 @@ function patchGlViewportFill(gl: WebGLRenderingContext | WebGL2RenderingContext)
 }
 
 /**
- * Lie about the JS box only while WebKit allocates the first drawing
- * buffer. Leaving this lie on after GL exists is #7 (CSS 100% + 384
- * clientWidth → empty black blit on Plex).
+ * #7 leftover: do not call. A 384 clientWidth lie plus CSS 100% painted
+ * empty black on Plex. Unlock still strips a cached lie from older builds.
  */
 function lockIosClientBox(canvas: HTMLCanvasElement, w: number, h: number) {
   const tagged = canvas as HTMLCanvasElement & { __g64client?: boolean };
@@ -202,7 +201,7 @@ function lockIosClientBox(canvas: HTMLCanvasElement, w: number, h: number) {
   }
 }
 
-/** Restore real client/offset box so it matches CSS 100% (#7). */
+/** Strip a leftover #7 client-box lie. Letterbox CSS is already 384×272. */
 function unlockIosClientBox(canvas: HTMLCanvasElement) {
   const tagged = canvas as HTMLCanvasElement & { __g64client?: boolean };
   if (!tagged.__g64client) return;
@@ -279,10 +278,10 @@ function preserveWebglBuffer() {
           this.width = 384;
           this.height = 272;
         }
-        // Lie about clientWidth *only for this allocation* so WebKit does
-        // not create a CSS×DPR drawing buffer. Unlock immediately after
-        // getContext — leaving the lie on is #7 (empty black blit).
-        lockIosClientBox(this, 384, 272);
+        // Native CSS box *before* getContext so WebKit allocates 384×272
+        // without a clientWidth lie (#7) or a CSS 100% box (#8).
+        this.style.setProperty("width", "384px", "important");
+        this.style.setProperty("height", "272px", "important");
       }
       // iOS WebKit needs preserveDrawingBuffer for CRT compositing; Android tablets do not
       // and pay a large fill-rate cost when it is forced on every WebGL context.
@@ -297,7 +296,6 @@ function preserveWebglBuffer() {
         if (ios) {
           lockIosBacking(this, 384, 272);
           unlockIosClientBox(this);
-          ensureViceViewportFill(this);
         }
       }
       return ctx;
@@ -1150,7 +1148,7 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       let bh = Math.max(272, Math.round(ch * dpr));
       if (tablet || iosPhone) {
         // VICE framebuffer is 384×272. Growing the backing store is solid
-        // black. CSS width/height 100% (not transform) fills the CRT.
+        // black. iOS: native CSS box (letterbox after #7/#8). Tablet: scale.
         bw = 384;
         bh = 272;
       } else if (touchMobile) {
@@ -1164,7 +1162,7 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       }
       const backingOk = canvas.width === bw && canvas.height === bh && canvas.width >= 64;
       // Reassigning canvas.width wipes the WebGL context on CriOS. Never
-      // resize after VICE has a context — CSS scales 384×272.
+      // resize after VICE has a context — iOS keeps a native 384×272 CSS box.
       const canResizeBacking = !iosPhone || !glLive || canvas.width < 64 || canvas.height < 64;
       if (
         canResizeBacking &&
@@ -1181,8 +1179,8 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       canvas.style.visibility = "visible";
       if (tablet || iosPhone) {
         // VICE paints 384×272. WebGL on some Android GPUs ignores object-fit.
-        // Tablet: scale the canvas in CSS pixels. iOS: CSS 100% fill —
-        // CriOS ignores transform on the canvas (#43) and the player wrapper (#44).
+        // Tablet: scale the canvas in CSS pixels. iOS: native 384×272 CSS
+        // letterbox — CSS 100% + clientWidth games are #7/#8 (empty black).
         if (isIos()) applyIosCrtStyle(canvas, el, parent);
         else applyTabletCrtStyle(canvas, el, parent);
       } else {
@@ -1193,9 +1191,15 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
     }
     const parent = el.querySelector(".ejs_canvas_parent") as HTMLElement | null;
     if (parent) {
-      parent.style.width = "100%";
-      parent.style.height = "100%";
-      parent.style.display = "block";
+      if (isIos()) {
+        // Do not stretch the parent back to 100% — that is the #7/#8 family.
+        letterboxNativeCss(parent);
+        parent.style.display = "block";
+      } else {
+        parent.style.width = "100%";
+        parent.style.height = "100%";
+        parent.style.display = "block";
+      }
     }
   } catch {
     /* ignore */
@@ -1300,35 +1304,36 @@ function watchIosCrtBox(box: HTMLElement, apply: () => void) {
 }
 
 /**
- * Layout-fill the bezel. Not CSS transform scale (#43/#44 stamp) and not a
- * leftover 384×272 clientWidth lie (#7 empty blit).
+ * Native 384×272 CSS box — paint over fill after #7/#8.
+ * Flex on .g64-screen centers this; no scale(), no CSS 100% on GL.
  */
-function fillBezelCss(el: HTMLElement) {
-  el.style.setProperty("position", "absolute", "important");
-  el.style.setProperty("inset", "0", "important");
-  el.style.setProperty("left", "0", "important");
-  el.style.setProperty("top", "0", "important");
-  el.style.setProperty("right", "0", "important");
-  el.style.setProperty("bottom", "0", "important");
+function letterboxNativeCss(el: HTMLElement) {
+  el.style.setProperty("position", "relative", "important");
+  el.style.setProperty("inset", "auto", "important");
+  el.style.setProperty("left", "auto", "important");
+  el.style.setProperty("top", "auto", "important");
+  el.style.setProperty("right", "auto", "important");
+  el.style.setProperty("bottom", "auto", "important");
   el.style.setProperty("margin", "0", "important");
-  el.style.setProperty("width", "100%", "important");
-  el.style.setProperty("height", "100%", "important");
+  el.style.setProperty("width", "384px", "important");
+  el.style.setProperty("height", "272px", "important");
   el.style.setProperty("min-width", "0", "important");
   el.style.setProperty("min-height", "0", "important");
   el.style.setProperty("max-width", "none", "important");
   el.style.setProperty("max-height", "none", "important");
+  el.style.setProperty("flex", "0 0 384px", "important");
   el.style.setProperty("transform", "none", "important");
   el.style.setProperty("-webkit-transform", "none", "important");
   el.style.setProperty("transform-origin", "0 0", "important");
 }
 
 /**
- * CriOS CRT fill after #47 / #48.
+ * CriOS CRT after #47 / #48 / #49.
  *
- * Read `docs/IOS_CRT_KNOWN_FAILURES.md` first. This is not 1/2/3/6/7:
- * live WebGL CSS 100% layout, backing locked at 384×272, client box
- * unlocked so it matches the CSS box (#7's leftover 384 lie was empty
- * black on Plex). No wrapper scale, no 2D present, no readPixels loop.
+ * Read `docs/IOS_CRT_KNOWN_FAILURES.md` first. This is not 1–8:
+ * live WebGL at native 384×272 CSS, centered in the bezel (letterbox).
+ * Paint first; bezel fill deferred. No wrapper scale, no CSS 100% on GL,
+ * no clientWidth lie/unlock games, no 2D present.
  */
 export function applyIosCrtStyle(
   canvas: HTMLCanvasElement,
@@ -1343,17 +1348,22 @@ export function applyIosCrtStyle(
 
   const apply = () => {
     unlockIosClientBox(canvas);
-    fillBezelCss(player);
+    box.style.setProperty("display", "flex", "important");
+    box.style.setProperty("align-items", "center", "important");
+    box.style.setProperty("justify-content", "center", "important");
+    letterboxNativeCss(player);
     const canvasParent = canvas.parentElement;
-    if (canvasParent && canvasParent !== player) fillBezelCss(canvasParent);
-    fillBezelCss(canvas);
-    canvas.style.setProperty("object-fit", "fill", "important");
-    canvas.style.setProperty("object-position", "0 0", "important");
+    if (canvasParent && canvasParent !== player) letterboxNativeCss(canvasParent);
+    letterboxNativeCss(canvas);
+    canvas.style.setProperty("position", "absolute", "important");
+    canvas.style.setProperty("left", "0", "important");
+    canvas.style.setProperty("top", "0", "important");
+    canvas.style.setProperty("object-fit", "contain", "important");
+    canvas.style.setProperty("object-position", "center", "important");
     canvas.style.setProperty("display", "block", "important");
     canvas.style.setProperty("visibility", "visible", "important");
     canvas.style.setProperty("opacity", "1", "important");
     stripIosPresent(box);
-    ensureViceViewportFill(canvas);
     void box.getBoundingClientRect();
   };
 

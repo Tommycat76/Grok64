@@ -1913,17 +1913,12 @@ html[data-g64os="ios"] .g64-log {
  * iPhone CRT: .g64-screen absolutely fills the bezel (no flex % / cqh).
  * Read docs/IOS_CRT_KNOWN_FAILURES.md first.
  *
- * #43: width:auto + 100cqh collapsed the screen to min-width (stamp).
- * #43: scale(dpr) on the canvas — CriOS ignores canvas CSS transform.
- * #44: 384×272 CSS + scale() on #grok64-player — DOM rect fill 1.0, stamp.
- * #46: tall 2D drawImage present — CriOS OOM, black → splash.
- * #47: readPixels 384×272 2D present + object-fit fill ~14fps — still
- *      cold-start → solid black on Tom’s phone (Plex gate false-green).
+ * #43–#44: scale() on GL / player — CriOS ignores transform (stamp).
+ * #46–#47: 2D present (drawImage / readPixels) — OOM or Tom black.
+ * #48–#49 / #7–#8: CSS 100% + clientWidth lie/unlock — Plex paint count:0.
  *
- * This path: live WebGL canvas is the only picture. Player + GL canvas
- * use layout 100% (not transform scale). Backing stays 384×272 in JS.
- * Leftover 2D present/mirror nodes are hidden/removed so they cannot
- * cover READY. Cold-start copy is a compact chip, not a full black sheet.
+ * This path: paint over fill. Live GL at native 384×272 CSS, flex-centered
+ * in the bezel (letterbox). No scale(), no CSS 100% on GL. Compact boot chip.
  */
 html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-bezel {
   position: relative;
@@ -1941,6 +1936,9 @@ html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-screen {
   min-width: 0 !important;
   min-height: 0 !important;
   aspect-ratio: auto;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
 }
 html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-boot {
   position: absolute;
@@ -1976,33 +1974,32 @@ html[data-g64os="ios"] .g64-ios-mirror {
   pointer-events: none !important;
 }
 html[data-g64os="ios"] #grok64-player {
-  position: absolute;
-  inset: 0;
-  left: 0;
-  top: 0;
-  right: 0;
-  bottom: 0;
+  position: relative;
+  inset: auto;
+  left: auto;
+  top: auto;
+  right: auto;
+  bottom: auto;
   margin: 0 !important;
-  width: 100% !important;
-  height: 100% !important;
+  width: 384px !important;
+  height: 272px !important;
   min-width: 0 !important;
   min-height: 0 !important;
   max-width: none !important;
   max-height: none !important;
+  flex: 0 0 384px;
   transform: none !important;
   -webkit-transform: none !important;
   transform-origin: 0 0 !important;
   z-index: 1;
 }
 html[data-g64os="ios"] #grok64-player .ejs_canvas_parent {
-  position: absolute;
-  inset: 0;
-  left: 0;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: 100% !important;
-  height: 100% !important;
+  position: relative;
+  inset: auto;
+  left: auto;
+  top: auto;
+  width: 384px !important;
+  height: 272px !important;
   max-width: none !important;
   max-height: none !important;
   transform: none !important;
@@ -2014,20 +2011,20 @@ html[data-g64os="ios"] #grok64-player canvas.g64-ios-fb {
   visibility: visible !important;
   opacity: 1 !important;
   position: absolute !important;
-  inset: 0 !important;
+  inset: auto !important;
   left: 0 !important;
   top: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
+  right: auto !important;
+  bottom: auto !important;
   margin: 0 !important;
-  width: 100% !important;
-  height: 100% !important;
+  width: 384px !important;
+  height: 272px !important;
   min-width: 0;
   min-height: 0;
   max-width: none !important;
   max-height: none !important;
-  object-fit: fill !important;
-  object-position: 0 0 !important;
+  object-fit: contain !important;
+  object-position: center !important;
   transform: none !important;
   -webkit-transform: none !important;
   transform-origin: 0 0 !important;

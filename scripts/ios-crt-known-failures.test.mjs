@@ -13,7 +13,7 @@ const present = readFileSync(join(root, "src/lib/emu/ios-present.ts"), "utf8");
 const gate = readFileSync(join(root, "scripts/crt-fill-gate.mjs"), "utf8");
 const docs = readFileSync(join(root, "docs/STATIC-HOSTING.md"), "utf8");
 
-test("known-failures doc exists and lists Tom phone failures 1–7", () => {
+test("known-failures doc exists and lists Tom phone failures 1–8", () => {
   assert.equal(existsSync(docPath), true);
   const doc = readFileSync(docPath, "utf8");
   assert.match(doc, /Read `docs\/IOS_CRT_KNOWN_FAILURES\.md` first/);
@@ -28,8 +28,13 @@ test("known-failures doc exists and lists Tom phone failures 1–7", () => {
   assert.match(doc, /8876d8a/);
   assert.match(doc, /### 7\.|#7/);
   assert.match(doc, /6c10228/);
+  assert.match(doc, /### 8\.|#8/);
+  assert.match(doc, /9c35eb7/);
+  assert.match(doc, /unlock/);
   assert.match(doc, /clientWidth/);
   assert.match(doc, /count:0|empty black/i);
+  assert.match(doc, /CSS 100% \+ clientWidth/);
+  assert.match(doc, /letterbox|384×272 CSS/);
   assert.match(doc, /JiffyDOS/);
   assert.match(doc, /#39/);
   assert.match(doc, /build-id|build id/i);
@@ -41,6 +46,8 @@ test("known-failures doc exists and lists Tom phone failures 1–7", () => {
 
 test("project agents and CRT follow-ups point at the known-failures doc", () => {
   assert.match(agents, /docs\/IOS_CRT_KNOWN_FAILURES\.md/);
+  assert.match(agents, /1–8|1-8/);
+  assert.match(agents, /letterbox/);
   assert.match(paint, /docs\/IOS_CRT_KNOWN_FAILURES\.md/);
   assert.match(host, /docs\/IOS_CRT_KNOWN_FAILURES\.md/);
   assert.match(present, /docs\/IOS_CRT_KNOWN_FAILURES\.md/);
@@ -48,14 +55,15 @@ test("project agents and CRT follow-ups point at the known-failures doc", () => 
   assert.match(docs, /docs\/IOS_CRT_KNOWN_FAILURES\.md/);
 });
 
-test("new CRT path is live-GL CSS fill, not failed approaches 1/2/3/6/7", () => {
-  const iosFn = host.slice(host.indexOf("function fillBezelCss"), host.indexOf("export async function recycleCore"));
-  assert.match(iosFn, /width", "100%"/);
-  assert.match(iosFn, /height", "100%"/);
+test("new CRT path is native 384×272 letterbox, not failed approaches 1–8", () => {
+  const iosFn = host.slice(host.indexOf("function letterboxNativeCss"), host.indexOf("export async function recycleCore"));
+  assert.match(iosFn, /letterboxNativeCss/);
+  assert.match(iosFn, /width", "384px"/);
+  assert.match(iosFn, /height", "272px"/);
+  assert.match(iosFn, /flex", "0 0 384px"/);
   assert.match(iosFn, /stripIosPresent/);
-  assert.match(iosFn, /unlockIosClientBox/);
-  assert.doesNotMatch(iosFn, /startIosPresent/);
-  assert.doesNotMatch(iosFn, /width", "384px"/);
+  assert.doesNotMatch(iosFn, /fillBezelCss/);
+  assert.doesNotMatch(iosFn, /width", "100%"/);
   assert.doesNotMatch(iosFn, /scale\(/);
   assert.doesNotMatch(iosFn, /(?<!un)lockIosClientBox\(canvas/);
   const iosCode = iosFn.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
@@ -65,22 +73,21 @@ test("new CRT path is live-GL CSS fill, not failed approaches 1/2/3/6/7", () => 
   assert.doesNotMatch(presentCode, /drawImage/);
   assert.doesNotMatch(presentCode, /toDataURL/);
   assert.match(paint, /live-webgl/);
-  assert.match(host, /function unlockIosClientBox/);
+  assert.match(paint, /letterbox/);
   const patched = host.slice(host.indexOf("function preserveWebglBuffer"), host.indexOf("type GuardedGm"));
-  assert.ok(
-    patched.indexOf("unlockIosClientBox(this)") > patched.indexOf("orig.call(this, type, merged)"),
-    "clientWidth lie must be cleared after getContext (#7)",
-  );
+  assert.match(patched, /width", "384px"/);
+  assert.doesNotMatch(patched, /lockIosClientBox\(this,\s*384,\s*272\)/);
 });
 
-test("gate never claims PASS and requires live GL fill", () => {
+test("gate never claims PASS and accepts letterbox paint over fill", () => {
   assert.match(gate, /Tom's phone is the only PASS/);
   assert.match(gate, /must never claim PASS|never claim PASS/i);
   assert.doesNotMatch(gate, /GATE PASS/);
-  assert.match(gate, /live GL CSS px vs bezel/);
+  assert.match(gate, /letterbox/);
+  assert.match(gate, /letterboxPaintFails/);
   assert.match(gate, /no 2D present canvas covering live GL/);
-  assert.match(gate, /#7 384x272 lie/);
+  assert.match(gate, /GL clientWidth is native 384x272/);
   assert.doesNotMatch(gate, /present canvas revealed after a lit copy/);
   assert.doesNotMatch(gate, /present bitmap stays 384x272/);
-  assert.doesNotMatch(gate, /GL clientWidth is native 384x272/);
+  assert.doesNotMatch(gate, /live GL CSS px vs bezel/);
 });

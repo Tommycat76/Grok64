@@ -13,10 +13,10 @@
  *   node scripts/crt-fill-gate.mjs https://grok64.tomsprojects.cc/
  *   node scripts/crt-fill-gate.mjs http://127.0.0.1:8091/
  *
- * HARD: asserts the *painted* live-GL picture fills the bezel. DOM wrapper /
- * getBoundingClientRect fill of 1.0 is not enough — that was the #45
- * false green on #44's wrapper-scale stamp. Tom's photo is top-right
- * (L-shaped purple left+bottom); a GL-origin stamp is bottom-left.
+ * HARD: asserts the *painted* live-GL picture is not solid black.
+ * After #7/#8, a centered 384×272 letterbox is accepted (paint over fill).
+ * Tom #44 top-right and GL-origin bottom-left still fail. DOM wrapper
+ * fill of 1.0 is never a pass.
  *
  * Also holds after first READY paint and fails if the session remounts
  * to the power splash, __g64 is torn down, the page reloads, or the CRT
@@ -42,8 +42,9 @@ import {
   cssPx,
   decodePng,
   fillsBox,
+  isNativeFbCssBox,
+  letterboxPaintFails,
   oldStampLayoutFails,
-  paintFails,
   paintedContent,
 } from "./crt-fill-paint.mjs";
 
@@ -216,14 +217,21 @@ function assertCssFill(label, cssW, cssH, outer, extra = {}) {
 }
 
 function assertPainted(label, shot, extra = {}) {
-  const fail = paintFails(shot.paint);
-  note(!fail, fail ? `${label} ${fail}` : `${label} painted fill ${shot.paint.fill.toFixed(2)} (${shot.paint.corner})`, {
-    bbox: shot.paint.bbox,
-    size: { w: shot.w, h: shot.h },
-    bg: shot.paint.bg,
-    count: shot.paint.count,
-    ...extra,
-  });
+  const fail = letterboxPaintFails(shot.paint);
+  note(
+    !fail,
+    fail
+      ? `${label} ${fail}`
+      : `${label} painted count:${shot.paint.count} ${shot.paint.corner} (letterbox OK after #7/#8)`,
+    {
+      bbox: shot.paint.bbox,
+      size: { w: shot.w, h: shot.h },
+      bg: shot.paint.bg,
+      count: shot.paint.count,
+      fill: shot.paint.fill,
+      ...extra,
+    },
+  );
   return shot.paint;
 }
 
@@ -363,8 +371,8 @@ note(!ready?.booting, "cold-start overlay dismissed after READY (must not stay a
 });
 note(ready?.buf?.w === 384 && ready?.buf?.h === 272, "VICE backing 384x272", ready?.buf);
 note(
-  !(ready?.canvasClient?.w === 384 && ready?.canvasClient?.h === 272),
-  "GL clientWidth is not the #7 384x272 lie (must match CSS fill)",
+  isNativeFbCssBox(ready?.canvasClient?.w, ready?.canvasClient?.h),
+  "GL clientWidth is native 384x272 (real CSS box, not a #7 lie on CSS 100%)",
   ready?.canvasClient,
 );
 
@@ -383,40 +391,44 @@ if (ready?.canvasCss && bezelInner) {
   const cssW = cssPx(ready.canvasCss.w);
   const cssH = cssPx(ready.canvasCss.h);
   note(
-    !oldStampLayoutFails(cssW || 0, cssH || 0, bezelInner.w, bezelInner.h),
-    "live GL canvas CSS fills the bezel (not a 384x272 stamp Tom cannot see)",
+    isNativeFbCssBox(cssW, cssH),
+    "live GL canvas CSS is native 384x272 (letterbox; fill deferred after #7/#8)",
     { bezelInner, glCss: { w: cssW, h: cssH } },
   );
   note(
-    oldStampLayoutFails(384, 272, bezelInner.w, bezelInner.h),
-    "old #44 384x272 CSS box would fail this bezel (gate would have caught Tom stamp)",
-    { bezelInner, locked: { w: 384, h: 272 } },
+    oldStampLayoutFails(cssW || 384, cssH || 272, bezelInner.w, bezelInner.h),
+    "384x272 CSS does not fill the tall bezel (documented letterbox tradeoff)",
+    { bezelInner, glCss: { w: cssW, h: cssH } },
   );
-  assertCssFill("live GL CSS px vs bezel (untransformed)", ready.canvasCss.w, ready.canvasCss.h, bezelInner);
-  if (ready.canvasClient) {
-    assertCssFill("GL clientWidth vs bezel (unlocked, not the #7 384 lie)", ready.canvasClient.w, ready.canvasClient.h, bezelInner);
-  }
   if (ready.canvas) {
     const dom = boxFill(ready.canvas.w, ready.canvas.h, bezelInner.w, bezelInner.h);
     console.log(
-      "INFO canvas DOM-rect fill (false-green if 1.00 while css-px/paint fail)",
+      "INFO canvas DOM-rect vs bezel (letterbox expected; paint count is the gate)",
       JSON.stringify({ dom, css: { w: cssW, h: cssH } }),
     );
   }
 }
 if (ready?.playerCss && bezelInner) {
-  assertCssFill("player wrapper CSS px vs bezel (untransformed, no scale)", ready.playerCss.w, ready.playerCss.h, bezelInner);
+  const pw = cssPx(ready.playerCss.w);
+  const ph = cssPx(ready.playerCss.h);
+  note(
+    isNativeFbCssBox(pw, ph),
+    "player wrapper CSS is native 384x272 (no scale, no CSS 100%)",
+    { playerCss: { w: pw, h: ph } },
+  );
 }
 if (ready?.screenCss && bezelInner) {
   assertCssFill("screen CSS px vs bezel (untransformed)", ready.screenCss.w, ready.screenCss.h, bezelInner);
 }
 
 const paint = assertPainted("READY", readyShot, { title: ready?.title, crtMs });
-if (paint.corner && paint.corner !== "full" && paint.corner !== "none") {
-  note(false, `READY painted stamp corner ${paint.corner} (Tom #44 photo is top-right; GL-origin is bottom-left)`, {
+if (paint.corner === "top-right" || paint.corner === "bottom-left") {
+  note(false, `READY painted stamp corner ${paint.corner} (Tom #44 is top-right; GL-origin is bottom-left)`, {
     bbox: paint.bbox,
     fill: paint.fill,
   });
+} else if (paint.corner && paint.corner !== "full" && paint.corner !== "none") {
+  console.log("INFO READY letterbox corner", paint.corner, JSON.stringify(paint.bbox));
 }
 
 if (crtMs > FIRST_CRT_WARN_MS) {

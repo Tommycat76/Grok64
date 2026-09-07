@@ -67,29 +67,27 @@ test("iOS CRT path does not recycle or Autostart", () => {
 test("iOS WebGL backing is locked to 384x272 before the first context", () => {
   assert.match(host, /this\.width = 384/);
   assert.match(host, /this\.height = 272/);
-  assert.match(host, /lockIosClientBox\(this, 384, 272\)/);
   assert.match(host, /lockIosBacking/);
   assert.match(host, /remapViceViewport/);
   const patched = host.slice(host.indexOf("function preserveWebglBuffer"), host.indexOf("type GuardedGm"));
+  assert.match(patched, /width", "384px"/);
+  assert.match(patched, /height", "272px"/);
   assert.ok(
-    patched.indexOf("lockIosClientBox(this, 384, 272)") < patched.indexOf("orig.call(this, type, merged)"),
-    "clientWidth must be locked before getContext",
+    patched.indexOf('width", "384px"') < patched.indexOf("orig.call(this, type, merged)"),
+    "native CSS box must be set before getContext (no #7 clientWidth lie)",
   );
-  assert.ok(
-    patched.indexOf("unlockIosClientBox(this)") > patched.indexOf("orig.call(this, type, merged)"),
-    "clientWidth lie must be cleared after getContext (#7)",
-  );
+  assert.doesNotMatch(patched, /lockIosClientBox\(this,\s*384,\s*272\)/);
 });
 
-test("iPhone CRT fills with live-GL CSS 100%, not wrapper scale or 2D present", () => {
+test("iPhone CRT is a native 384×272 letterbox, not wrapper scale or 2D present", () => {
   assert.match(host, /applyIosCrtStyle/);
   assert.match(host, /g64-ios-fb/);
   assert.match(host, /if \(isIos\(\)\) applyIosCrtStyle/);
-  assert.match(host, /fillBezelCss/);
+  assert.match(host, /letterboxNativeCss/);
   assert.match(host, /stripIosPresent/);
-  assert.match(host, /unlockIosClientBox/);
   assert.match(host, /#grok64-player/);
   assert.match(host, /remapViceViewport/);
+  assert.doesNotMatch(host, /fillBezelCss/);
   assert.doesNotMatch(host, /translate3d\(0,0,0\) scale\(/);
   assert.doesNotMatch(host, /klass === "g64-ios-fb" \? Math.max\(1, window.devicePixelRatio/);
   assert.doesNotMatch(host, /sw \* dpr/);

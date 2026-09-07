@@ -40,9 +40,10 @@ node scripts/flatten-dist.mjs dist
 
 Do not claim an iPhone CRT PASS from this box. Tom’s real CriOS is the only PASS.
 **Chromium-on-Plex still is not CriOS PASS.** #46/#47 went green while Tom’s
-phone went black. **#48** (`main@6c10228`) was honestly red: layout filled,
-paint `count:0` solid black (CSS 100% + `clientWidth` lied to 384×272 — known
-failure #7). Zero PASS without Tom.
+phone went black. **#48** (`main@6c10228`, #7) and **#49** (`main@9c35eb7`, #8)
+were honestly red: CSS 100% + clientWidth lie/unlock, paint `count:0` solid
+black. That family is dead. Current ship is a **centered 384×272 letterbox**
+(paint over fill). Zero PASS without Tom.
 
 ### CRT fill gate (required after deploy)
 
@@ -56,10 +57,10 @@ node scripts/crt-fill-gate.mjs http://127.0.0.1:8091/
 
 It launches Playwright Chromium at an iPhone viewport (390×844, touch, CriOS UA), powers on, then:
 
-1. Hides on-screen chrome, crops `.g64-screen`, and measures the **painted** pixel bbox **and coverage** of the **live WebGL** canvas. A 384×272 stamp (Tom #44 photo: top-right; GL-origin: bottom-left) or joystick-only / solid-black pixels **fail**, even when wrapper rects report fill 1.00.
-2. Compares **untransformed** computed CSS px of the live GL canvas and `#grok64-player` (not a 2D present overlay, not a transformed DOM rect) to the bezel. The old #44 `384×272` + `scale()` layout and the #47 2D present path fail this on a tall phone bezel.
+1. Hides on-screen chrome, crops `.g64-screen`, and measures the **painted** pixel bbox **and coverage** of the **live WebGL** canvas. Solid black / `count:0` **fail**. After #7/#8 a **centered 384×272 letterbox** is accepted (paint over fill). Tom #44 top-right and GL-origin bottom-left stamps still fail, even when wrapper rects report fill 1.00.
+2. Requires **untransformed** computed CSS px of the live GL canvas and `#grok64-player` to be the **native 384×272 box** (not CSS 100%, not a 2D present, not `scale()`). Bezel fill is **not** required.
 3. Fails if the boot overlay is a full-bezel black sheet, or if power → first READY frame takes longer than 18s (flags the ~39s iPhone blank). Plex Chromium may not reproduce iPhone WASM time.
-4. **Session hold** (~8s after first READY): still powered (no splash remount), `__g64` still mounted, no full page reload / tab crash, **no 2D present canvas covering GL**, VICE backing still 384×272, **clientWidth is not the #7 384×272 lie**, CRT still painted (not #46/#47/#48 solid black).
+4. **Session hold** (~8s after first READY): still powered (no splash remount), `__g64` still mounted, no full page reload / tab crash, **no 2D present canvas covering GL**, VICE backing still 384×272, **clientWidth is the real 384×272 CSS box**, CRT still painted (not #46–#49 solid black).
 
 Screenshots land in `screenshots/crt-fill-gate-*.png` (including `*-bezel.png` and `*-hold-bezel.png` crops).
 

@@ -73,15 +73,16 @@ test("CSS never hides live WebGL behind a 2D overlay", () => {
   );
 });
 
-test("iOS GL canvas CSS-fills the bezel; leftover 2D present is hidden", () => {
+test("iOS GL canvas is a native 384×272 letterbox; leftover 2D present is hidden", () => {
   const iosCanvas = css.slice(css.indexOf("html[data-g64os=\"ios\"] #grok64-player canvas"));
-  assert.match(iosCanvas, /width: 100% !important/);
-  assert.match(iosCanvas, /height: 100% !important/);
+  assert.match(iosCanvas, /width: 384px !important/);
+  assert.match(iosCanvas, /height: 272px !important/);
   assert.match(iosCanvas, /transform: none !important/);
-  assert.match(iosCanvas, /object-fit: fill !important/);
-  assert.doesNotMatch(iosCanvas.slice(0, 900), /width: 384px/);
+  assert.match(iosCanvas, /object-fit: contain !important/);
+  assert.doesNotMatch(iosCanvas.slice(0, 900), /width: 100% !important/);
   assert.match(css, /canvas\.g64-ios-present/);
   assert.match(paintSrc, /applyIosCrtStyle/);
+  assert.match(paintSrc, /letterbox/);
   assert.match(paintSrc, /IOS_CRT_KNOWN_FAILURES/);
 });
 
