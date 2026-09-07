@@ -21,6 +21,7 @@ import {
   clearUnitMounts,
   coreHasFs,
   destroyEmu,
+  disarmAutostart,
   dismissEjsPrompts,
   ensureRuntime,
   fitEmu,
@@ -63,7 +64,7 @@ import { hasCmdRom, hasJiffyPair, prefetchBundledRoms } from "@/lib/emu/roms";
 import { listPartitions, partitionsForMount, setIecDevice } from "@/lib/emu/sd2iec";
 import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor } from "@/lib/emu/vice-extras";
 import { HwHoldChip } from "@/components/emu/HwHoldChip";
-import { mapHasDrive, planPlay, unitOfDrive, userAttachFromMap } from "@/lib/emu/play-session";
+import { mapHasDrive, planPlay, shouldRecoverBoot, unitOfDrive, userAttachFromMap } from "@/lib/emu/play-session";
 import {
   actionForPress,
   hwButtonById,
@@ -640,16 +641,13 @@ export function Grok64App() {
           playLockRef.current = false;
           fireArmedAt.current = Date.now() + 300;
           setWarp(emuRef.current, false);
-          applyRuntimeOptions(emuRef.current, {
-            vice_autostart_warp: "disabled",
-            vice_autoloadwarp: "disabled",
-          });
+          disarmAutostart(emuRef.current);
           s.setBooting(false);
           s.setRunning(true);
           plugJoysticks(emuRef.current, useEmu.getState().joyPort);
           inGameplayRef.current = true;
           clearMenuJoyInput();
-          glog("play-unlock", { title: useEmu.getState().currentTitle });
+          glog("play-unlock", { title: useEmu.getState().currentTitle, disarmed: true });
           persistGateRef.current = true;
           if (isIosPhone()) {
             const playerEl = document.getElementById("grok64-player");
@@ -1398,8 +1396,20 @@ export function Grok64App() {
   powerOnRef.current = powerOn;
   const recoverBoot = useCallback(() => {
     const st = useEmu.getState();
-    if (!st.powered) return;
-    if (emuRef.current && coreHasFs(emuRef.current)) return;
+    if (
+      !shouldRecoverBoot({
+        playMode: playModeRef.current,
+        playLock: playLockRef.current,
+        inGameplay: inGameplayRef.current,
+        powered: st.powered,
+        hasFs: Boolean(emuRef.current && coreHasFs(emuRef.current)),
+      })
+    ) {
+      if (st.powered && playModeRef.current !== "basic") {
+        glog("boot-recover-skipped", { mode: playModeRef.current, lock: playLockRef.current });
+      }
+      return;
+    }
     if (bootKickRef.current) return;
     glog("boot-recover", { booting: st.booting, running: st.running });
     const plan = planPlay({
@@ -1471,6 +1481,11 @@ export function Grok64App() {
       if (coreHasFs(emuRef.current)) {
         useEmu.getState().setBooting(false);
         useEmu.getState().setRunning(true);
+        return;
+      }
+      if (playModeRef.current !== "basic" || inGameplayRef.current) {
+        glog("boot-stuck-skipped", { mode: playModeRef.current });
+        useEmu.getState().setBooting(false);
         return;
       }
       dismissEjsPrompts(document.getElementById("grok64-player"), "boot");
@@ -1763,7 +1778,7 @@ export function Grok64App() {
   }, [s.iecDrive, s.iecUnit]);
   useEffect(() => {
     const emu = emuRef.current;
-    if (playLockRef.current || playModeRef.current === "disk") {
+    if (playLockRef.current || playModeRef.current === "disk" || inGameplayRef.current) {
       applyRuntimeOptions(emu, {
         ...viceJoyOptions(s.joyPort),
         vice_ram_expansion_unit: s.reuSize,
@@ -1779,7 +1794,7 @@ export function Grok64App() {
   }, [s.reuSize, s.iecDrive, s.iecUnit, s.mouseMode, s.joyPort, s.machineId, s.scpuSimm, s.scpuTurbo, expansionOpts, syncJiffy]);
   useEffect(() => {
     if (!emuRef.current || !useEmu.getState().running) return;
-    if (playLockRef.current || playModeRef.current === "disk") return;
+    if (playLockRef.current || playModeRef.current === "disk" || inGameplayRef.current) return;
     useEmu.getState().setBooting(true, s.jiffyDos ? "Applying JiffyDOS…" : "JiffyDOS off…", 60);
     void (async () => {
       const on = await syncJiffy(emuRef.current, "hard");
@@ -2171,6 +2186,13 @@ export function Grok64App() {
           type="button"
           className="g64-iconbtn extra g64-reset"
           aria-label="Reset"
+          tabIndex={-1}
+          onKeyDown={(e) => {
+            if (e.code === "Space" || e.key === " ") {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          }}
           onClick={() => resetReady()}
         >
           <RotateCcw className="size-5" />

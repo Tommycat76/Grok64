@@ -1,0 +1,66 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const app = readFileSync(join(root, "src/components/emu/Grok64App.tsx"), "utf8");
+const host = readFileSync(join(root, "src/lib/emu/host.ts"), "utf8");
+const keys = readFileSync(join(root, "src/lib/emu/keys.ts"), "utf8");
+const paint = readFileSync(join(root, "src/lib/emu/ios-paint.ts"), "utf8");
+
+test("play-unlock disarms Autostart without recycling the core", () => {
+  assert.match(app, /disarmAutostart\(emuRef\.current\)/);
+  assert.match(app, /glog\("play-unlock"/);
+  assert.doesNotMatch(app, /kickAutostart/);
+});
+
+test("toolbar Reset cold-boots via resetReady; Space cannot click it", () => {
+  const reset = app.slice(app.indexOf("g64-reset"), app.indexOf("g64-reset") + 900);
+  assert.match(reset, /resetReady\(\)/);
+  assert.match(reset, /e\.code === "Space"/);
+  assert.match(reset, /tabIndex=\{-1\}/);
+  assert.doesNotMatch(reset, /kickAutostart/);
+  assert.doesNotMatch(reset, /autostartAfterReady/);
+  assert.match(app, /glog\("user-reset-ready"/);
+  assert.match(app, /syncJiffy\(emu, "hard"\)/);
+  assert.match(app, /Reset — READY/);
+});
+
+test("#40 Paradroid cracktro nudge is kept (Space stays PETSCII, not Reset)", () => {
+  assert.match(app, /scheduleCracktroNudge/);
+  assert.match(app, /glog\("cracktro-nudge"/);
+});
+
+test("boot recover cannot yank a floppy session back to BASIC READY", () => {
+  assert.match(app, /shouldRecoverBoot/);
+  assert.match(app, /boot-recover-skipped/);
+  assert.match(app, /boot-stuck-skipped/);
+});
+
+test("disarmAutostart does not call resetEmu / recycleCore", () => {
+  const fn = host.slice(host.indexOf("export function disarmAutostart"), host.indexOf("function removeMediaFile"));
+  assert.match(fn, /PLAY_UNLOCK_VICE_OPTS/);
+  assert.doesNotMatch(fn, /resetEmu\(/);
+  assert.doesNotMatch(fn, /recycleCore\(/);
+});
+
+test("C64 Space is not dispatched to window (HTML Reset activation)", () => {
+  assert.match(keys, /KEY_BROADCAST_WINDOW = false/);
+  assert.doesNotMatch(keys, /window\.dispatchEvent\(make\(\)\)/);
+  assert.doesNotMatch(keys, /document\.dispatchEvent\(make\(\)\)/);
+  assert.match(keys, /parent\?\.dispatchEvent\(make\(\)\)/);
+});
+
+test("iOS paint watchdog does not recycle or Autostart", () => {
+  assert.match(paint, /WATCHDOG_RECYCLES_CORE = false/);
+  assert.doesNotMatch(paint, /recycleCore\(/);
+  assert.doesNotMatch(paint, /hardReset\(/);
+  assert.doesNotMatch(paint, /autostartAfterReady\(/);
+});
+
+test("iPhone floppy Play still recycles — never hot-swap (locked)", () => {
+  const session = readFileSync(join(root, "src/lib/emu/play-session.ts"), "utf8");
+  assert.match(session, /if \(extra\?\.iosPhone\) return true/);
+});
