@@ -70,7 +70,7 @@ export function unit8IsRealFloppy(live: DriveAttach, liveWorkDisk?: string | nul
 }
 
 export type RecycleExtra = {
-  /** CriOS: Jiffy KERNAL swap on a live core drops unit 8. */
+  /** CriOS floppy Autostart must never hot-swap — Tom's logs are always hot-swap → DNP. */
   iosPhone?: boolean;
   jiffyWant?: boolean;
   /** True only after ROMs landed in VICE FS and vice_jiffydos was enabled. */
@@ -83,19 +83,20 @@ export function floppyNeedsRecycle(
   user?: DriveAttach,
   extra?: RecycleExtra,
 ): boolean {
-  let recycle = false;
-  if (isFsWorkDisk(liveWorkDisk)) recycle = true;
-  else if (liveIec === "sd2iec") recycle = true;
-  else if (liveIec === "cmdhd") {
-    if (!user || user.unit === 8) recycle = true;
-    else recycle = !(liveWorkDisk === "8_d64" || liveWorkDisk === "8_d81");
-  } else {
-    recycle = !floppyPlayCanHotSwap(liveIec, liveWorkDisk);
+  // iPhone: every floppy Play rebuilds a 1541 #8. Session/cache often says
+  // 1541 + 8_d64 while the WASM still has no device 8 (SD2IEC chip on, CMD
+  // on, then ios-frame-ok hot-swap → LOAD"*",8,1 → DEVICE NOT PRESENT).
+  if (extra?.iosPhone) return true;
+  if (isFsWorkDisk(liveWorkDisk)) return true;
+  if (liveIec === "sd2iec") return true;
+  // User still has SD2IEC as the Settings drive — live session may have been
+  // flipped to 1541 by a prior Play. CriOS and desktop both recycle.
+  if (user?.iec === "sd2iec") return true;
+  if (liveIec === "cmdhd") {
+    if (!user || user.unit === 8) return true;
+    return !(liveWorkDisk === "8_d64" || liveWorkDisk === "8_d81");
   }
-  // Stock BASIC + claimed Jiffy on iPhone: hot-swap prepareCore/setVariable
-  // leaves DEVICE NOT PRESENT. Recycle so ROMs inject before the first reset.
-  if (!recycle && extra?.iosPhone && extra.jiffyWant && !extra.jiffyLive) return true;
-  return recycle;
+  return !floppyPlayCanHotSwap(liveIec, liveWorkDisk);
 }
 
 export function planPlay(input: {

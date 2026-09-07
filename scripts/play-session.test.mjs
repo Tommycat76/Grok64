@@ -26,7 +26,7 @@ const {
   HW_LONG_MS,
   HW_BUTTONS,
 } = await server.ssrLoadModule("/src/lib/emu/hw-buttons.ts");
-const { workDiskFor, C64OS_REU, reuForVice } = await server.ssrLoadModule("/src/lib/emu/vice-extras.ts");
+const { workDiskFor, C64OS_REU, reuForVice, buildViceExtras } = await server.ssrLoadModule("/src/lib/emu/vice-extras.ts");
 await server.close();
 
 test("floppy Play from SD2IEC@8 recycles to a real 1541 on unit 8", () => {
@@ -177,6 +177,21 @@ test("SD2IEC freeze button wraps the disk list like real hardware", () => {
   assert.equal(nextDiskIndex(0, 0, 1), 0);
 });
 
+test("recycled C64 core bakes vice_drive8_type=1541 at boot", () => {
+  const opts = buildViceExtras({
+    reu: "none",
+    iec: "1541",
+    iecUnit: 8,
+    mouse: false,
+    joyPort: 2,
+    scpu: false,
+    jiffy: false,
+  });
+  assert.equal(opts.vice_work_disk, "8_d64");
+  assert.equal(opts.vice_drive8_type, "1541");
+  assert.equal(opts.vice_jiffydos, "disabled");
+});
+
 test("C64 OS REU is a real 16 MB unit — never stubbed", () => {
   assert.equal(C64OS_REU, "16384kB");
   assert.equal(reuForVice("16384kB"), "16384kB");
@@ -253,7 +268,7 @@ test("iPhone + Jiffy wanted but not live recycles even when 1541 is already up",
   assert.deepEqual(plan.user, { iec: "cmdhd", unit: 11 });
 });
 
-test("iPhone + Jiffy already live + 1541 hot-swaps (CMD@11 stays)", () => {
+test("iPhone floppy Play never hot-swaps — even CMD@11 + live 1541 + Jiffy live", () => {
   const plan = planPlay({
     filename: "mule.d64",
     userIec: "cmdhd",
@@ -264,7 +279,21 @@ test("iPhone + Jiffy already live + 1541 hot-swaps (CMD@11 stays)", () => {
     jiffyWant: true,
     jiffyLive: true,
   });
-  assert.equal(plan.recycle, false);
+  assert.equal(plan.recycle, true);
+  assert.deepEqual(plan.live, { iec: "1541", unit: 8 });
+  assert.deepEqual(plan.user, { iec: "cmdhd", unit: 11 });
+});
+
+test("user SD2IEC + stale 1541 session recycles (Tom chip-on / hot-swap log)", () => {
+  const plan = planPlay({
+    filename: "paradroidalldri.d64",
+    userIec: "sd2iec",
+    userUnit: 8,
+    liveIec: "1541",
+    liveWorkDisk: "8_d64",
+    iosPhone: false,
+  });
+  assert.equal(plan.recycle, true);
 });
 
 test("desktop Jiffy-not-live still hot-swaps on a real 1541", () => {

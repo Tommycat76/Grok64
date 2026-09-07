@@ -164,8 +164,8 @@ const failures = [];
     const start = logs.some((l) => /core-start/.test(l) && /paradroid/i.test(l));
     return { recycle, hot, mount, start, playMode: window.__g64?.playMode?.() };
   });
-  if (raced.hot && !raced.recycle && (before.workDisk === "8_fs" || before.sessionIec === "sd2iec")) {
-    failures.push("Play hot-swapped on live SD2IEC/8_fs before recycle (CriOS race)");
+  if (raced.hot) {
+    failures.push("iPhone Play logged hot-swap — CriOS floppy must recycle (Tom DNP)");
   }
   await playP;
 
@@ -190,8 +190,11 @@ const failures = [];
   await page.screenshot({ path: "/workspace/screenshots/ios-play-attach.png" });
 
   const hot = (after?.last || []).join("\n");
-  if (/hot-swap/.test(hot) && !/play-recycle/.test(hot) && (before.workDisk === "8_fs" || before.sessionIec === "sd2iec")) {
-    failures.push(`Play hot-swapped instead of recycling 8_fs (logs=${hot})`);
+  if (/hot-swap/.test(hot)) {
+    failures.push(`iPhone Play hot-swapped (logs=${hot})`);
+  }
+  if (!/play-recycle/.test(hot) && !raced.recycle) {
+    failures.push(`iPhone Play did not recycle (logs=${hot})`);
   }
   if (after?.sessionIec !== "1541") {
     failures.push(`session IEC after Play is ${after?.sessionIec}, want 1541`);
@@ -200,6 +203,59 @@ const failures = [];
     failures.push(`Play did not attach 8_d64 (logs=${hot} opts=${JSON.stringify(after?.opts)} work=${after?.workDisk})`);
   }
   console.log("ios-play", JSON.stringify({ before, after, raced, failHint: failures.slice(-1) }));
+  await context.close();
+}
+
+{
+  // Tom's iPhone: CMD@11 + session already 1541 + Jiffy claimed — #35 hot-swapped.
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    userAgent:
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/120.0.6099.119 Mobile/15E148 Safari/604.1",
+    hasTouch: true,
+    isMobile: true,
+  });
+  await context.addInitScript(() => {
+    const raw = localStorage.getItem("grok64-settings");
+    let parsed = { state: {}, version: 10 };
+    try {
+      if (raw) parsed = JSON.parse(raw);
+    } catch {
+      /* seed */
+    }
+    parsed.state = {
+      ...(parsed.state || {}),
+      iecDrive: "cmdhd",
+      iecUnit: 11,
+      jiffyDos: true,
+    };
+    parsed.version = parsed.version || 10;
+    localStorage.setItem("grok64-settings", JSON.stringify(parsed));
+  });
+  const page = await context.newPage();
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45000 });
+  await page.locator(".g64-splash").waitFor({ timeout: 20000 });
+  await page.waitForFunction(() => typeof window.__g64?.power === "function", { timeout: 15000 });
+  await page.evaluate(() => window.__g64.power());
+  await waitReady(page);
+  await page.waitForTimeout(1200);
+
+  const playP = page.evaluate(async () => {
+    await window.__g64.load("/software/grok64-workbench.d64", "paradroidalldri.d64");
+  });
+  await page.waitForTimeout(400);
+  const raced = await page.evaluate(() => {
+    const logs = (window.__g64log || []).map(String);
+    return {
+      recycle: logs.some((l) => /play-recycle/.test(l)),
+      hot: logs.some((l) => /hot-swap/.test(l)),
+      reason: (logs.find((l) => /play-recycle/.test(l)) || "").slice(0, 180),
+    };
+  });
+  if (raced.hot) failures.push(`CMD@11 iPhone Play hot-swapped: ${raced.reason}`);
+  if (!raced.recycle) failures.push("CMD@11 iPhone Play did not recycle");
+  await playP.catch(() => undefined);
+  console.log("ios-play-cmd11", raced);
   await context.close();
 }
 

@@ -1047,11 +1047,19 @@ export function Grok64App() {
       sessionIecRef.current = plan.live.iec;
       sessionUnitRef.current = plan.live.unit;
       const attach = plan.attach;
-      const canHotSwap = !plan.recycle;
-      if (plan.recycle) {
-        const jiffyKernal = isIosPhone() && jiffyWant && !jiffyLive && liveIec !== "sd2iec";
+      // Hard lock: CriOS never enters the hot-swap branch, even if the plan
+      // is stale. Tom's #35 log is always hot-swap → DEVICE NOT PRESENT.
+      const canHotSwap = !plan.recycle && !isIosPhone();
+      if (plan.recycle || isIosPhone()) {
+        const reason = isIosPhone()
+          ? "ios-floppy"
+          : userIec === "sd2iec" && liveIec !== "sd2iec"
+            ? "user-sd2iec"
+            : jiffyWant && !jiffyLive
+              ? "jiffy-kernal"
+              : "fs-drive";
         glog("play-recycle", {
-          reason: jiffyKernal ? "jiffy-kernal" : "fs-drive",
+          reason,
           from: liveIec,
           work: liveWork,
           iec: plan.live.iec,
