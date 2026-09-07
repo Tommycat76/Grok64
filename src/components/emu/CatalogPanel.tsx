@@ -96,7 +96,7 @@ export function CatalogPanel({ onPlay, onInsert }: Props) {
   async function ingest(file: CatalogFile, mode: "play" | "save" | "insert") {
     const got = await fetchRemote(file);
     const parts = explodeArchive(got.name, got.data);
-    const chosen = pickBootFile(parts) ?? parts[0];
+    const chosen = pickBootFile(parts, file.name) ?? parts[0];
     if (!chosen) throw new Error("No C64 file in that download.");
     let first: LibraryItem | null = null;
     for (const part of parts) {
@@ -126,7 +126,7 @@ export function CatalogPanel({ onPlay, onInsert }: Props) {
         setOpenKey(hit.key);
         return;
       }
-      const bootFile = pickBootFile(list);
+      const bootFile = pickBootFile(list, hit.title);
       if (!bootFile) throw new Error("No disk, cart or SID in that release.");
       if (list.length > 1) setOpenKey(hit.key);
       await ingest(bootFile, mode);

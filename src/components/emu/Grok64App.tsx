@@ -47,6 +47,7 @@ import {
   readMountedMedia,
   recycleCore,
   restoreState,
+  resetEmu,
   setJoyVector,
   setPaused,
   setWarp,
@@ -62,7 +63,7 @@ import { hasCmdRom, hasJiffyPair, prefetchBundledRoms } from "@/lib/emu/roms";
 import { listPartitions, partitionsForMount, setIecDevice } from "@/lib/emu/sd2iec";
 import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor } from "@/lib/emu/vice-extras";
 import { HwHoldChip } from "@/components/emu/HwHoldChip";
-import { defaultCmdUnit, planPlay } from "@/lib/emu/play-session";
+import { mapHasDrive, planPlay, unitOfDrive, userAttachFromMap } from "@/lib/emu/play-session";
 import {
   actionForPress,
   hwButtonById,
@@ -77,7 +78,7 @@ import { detectJoyPort, detectSoftwareStandard } from "@/lib/emu/region";
 import { RETRO_BTN } from "@/lib/emu/types";
 import { dispatchC64Key, isJoyFireKey } from "@/lib/emu/keys";
 import { bootFileName, driveForPlay, d64DiskName, isDiskKind, isWorkDiskImage, kindOf, needsTypedBoot } from "@/lib/emu/formats";
-import { wrapForDiskSwap } from "@/lib/emu/d64";
+import { wrapForDiskSwap, prepareAutostartDisk, wantsCracktroNudge } from "@/lib/emu/d64";
 import { isSid, psidToPrg } from "@/lib/emu/psid";
 import { toArrayBuffer } from "@/lib/emu/archive";
 import { glog, glogFire, subscribeLog } from "@/lib/emu/debug";
@@ -177,6 +178,9 @@ export function Grok64App() {
   const [iosResume, setIosResume] = useState(false);
   const [diskOpen, setDiskOpen] = useState(false);
   const [logLines, setLogLines] = useState([]);
+  const [cartLive, setCartLive] = useState(false);
+  const cartLiveRef = useRef(false);
+  const resetReadyRef = useRef(() => {});
   const [softwareStd, setSoftwareStd] = useState(null);
   const softwareStdRef = useRef(null);
   const [snap, setSnap] = useState({
@@ -414,11 +418,18 @@ export function Grok64App() {
       hwPress: (id, press = "short") => hwActionRef.current(id, press),
       hwButtons: () =>
         visibleHwButtons({
-          cart: true,
-          sd2iec: true,
-          cmdhd: useEmu.getState().iecDrive === "cmdhd",
+          cart: cartLiveRef.current,
+          sd2iec: mapHasDrive(useEmu.getState().iecMap, "sd2iec"),
+          cmdhd: mapHasDrive(useEmu.getState().iecMap, "cmdhd"),
           scpu: useEmu.getState().machineId === "scpu",
         }).map((b) => b.id),
+      setIecSlot: (unit, slot) => useEmu.getState().setIecSlot(unit, slot),
+      iecMap: () => useEmu.getState().iecMap,
+      resetReady: () => resetReadyRef.current?.(),
+      setCartLive: (v) => {
+        cartLiveRef.current = !!v;
+        setCartLive(!!v);
+      },
       sdFreeze: async (dir = 1) => {
         const parts = await listPartitions();
         const disks = parts.flatMap((p) =>
@@ -668,28 +679,37 @@ export function Grok64App() {
     },
     [],
   );
-  const kickAutostart = useCallback(async () => {
-    glog("kickAutostart", { mode: playModeRef.current, title: useEmu.getState().currentTitle });
-    pendingKickRef.current = false;
-    setAwaitingStart(false);
+  const resetReady = useCallback(() => {
+    const emu = emuRef.current;
+    glog("user-reset-ready", { prev: playModeRef.current, title: useEmu.getState().currentTitle });
+    playModeRef.current = "basic";
+    cartLiveRef.current = false;
+    setCartLive(false);
     persistGateRef.current = false;
-    inGameplayRef.current = false;
-    unlockAudio(emuRef.current);
-    setPaused(emuRef.current, false);
-    setWarp(emuRef.current, false);
-    useEmu.getState().setWarped(false);
-    useEmu.getState().setBooting(true, "Restarting…", 50);
-    clearRetroSaves(emuRef.current);
-    const st = useEmu.getState();
-    await prepareCore(emuRef.current, {
-      live: { iec: sessionIecRef.current, unit: sessionUnitRef.current },
-      user: { iec: st.iecDrive, unit: st.iecUnit },
-      jiffyWant: st.jiffyDos,
+    pendingKickRef.current = false;
+    playLockRef.current = false;
+    bootHoldRef.current = false;
+    inGameplayRef.current = true;
+    setAwaitingStart(false);
+    useEmu.getState().setCurrentTitle("BASIC");
+    useEmu.getState().setBooting(false);
+    applyRuntimeOptions(emu, {
+      vice_autostart: "disabled",
+      vice_autostart_warp: "disabled",
+      vice_autoloadwarp: "disabled",
     });
-    applyIecUnit(emuRef.current, sessionIecRef.current, sessionUnitRef.current);
-    autostartAfterReady(emuRef.current, playModeRef.current === "disk");
-    beginPlayLock(playLockDuration(playModeRef.current), "Restarting…");
-  }, [beginPlayLock]);
+    void (async () => {
+      await syncJiffy(emu, "hard");
+      if (isIosPhone()) {
+        const playerEl = document.getElementById("grok64-player");
+        fitEmu(playerEl, emu);
+        kickIosPaint(emu, playerEl, "user-reset");
+        scheduleIosPaintKicks(emu, playerEl);
+      }
+    })();
+    toast.message("Reset — READY");
+  }, [syncJiffy]);
+  resetReadyRef.current = resetReady;
   const resumePlayback = useCallback(() => {
     unlockAudio(emuRef.current);
     const playerEl = document.getElementById("grok64-player");
@@ -723,6 +743,24 @@ export function Grok64App() {
       glog("ios-frame-ok", { tag });
     });
   }, [startIosAutoPaint]);
+  const scheduleCracktroNudge = useCallback((title) => {
+    if (!wantsCracktroNudge(title || "")) return;
+    bootTimersRef.current.push(
+      window.setTimeout(() => {
+        glog("cracktro-nudge", { title });
+        dispatchC64Key("Space", " ", true);
+        window.setTimeout(() => dispatchC64Key("Space", " ", false), 90);
+        window.setTimeout(() => {
+          joyInput(emuRef.current, RETRO_BTN.B, true);
+          joyInput(emuRef.current, RETRO_BTN.A, true);
+          window.setTimeout(() => {
+            joyInput(emuRef.current, RETRO_BTN.B, false);
+            joyInput(emuRef.current, RETRO_BTN.A, false);
+          }, 90);
+        }, 220);
+      }, 2200),
+    );
+  }, []);
   const settleAfterStart = useCallback(
     async (emu, gen, spec) => {
       const setBusy = (msg, p) => {
@@ -748,6 +786,7 @@ export function Grok64App() {
         user: spec.user,
         jiffyWant: st.jiffyDos,
         sdParts: parts,
+        driveMap: st.iecMap,
       });
       if (loadGenRef.current !== gen) return;
       glog("core-ready", { ...prep, live: spec.live, user: spec.user, reu: st.reuSize });
@@ -786,10 +825,11 @@ export function Grok64App() {
         setBusy(`Loading ${spec.title}…`, 78);
         if (isIosPhone()) await new Promise((r) => setTimeout(r, 140));
         if (loadGenRef.current !== gen) return;
-        autostartAfterReady(emu, true);
+        autostartAfterReady(emu, true, { autoloadWarp: playModeRef.current === "disk" ? false : undefined });
         applyIecUnit(emu, spec.live.iec, spec.live.unit);
-        if (isIosPhone()) kickIosAfterEmuAction(emu, "settle", gen);
+        if (isIosPhone())     kickIosAfterEmuAction(emu, "settle", gen);
         beginPlayLock(playLockDuration(playModeRef.current), `Loading ${spec.title}…`);
+        scheduleCracktroNudge(spec.title);
       } else {
         if (prep.jiffy) setBusy("Applying JiffyDOS…", 72);
         hardReset(emu);
@@ -817,7 +857,7 @@ export function Grok64App() {
         reu: st.reuSize,
       });
     },
-    [s, beginPlayLock, kickIosAfterEmuAction, clearMenuJoyInput],
+    [s, beginPlayLock, kickIosAfterEmuAction, clearMenuJoyInput, scheduleCracktroNudge],
   );
   const clearBootTimers = () => {
     for (const t of bootTimersRef.current) window.clearTimeout(t);
@@ -1035,8 +1075,9 @@ export function Grok64App() {
       }
       const origKind = kindOf(bootName);
       const diskLoad = !work && needsTypedBoot(origKind) && opts.autostart === false;
-      const userIec = useEmu.getState().iecDrive;
-      const userUnit = useEmu.getState().iecUnit;
+      const user = userAttachFromMap(useEmu.getState().iecMap);
+      const userIec = user.iec;
+      const userUnit = user.unit;
       const liveIec = sessionIecRef.current;
       const liveWork = lastAppliedWorkDisk();
       const jiffyWant = useEmu.getState().jiffyDos;
@@ -1054,6 +1095,8 @@ export function Grok64App() {
         jiffyLive,
       });
       playModeRef.current = plan.kind === "floppy" ? "disk" : plan.kind === "basic" ? "basic" : "auto";
+      cartLiveRef.current = plan.kind === "cart";
+      setCartLive(plan.kind === "cart");
       sessionIecRef.current = plan.live.iec;
       sessionUnitRef.current = plan.live.unit;
       const attach = plan.attach;
@@ -1108,7 +1151,6 @@ export function Grok64App() {
           await new Promise((r) => setTimeout(r, 80));
         }
       }
-      const media = new Uint8Array(safe);
       const title = opts.title ?? filename;
       const assigned = detectJoyPort({ names: [filename, title] });
       const prevPort = useEmu.getState().joyPort;
@@ -1122,6 +1164,10 @@ export function Grok64App() {
         plugJoysticks(emuRef.current, assigned);
       }
       const live = Boolean(emuRef.current && coreHasFs(emuRef.current));
+      let media = new Uint8Array(safe);
+      if (origKind === "d64") {
+        media = prepareAutostartDisk(media, bootName, title);
+      }
       const wrapped = wrapForDiskSwap(origKind, media, bootName);
       if (live && canHotSwap && emuRef.current && (wrapped || origKind === "d64")) {
         const payloadDisk = wrapped ?? media;
@@ -1190,6 +1236,7 @@ export function Grok64App() {
             user: plan.user,
             jiffyWant: stNow.jiffyDos,
             skipJiffy: true,
+            driveMap: stNow.iecMap,
           });
           applyIecUnit(emuRef.current, playIec, playAttachUnit);
           plugJoysticks(emuRef.current, useEmu.getState().joyPort);
@@ -1209,15 +1256,16 @@ export function Grok64App() {
               }, 800),
             );
           } else {
-            autostartAfterReady(emuRef.current, true);
+            autostartAfterReady(emuRef.current, true, { autoloadWarp: false });
             applyIecUnit(emuRef.current, playIec, playAttachUnit);
             if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, "hot-swap");
             beginPlayLock(playLockDuration(playModeRef.current), `Loading ${title}…`);
+            scheduleCracktroNudge(title);
           }
           return;
         }
       }
-      const blob = new Blob([safe]);
+      const blob = new Blob([toArrayBuffer(media)]);
       const url = URL.createObjectURL(blob);
       blobRef.current = url;
       await startWithUrl(url, bootName, {
@@ -1230,7 +1278,7 @@ export function Grok64App() {
         userUnit: plan.user.unit,
       });
     },
-    [s, persistNow, startWithUrl, beginPlayLock, syncJiffy],
+    [s, persistNow, startWithUrl, beginPlayLock, syncJiffy, scheduleCracktroNudge],
   );
   playBufferRef.current = playBuffer;
   const playBundled = useCallback(
@@ -1962,44 +2010,38 @@ export function Grok64App() {
           <button type="button" className="g64-chip" onClick={() => s.setSettingsOpen(true)} title={detectLine(resolved)}>
             {resolved.chip}
           </button>
+          {mapHasDrive(s.iecMap, "sd2iec") ? (
           <button
             type="button"
             className="g64-chip g64-chip-gate g64-chip-pin"
-            data-on={s.iecDrive === "sd2iec" ? "true" : "false"}
-            title={
-              s.iecDrive === "sd2iec"
-                ? "SD2IEC card on — floppy Play uses 1541 #8, then you can rebuild the card"
-                : "SD2IEC virtual card (VICE FS, not SoftIEC)"
-            }
+            data-on="true"
+            title="SD2IEC card on — tap to turn off. Floppy Play still uses 1541 #8."
             onClick={() => {
-              const next = s.iecDrive === "sd2iec" ? "1541" : "sd2iec";
-              s.setIecDrive(next);
-              if (next === "sd2iec") s.setIecUnit(8);
-              toast.message(next === "sd2iec" ? "SD2IEC ON — applies on next rebuild" : "SD2IEC OFF — 1541");
+              const unit = unitOfDrive(s.iecMap, "sd2iec") ?? 8;
+              s.setIecSlot(unit, unit === 8 ? "1541" : "none");
+              toast.message("SD2IEC off — 1541 on #8");
             }}
           >
             SD2IEC
           </button>
+          ) : null}
+          {mapHasDrive(s.iecMap, "cmdhd") ? (
           <button
             type="button"
             className="g64-chip g64-chip-gate g64-chip-pin"
-            data-on={s.iecDrive === "cmdhd" ? "true" : "false"}
-            title={
-              s.iecDrive === "cmdhd"
-                ? `CMD HD on #${s.iecUnit} — real drive + your Boot ROM`
-                : "CMD HD (real VICE CMD, your ROM). Defaults to #9 so floppy Play keeps 1541 #8"
-            }
+            data-on="true"
+            title={`CMD HD on #${unitOfDrive(s.iecMap, "cmdhd") ?? 9} — tap to turn off`}
             onClick={() => {
-              const on = s.iecDrive !== "cmdhd";
-              s.setIecDrive(on ? "cmdhd" : "1541");
-              if (on) s.setIecUnit(defaultCmdUnit(s.iecUnit));
+              const unit = unitOfDrive(s.iecMap, "cmdhd") ?? 9;
+              s.setIecSlot(unit, "none");
               cmdSwappedRef.current = false;
               setCmdSwapped(false);
-              toast.message(on ? `CMD HD on #${defaultCmdUnit(s.iecUnit)} — real drive` : "CMD HD off");
+              toast.message("CMD HD off");
             }}
           >
             CMD
           </button>
+          ) : null}
           <button
             type="button"
             className="g64-chip g64-chip-gate g64-chip-pin"
@@ -2014,9 +2056,9 @@ export function Grok64App() {
             MOUSE
           </button>
           {visibleHwButtons({
-            cart: true,
-            sd2iec: true,
-            cmdhd: s.iecDrive === "cmdhd",
+            cart: cartLive,
+            sd2iec: mapHasDrive(s.iecMap, "sd2iec"),
+            cmdhd: mapHasDrive(s.iecMap, "cmdhd"),
             scpu: s.machineId === "scpu",
           }).map((spec) => (
             <HwHoldChip
@@ -2027,14 +2069,16 @@ export function Grok64App() {
               longMs={spec.longMs}
               on={
                 spec.id === "sd-disk"
-                  ? s.iecDrive === "sd2iec"
+                  ? mapHasDrive(s.iecMap, "sd2iec")
                   : spec.id === "sd-swap"
                     ? sdUnit === 9
                     : spec.id === "cmd-swap"
                       ? cmdSwapped
                       : spec.id === "scpu-rst"
                         ? s.machineId === "scpu"
-                        : false
+                        : spec.id === "cart-fz"
+                          ? cartLive
+                          : false
               }
               onShort={() => void runHwAction(spec.shortAction)}
               onLong={spec.longAction ? () => void runHwAction(spec.longAction) : undefined}
@@ -2059,45 +2103,36 @@ export function Grok64App() {
           >
             CARDINALS
           </button>
+          {s.jumpBtn ? (
           <button
             type="button"
             className="g64-chip g64-chip-gate"
-            data-on={s.jumpBtn ? "true" : "false"}
-            title={s.jumpBtn ? "Jump button on — tap to hide" : "Show jump button (stick up)"}
+            data-on="true"
+            title="Jump button on — tap to hide"
             onClick={() => {
-              const next = !s.jumpBtn;
-              s.setJumpBtn(next);
-              if (!next) {
-                jumpHeldRef.current = false;
-                emitJoyVector();
-              }
-              toast.message(next ? "Jump button on — stick up" : "Jump button off");
+              s.setJumpBtn(false);
+              jumpHeldRef.current = false;
+              emitJoyVector();
+              toast.message("Jump button off");
             }}
           >
             JUMP
           </button>
+          ) : null}
+          {s.machineId === "scpu" ? (
           <button
             type="button"
             className="g64-chip g64-chip-gate"
-            data-on={s.machineId === "scpu" ? "true" : "false"}
-            title={s.machineId === "scpu" ? "SuperCPU on — tap for C64" : "CMD SuperCPU (65816, 20 MHz)"}
+            data-on="true"
+            title="SuperCPU on — tap for C64"
             onClick={() => {
-              const next = s.machineId !== "scpu";
-              s.setMachine(next ? "scpu" : "c64-auto");
-              toast.message(next ? "SuperCPU — applies on next load" : "C64");
+              s.setMachine("c64-auto");
+              toast.message("C64");
             }}
           >
             SCPU
           </button>
-          <button
-            type="button"
-            className="g64-chip g64-chip-gate"
-            data-on={s.snapsOpen ? "true" : "false"}
-            title="Hardware freeze and memory snapshots"
-            onClick={() => s.setSnapsOpen(true)}
-          >
-            SNAP
-          </button>
+          ) : null}
           {padConnected ? (
             <button
               type="button"
@@ -2136,22 +2171,7 @@ export function Grok64App() {
           type="button"
           className="g64-iconbtn extra g64-reset"
           aria-label="Reset"
-          onClick={() => {
-            const mode = playModeRef.current;
-            if (mode === "basic") {
-              void syncJiffy(emuRef.current, "hard");
-              return;
-            }
-            if (mode === "disk") {
-              glog("user-reset-disk");
-              persistGateRef.current = false;
-              pendingKickRef.current = false;
-              setAwaitingStart(false);
-              void kickAutostart();
-              return;
-            }
-            void syncJiffy(emuRef.current, "soft");
-          }}
+          onClick={() => resetReady()}
         >
           <RotateCcw className="size-5" />
         </button>

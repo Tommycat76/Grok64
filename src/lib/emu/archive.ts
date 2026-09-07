@@ -1,4 +1,5 @@
 import { unzipSync } from "fflate";
+import { isCracktroName, listD64Directory, namesFuzzyMatch } from "./d64";
 import { kindOf } from "./formats";
 import type { MediaKind } from "./types";
 
@@ -59,25 +60,55 @@ const RANK: Partial<Record<MediaKind, number>> = {
 };
 
 const SKIP =
-  /preview|readme|\.nfo$|docs?$|side\s*b|disk\s*(2|3|b)\b|construction|\bkit\b|trainer|awally|a[\s._-]*wally|editor|designer|cheat|\+\d{1,2}\b/i;
+  /preview|readme|\.nfo$|docs?$|construction|\bkit\b|trainer|awally|a[\s._-]*wally|editor|designer|cheat|\+\d{1,2}\b/i;
+const SIDE_B = /side\s*b|disk\s*(2|3|b)\b/i;
 const PREFER = /first[\s._-]*star|original|\((?:usa|us)\)/i;
 
 export function isJunkRelease(name: string): boolean {
   return SKIP.test(name);
 }
 
-export function pickBootFile<T extends { name: string }>(files: T[]): T | null {
+export function bootFileScore(
+  name: string,
+  title?: string,
+  data?: Uint8Array | ArrayBuffer | null,
+): number {
+  let score = 0;
+  const kind = kindOf(name);
+  score -= (RANK[kind] ?? 50) * 10;
+  if (SKIP.test(name)) score -= 80;
+  if (SIDE_B.test(name)) score -= 8;
+  if (PREFER.test(name)) score += 12;
+  if (title && namesFuzzyMatch(name, title)) score += 20;
+  if (/intro|cracktro|\bcrack\b/i.test(name) && !/paradroid|uridium/i.test(name)) score -= 25;
+  const raw =
+    data instanceof ArrayBuffer ? new Uint8Array(data) : data instanceof Uint8Array ? data : null;
+  if (raw && (kind === "d64" || kind === "d71")) {
+    const dir = listD64Directory(raw);
+    const prgs = dir.filter((e) => e.prg);
+    const first = prgs[0];
+    const game =
+      title && prgs.find((e) => namesFuzzyMatch(e.name, title) && !isCracktroName(e.name));
+    if (game) score += 40;
+    if (first && isCracktroName(first.name) && !game) score -= 30;
+    if (first && game && first.slot !== game.slot && isCracktroName(first.name)) score += 10;
+  }
+  score -= Math.min(name.length, 80) / 20;
+  return score;
+}
+
+export function pickBootFile<T extends { name: string; data?: Uint8Array | ArrayBuffer }>(
+  files: T[],
+  title?: string,
+): T | null {
   if (!files.length) return null;
   const playable = files.filter((f) => kindOf(f.name) !== "unknown" && kindOf(f.name) !== "zip");
   const pool = playable.length ? playable : files;
   const preferred = pool.filter((f) => !SKIP.test(f.name));
   const ranked = [...(preferred.length ? preferred : pool)].sort((a, b) => {
-    const ra = RANK[kindOf(a.name)] ?? 50;
-    const rb = RANK[kindOf(b.name)] ?? 50;
-    if (ra !== rb) return ra - rb;
-    const pa = PREFER.test(a.name) ? 0 : 1;
-    const pb = PREFER.test(b.name) ? 0 : 1;
-    if (pa !== pb) return pa - pb;
+    const sa = bootFileScore(a.name, title, a.data);
+    const sb = bootFileScore(b.name, title, b.data);
+    if (sa !== sb) return sb - sa;
     return a.name.length - b.name.length;
   });
   return ranked[0] ?? null;

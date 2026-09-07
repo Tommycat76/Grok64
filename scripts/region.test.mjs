@@ -117,7 +117,7 @@ test("boot filename keeps a C64 extension for VICE", () => {
   assert.equal(bootFileName("tune.sid").toLowerCase().endsWith(".sid"), true);
 });
 
-test("pickBootFile skips docs and side B", () => {
+test("pickBootFile skips docs and prefers unmarked Paradroid over side B by name", () => {
   const files = [
     { name: "readme.txt" },
     { name: "Paradroid side B.d64" },
@@ -125,6 +125,25 @@ test("pickBootFile skips docs and side B", () => {
     { name: "preview.prg" },
   ];
   assert.equal(pickBootFile(files)?.name, "Paradroid.d64");
+});
+
+test("pickBootFile with directory data prefers the side that holds PARADROID", () => {
+  const intro = new Uint8Array(174848);
+  intro[0x16500] = 18;
+  intro[0x16501] = 1;
+  intro[0x16600] = 0;
+  intro[0x16601] = 255;
+  intro[0x16602] = 0x82;
+  const n = "INTRO";
+  for (let i = 0; i < 16; i++) intro[0x16605 + i] = i < n.length ? n.charCodeAt(i) : 0xa0;
+  const game = intro.slice();
+  const g = "PARADROID";
+  for (let i = 0; i < 16; i++) game[0x16605 + i] = i < g.length ? g.charCodeAt(i) : 0xa0;
+  const files = [
+    { name: "Paradroid side A.d64", data: intro },
+    { name: "Paradroid side B.d64", data: game },
+  ];
+  assert.equal(pickBootFile(files, "Paradroid")?.name, "Paradroid side B.d64");
 });
 
 test("pickBootFile prefers original Boulder Dash over kit, trainer and A Wally", () => {

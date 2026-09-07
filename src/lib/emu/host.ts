@@ -3,15 +3,16 @@ import { sidOptions } from "./machines";
 import { catalogFiles, hasCmdRom, hasJiffyPair, romFileMap, romsHaveJiffyPair } from "./roms";
 import { buildViceExtras, workDiskFor } from "./vice-extras";
 import {
+  iecMapFromLegacy,
   liveDriveOptions,
-  viceDriveTypeOption,
   viceDriveTypeVars,
+  viceMapFromIecMap,
   viceRcForDrives,
-  viceRcForUser,
+  withLiveFloppy,
   type DriveAttach,
 } from "./play-session";
 import { cmdDriveMap, cmdSwapUnits, sd2iecSwapUnit } from "./hw-buttons";
-import type { DriveMode, IecDrive, IecUnit, JoyPort, ReuSize, ScpuSimm, SidEngine, SidModel } from "./types";
+import type { DriveMode, IecDrive, IecMap, IecUnit, JoyPort, ReuSize, ScpuSimm, SidEngine, SidModel } from "./types";
 import { RETRO_BTN } from "./types";
 import { glog } from "./debug";
 
@@ -994,25 +995,15 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       canvas.style.display = "block";
       canvas.style.visibility = "visible";
       if (tablet) {
-        // VICE always paints 384×272. CSS object-fit does not upscale WebGL on
-        // some Android GPUs (postage-stamp, often bottom-right). Scale the
-        // layer so the picture fills the already-letterboxed .g64-screen.
-        const box = (el.closest(".g64-screen") as HTMLElement | null) ?? parent;
-        const sw = Math.max(box.clientWidth || 0, el.clientWidth || 0, 384);
-        const sh = Math.max(box.clientHeight || 0, el.clientHeight || 0, 272);
-        const scale = Math.min(sw / 384, sh / 272);
-        canvas.style.setProperty("width", "384px", "important");
-        canvas.style.setProperty("height", "272px", "important");
-        canvas.style.setProperty("max-width", "none", "important");
-        canvas.style.setProperty("max-height", "none", "important");
-        canvas.style.setProperty("position", "absolute", "important");
-        canvas.style.setProperty("left", "50%", "important");
-        canvas.style.setProperty("top", "50%", "important");
-        canvas.style.setProperty("right", "auto", "important");
-        canvas.style.setProperty("bottom", "auto", "important");
-        canvas.style.setProperty("transform", `translate(-50%, -50%) scale(${scale})`, "important");
-        canvas.style.setProperty("transform-origin", "center center", "important");
+        // VICE paints 384×272. Some Android GPUs blit WebGL 1:1 (postage stamp)
+        // and ignore object-fit. Keep the backing store native, size the CSS
+        // box to 384×272, then scale from the top-left of the already
+        // letterboxed .g64-screen. left:50% + translate was shifting the
+        // picture (left black bar / right cutoff) when inset:0 still applied.
+        applyTabletCrtStyle(canvas, el, parent);
       } else {
+        canvas.classList.remove("g64-tablet-fb");
+        clearTabletCrtStyle(canvas);
         canvas.style.width = "100%";
         canvas.style.height = "100%";
       }
@@ -1028,6 +1019,54 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
   } finally {
     fitting = false;
   }
+}
+
+const TABLET_CRT_PROPS = [
+  "inset",
+  "left",
+  "top",
+  "right",
+  "bottom",
+  "width",
+  "height",
+  "max-width",
+  "max-height",
+  "transform",
+  "transform-origin",
+  "object-fit",
+  "object-position",
+] as const;
+
+function clearTabletCrtStyle(canvas: HTMLCanvasElement) {
+  for (const prop of TABLET_CRT_PROPS) canvas.style.removeProperty(prop);
+}
+
+/** Tablet-only CRT fill. Phone / CriOS paint path must not call this. */
+export function applyTabletCrtStyle(
+  canvas: HTMLCanvasElement,
+  el: HTMLElement,
+  parent: HTMLElement,
+) {
+  canvas.classList.add("g64-tablet-fb");
+  const box = (el.closest(".g64-screen") as HTMLElement | null) ?? parent;
+  const sw = Math.max(box.clientWidth || 0, el.clientWidth || 0, 1);
+  const sh = Math.max(box.clientHeight || 0, el.clientHeight || 0, 1);
+  const sx = sw / 384;
+  const sy = sh / 272;
+  canvas.style.setProperty("position", "absolute", "important");
+  canvas.style.setProperty("inset", "auto", "important");
+  canvas.style.setProperty("left", "0", "important");
+  canvas.style.setProperty("top", "0", "important");
+  canvas.style.setProperty("right", "auto", "important");
+  canvas.style.setProperty("bottom", "auto", "important");
+  canvas.style.setProperty("width", "384px", "important");
+  canvas.style.setProperty("height", "272px", "important");
+  canvas.style.setProperty("max-width", "none", "important");
+  canvas.style.setProperty("max-height", "none", "important");
+  canvas.style.setProperty("transform-origin", "0 0", "important");
+  canvas.style.setProperty("transform", `scale(${sx}, ${sy})`, "important");
+  canvas.style.setProperty("object-fit", "fill", "important");
+  canvas.style.setProperty("object-position", "0 0", "important");
 }
 
 export async function recycleCore(emu: EjsInstance | null, el: HTMLElement | null) {
@@ -1497,34 +1536,34 @@ export async function prepareCore(
     sdParts?: { id: number; files: { name: string; data: Uint8Array }[] }[];
     /** Hot-swap must not flip vice_jiffydos — that reset drops unit 8 on CriOS. */
     skipJiffy?: boolean;
+    driveMap?: IecMap;
   },
 ): Promise<{ jiffy: boolean; roms: number; cmd: boolean }> {
   if (!emu) return { jiffy: false, roms: 0, cmd: false };
   let roms = 0;
   let cmd = false;
   try {
-    const map = await romFileMap();
-    if (Object.keys(map).length) roms = injectRoms(emu, map);
-    cmd = opts.user.iec === "cmdhd" && (await hasCmdRom());
+    const files = await romFileMap();
+    if (Object.keys(files).length) roms = injectRoms(emu, files);
+    const wantsCmd =
+      opts.user.iec === "cmdhd" || Object.values(opts.driveMap ?? {}).includes("cmdhd");
+    cmd = wantsCmd && (await hasCmdRom());
   } catch {
     /* optional */
   }
-  injectViceRc(emu, viceRcForUser(opts.user, opts.live, { cmdRom: cmd }));
+  const userMap = opts.driveMap ?? iecMapFromLegacy(opts.user.iec, opts.user.unit);
+  const liveMap = withLiveFloppy(userMap, opts.live);
+  const viceMap = viceMapFromIecMap(liveMap);
+  if (!cmd) {
+    for (const unit of [8, 9, 10, 11] as IecUnit[]) {
+      if (viceMap[unit] === "cmdhd") delete viceMap[unit];
+    }
+  }
+  injectViceRc(emu, viceRcForDrives(viceMap, opts.live.iec === "sd2iec"));
   if (opts.live.iec === "sd2iec" && opts.sdParts?.length) {
     injectSdWork(emu, opts.sdParts);
   }
-  const types: Record<string, string> = {};
-  if (opts.live.iec === "1541" || opts.live.iec === "1581") {
-    types[`vice_drive${opts.live.unit}_type`] = viceDriveTypeOption(opts.live.iec);
-  } else if (opts.live.iec === "cmdhd") {
-    types[`vice_drive${opts.live.unit}_type`] = viceDriveTypeOption("cmdhd");
-    types.vice_drive8_type = "1541";
-  }
-  if (cmd && opts.user.iec === "cmdhd" && opts.user.unit !== 8) {
-    types[`vice_drive${opts.user.unit}_type`] = viceDriveTypeOption("cmdhd");
-    if (!types.vice_drive8_type) types.vice_drive8_type = "1541";
-  }
-  if (Object.keys(types).length) applyRuntimeOptions(emu, types);
+  applyRuntimeOptions(emu, viceDriveTypeVars(viceMap));
   applyIecUnit(emu, opts.live.iec, opts.live.unit);
   const jiffy = opts.skipJiffy
     ? lastJiffy
@@ -1534,11 +1573,15 @@ export async function prepareCore(
   return { jiffy, roms, cmd };
 }
 
-export function autostartAfterReady(emu: EjsInstance | null, trueDrive = true) {
+export function autostartAfterReady(
+  emu: EjsInstance | null,
+  trueDrive = true,
+  opts?: { autoloadWarp?: boolean },
+) {
   applyRuntimeOptions(emu, {
     vice_autostart: "enabled",
     vice_autostart_warp: "enabled",
-    vice_autoloadwarp: "enabled",
+    vice_autoloadwarp: opts?.autoloadWarp === false ? "disabled" : "enabled",
     vice_reset: "autostart",
     ...(trueDrive
       ? {

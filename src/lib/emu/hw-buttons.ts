@@ -118,8 +118,8 @@ export interface HwAttachState {
 /** Buttons that must be on screen for the currently attached hardware. */
 export function visibleHwButtons(attached: HwAttachState): HwButtonSpec[] {
   return HW_BUTTONS.filter((b) => {
-    if (b.device === "cart") return attached.cart !== false;
-    if (b.device === "sd2iec") return attached.sd2iec !== false;
+    if (b.device === "cart") return !!attached.cart;
+    if (b.device === "sd2iec") return !!attached.sd2iec;
     if (b.device === "cmdhd") return !!attached.cmdhd;
     if (b.device === "scpu") return !!attached.scpu;
     return false;

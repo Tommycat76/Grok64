@@ -1246,6 +1246,30 @@ div[class*="ejs_virtual"] {
   font-size: 11px;
 }
 
+.g64-iec-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.g64-iec-row > span {
+  flex: 0 0 2.2rem;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--color-phosphor);
+}
+.g64-iec-row .g64-seg {
+  flex: 1;
+  min-width: 0;
+}
+.g64-iec-row .g64-seg button {
+  min-height: 32px;
+  font-size: 10px;
+  padding: 0 4px;
+}
+
 .g64-catalog {
   display: flex;
   flex-direction: column;
@@ -1563,7 +1587,22 @@ div[class*="ejs_virtual"] {
 }
 .g64-app[data-device="tablet"] .g64-screen canvas {
   object-fit: fill !important;
-  object-position: center !important;
+  object-position: 0 0 !important;
+}
+.g64-app[data-device="tablet"] .g64-screen canvas.g64-tablet-fb {
+  position: absolute !important;
+  inset: auto !important;
+  left: 0 !important;
+  top: 0 !important;
+  right: auto !important;
+  bottom: auto !important;
+  width: 384px !important;
+  height: 272px !important;
+  max-width: none !important;
+  max-height: none !important;
+  transform-origin: 0 0 !important;
+  object-fit: fill !important;
+  object-position: 0 0 !important;
 }
 .g64-app[data-device="tablet"][data-kb="true"] .g64-log {
   max-height: 3.4em;

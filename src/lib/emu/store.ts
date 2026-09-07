@@ -6,6 +6,8 @@ import type {
   CorePref,
   DriveMode,
   IecDrive,
+  IecMap,
+  IecSlot,
   IecUnit,
   JoyPort,
   LibraryItem,
@@ -18,6 +20,7 @@ import type {
   VideoPref,
 } from "./types";
 import { clampLayout, DEFAULT_CONTROL_LAYOUT, type ControlId, type ControlLayout } from "./control-layout";
+import { defaultIecMap, iecMapFromLegacy, setIecSlot as patchIecSlot, userAttachFromMap } from "./play-session";
 
 const DEFAULT_BINDS: ControlBinding[] = [
   { action: "up", keys: [], padButtons: [12], padAxes: [{ axis: 1, dir: -1 }] },
@@ -62,6 +65,7 @@ interface SettingsSlice {
   reuSize: ReuSize;
   iecDrive: IecDrive;
   iecUnit: IecUnit;
+  iecMap: IecMap;
   mouseMode: boolean;
   padSide: PadSide;
   layoutEdit: boolean;
@@ -87,6 +91,7 @@ interface SettingsSlice {
   setReuSize: (v: ReuSize) => void;
   setIecDrive: (v: IecDrive) => void;
   setIecUnit: (v: IecUnit) => void;
+  setIecSlot: (unit: IecUnit, slot: IecSlot) => void;
   setMouseMode: (v: boolean) => void;
   setPadSide: (v: PadSide) => void;
   setLayoutEdit: (v: boolean) => void;
@@ -133,6 +138,11 @@ interface SessionSlice {
   setCurrentTitle: (n: string | null) => void;
 }
 
+function withIecMap(map: IecMap) {
+  const user = userAttachFromMap(map);
+  return { iecMap: map, iecDrive: user.iec, iecUnit: user.unit };
+}
+
 export const useEmu = create<SettingsSlice & SessionSlice>()(
   persist(
     (set) => ({
@@ -152,6 +162,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       reuSize: "none",
       iecDrive: "1541",
       iecUnit: 8,
+      iecMap: defaultIecMap(),
       mouseMode: false,
       padSide: "left",
       layoutEdit: false,
@@ -175,8 +186,19 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       setStickGate: (stickGate) => set({ stickGate }),
       setJumpBtn: (jumpBtn) => set({ jumpBtn }),
       setReuSize: (reuSize) => set({ reuSize }),
-      setIecDrive: (iecDrive) => set({ iecDrive }),
+      setIecDrive: (iecDrive) =>
+        set((s) => {
+          const current = s.iecMap ?? defaultIecMap();
+          if (iecDrive === "cmdhd") {
+            const unit = 9;
+            const base = { ...current, 8: current[8] === "cmdhd" ? "1541" : current[8] };
+            return withIecMap(patchIecSlot(base, unit, "cmdhd"));
+          }
+          if (iecDrive === "sd2iec") return withIecMap(patchIecSlot(current, 8, "sd2iec"));
+          return withIecMap(patchIecSlot(current, 8, iecDrive));
+        }),
       setIecUnit: (iecUnit) => set({ iecUnit }),
+      setIecSlot: (unit, slot) => set((s) => withIecMap(patchIecSlot(s.iecMap ?? defaultIecMap(), unit, slot))),
       setMouseMode: (mouseMode) => set({ mouseMode }),
       setPadSide: (padSide) => set({ padSide }),
       setLayoutEdit: (layoutEdit) => set({ layoutEdit }),
@@ -232,7 +254,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
     }),
     {
       name: "grok64-settings",
-      version: 10,
+      version: 11,
       storage: createJSONStorage(() =>
         typeof window === "undefined"
           ? {
@@ -258,6 +280,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         reuSize: s.reuSize,
         iecDrive: s.iecDrive,
         iecUnit: s.iecUnit,
+        iecMap: s.iecMap,
         mouseMode: s.mouseMode,
         padSide: s.padSide,
         controlLayout: s.controlLayout,
@@ -285,6 +308,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
           "reuSize",
           "iecDrive",
           "iecUnit",
+          "iecMap",
           "mouseMode",
           "padSide",
           "controlLayout",
@@ -329,6 +353,13 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         }
         if (version < 10) {
           p.controlLayout = { ...DEFAULT_CONTROL_LAYOUT };
+        }
+        if (version < 11) {
+          const drive = (["1541", "1581", "sd2iec", "cmdhd"].includes(p.iecDrive as string)
+            ? p.iecDrive
+            : "1541") as IecDrive;
+          const unit = ([8, 9, 10, 11].includes(p.iecUnit as number) ? p.iecUnit : 8) as IecUnit;
+          p.iecMap = iecMapFromLegacy(drive, unit);
         }
         if (version < 7) {
           if (!p.reuSize) p.reuSize = "none";
