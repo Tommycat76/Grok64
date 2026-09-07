@@ -44,6 +44,9 @@ export function buildViceExtras(input: ViceExtrasInput): Record<string, string> 
     opts.vice_work_disk = workDiskFor(input.iec, unit);
     opts.vice_virtual_device_traps = "disabled";
     opts.vice_drive_true_emulation = "enabled";
+    if (input.iec === "1541" || input.iec === "1581") {
+      opts[`vice_drive${unit}_type`] = input.iec === "1581" ? "1581" : "1541";
+    }
   }
 
   if (input.mouse) {
