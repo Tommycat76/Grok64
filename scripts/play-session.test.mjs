@@ -137,11 +137,19 @@ test("live drive options: CMD is real (no 8_fs traps); SD2IEC is VICE FS card", 
     vice_work_disk: "disabled",
     vice_virtual_device_traps: "disabled",
     vice_drive_true_emulation: "enabled",
+    vice_drive9_type: "CMD HD",
   });
   assert.deepEqual(liveDriveOptions({ iec: "sd2iec", unit: 8 }), {
     vice_work_disk: "8_fs",
     vice_virtual_device_traps: "enabled",
     vice_drive_true_emulation: "disabled",
+    vice_drive8_type: "None",
+  });
+  assert.deepEqual(liveDriveOptions({ iec: "1541", unit: 8 }), {
+    vice_work_disk: "8_d64",
+    vice_virtual_device_traps: "disabled",
+    vice_drive_true_emulation: "enabled",
+    vice_drive8_type: "1541",
   });
   assert.equal(workDiskFor("cmdhd", 9), "disabled");
   assert.equal(workDiskFor("sd2iec", 8), "8_fs");
@@ -219,6 +227,67 @@ test("hardware buttons: short/long map matches real devices", () => {
   const noCmd = visibleHwButtons({ cart: true, sd2iec: true, cmdhd: false, scpu: false }).map((b) => b.id);
   assert.deepEqual(noCmd, ["cart-fz", "sd-disk", "sd-swap"]);
   assert.ok(HW_BUTTONS.every((b) => b.shortAction));
+});
+
+test("iPhone + Jiffy wanted but not live recycles even when 1541 is already up", () => {
+  assert.equal(
+    floppyNeedsRecycle("1541", "8_d64", { iec: "cmdhd", unit: 11 }, {
+      iosPhone: true,
+      jiffyWant: true,
+      jiffyLive: false,
+    }),
+    true,
+  );
+  const plan = planPlay({
+    filename: "paradroidalldri.d64",
+    userIec: "cmdhd",
+    userUnit: 11,
+    liveIec: "1541",
+    liveWorkDisk: "8_d64",
+    iosPhone: true,
+    jiffyWant: true,
+    jiffyLive: false,
+  });
+  assert.equal(plan.recycle, true);
+  assert.deepEqual(plan.live, { iec: "1541", unit: 8 });
+  assert.deepEqual(plan.user, { iec: "cmdhd", unit: 11 });
+});
+
+test("iPhone + Jiffy already live + 1541 hot-swaps (CMD@11 stays)", () => {
+  const plan = planPlay({
+    filename: "mule.d64",
+    userIec: "cmdhd",
+    userUnit: 11,
+    liveIec: "1541",
+    liveWorkDisk: "8_d64",
+    iosPhone: true,
+    jiffyWant: true,
+    jiffyLive: true,
+  });
+  assert.equal(plan.recycle, false);
+});
+
+test("desktop Jiffy-not-live still hot-swaps on a real 1541", () => {
+  const plan = planPlay({
+    filename: "paradroid.d64",
+    userIec: "1541",
+    userUnit: 8,
+    liveIec: "1541",
+    liveWorkDisk: "8_d64",
+    iosPhone: false,
+    jiffyWant: true,
+    jiffyLive: false,
+  });
+  assert.equal(plan.recycle, false);
+});
+
+test("vicerc omits CMD type 4844 when the ROM is missing", () => {
+  const withRom = viceRcForUser({ iec: "cmdhd", unit: 11 }, { iec: "1541", unit: 8 }, { cmdRom: true });
+  assert.match(withRom, /Drive8Type=1541/);
+  assert.match(withRom, /Drive11Type=4844/);
+  const noRom = viceRcForUser({ iec: "cmdhd", unit: 11 }, { iec: "1541", unit: 8 }, { cmdRom: false });
+  assert.match(noRom, /Drive8Type=1541/);
+  assert.doesNotMatch(noRom, /4844/);
 });
 
 test("Autostart is never a core-start flag — always after ready", () => {

@@ -92,6 +92,24 @@ const failures = [];
   if (layout.screen && layout.bezel && layout.screen.w < 200) {
     failures.push(`CRT too narrow ${layout.screen.w}`);
   }
+  if (layout.canvasCss && layout.screen && layout.screen.w > 0) {
+    const fillW = layout.canvasCss.w / layout.screen.w;
+    const fillH = layout.canvasCss.h / layout.screen.h;
+    if (fillW < 0.85 || fillH < 0.85) {
+      failures.push(
+        `CRT postage stamp canvas ${layout.canvasCss.w}x${layout.canvasCss.h} in screen ${layout.screen.w}x${layout.screen.h}`,
+      );
+    }
+    const cx = layout.canvasCss.x + layout.canvasCss.w / 2;
+    const cy = layout.canvasCss.y + layout.canvasCss.h / 2;
+    const sx = layout.screen.x + layout.screen.w / 2;
+    const sy = layout.screen.y + layout.screen.h / 2;
+    if (Math.abs(cx - sx) > 28 || Math.abs(cy - sy) > 28) {
+      failures.push(
+        `canvas not centered in screen (canvas ${JSON.stringify(layout.canvasCss)} screen ${JSON.stringify(layout.screen)})`,
+      );
+    }
+  }
   console.log("tablet-crt", failures.length ? "FAIL" : "OK", JSON.stringify(layout));
   await context.close();
 }
