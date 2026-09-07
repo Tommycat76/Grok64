@@ -1960,6 +1960,10 @@ html[data-g64os="ios"] .g64-screen > canvas.g64-ios-present {
   height: 100% !important;
   max-width: none !important;
   max-height: none !important;
+  /* .g64-screen canvas uses object-fit:contain — that letterboxes a 384×272
+     bitmap in the tall bezel (the stamp the last gate shot). Fill stretches. */
+  object-fit: fill !important;
+  object-position: 0 0 !important;
   z-index: 2;
   pointer-events: none;
   display: block;

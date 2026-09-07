@@ -202,6 +202,7 @@ test("iOS phone screen fill CSS does not use the #43 cqh or #44 384px lock", () 
   assert.match(canvas, /transform: none !important/);
   assert.match(css, /\.g64-ios-present/);
   assert.match(css, /html\[data-g64os="ios"\] \.g64-screen > canvas\.g64-ios-present/);
+  assert.match(css, /object-fit: fill !important/);
 });
 
 function crc32(buf) {

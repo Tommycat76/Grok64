@@ -22,7 +22,7 @@ test("present copies live WebGL with readPixels, never PNG or VICE getContext", 
   assert.match(present, /putImageData/);
   assert.match(present, /g64-ios-present/);
   assert.match(present, /getContext\("2d"/);
-  assert.doesNotMatch(present, /drawImage\(/);
+  assert.doesNotMatch(present, /ctx\.drawImage|drawImage\(src/);
   assert.doesNotMatch(present, /toDataURL|readFsPng|viceScreenshot/);
   assert.doesNotMatch(present, /getContext\("webgl/);
   assert.match(host, /startIosPresent/);
@@ -57,4 +57,10 @@ test("empty present canvas cannot cover READY", () => {
   assert.match(present, /g64-ios-present-on/);
   assert.match(css, /g64-ios-present:not\(\.g64-ios-present-on\)/);
   assert.match(css, /visibility: hidden/);
+});
+
+test("present CSS overrides .g64-screen canvas object-fit:contain (letterbox stamp)", () => {
+  const rule = css.slice(css.indexOf(".g64-screen > canvas.g64-ios-present"));
+  assert.match(rule.slice(0, 700), /object-fit: fill !important/);
+  assert.match(css, /\.g64-screen canvas \{[\s\S]*?object-fit: contain/);
 });
