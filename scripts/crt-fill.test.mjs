@@ -234,9 +234,13 @@ test("letterboxPaintFails accepts a centered native READY and rejects black / #4
   assert.match(letterboxPaintFails(paintedContent(black.data, black.width, black.height)) ?? "", /blank|solid-black|no painted/i);
 
   const stamp = tomStampFixture(374, 652);
-  assert.match(letterboxPaintFails(paintedContent(stamp.data, stamp.width, stamp.height)) ?? "", /top-right|#44/);
-  const bl = tomStampBottomLeftFixture(374, 652);
-  assert.match(letterboxPaintFails(paintedContent(bl.data, bl.width, bl.height)) ?? "", /bottom-left/);
+  assert.ok(letterboxPaintFails(paintedContent(stamp.data, stamp.width, stamp.height)), "#44 postage stamp must fail");
+  const bigTr = makeRgba(374, 652, [0x6c, 0x5a, 0x9a, 255]);
+  fillRect(bigTr, 374 - 8 - 220, 8, 220, 180, [0x12, 0x16, 0x3a, 255]);
+  assert.match(letterboxPaintFails(paintedContent(bigTr.data, bigTr.width, bigTr.height)) ?? "", /top-right|#44/);
+  const bigBl = makeRgba(374, 652, [0x6c, 0x5a, 0x9a, 255]);
+  fillRect(bigBl, 8, 652 - 8 - 180, 220, 180, [0x12, 0x16, 0x3a, 255]);
+  assert.match(letterboxPaintFails(paintedContent(bigBl.data, bigBl.width, bigBl.height)) ?? "", /bottom-left/);
 });
 
 test("isNativeFbCssBox is the real 384×272 box, not a bezel-sized unlock", () => {
