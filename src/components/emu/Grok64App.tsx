@@ -89,6 +89,7 @@ import {
   forceIosMirrorBlit,
   installIosPaintHooks,
   iosTapResumeCooldown,
+  isIosMirrorActive,
   isIosMirrorPainted,
   isIosPaintSettled,
   kickIosPaint,
@@ -371,6 +372,9 @@ export function Grok64App() {
       running: () => useEmu.getState().running,
       booting: () => useEmu.getState().booting,
       playLock: () => playLockRef.current,
+      paintSettled: () => isIosPaintSettled(),
+      mirrorPainted: () => isIosMirrorPainted(),
+      mirrorActive: () => isIosMirrorActive(),
       media: () =>
         readMountedMedia(emuRef.current).map((m) => ({
           name: m.name,

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * iPhone boot QA: READY at power-on + Boulder Dash hot-swap without restart.
+ * iPhone boot QA: READY at power-on + Boulder Dash play-recycle (never hot-swap).
  * Asserts non-black CRT canvas pixels (not just emulator state / PNG byte size).
  */
 import { chromium } from "playwright";
@@ -153,6 +153,8 @@ const after = {
     boots: (window.__g64log || []).filter((l) => /boot-begin|power-on/.test(String(l))).length,
     running: window.__g64?.running?.(),
     splash: !!document.querySelector(".g64-splash"),
+    recycle: (window.__g64log || []).some((l) => /play-recycle/.test(String(l))),
+    painted: (window.__g64log || []).some((l) => /ios-mirror-painted|ios-frame-ok/.test(String(l))),
   }))),
   frame: bdFrame,
 };
@@ -167,13 +169,13 @@ if (after.splash || !after.running) {
   console.log("FAIL splash or not running after load");
   process.exit(2);
 }
-if (after.boots > bootsBefore) {
-  console.log("FAIL full core recycle during hot-swap");
+if (!after.recycle && after.boots <= bootsBefore) {
+  console.log("FAIL iPhone Play must recycle (never hot-swap)");
   process.exit(2);
 }
 if (!after.frame.ok) {
-  console.log("FAIL CRT canvas blank after hot-swap", after.frame);
+  console.log("FAIL CRT canvas blank after play-recycle", after.frame);
   process.exit(2);
 }
-console.log("PASS ios boot READY + boulder dash hot-swap");
+console.log("BOX ios boot READY + boulder dash play-recycle (not a real-device PASS)");
 process.exit(0);

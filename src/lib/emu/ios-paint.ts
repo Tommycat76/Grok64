@@ -21,15 +21,28 @@ function pngLooksValid(raw: Uint8Array | null): boolean {
   );
 }
 
+type PngDraw = (
+  ctx: CanvasRenderingContext2D,
+  dw?: number,
+  dh?: number,
+) => void;
+
 /** Decode a PNG blob for canvas draw — Image() is more reliable than createImageBitmap on CriOS. */
-async function decodePngBlob(blob: Blob): Promise<{ width: number; height: number; draw: (ctx: CanvasRenderingContext2D) => void; dispose: () => void }> {
-  if (typeof createImageBitmap === "function") {
+async function decodePngBlob(blob: Blob): Promise<{
+  width: number;
+  height: number;
+  draw: PngDraw;
+  dispose: () => void;
+}> {
+  // CriOS createImageBitmap often yields an empty/wrong bitmap. Prefer Image().
+  if (!isIosPhone() && typeof createImageBitmap === "function") {
     try {
       const bmp = await createImageBitmap(blob);
       return {
         width: bmp.width,
         height: bmp.height,
-        draw: (ctx) => ctx.drawImage(bmp, 0, 0),
+        draw: (ctx, dw, dh) =>
+          dw && dh ? ctx.drawImage(bmp, 0, 0, dw, dh) : ctx.drawImage(bmp, 0, 0),
         dispose: () => bmp.close?.(),
       };
     } catch {
@@ -48,7 +61,8 @@ async function decodePngBlob(blob: Blob): Promise<{ width: number; height: numbe
     return {
       width: img.naturalWidth,
       height: img.naturalHeight,
-      draw: (ctx) => ctx.drawImage(img, 0, 0),
+      draw: (ctx, dw, dh) =>
+        dw && dh ? ctx.drawImage(img, 0, 0, dw, dh) : ctx.drawImage(img, 0, 0),
       dispose: () => {
         img.src = "";
       },
@@ -56,6 +70,88 @@ async function decodePngBlob(blob: Blob): Promise<{ width: number; height: numbe
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((r) => setTimeout(r, ms));
+}
+
+function readFsPng(FS: { readFile?: (p: string) => Uint8Array | string | ArrayBuffer } | null | undefined) {
+  if (!FS?.readFile) return null;
+  for (const p of ["/screenshot.png", "screenshot.png"]) {
+    try {
+      const raw = FS.readFile(p);
+      const u8 = typeof raw === "string" ? null : copyBytes(raw);
+      if (pngLooksValid(u8)) return u8;
+    } catch {
+      /* missing */
+    }
+  }
+  return null;
+}
+
+/**
+ * EJS GameManager.screenshot() spins forever until screenshot.png appears.
+ * After play-recycle that file often never lands (paused loop / wiped GL),
+ * so the mirror + watchdog deadlock and the UI only logs ios-paint-poll.
+ * Drive cmd_take_screenshot ourselves and time out.
+ */
+let shotTail: Promise<unknown> = Promise.resolve();
+
+export async function viceScreenshot(
+  emu: EjsInstance | null,
+  timeoutMs = 1600,
+): Promise<Uint8Array | null> {
+  if (!emu?.gameManager) return null;
+  const run = async () => {
+    const gm = emu.gameManager!;
+    const FS = gm.FS ?? emu.Module?.FS ?? null;
+    const cmd = gm.functions?.screenshot;
+    if (FS && typeof cmd === "function") {
+      try {
+        FS.unlink?.("screenshot.png");
+      } catch {
+        /* missing */
+      }
+      try {
+        FS.unlink?.("/screenshot.png");
+      } catch {
+        /* missing */
+      }
+      try {
+        cmd();
+      } catch {
+        glog("ios-screenshot-cmd-fail");
+        return null;
+      }
+      const t0 = Date.now();
+      while (Date.now() - t0 < timeoutMs) {
+        const hit = readFsPng(FS);
+        if (hit) return hit;
+        await sleep(50);
+      }
+      glog("ios-screenshot-timeout", { ms: timeoutMs });
+      return null;
+    }
+    if (typeof gm.screenshot !== "function") return null;
+    try {
+      const raced = await Promise.race([
+        gm.screenshot().then((raw) => copyBytes(raw)),
+        sleep(timeoutMs).then(() => null),
+      ]);
+      if (!raced) glog("ios-screenshot-timeout", { ms: timeoutMs, via: "ejs" });
+      return raced;
+    } catch (err) {
+      glog("ios-screenshot-fail", { m: err instanceof Error ? err.message : String(err) });
+      return null;
+    }
+  };
+  const next = shotTail.then(run, run);
+  shotTail = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
 }
 
 let metricsCanvas: HTMLCanvasElement | null = null;
@@ -72,30 +168,12 @@ export async function frameImageMetrics(raw: Uint8Array | null): Promise<{ lum: 
     const ctx = c.getContext("2d", { willReadFrequently: true });
     if (!ctx) return null;
 
-    if (typeof createImageBitmap === "function") {
-      const bmp = await createImageBitmap(blob);
-      const side = Math.min(48, bmp.width, bmp.height);
-      const patches = [
-        { x: 0, y: 0 },
-        { x: 0, y: Math.max(0, bmp.height - side) },
-      ];
-      let best: { lum: number; uniq: number } | null = null;
-      for (const { x, y } of patches) {
-        c.width = side;
-        c.height = side;
-        ctx.drawImage(bmp, x, y, side, side, 0, 0, side, side);
-        const m = samplePixels(ctx.getImageData(0, 0, side, side).data);
-        if (!best || m.uniq > best.uniq) best = m;
-      }
-      bmp.close();
-      return best;
-    }
-
+    // Full-frame downsample — C64 corners are solid border and used to reject READY.
     const decoded = await decodePngBlob(blob);
-    const side = Math.min(48, decoded.width, decoded.height);
+    const side = 48;
     c.width = side;
     c.height = side;
-    decoded.draw(ctx);
+    decoded.draw(ctx, side, side);
     decoded.dispose();
     return samplePixels(ctx.getImageData(0, 0, side, side).data);
   } catch {
@@ -174,7 +252,9 @@ function sampleGlCanvas(canvas: HTMLCanvasElement): { lum: number; uniq: number 
     gl.finish?.();
     const side = 8;
     const buf = new Uint8Array(side * side * 4);
-    gl.readPixels(0, 0, side, side, gl.RGBA, gl.UNSIGNED_BYTE, buf);
+    const x = Math.max(0, Math.floor(canvas.width / 2) - 4);
+    const y = Math.max(0, Math.floor(canvas.height / 2) - 4);
+    gl.readPixels(x, y, side, side, gl.RGBA, gl.UNSIGNED_BYTE, buf);
     return samplePixels(buf);
   } catch {
     return null;
@@ -235,6 +315,7 @@ export async function displayHasFrame(emu: EjsInstance | null, root?: HTMLElemen
 }
 
 let paintSettled = false;
+let lastPollLog = 0;
 
 export function isIosPaintSettled(): boolean {
   return paintSettled;
@@ -280,14 +361,26 @@ export function kickIosPaint(
     } catch {
       /* ignore */
     }
-    fitEmu(root, emu);
-    try {
-      window.dispatchEvent(new Event("resize"));
-    } catch {
-      /* ignore */
+    const shouldFit =
+      fromUserGesture || tag === "settle" || tag === "resume" || tag === "play-unlock";
+    if (shouldFit) {
+      fitEmu(root, emu);
+      try {
+        window.dispatchEvent(new Event("resize"));
+      } catch {
+        /* ignore */
+      }
     }
   }
-  glog(`ios-paint-${tag}`);
+  if (tag === "poll") {
+    if (performance.now() - lastPollLog > 2000) {
+      lastPollLog = performance.now();
+      glog("ios-paint-poll");
+    }
+  } else {
+    glog(`ios-paint-${tag}`);
+  }
+  if (!paintSettled) startIosViceMirror(emu, root);
 }
 
 export function scheduleIosPaintKicks(emu: EjsInstance | null, root: HTMLElement | null) {
@@ -300,9 +393,8 @@ export function scheduleIosPaintKicks(emu: EjsInstance | null, root: HTMLElement
 
 /** True when VICE reports a visible framebuffer (not a black PNG shell). */
 export async function viceHasFrame(emu: EjsInstance | null): Promise<boolean> {
-  if (!emu?.gameManager?.screenshot) return false;
   try {
-    const raw = copyBytes(await emu.gameManager.screenshot());
+    const raw = await viceScreenshot(emu);
     const m = await frameImageMetrics(raw);
     return pixelsLookLive(m);
   } catch {
@@ -312,9 +404,8 @@ export async function viceHasFrame(emu: EjsInstance | null): Promise<boolean> {
 
 /** True when a VICE screenshot looks like KERNAL / BASIC READY (not boot garbage). */
 export async function viceHasReadyFrame(emu: EjsInstance | null): Promise<boolean> {
-  if (!emu?.gameManager?.screenshot) return false;
   try {
-    const raw = copyBytes(await emu.gameManager.screenshot());
+    const raw = await viceScreenshot(emu);
     const m = await frameImageMetrics(raw);
     return frameLooksReady(m);
   } catch {
@@ -459,9 +550,8 @@ export async function forceIosMirrorBlit(
   _fromUserGesture = false,
 ): Promise<boolean> {
   if (!isIosPhone() || !emu) return false;
-  if (!emu.gameManager?.screenshot) return false;
   try {
-    const raw = copyBytes(await emu.gameManager.screenshot());
+    const raw = await viceScreenshot(emu);
     if (!raw || !pngLooksValid(raw)) return false;
     const m = await frameImageMetrics(raw);
     if (!mirrorPainted && !frameLooksReady(m)) return false;
@@ -500,7 +590,7 @@ export function startIosViceMirror(
   root: HTMLElement | null,
   onFirstPaint?: () => void,
 ) {
-  if (!isIosPhone() || !emu?.gameManager?.screenshot) return;
+  if (!isIosPhone() || !emu) return;
   if (mirrorActive && mirrorEmu === emu) {
     if (mirrorPainted) onFirstPaint?.();
     return;
@@ -513,19 +603,41 @@ export function startIosViceMirror(
   mirrorEmu = emu;
   let pending = false;
   let ticks = 0;
+  let misses = 0;
   let paintedCb = onFirstPaint ?? null;
 
   const captureScreenshot = () => {
     if (gen !== mirrorGen || pending) return;
     pending = true;
-    void emu
-      .gameManager!.screenshot!()
+    void viceScreenshot(emu)
       .then(async (raw) => {
         if (gen !== mirrorGen) return;
         const u8 = copyBytes(raw);
-        if (!u8 || !pngLooksValid(u8)) return;
+        if (!u8 || !pngLooksValid(u8)) {
+          misses += 1;
+          if (misses === 1 || misses % 8 === 0) glog("ios-mirror-skip", { reason: "no-png", misses });
+          if (misses >= 2) {
+            const glOk = await blitGlToMirror(root);
+            if (glOk) {
+              const src = playerCanvas(root);
+              const live = src ? pixelsLookLive(sampleGlCanvas(src)) : false;
+              if (live) {
+                signalMirrorPainted(paintedCb);
+                paintedCb = null;
+              }
+            }
+          }
+          return;
+        }
         const m = await frameImageMetrics(u8);
-        if (!mirrorPainted && !frameLooksReady(m)) return;
+        const accept = frameLooksReady(m) || (misses >= 4 && pixelsLookLive(m));
+        if (!mirrorPainted && !accept) {
+          misses += 1;
+          if (misses === 1 || misses % 6 === 0) {
+            glog("ios-mirror-skip", { lum: m?.lum, uniq: m?.uniq, misses });
+          }
+          return;
+        }
         const ok = await blitPngToMirror(root, u8, m, true);
         if (!ok) return;
         signalMirrorPainted(paintedCb);
@@ -544,15 +656,15 @@ export function startIosViceMirror(
     mirrorRaf = requestAnimationFrame(tick);
     ticks += 1;
     const now = performance.now();
- const minGap = mirrorPainted ? MIRROR_GAME_MS : MIRROR_PAINT_MS;
+    const minGap = mirrorPainted ? MIRROR_GAME_MS : MIRROR_PAINT_MS;
     if (now - mirrorLastCapture < minGap) return;
     if (mirrorPainted) {
-      void blitGlToMirror(root).then((ok) => {
-        if (ok) {
-          mirrorLastCapture = performance.now();
-          signalMirrorPainted(null);
-        }
-      });
+      const src = playerCanvas(root);
+      if (src && pixelsLookLive(sampleGlCanvas(src))) {
+        void blitGlToMirror(root).then((ok) => {
+          if (ok) mirrorLastCapture = performance.now();
+        });
+      }
       return;
     }
     if (ticks % 2 === 0) {
@@ -567,6 +679,7 @@ export function startIosViceMirror(
 type PaintTarget = { emu: EjsInstance | null; root: HTMLElement | null };
 let watchdogGen = 0;
 let watchdogRaf = 0;
+let watchdogEmu: EjsInstance | null = null;
 let hooksInstalled = false;
 let activeTarget: PaintTarget = { emu: null, root: null };
 let onPaintedCb: (() => void) | null = null;
@@ -577,6 +690,7 @@ export function stopIosPaintWatchdog() {
   watchdogGen += 1;
   if (watchdogRaf) cancelAnimationFrame(watchdogRaf);
   watchdogRaf = 0;
+  watchdogEmu = null;
 }
 
 export type IosPaintWatchdogOpts = {
@@ -600,8 +714,19 @@ export function startIosPaintWatchdog(
     return;
   }
   activeTarget = { emu, root };
-  onPaintedCb = resolved.onPainted ?? null;
-  onTimeoutCb = resolved.onTimeout ?? null;
+  if (resolved.onPainted) onPaintedCb = resolved.onPainted;
+  if (resolved.onTimeout) onTimeoutCb = resolved.onTimeout;
+
+  if (watchdogRaf && watchdogEmu === emu) {
+    startIosViceMirror(emu, root, () => {
+      markPaintSettled();
+      onPaintedCb?.();
+      onPaintedCb = null;
+      onTimeoutCb = null;
+    });
+    return;
+  }
+
   stopIosPaintWatchdog();
 
   let painted = false;
@@ -623,8 +748,9 @@ export function startIosPaintWatchdog(
   startIosViceMirror(emu, root, signalPainted);
 
   const gen = watchdogGen;
+  watchdogEmu = emu;
   let frames = 0;
-  const maxFrames = resolved.maxFrames ?? 180;
+  const maxFrames = resolved.maxFrames ?? 480;
   const started = performance.now();
 
   const tick = () => {
@@ -636,33 +762,34 @@ export function startIosPaintWatchdog(
       signalPainted();
       return;
     }
-    if (frames <= 12 || frames % 3 === 0) {
+    const elapsed = performance.now() - started;
+    if (frames <= 12 || frames % 6 === 0) {
       kickIosPaint(e, r, `wd${frames}`);
     }
-    void displayHasFrame(e, r).then((ok) => {
-      if (gen !== watchdogGen) return;
-      if (ok || mirrorPainted) {
-        glog("ios-watchdog-painted", { frames, mirror: mirrorActive, mirrorPainted });
-        signalPainted();
+    if (frames % 15 === 0) {
+      void displayHasFrame(e, r).then((ok) => {
+        if (gen !== watchdogGen) return;
+        if (ok || mirrorPainted) {
+          glog("ios-watchdog-painted", { frames, mirror: mirrorActive, mirrorPainted });
+          signalPainted();
+        }
+      });
+    }
+    if (frames < maxFrames && elapsed < 20_000) {
+      watchdogRaf = requestAnimationFrame(tick);
+      return;
+    }
+    glog("ios-watchdog-timeout", { frames, mirror: mirrorActive, mirrorPainted, elapsed: Math.round(elapsed) });
+    if (!painted && !mirrorPainted && elapsed >= 20_000) {
+      if (performance.now() < tapCooldownUntil) {
+        glog("ios-resume-cooldown");
+        watchdogRaf = requestAnimationFrame(tick);
         return;
       }
-      const elapsed = performance.now() - started;
-      if (frames < maxFrames && elapsed < 20_000) {
-        watchdogRaf = requestAnimationFrame(tick);
-      } else {
-        glog("ios-watchdog-timeout", { frames, mirror: mirrorActive, mirrorPainted, elapsed: Math.round(elapsed) });
-        if (!painted && !mirrorPainted && elapsed >= 20_000) {
-          if (performance.now() < tapCooldownUntil) {
-            glog("ios-resume-cooldown");
-            watchdogRaf = requestAnimationFrame(tick);
-            return;
-          }
-          onTimeoutCb?.();
-        }
-        onTimeoutCb = null;
-        if (!mirrorPainted) scheduleIosPaintKicks(e, r);
-      }
-    });
+      onTimeoutCb?.();
+    }
+    onTimeoutCb = null;
+    if (!mirrorPainted) scheduleIosPaintKicks(e, r);
   };
   watchdogRaf = requestAnimationFrame(tick);
 }
@@ -697,7 +824,10 @@ export function installIosPaintHooks(getTarget: () => PaintTarget) {
     ev.preventDefault();
     resetIosPaintState();
     const { emu, root } = getTarget();
-    if (emu) scheduleIosPaintKicks(emu, root);
+    if (emu) {
+      scheduleIosPaintKicks(emu, root);
+      startIosPaintWatchdog(emu, root);
+    }
   };
   const onCtxRestored = () => {
     glog("webgl-context-restored");
