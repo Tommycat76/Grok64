@@ -19,6 +19,8 @@ export const FIRST_CRT_MAX_MS = 18000;
 export const FIRST_CRT_WARN_MS = 8000;
 /** #000 vs bezel #0c0c0e is ~22 — keep this under that so a filled dark CRT counts. */
 export const PAINT_THRESH = 20;
+/** Lit pixels / crop. A 384×272 stamp in a tall bezel is ~0.04; chrome-only is lower. */
+export const COVERAGE_MIN = 0.15;
 
 /** #0c0c0e — --color-bezel. Used when corners cannot be sampled. */
 export const BEZEL_RGB = [12, 12, 14];
@@ -110,24 +112,34 @@ export function classifyStampCorner(bbox, imgW, imgH) {
  */
 export function paintedContent(data, width, height, opts = {}) {
   const thresh = opts.thresh ?? PAINT_THRESH;
-  const bg = opts.bg ?? medianColor(sampleCorners(data, width, height));
-  let minX = width;
-  let minY = height;
+  const inset = Math.max(0, opts.inset ?? 0);
+  const x0 = inset;
+  const y0 = inset;
+  const x1 = width - inset;
+  const y1 = height - inset;
+  const innerW = Math.max(0, x1 - x0);
+  const innerH = Math.max(0, y1 - y0);
+  const area = innerW * innerH;
+  const bg = opts.bg ?? medianColor(sampleCorners(data, width, height, Math.max(2, inset || 3)));
+  let minX = innerW;
+  let minY = innerH;
   let maxX = -1;
   let maxY = -1;
   let count = 0;
-  const n = width * height;
-  for (let i = 0, p = 0; p < n; p++, i += 4) {
-    if (colorDist(data[i], data[i + 1], data[i + 2], bg) < thresh) continue;
-    const x = p % width;
-    const y = (p / width) | 0;
-    count += 1;
-    if (x < minX) minX = x;
-    if (y < minY) minY = y;
-    if (x > maxX) maxX = x;
-    if (y > maxY) maxY = y;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
+      const i = (y * width + x) * 4;
+      if (colorDist(data[i], data[i + 1], data[i + 2], bg) < thresh) continue;
+      const lx = x - x0;
+      const ly = y - y0;
+      count += 1;
+      if (lx < minX) minX = lx;
+      if (ly < minY) minY = ly;
+      if (lx > maxX) maxX = lx;
+      if (ly > maxY) maxY = ly;
+    }
   }
-  if (count < 24 || maxX < 0) {
+  if (count < 24 || maxX < 0 || area < 8) {
     return {
       empty: true,
       count,
@@ -135,27 +147,32 @@ export function paintedContent(data, width, height, opts = {}) {
       fill: 0,
       fillW: 0,
       fillH: 0,
+      coverage: 0,
       corner: "none",
       bg,
     };
   }
   const bw = maxX - minX + 1;
   const bh = maxY - minY + 1;
-  const bbox = { x: minX, y: minY, w: bw, h: bh };
+  const bbox = { x: minX + x0, y: minY + y0, w: bw, h: bh };
   return {
     empty: false,
     count,
     bbox,
-    fill: (bw * bh) / (width * height),
-    fillW: bw / width,
-    fillH: bh / height,
-    corner: classifyStampCorner(bbox, width, height),
+    fill: (bw * bh) / area,
+    fillW: bw / innerW,
+    fillH: bh / innerH,
+    coverage: count / area,
+    corner: classifyStampCorner({ x: minX, y: minY, w: bw, h: bh }, innerW, innerH),
     bg,
   };
 }
 
-export function paintFails(paint, min = FILL_MIN) {
+export function paintFails(paint, min = FILL_MIN, cover = COVERAGE_MIN) {
   if (!paint || paint.empty) return "no painted CRT (blank / bezel-only)";
+  if ((paint.coverage ?? 0) < cover) {
+    return `painted coverage ${(paint.coverage ?? 0).toFixed(3)} (stamp / chrome-only, need ${cover})`;
+  }
   if (paint.fill < min || paint.fillW < min || paint.fillH < min) {
     return `painted stamp ${paint.corner} fill ${paint.fill.toFixed(2)}`;
   }

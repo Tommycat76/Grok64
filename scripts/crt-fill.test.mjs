@@ -34,6 +34,7 @@ test("Plex CRT fill gate script exists and documents iPhone viewport fill", () =
   assert.match(gate, /390/);
   assert.match(gate, /844/);
   assert.match(readFileSync(paintPath, "utf8"), /FILL_MIN = 0\.85/);
+  assert.match(readFileSync(paintPath, "utf8"), /COVERAGE_MIN = 0\.15/);
   assert.match(gate, /grok64\.tomsprojects\.cc/);
   assert.match(gate, /8091/);
   assert.match(gate, /not a Tom PASS|not a real CriOS PASS/i);
@@ -41,6 +42,7 @@ test("Plex CRT fill gate script exists and documents iPhone viewport fill", () =
   assert.match(gate, /g64-screen/);
   assert.match(gate, /g64-bezel/);
   assert.match(gate, /paintedContent|shotPaint/);
+  assert.match(gate, /hideChrome|g64-screen/);
   assert.match(gate, /untransformed/);
   assert.match(gate, /FIRST_CRT_MAX_MS/);
   assert.match(gate, /function hasCssScale/);
@@ -65,7 +67,7 @@ test("gate fails Tom's #44 stamp even when DOM wrappers report fill 1.0", () => 
   const paint = paintedContent(stamp.data, stamp.width, stamp.height);
   assert.equal(paint.empty, false);
   assert.equal(paint.corner, "bottom-left");
-  assert.ok(paint.fill < FILL_MIN, `stamp fill ${paint.fill} should be ≪ bezel`);
+  assert.ok(paint.fill < FILL_MIN || paint.coverage < 0.15, `stamp fill ${paint.fill} cov ${paint.coverage} should be ≪ bezel`);
   assert.ok(paintFails(paint), "paintFails must reject the stamp");
   // Transformed DOM boxes can still be 1.0 — that must not pass.
   assert.equal(fillsBox(374, 652, 374, 652), true);
@@ -97,6 +99,15 @@ test("filled near-black CRT on bezel still counts as painted (not 39s-blank)", (
   assert.equal(paint.empty, false);
   assert.equal(paint.corner, "full");
   assert.equal(paintFails(paint), null);
+});
+
+test("sparse chrome / corner AA with a full bbox still fails coverage", () => {
+  const img = makeRgba(374, 652, [9, 9, 10, 255]);
+  fillRect(img, 16, 16, 3, 3, [255, 255, 255, 255]);
+  fillRect(img, 350, 620, 3, 3, [255, 255, 255, 255]);
+  fillRect(img, 12, 560, 48, 48, [220, 220, 220, 255]);
+  const paint = paintedContent(img.data, img.width, img.height);
+  assert.ok(paintFails(paint), "bbox-only fill must not pass chrome-only pixels");
 });
 
 test("blank bezel (39s no CRT) fails", () => {

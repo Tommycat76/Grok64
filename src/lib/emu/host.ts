@@ -174,10 +174,32 @@ function patchGlViewportFill(gl: WebGLRenderingContext | WebGL2RenderingContext)
   };
 }
 
-function lockIosBacking(canvas: HTMLCanvasElement, w: number, h: number) {
+/** CSS-pixel size of .g64-screen — the WebGL drawing buffer must match this. */
+export function iosDisplayBufferSize(): { w: number; h: number } {
+  if (typeof document === "undefined" || typeof window === "undefined") {
+    return { w: 384, h: 272 };
+  }
+  const box = document.querySelector(".g64-screen") as HTMLElement | null;
+  let w = Math.round(box?.clientWidth || 0);
+  let h = Math.round(box?.clientHeight || 0);
+  if (w < 160 || h < 120) {
+    const vw = Math.round(window.visualViewport?.width ?? window.innerWidth ?? 390);
+    const vh = Math.round(window.visualViewport?.height ?? window.innerHeight ?? 844);
+    w = Math.max(w, vw - 36);
+    h = Math.max(h, Math.round(vh * 0.55));
+  }
+  return { w: Math.max(384, w), h: Math.max(272, h) };
+}
+
+function lockIosBacking(canvas: HTMLCanvasElement, _reportedW: number, _reportedH: number) {
   const tagged = canvas as HTMLCanvasElement & { __g64lock?: boolean };
   if (tagged.__g64lock) return;
   tagged.__g64lock = true;
+  // Freeze the *actual* drawing-buffer size (CSS box). Do not report 384×272 —
+  // some WebGL implementations resync the buffer to the getter and would
+  // shrink back into a bottom-left stamp.
+  const w = canvas.width;
+  const h = canvas.height;
   try {
     Object.defineProperty(canvas, "width", {
       configurable: true,
@@ -214,9 +236,14 @@ function preserveWebglBuffer() {
     if (type === "webgl" || type === "webgl2" || type === "experimental-webgl") {
       // Size the VICE framebuffer before the first context. Assigning width
       // after GL exists wipes CriOS. CSS fills the CRT around 384×272.
-      if (ios && (this.width !== 384 || this.height !== 272)) {
-        this.width = 384;
-        this.height = 272;
+      if (ios) {
+        // Drawing buffer must match the CSS box. A 384×272 buffer in a
+        // tall 100% canvas is a bottom-left GL-layer stamp on WebKit.
+        const disp = iosDisplayBufferSize();
+        if (this.width !== disp.w || this.height !== disp.h) {
+          this.width = disp.w;
+          this.height = disp.h;
+        }
       }
       // iOS WebKit needs preserveDrawingBuffer for CRT compositing; Android tablets do not
       // and pay a large fill-rate cost when it is forced on every WebGL context.
@@ -1077,11 +1104,23 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
         lastFitBox.bh >= 272;
       // Touch mobile: DPR 1 keeps fill-rate sane on Onn tablets and iPhone alike.
       const dpr = touchMobile ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+      const glLive = Boolean((canvas as HTMLCanvasElement & { __g64gl?: unknown }).__g64gl);
       let bw = Math.max(384, Math.round(cw * dpr));
       let bh = Math.max(272, Math.round(ch * dpr));
-      if (tablet || iosPhone) {
+      if (iosPhone) {
+        // Before GL: size the drawing buffer to the CSS box. After GL: never
+        // reassign width (wipes CriOS). VICE still thinks 384×272 via the lock.
+        if (!glLive) {
+          const disp = iosDisplayBufferSize();
+          bw = disp.w;
+          bh = disp.h;
+        } else {
+          bw = canvas.width;
+          bh = canvas.height;
+        }
+      } else if (tablet) {
         // VICE framebuffer is 384×272. Stretching the backing store past that
-        // leaves a black gap. CriOS CSS fills the CRT; do not grow the buffer.
+        // leaves a black gap on Android. CSS scale fills the CRT.
         bw = 384;
         bh = 272;
       } else if (touchMobile) {
@@ -1094,7 +1133,6 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
         }
       }
       const backingOk = canvas.width === bw && canvas.height === bh && canvas.width >= 64;
-      const glLive = Boolean((canvas as HTMLCanvasElement & { __g64gl?: unknown }).__g64gl);
       // Reassigning canvas.width wipes the WebGL context on CriOS. Never
       // resize after VICE has a context — CSS scales 384×272.
       const canResizeBacking = !iosPhone || !glLive || canvas.width < 64 || canvas.height < 64;

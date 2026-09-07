@@ -157,8 +157,13 @@ const measureSrc = () => {
   };
 };
 
-async function shotPaint(page, name) {
-  const loc = page.locator(".g64-bezel");
+async function shotPaint(page, name, { hideChrome = true, inset = 8 } = {}) {
+  if (hideChrome) {
+    await page.addStyleTag({
+      content: ".g64-controls,.g64-unlock{visibility:hidden !important;opacity:0 !important}",
+    });
+  }
+  const loc = page.locator(".g64-screen").first();
   const path = join(shotDir, name);
   let buf;
   try {
@@ -170,7 +175,12 @@ async function shotPaint(page, name) {
   }
   writeFileSync(path, buf);
   const png = decodePng(buf);
-  return { paint: paintedContent(png.data, png.width, png.height), path, w: png.width, h: png.height };
+  return {
+    paint: paintedContent(png.data, png.width, png.height, { inset }),
+    path,
+    w: png.width,
+    h: png.height,
+  };
 }
 
 function assertCssFill(label, cssW, cssH, outer, extra = {}) {
@@ -287,7 +297,18 @@ const readyShot = await shotPaint(page, "crt-fill-gate-ready-bezel.png");
 note(Boolean(ready?.build), "build id visible after power", { build: ready?.build });
 note(!ready?.log, "debug log still off");
 note(!ready?.overlay, "no PNG/2D overlay covering WebGL");
-note(ready?.buf?.w === 384 && ready?.buf?.h === 272, "VICE backing 384x272", ready?.buf);
+note(
+  Boolean(ready?.buf && ready.buf.w >= 300 && ready.buf.h >= 400 && (ready.buf.w !== 384 || ready.buf.h !== 272)),
+  "iOS drawing buffer matches tall CSS box (not a 384x272 stamp layer)",
+  ready?.buf,
+);
+if (ready?.db && ready.buf) {
+  note(
+    ready.db.w >= 300 && ready.db.h >= 400,
+    "WebGL drawingBuffer matches CSS box",
+    ready.db,
+  );
+}
 
 // #44 stamp path: wrapper scale + 384×272 CSS. CriOS ignores that scale on GL.
 note(!hasCssScale(ready?.playerXf), "player wrapper has no CSS scale (CriOS ignores it on the GL layer)", {
