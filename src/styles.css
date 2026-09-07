@@ -222,6 +222,9 @@ html, body, #app {
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
 }
+.g64-app[data-device="tablet"] .g64-top-rail {
+  flex-wrap: nowrap;
+}
 .g64-top-rail::-webkit-scrollbar {
   display: none;
 }
@@ -1534,17 +1537,32 @@ div[class*="ejs_virtual"] {
 }
 /* Largest 384/272 CRT that fits under the log / above the locked keyboard. */
 .g64-app[data-device="tablet"] .g64-screen {
-  flex: 0 1 auto;
-  width: min(100%, calc(100cqh * 384 / 272));
+  container-type: size;
+  flex: 0 0 auto;
+  width: auto;
   height: auto;
   max-width: 100%;
   max-height: 100%;
+  min-width: 200px;
   aspect-ratio: 384 / 272;
+}
+@supports (width: 1cqh) {
+  .g64-app[data-device="tablet"] .g64-screen {
+    width: min(100%, calc(100cqh * 384 / 272));
+  }
 }
 .g64-app[data-device="tablet"] .g64-screen #grok64-player,
 .g64-app[data-device="tablet"] .g64-screen #grok64-player > div,
+.g64-app[data-device="tablet"] .g64-screen .ejs_canvas_parent {
+  position: absolute;
+  inset: 0;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+}
 .g64-app[data-device="tablet"] .g64-screen canvas {
-  object-fit: contain !important;
+  object-fit: fill !important;
   object-position: center !important;
 }
 .g64-app[data-device="tablet"][data-kb="true"] .g64-log {
@@ -1720,7 +1738,7 @@ div[class*="ejs_virtual"] {
   aspect-ratio: auto;
   margin-inline: auto;
 }
-.g64-app[data-orient="landscape"][data-kb="true"] .g64-screen {
+.g64-app[data-orient="landscape"][data-kb="true"]:not([data-device="tablet"]) .g64-screen {
   min-height: 0;
   min-width: 0;
   max-width: 100%;
@@ -1729,6 +1747,15 @@ div[class*="ejs_virtual"] {
   height: auto;
   aspect-ratio: 4 / 3;
   flex: 0 1 auto;
+}
+.g64-app[data-orient="landscape"][data-kb="true"][data-device="tablet"] .g64-screen {
+  flex: 0 0 auto;
+  width: min(100%, calc(100cqh * 384 / 272));
+  height: auto;
+  min-width: 200px;
+  max-width: 100%;
+  max-height: 100%;
+  aspect-ratio: 384 / 272;
 }
 .g64-app[data-orient="landscape"][data-kb="true"] .g64-controls {
   position: relative;

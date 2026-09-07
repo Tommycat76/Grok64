@@ -35,6 +35,7 @@ import {
   cartReset,
   cmdHdSwap,
   flushEmuFs,
+  lastAppliedJiffy,
   lastAppliedWorkDisk,
   swapBootDisk,
   sd2iecFreeze,
@@ -360,6 +361,7 @@ export function Grok64App() {
       userUnit: () => useEmu.getState().iecUnit,
       reu: () => useEmu.getState().reuSize,
       workDisk: () => lastAppliedWorkDisk(),
+      jiffyLive: () => lastAppliedJiffy(),
       title: () => useEmu.getState().currentTitle,
       bootPath: () => bootPathRef.current,
       hasFs: () => coreHasFs(emuRef.current),
@@ -1027,6 +1029,8 @@ export function Grok64App() {
       const userUnit = useEmu.getState().iecUnit;
       const liveIec = sessionIecRef.current;
       const liveWork = lastAppliedWorkDisk();
+      const jiffyWant = useEmu.getState().jiffyDos;
+      const jiffyLive = lastAppliedJiffy();
       const plan = planPlay({
         filename: bootName,
         work,
@@ -1035,6 +1039,9 @@ export function Grok64App() {
         liveIec,
         liveWorkDisk: liveWork,
         autostart: opts.autostart !== false,
+        iosPhone: isIosPhone(),
+        jiffyWant,
+        jiffyLive,
       });
       playModeRef.current = plan.kind === "floppy" ? "disk" : plan.kind === "basic" ? "basic" : "auto";
       sessionIecRef.current = plan.live.iec;
@@ -1042,13 +1049,16 @@ export function Grok64App() {
       const attach = plan.attach;
       const canHotSwap = !plan.recycle;
       if (plan.recycle) {
+        const jiffyKernal = isIosPhone() && jiffyWant && !jiffyLive && liveIec !== "sd2iec";
         glog("play-recycle", {
-          reason: "fs-drive",
+          reason: jiffyKernal ? "jiffy-kernal" : "fs-drive",
           from: liveIec,
           work: liveWork,
           iec: plan.live.iec,
           unit: plan.live.unit,
           user: plan.user,
+          jiffyWant,
+          jiffyLive,
         });
       }
       glog("play", {
@@ -1065,6 +1075,9 @@ export function Grok64App() {
         fromWork: liveWork,
         canHotSwap,
         recycle: plan.recycle,
+        jiffyWant,
+        jiffyLive,
+        ios: isIosPhone(),
       });
       if (work) workDiskBytesRef.current = new Uint8Array(safe);
       if (!work && opts.libraryId) {
@@ -1158,10 +1171,11 @@ export function Grok64App() {
             live: plan.live,
             user: plan.user,
             jiffyWant: stNow.jiffyDos,
+            skipJiffy: true,
           });
           applyIecUnit(emuRef.current, playIec, playAttachUnit);
           plugJoysticks(emuRef.current, useEmu.getState().joyPort);
-          if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, "hot-swap");
+          if (isIosPhone()) resetIosPaintState();
           s.setCurrentTitle(title);
           s.setRunning(true);
           if (work) {
@@ -1179,6 +1193,7 @@ export function Grok64App() {
           } else {
             autostartAfterReady(emuRef.current, true);
             applyIecUnit(emuRef.current, playIec, playAttachUnit);
+            if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, "hot-swap");
             beginPlayLock(playLockDuration(playModeRef.current), `Loading ${title}…`);
           }
           return;
@@ -1704,6 +1719,7 @@ export function Grok64App() {
       const on = await syncJiffy(emuRef.current, "hard");
       useEmu.getState().setBooting(false);
       if (on) toast.message("JiffyDOS applied — real KERNAL + 1541 ROMs");
+      else if (s.jiffyDos) toast.error("JiffyDOS ROMs did not land — stock KERNAL");
     })();
   }, [s.jiffyDos, syncJiffy]);
   useEffect(() => {

@@ -117,6 +117,16 @@ export async function hasJiffyPair(): Promise<boolean> {
   return Boolean(c64 && d1541);
 }
 
+export function catalogFiles(id: string): string[] {
+  return ROM_CATALOG.find((d) => d.id === id)?.files ?? [];
+}
+
+/** Bytes in a romFileMap that are a usable Jiffy C64 + 1541 pair. */
+export function romsHaveJiffyPair(roms: Record<string, Uint8Array>): boolean {
+  const big = (n: string) => (roms[n]?.byteLength ?? 0) >= 4096;
+  return catalogFiles("jiffy-c64").some(big) && catalogFiles("jiffy-1541").some(big);
+}
+
 export async function hasCmdRom(): Promise<boolean> {
   return Boolean(await getRom("cmdhd"));
 }

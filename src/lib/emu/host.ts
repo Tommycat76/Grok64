@@ -1,8 +1,15 @@
 import { detectDevice, detectOs, isIos, isIosPhone, isTouchMobile } from "./detect";
 import { sidOptions } from "./machines";
-import { hasCmdRom, hasJiffyPair, romFileMap } from "./roms";
+import { catalogFiles, hasCmdRom, hasJiffyPair, romFileMap, romsHaveJiffyPair } from "./roms";
 import { buildViceExtras, workDiskFor } from "./vice-extras";
-import { liveDriveOptions, viceDriveTypeVars, viceRcForDrives, viceRcForUser, type DriveAttach } from "./play-session";
+import {
+  liveDriveOptions,
+  viceDriveTypeOption,
+  viceDriveTypeVars,
+  viceRcForDrives,
+  viceRcForUser,
+  type DriveAttach,
+} from "./play-session";
 import { cmdDriveMap, cmdSwapUnits, sd2iecSwapUnit } from "./hw-buttons";
 import type { DriveMode, IecDrive, IecUnit, JoyPort, ReuSize, ScpuSimm, SidEngine, SidModel } from "./types";
 import { RETRO_BTN } from "./types";
@@ -880,6 +887,7 @@ export function setWarp(emu: EjsInstance | null, on: boolean) {
 
 export function destroyEmu(emu: EjsInstance | null, el: HTMLElement | null) {
   resetFitCache();
+  lastJiffy = false;
   keyboardArmed = false;
   try {
     emu?.gameManager?.toggleMainLoop(0);
@@ -958,18 +966,42 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
           bh = Math.max(272, Math.round(bh * scale));
         }
       }
-      const sizeDrift = tablet && (canvas.width !== bw || canvas.height !== bh);
-      if (sizeDrift || (!boxStable && (canvas.width < 64 || canvas.height < 64 || touchMobile))) {
+      const backingOk = canvas.width === bw && canvas.height === bh && canvas.width >= 64;
+      // Reassigning canvas.width wipes the WebGL context. On Onn that left a
+      // 384×272 blit in a corner of a large .g64-screen. Only set backing when
+      // it actually changed.
+      if (!backingOk && (force || !boxStable || canvas.width < 64 || canvas.height < 64)) {
         canvas.width = bw;
         canvas.height = bh;
         lastFitBox = { pw: cw, ph: ch, bw, bh };
       } else if (!boxStable) {
         lastFitBox = { pw: cw, ph: ch, bw: canvas.width, bh: canvas.height };
       }
-      canvas.style.width = "100%";
-      canvas.style.height = "100%";
       canvas.style.display = "block";
       canvas.style.visibility = "visible";
+      if (tablet) {
+        // VICE always paints 384×272. CSS object-fit does not upscale WebGL on
+        // some Android GPUs (postage-stamp, often bottom-right). Scale the
+        // layer so the picture fills the already-letterboxed .g64-screen.
+        const box = (el.closest(".g64-screen") as HTMLElement | null) ?? parent;
+        const sw = Math.max(box.clientWidth || 0, el.clientWidth || 0, 384);
+        const sh = Math.max(box.clientHeight || 0, el.clientHeight || 0, 272);
+        const scale = Math.min(sw / 384, sh / 272);
+        canvas.style.setProperty("width", "384px", "important");
+        canvas.style.setProperty("height", "272px", "important");
+        canvas.style.setProperty("max-width", "none", "important");
+        canvas.style.setProperty("max-height", "none", "important");
+        canvas.style.setProperty("position", "absolute", "important");
+        canvas.style.setProperty("left", "50%", "important");
+        canvas.style.setProperty("top", "50%", "important");
+        canvas.style.setProperty("right", "auto", "important");
+        canvas.style.setProperty("bottom", "auto", "important");
+        canvas.style.setProperty("transform", `translate(-50%, -50%) scale(${scale})`, "important");
+        canvas.style.setProperty("transform-origin", "center center", "important");
+      } else {
+        canvas.style.width = "100%";
+        canvas.style.height = "100%";
+      }
     }
     const parent = el.querySelector(".ejs_canvas_parent") as HTMLElement | null;
     if (parent) {
@@ -990,13 +1022,22 @@ export async function recycleCore(emu: EjsInstance | null, el: HTMLElement | nul
 }
 
 let lastWorkDisk: string | null = null;
+let lastJiffy = false;
 
 export function lastAppliedWorkDisk(): string | null {
   return lastWorkDisk;
 }
 
+export function lastAppliedJiffy(): boolean {
+  return lastJiffy;
+}
+
 export function rememberWorkDisk(work: string | null | undefined) {
   if (typeof work === "string" && work.trim()) lastWorkDisk = work.trim();
+}
+
+export function rememberJiffyLive(on: boolean) {
+  lastJiffy = on;
 }
 
 export function applyRuntimeOptions(emu: EjsInstance | null, opts: Record<string, string>) {
@@ -1186,21 +1227,62 @@ export function mkdirFs(FS: EmscriptenFS, path: string) {
   }
 }
 
+/** Every path libretro-vice has used for system/vice — iPhone must write all of them. */
+export const VICE_SYSTEM_ROOTS = [
+  "/home/web_user/retroarch/userdata/system/vice",
+  "/home/web_user/retroarch/system/vice",
+  "/system/vice",
+  "/vice",
+] as const;
+
+export const VICE_RC_ROOTS = [
+  "/home/web_user/retroarch/userdata/system/vice",
+  "/home/web_user/.config/vice",
+  "/vice",
+] as const;
+
+function fsFileExists(FS: EmscriptenFS, path: string): boolean {
+  const names = [path, path.replace(/^\//, ""), `/${path.replace(/^\//, "")}`];
+  for (const p of names) {
+    try {
+      const raw = FS.readFile?.(p, { encoding: "binary" });
+      const n =
+        raw instanceof Uint8Array ? raw.byteLength : typeof raw === "string" ? raw.length : 0;
+      if (n >= 4096) return true;
+    } catch {
+      /* try stat */
+    }
+    try {
+      const st = FS.stat?.(p);
+      if (st && (st.size ?? 0) >= 4096) return true;
+    } catch {
+      /* next */
+    }
+  }
+  return false;
+}
+
+/** True when both Jiffy files are readable from a VICE system root. */
+export function jiffyPairLanded(emu: EjsInstance | null): boolean {
+  const FS = fsOf(emu);
+  if (!FS) return false;
+  const c64 = catalogFiles("jiffy-c64");
+  const d41 = catalogFiles("jiffy-1541");
+  for (const root of VICE_SYSTEM_ROOTS) {
+    const hasC64 = c64.some((n) => fsFileExists(FS, `${root}/${n}`));
+    const has1541 = d41.some((n) => fsFileExists(FS, `${root}/${n}`));
+    if (hasC64 && has1541) return true;
+  }
+  return false;
+}
+
 export function injectRoms(emu: EjsInstance | null, files: Record<string, Uint8Array>): number {
   const FS = fsOf(emu);
   if (!FS?.writeFile) return 0;
-  const roots = isIosPhone()
-    ? ["/home/web_user/retroarch/userdata/system/vice"]
-    : [
-        "/home/web_user/retroarch/userdata/system/vice",
-        "/home/web_user/retroarch/system/vice",
-        "/system/vice",
-        "/vice",
-      ];
-  for (const root of roots) mkdirFs(FS, root);
+  for (const root of VICE_SYSTEM_ROOTS) mkdirFs(FS, root);
   let count = 0;
   for (const [name, data] of Object.entries(files)) {
-    for (const root of roots) {
+    for (const root of VICE_SYSTEM_ROOTS) {
       try {
         FS.writeFile(`${root}/${name}`, data);
         count += 1;
@@ -1212,20 +1294,47 @@ export function injectRoms(emu: EjsInstance | null, files: Record<string, Uint8A
   return count;
 }
 
-/** Inject Jiffy ROMs and flip vice_jiffydos — returns true when both ROMs are present. */
+function finalizeJiffyOption(emu: EjsInstance | null, landed: boolean): boolean {
+  applyRuntimeOptions(emu, { vice_jiffydos: landed ? "enabled" : "disabled" });
+  lastJiffy = landed;
+  if (landed) glog("jiffy-inject-ok");
+  else glog("jiffy-inject-miss");
+  return landed;
+}
+
+/**
+ * Inject Jiffy ROMs, flush, then enable. Returns true only when both files
+ * landed in VICE FS — IDB presence alone is not success (stock BASIC V2).
+ */
 export async function applyJiffyDos(emu: EjsInstance | null, want: boolean): Promise<boolean> {
   if (!emu) return false;
-  const on = want && (await hasJiffyPair());
-  if (on) {
-    try {
-      const roms = await romFileMap();
-      if (Object.keys(roms).length) injectRoms(emu, roms);
-    } catch {
-      /* optional */
-    }
+  if (!want || !(await hasJiffyPair())) {
+    return finalizeJiffyOption(emu, false);
   }
-  applyRuntimeOptions(emu, { vice_jiffydos: on ? "enabled" : "disabled" });
-  return on;
+  let roms: Record<string, Uint8Array> = {};
+  try {
+    roms = await romFileMap();
+  } catch {
+    return finalizeJiffyOption(emu, false);
+  }
+  if (!romsHaveJiffyPair(roms)) {
+    return finalizeJiffyOption(emu, false);
+  }
+  injectRoms(emu, roms);
+  await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
+  return finalizeJiffyOption(emu, jiffyPairLanded(emu));
+}
+
+/** Test helper: inject + enable without IDB. Success only if files land. */
+export function applyJiffyFromRoms(
+  emu: EjsInstance | null,
+  want: boolean,
+  roms: Record<string, Uint8Array>,
+): boolean {
+  if (!emu) return false;
+  if (!want || !romsHaveJiffyPair(roms)) return finalizeJiffyOption(emu, false);
+  injectRoms(emu, roms);
+  return finalizeJiffyOption(emu, jiffyPairLanded(emu));
 }
 
 export function injectSdWork(
@@ -1347,16 +1456,9 @@ export async function waitForCoreFs(emu: EjsInstance | null, timeoutMs = 12_000)
 export function injectViceRc(emu: EjsInstance | null, body: string): number {
   const FS = fsOf(emu);
   if (!FS?.writeFile) return 0;
-  const roots = isIosPhone()
-    ? ["/home/web_user/retroarch/userdata/system/vice"]
-    : [
-        "/home/web_user/retroarch/userdata/system/vice",
-        "/home/web_user/.config/vice",
-        "/vice",
-      ];
-  for (const root of roots) mkdirFs(FS, root);
+  for (const root of VICE_RC_ROOTS) mkdirFs(FS, root);
   let n = 0;
-  for (const root of roots) {
+  for (const root of VICE_RC_ROOTS) {
     try {
       FS.writeFile(`${root}/vicerc`, body);
       n += 1;
@@ -1379,6 +1481,8 @@ export async function prepareCore(
     user: DriveAttach;
     jiffyWant: boolean;
     sdParts?: { id: number; files: { name: string; data: Uint8Array }[] }[];
+    /** Hot-swap must not flip vice_jiffydos — that reset drops unit 8 on CriOS. */
+    skipJiffy?: boolean;
   },
 ): Promise<{ jiffy: boolean; roms: number; cmd: boolean }> {
   if (!emu) return { jiffy: false, roms: 0, cmd: false };
@@ -1391,12 +1495,26 @@ export async function prepareCore(
   } catch {
     /* optional */
   }
-  injectViceRc(emu, viceRcForUser(opts.user, opts.live));
+  injectViceRc(emu, viceRcForUser(opts.user, opts.live, { cmdRom: cmd }));
   if (opts.live.iec === "sd2iec" && opts.sdParts?.length) {
     injectSdWork(emu, opts.sdParts);
   }
+  const types: Record<string, string> = {};
+  if (opts.live.iec === "1541" || opts.live.iec === "1581") {
+    types[`vice_drive${opts.live.unit}_type`] = viceDriveTypeOption(opts.live.iec);
+  } else if (opts.live.iec === "cmdhd") {
+    types[`vice_drive${opts.live.unit}_type`] = viceDriveTypeOption("cmdhd");
+    types.vice_drive8_type = "1541";
+  }
+  if (cmd && opts.user.iec === "cmdhd" && opts.user.unit !== 8) {
+    types[`vice_drive${opts.user.unit}_type`] = viceDriveTypeOption("cmdhd");
+    if (!types.vice_drive8_type) types.vice_drive8_type = "1541";
+  }
+  if (Object.keys(types).length) applyRuntimeOptions(emu, types);
   applyIecUnit(emu, opts.live.iec, opts.live.unit);
-  const jiffy = await applyJiffyDos(emu, opts.jiffyWant);
+  const jiffy = opts.skipJiffy
+    ? lastJiffy
+    : await applyJiffyDos(emu, opts.jiffyWant);
   await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
   applyIecUnit(emu, opts.live.iec, opts.live.unit);
   return { jiffy, roms, cmd };

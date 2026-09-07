@@ -69,18 +69,33 @@ export function unit8IsRealFloppy(live: DriveAttach, liveWorkDisk?: string | nul
   return live.iec === "1541" || live.iec === "1581";
 }
 
+export type RecycleExtra = {
+  /** CriOS: Jiffy KERNAL swap on a live core drops unit 8. */
+  iosPhone?: boolean;
+  jiffyWant?: boolean;
+  /** True only after ROMs landed in VICE FS and vice_jiffydos was enabled. */
+  jiffyLive?: boolean;
+};
+
 export function floppyNeedsRecycle(
   liveIec: IecDrive,
   liveWorkDisk?: string | null,
   user?: DriveAttach,
+  extra?: RecycleExtra,
 ): boolean {
-  if (isFsWorkDisk(liveWorkDisk)) return true;
-  if (liveIec === "sd2iec") return true;
-  if (liveIec === "cmdhd") {
-    if (!user || user.unit === 8) return true;
-    return !(liveWorkDisk === "8_d64" || liveWorkDisk === "8_d81");
+  let recycle = false;
+  if (isFsWorkDisk(liveWorkDisk)) recycle = true;
+  else if (liveIec === "sd2iec") recycle = true;
+  else if (liveIec === "cmdhd") {
+    if (!user || user.unit === 8) recycle = true;
+    else recycle = !(liveWorkDisk === "8_d64" || liveWorkDisk === "8_d81");
+  } else {
+    recycle = !floppyPlayCanHotSwap(liveIec, liveWorkDisk);
   }
-  return !floppyPlayCanHotSwap(liveIec, liveWorkDisk);
+  // Stock BASIC + claimed Jiffy on iPhone: hot-swap prepareCore/setVariable
+  // leaves DEVICE NOT PRESENT. Recycle so ROMs inject before the first reset.
+  if (!recycle && extra?.iosPhone && extra.jiffyWant && !extra.jiffyLive) return true;
+  return recycle;
 }
 
 export function planPlay(input: {
@@ -91,6 +106,9 @@ export function planPlay(input: {
   liveIec: IecDrive;
   liveWorkDisk?: string | null;
   autostart?: boolean;
+  iosPhone?: boolean;
+  jiffyWant?: boolean;
+  jiffyLive?: boolean;
 }): PlayPlan {
   const work = !!input.work;
   const kind = playKindOf(input.filename, work);
@@ -99,7 +117,11 @@ export function planPlay(input: {
   const autostart = input.autostart !== false && kind !== "basic";
 
   if (kind === "floppy" && attach) {
-    const recycle = floppyNeedsRecycle(input.liveIec, input.liveWorkDisk, user);
+    const recycle = floppyNeedsRecycle(input.liveIec, input.liveWorkDisk, user, {
+      iosPhone: input.iosPhone,
+      jiffyWant: input.jiffyWant,
+      jiffyLive: input.jiffyLive,
+    });
     return {
       kind,
       user,
@@ -147,11 +169,14 @@ export function planPlay(input: {
  * 1541/1581: true drive + matching work disk.
  */
 export function liveDriveOptions(live: DriveAttach): Record<string, string> {
+  const typeKey = `vice_drive${live.unit}_type`;
+  const typed = { [typeKey]: viceDriveTypeOption(live.iec) };
   if (live.iec === "cmdhd") {
     return {
       vice_work_disk: "disabled",
       vice_virtual_device_traps: "disabled",
       vice_drive_true_emulation: "enabled",
+      ...typed,
     };
   }
   if (live.iec === "sd2iec") {
@@ -159,6 +184,7 @@ export function liveDriveOptions(live: DriveAttach): Record<string, string> {
       vice_work_disk: `${live.unit}_fs`,
       vice_virtual_device_traps: "enabled",
       vice_drive_true_emulation: "disabled",
+      ...typed,
     };
   }
   if (live.iec === "1581") {
@@ -166,12 +192,14 @@ export function liveDriveOptions(live: DriveAttach): Record<string, string> {
       vice_work_disk: `${live.unit}_d81`,
       vice_virtual_device_traps: "disabled",
       vice_drive_true_emulation: "enabled",
+      ...typed,
     };
   }
   return {
     vice_work_disk: `${live.unit}_d64`,
     vice_virtual_device_traps: "disabled",
     vice_drive_true_emulation: "enabled",
+    ...typed,
   };
 }
 
@@ -215,15 +243,22 @@ export function viceRcForDrives(map: Partial<Record<IecUnit, IecDrive>>, virtual
  * vicerc snippet so CMD HD is a real drive (firmware ROM + drive CPU),
  * and unit 8 stays a 1541 when CMD lives on 9–11.
  */
-export function viceRcForUser(user: DriveAttach, live: DriveAttach): string {
-  const lines = [
-    "[C64]",
-    `Drive8Type=${live.unit === 8 ? viceDriveTypeCode(live.iec) : 1541}`,
-  ];
-  if (user.iec === "cmdhd" && user.unit !== 8) {
-    lines.push(`Drive${user.unit}Type=${viceDriveTypeCode("cmdhd")}`);
-  } else if (live.iec === "cmdhd" && live.unit !== 8) {
-    lines.push(`Drive${live.unit}Type=${viceDriveTypeCode("cmdhd")}`);
+export function viceRcForUser(
+  user: DriveAttach,
+  live: DriveAttach,
+  opts?: { cmdRom?: boolean },
+): string {
+  const drive8 =
+    live.unit === 8 && live.iec !== "sd2iec" ? viceDriveTypeCode(live.iec) : 1541;
+  const lines = ["[C64]", `Drive8Type=${drive8}`];
+  const cmdUnit =
+    user.iec === "cmdhd" && user.unit !== 8
+      ? user.unit
+      : live.iec === "cmdhd" && live.unit !== 8
+        ? live.unit
+        : null;
+  if (cmdUnit != null && opts?.cmdRom !== false) {
+    lines.push(`Drive${cmdUnit}Type=${viceDriveTypeCode("cmdhd")}`);
   }
   if (user.iec === "cmdhd" && user.unit === 8 && live.iec !== "cmdhd") {
     /* Floppy Play stole #8 — keep user HD preference out of the live 1541. */
