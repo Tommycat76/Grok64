@@ -73,6 +73,16 @@ test("CSS never hides live WebGL behind a 2D overlay", () => {
   );
 });
 
+test("iOS canvas CSS is the native 384x272 box, not 100% fill", () => {
+  const iosCanvas = css.slice(css.indexOf("html[data-g64os=\"ios\"] #grok64-player canvas"));
+  assert.match(iosCanvas, /width: 384px !important/);
+  assert.match(iosCanvas, /height: 272px !important/);
+  assert.match(iosCanvas, /inset: auto !important/);
+  assert.doesNotMatch(iosCanvas.slice(0, 900), /width: 100% !important/);
+  assert.match(paintSrc, /applyIosCrtStyle/);
+  assert.doesNotMatch(paintSrc, /setProperty\("width", "100%"/);
+});
+
 test("production UI shows build id; debug log is opt-in", () => {
   assert.match(app, /<BuildId/);
   assert.match(app, /s\.debugLog \|\| debugQueryOn\(\)/);

@@ -25,7 +25,7 @@
  */
 
 import type { EjsInstance } from "./host";
-import { dismissEjsPrompts, fitEmu, unlockAudio } from "./host";
+import { applyIosCrtStyle, dismissEjsPrompts, fitEmu, unlockAudio } from "./host";
 import { isIosPhone } from "./detect";
 import { glog } from "./debug";
 
@@ -102,8 +102,13 @@ function revealLiveCanvas(canvas: HTMLCanvasElement) {
   canvas.style.setProperty("display", "block", "important");
   canvas.style.setProperty("visibility", "visible", "important");
   canvas.style.setProperty("opacity", "1", "important");
-  canvas.style.setProperty("width", "100%", "important");
-  canvas.style.setProperty("height", "100%", "important");
+  // Never force 100%×100% here — CriOS blits the 384×272 buffer in device
+  // pixels inside a stretched CSS box (postage stamp). Scale from native FB.
+  const el =
+    (canvas.closest("#grok64-player") as HTMLElement | null) ??
+    (typeof document !== "undefined" ? document.getElementById("grok64-player") : null);
+  const parent = canvas.parentElement ?? el;
+  if (el && parent) applyIosCrtStyle(canvas, el, parent);
 }
 
 /**
@@ -112,11 +117,17 @@ function revealLiveCanvas(canvas: HTMLCanvasElement) {
  */
 function nudgeCompositor(canvas: HTMLCanvasElement) {
   try {
-    const prev = canvas.style.transform;
-    canvas.style.transform = "translate3d(0,0,0.01px)";
+    const prev = canvas.style.getPropertyValue("transform");
+    const pri = canvas.style.getPropertyPriority("transform") || "important";
+    // Do not drop the CRT scale — replacing it with translate3d reopens the stamp.
+    if (/scale\(/.test(prev)) {
+      void canvas.offsetWidth;
+      return;
+    }
+    canvas.style.setProperty("transform", "translate3d(0,0,0.01px)", pri);
     void canvas.offsetWidth;
     requestAnimationFrame(() => {
-      canvas.style.transform = prev || "translate3d(0,0,0)";
+      canvas.style.setProperty("transform", prev || "translate3d(0,0,0)", pri);
     });
   } catch {
     /* ignore */
@@ -174,9 +185,12 @@ export function presentIosCrt(
         /* ignore */
       }
     }
-    nudgeCompositor(canvas);
   }
 
+  // Always refit CSS. #42 left many present tags on width/height 100%, which
+  // is the postage-stamp path on real CriOS.
+  fitEmu(playerRoot(root), emu);
+  if (canvas) nudgeCompositor(canvas);
   const shouldFit =
     opts.fit ??
     (gesture ||
@@ -187,7 +201,6 @@ export function presentIosCrt(
       tag === "user-reset" ||
       tag === "jiffy");
   if (shouldFit) {
-    fitEmu(root, emu);
     try {
       window.dispatchEvent(new Event("resize"));
     } catch {
@@ -203,6 +216,7 @@ export function presentIosCrt(
     h: canvas?.height ?? 0,
     cw: canvas?.clientWidth ?? 0,
     ch: canvas?.clientHeight ?? 0,
+    xf: canvas?.style.getPropertyValue("transform") ?? "",
   });
 }
 
