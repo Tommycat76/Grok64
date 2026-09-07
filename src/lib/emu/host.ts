@@ -1050,16 +1050,15 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       }
       canvas.style.display = "block";
       canvas.style.visibility = "visible";
-      if (tablet) {
-        // VICE paints 384×272. Some Android GPUs blit WebGL 1:1 (postage stamp)
-        // and ignore object-fit. Keep the backing store native, size the CSS
-        // box to 384×272, then scale from the top-left of the already
-        // letterboxed .g64-screen. left:50% + translate was shifting the
-        // picture (left black bar / right cutoff) when inset:0 still applied.
-        applyTabletCrtStyle(canvas, el, parent);
+      if (tablet || iosPhone) {
+        // VICE paints 384×272. WebGL on some Android GPUs and CriOS ignores
+        // object-fit / CSS 100% and blits the buffer 1:1 (postage stamp).
+        // Size the CSS box to the native framebuffer, then scale from 0,0.
+        // iOS blits in device pixels — applyIosCrtStyle multiplies by DPR.
+        if (isIos()) applyIosCrtStyle(canvas, el, parent);
+        else applyTabletCrtStyle(canvas, el, parent);
       } else {
-        canvas.classList.remove("g64-tablet-fb");
-        clearTabletCrtStyle(canvas);
+        clearNativeFbCrtStyle(canvas);
         canvas.style.width = "100%";
         canvas.style.height = "100%";
       }
@@ -1077,7 +1076,9 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
   }
 }
 
-const TABLET_CRT_PROPS = [
+const NATIVE_FB_W = 384;
+const NATIVE_FB_H = 272;
+const NATIVE_FB_PROPS = [
   "inset",
   "left",
   "top",
@@ -1093,36 +1094,63 @@ const TABLET_CRT_PROPS = [
   "object-position",
 ] as const;
 
-function clearTabletCrtStyle(canvas: HTMLCanvasElement) {
-  for (const prop of TABLET_CRT_PROPS) canvas.style.removeProperty(prop);
+function clearNativeFbCrtStyle(canvas: HTMLCanvasElement) {
+  for (const prop of NATIVE_FB_PROPS) canvas.style.removeProperty(prop);
+  canvas.classList.remove("g64-tablet-fb", "g64-ios-fb");
 }
 
-/** Tablet-only CRT fill. Phone / CriOS paint path must not call this. */
-export function applyTabletCrtStyle(
+function applyNativeFbCrtStyle(
   canvas: HTMLCanvasElement,
   el: HTMLElement,
   parent: HTMLElement,
+  klass: "g64-tablet-fb" | "g64-ios-fb",
 ) {
-  canvas.classList.add("g64-tablet-fb");
+  canvas.classList.remove(klass === "g64-ios-fb" ? "g64-tablet-fb" : "g64-ios-fb");
+  canvas.classList.add(klass);
   const box = (el.closest(".g64-screen") as HTMLElement | null) ?? parent;
   const sw = Math.max(box.clientWidth || 0, el.clientWidth || 0, 1);
   const sh = Math.max(box.clientHeight || 0, el.clientHeight || 0, 1);
-  const sx = sw / 384;
-  const sy = sh / 272;
+  // CriOS WebGL ignores CSS 100% / object-fit and blits 384×272 in device
+  // pixels (Tom's postage stamp). Keep the CSS box at native FB size so
+  // RetroArch's viewport (clientWidth × clientHeight) matches the locked
+  // backing store — a 384/dpr box made VICE paint a stamp into the buffer.
+  // Scale by DPR on iOS so that device-pixel blit fills the CRT.
+  // Android tablets blit 1:1 in CSS pixels — dpr stays 1.
+  const dpr = klass === "g64-ios-fb" ? Math.max(1, window.devicePixelRatio || 1) : 1;
+  const sx = (sw * dpr) / NATIVE_FB_W;
+  const sy = (sh * dpr) / NATIVE_FB_H;
   canvas.style.setProperty("position", "absolute", "important");
   canvas.style.setProperty("inset", "auto", "important");
   canvas.style.setProperty("left", "0", "important");
   canvas.style.setProperty("top", "0", "important");
   canvas.style.setProperty("right", "auto", "important");
   canvas.style.setProperty("bottom", "auto", "important");
-  canvas.style.setProperty("width", "384px", "important");
-  canvas.style.setProperty("height", "272px", "important");
+  canvas.style.setProperty("width", `${NATIVE_FB_W}px`, "important");
+  canvas.style.setProperty("height", `${NATIVE_FB_H}px`, "important");
   canvas.style.setProperty("max-width", "none", "important");
   canvas.style.setProperty("max-height", "none", "important");
   canvas.style.setProperty("transform-origin", "0 0", "important");
   canvas.style.setProperty("transform", `scale(${sx}, ${sy})`, "important");
   canvas.style.setProperty("object-fit", "fill", "important");
   canvas.style.setProperty("object-position", "0 0", "important");
+}
+
+/** Android tablet CRT fill — CSS-pixel 1:1 blit, no DPR multiply. */
+export function applyTabletCrtStyle(
+  canvas: HTMLCanvasElement,
+  el: HTMLElement,
+  parent: HTMLElement,
+) {
+  applyNativeFbCrtStyle(canvas, el, parent, "g64-tablet-fb");
+}
+
+/** CriOS / iPad CRT fill — device-pixel blit, scale by devicePixelRatio. */
+export function applyIosCrtStyle(
+  canvas: HTMLCanvasElement,
+  el: HTMLElement,
+  parent: HTMLElement,
+) {
+  applyNativeFbCrtStyle(canvas, el, parent, "g64-ios-fb");
 }
 
 export async function recycleCore(emu: EjsInstance | null, el: HTMLElement | null) {

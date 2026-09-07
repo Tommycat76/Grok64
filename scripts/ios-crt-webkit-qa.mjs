@@ -41,6 +41,12 @@ for (let i = 0; i < 80; i++) {
     const c = root?.querySelector("canvas");
     const cs = c ? getComputedStyle(c) : null;
     const logs = window.__g64log || [];
+    const screen = document.querySelector(".g64-screen");
+    const br = (n) => {
+      if (!n) return null;
+      const r = n.getBoundingClientRect();
+      return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+    };
     return {
       fs: window.__g64?.hasFs?.() ?? false,
       title: window.__g64?.title?.() ?? null,
@@ -56,6 +62,12 @@ for (let i = 0; i < 80; i++) {
       op: cs?.opacity ?? null,
       w: c?.width ?? 0,
       h: c?.height ?? 0,
+      cssW: cs?.width ?? null,
+      cssH: cs?.height ?? null,
+      xf: cs?.transform ?? null,
+      fb: c?.classList.contains("g64-ios-fb") ?? false,
+      screen: br(screen),
+      canvasCss: br(c),
     };
   });
   if (state.fs && state.running && state.title === "BASIC") break;
@@ -94,6 +106,29 @@ if (state.poll) {
 if (state.vis === "hidden" || state.op === "0") {
   console.log("FAIL live canvas hidden");
   process.exit(2);
+}
+if (state.w !== 384 || state.h !== 272) {
+  console.log("FAIL backing not 384x272", state.w, state.h);
+  process.exit(2);
+}
+if (!state.fb) {
+  console.log("FAIL missing g64-ios-fb");
+  process.exit(2);
+}
+if (!/scale\(|matrix\(/i.test(String(state.xf || ""))) {
+  console.log("FAIL canvas transform has no scale", state.xf);
+  process.exit(2);
+}
+if (state.canvasCss && state.screen && state.screen.w > 0) {
+  const fillW = state.canvasCss.w / state.screen.w;
+  const fillH = state.canvasCss.h / state.screen.h;
+  if (fillW < 0.85 || fillH < 0.85) {
+    console.log(
+      "FAIL postage stamp",
+      JSON.stringify({ canvas: state.canvasCss, screen: state.screen, fillW, fillH }),
+    );
+    process.exit(2);
+  }
 }
 console.log("WEBKIT iPhone-UA CRT smoke (not a real CriOS PASS)");
 process.exit(0);
