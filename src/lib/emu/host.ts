@@ -1020,7 +1020,8 @@ export function applyRuntimeOptions(emu: EjsInstance | null, opts: Record<string
 export async function flushEmuFs(emu: EjsInstance | null, timeoutMs = 1500): Promise<boolean> {
   const FS = fsOf(emu);
   if (!FS) return false;
-  if (!FS.syncfs) {
+  const sync = FS.syncfs;
+  if (!sync) {
     if (isIosPhone()) await new Promise((r) => setTimeout(r, 80));
     return true;
   }
@@ -1033,7 +1034,7 @@ export async function flushEmuFs(emu: EjsInstance | null, timeoutMs = 1500): Pro
     };
     const timer = setTimeout(() => done(false), timeoutMs);
     try {
-      FS.syncfs(false, (err?: unknown) => {
+      sync(false, (err?: unknown) => {
         clearTimeout(timer);
         done(!err);
       });
