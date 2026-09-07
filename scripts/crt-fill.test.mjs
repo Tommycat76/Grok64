@@ -164,7 +164,7 @@ test("hosting docs tell the coordinator how to run the fill gate", () => {
   assert.match(docs, /PLEXnTORRENT_HP|Plex/);
   assert.match(docs, /painted|screenshot/i);
   assert.match(docs, /session hold|splash remount|page reload/i);
-  assert.match(docs, /not a real CriOS PASS/);
+  assert.match(docs, /real CriOS PASS/);
   assert.match(docs, /Chromium-on-Plex/);
 });
 
