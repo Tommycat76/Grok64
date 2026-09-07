@@ -89,6 +89,7 @@ import {
   forceIosMirrorBlit,
   installIosPaintHooks,
   iosTapResumeCooldown,
+  isIosMirrorActive,
   isIosMirrorPainted,
   isIosPaintSettled,
   kickIosPaint,
@@ -371,6 +372,9 @@ export function Grok64App() {
       running: () => useEmu.getState().running,
       booting: () => useEmu.getState().booting,
       playLock: () => playLockRef.current,
+      paintSettled: () => isIosPaintSettled(),
+      mirrorPainted: () => isIosMirrorPainted(),
+      mirrorActive: () => isIosMirrorActive(),
       media: () =>
         readMountedMedia(emuRef.current).map((m) => ({
           name: m.name,
@@ -770,24 +774,27 @@ export function Grok64App() {
       } catch {}
       const playerEl = document.getElementById("grok64-player");
       fitEmu(playerEl, emu);
-      if (isIosPhone()) kickIosAfterEmuAction(emu, "settle", gen);
-      bootHoldRef.current = false;
       s.setCurrentTitle(spec.title);
-      s.setRunning(true);
       pendingKickRef.current = false;
       setAwaitingStart(false);
       spec.onStarted?.(emu);
       if (spec.autostartAfterReady) {
+        bootHoldRef.current = false;
+        s.setRunning(true);
         setBusy(`Loading ${spec.title}…`, 78);
         if (isIosPhone()) await new Promise((r) => setTimeout(r, 140));
         if (loadGenRef.current !== gen) return;
         autostartAfterReady(emu, true);
         applyIecUnit(emu, spec.live.iec, spec.live.unit);
+        if (isIosPhone()) kickIosAfterEmuAction(emu, "settle", gen);
         beginPlayLock(playLockDuration(playModeRef.current), `Loading ${spec.title}…`);
       } else {
         if (prep.jiffy) setBusy("Applying JiffyDOS…", 72);
         hardReset(emu);
         applyIecUnit(emu, spec.live.iec, spec.live.unit);
+        bootHoldRef.current = false;
+        s.setRunning(true);
+        if (isIosPhone()) kickIosAfterEmuAction(emu, "settle", gen);
         bootTimersRef.current.push(
           window.setTimeout(() => {
             if (loadGenRef.current !== gen) return;
@@ -795,6 +802,7 @@ export function Grok64App() {
             persistGateRef.current = true;
             inGameplayRef.current = true;
             clearMenuJoyInput();
+            if (isIosPhone()) kickIosAfterEmuAction(emu, "ready", gen);
           }, isIosPhone() ? 900 : 500),
         );
       }

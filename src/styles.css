@@ -1871,9 +1871,12 @@ html[data-g64os="ios"] #grok64-player .g64-ios-mirror {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
 }
+/* Keep GL visible until the 2D mirror actually paints. Hiding it first
+   stopped RetroArch from presenting, so screenshot.png never appeared and
+   CriOS stayed on ios-paint-poll with a black CRT. */
 html[data-g64os="ios"] #grok64-player:not(.g64-ios-mirror-on) canvas:not(.g64-ios-mirror) {
-  opacity: 0 !important;
-  visibility: hidden !important;
+  opacity: 1;
+  visibility: visible;
 }
 html[data-g64os="ios"] #grok64-player.g64-ios-mirror-on canvas:not(.g64-ios-mirror) {
   opacity: 0 !important;

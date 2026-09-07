@@ -68,6 +68,7 @@ export interface EjsInstance {
     functions?: {
       simulateInput?: (player: number, index: number, value: number) => void;
       restart?: () => void;
+      screenshot?: () => void;
     };
     FS?: EmscriptenFS;
   };
@@ -934,7 +935,7 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
   fitting = true;
   const canvas =
     (emu?.Module?.canvas as HTMLCanvasElement | undefined) ||
-    (el.querySelector("canvas") as HTMLCanvasElement | null);
+    (el.querySelector("canvas:not(.g64-ios-mirror)") as HTMLCanvasElement | null);
   try {
     if (canvas) {
       const parent = canvas.parentElement ?? el;
@@ -942,6 +943,7 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       const ch = Math.max(parent.clientHeight, el.clientHeight, 160);
       const touchMobile = isTouchMobile();
       const tablet = detectDevice() === "tablet";
+      const iosPhone = isIosPhone();
       const boxStable =
         !force &&
         Math.abs(cw - lastFitBox.pw) < 3 &&
@@ -967,10 +969,15 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
         }
       }
       const backingOk = canvas.width === bw && canvas.height === bh && canvas.width >= 64;
-      // Reassigning canvas.width wipes the WebGL context. On Onn that left a
-      // 384×272 blit in a corner of a large .g64-screen. Only set backing when
-      // it actually changed.
-      if (!backingOk && (force || !boxStable || canvas.width < 64 || canvas.height < 64)) {
+      // Reassigning canvas.width wipes the WebGL context. On iPhone that also
+      // kills cmd_take_screenshot (paint-poll hang). Never resize an already
+      // live iPhone backing store — CSS scales the 384×272 framebuffer.
+      const canResizeBacking = !iosPhone || canvas.width < 64 || canvas.height < 64;
+      if (
+        canResizeBacking &&
+        !backingOk &&
+        (force || !boxStable || canvas.width < 64 || canvas.height < 64)
+      ) {
         canvas.width = bw;
         canvas.height = bh;
         lastFitBox = { pw: cw, ph: ch, bw, bh };
