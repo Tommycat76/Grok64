@@ -53,11 +53,19 @@ test("C64 Space is not dispatched to window (HTML Reset activation)", () => {
   assert.match(keys, /parent\?\.dispatchEvent\(make\(\)\)/);
 });
 
-test("iOS paint watchdog does not recycle or Autostart", () => {
+test("iOS CRT path does not recycle or Autostart", () => {
   assert.match(paint, /WATCHDOG_RECYCLES_CORE = false/);
+  assert.match(paint, /presentIosCrt/);
   assert.doesNotMatch(paint, /recycleCore\(/);
   assert.doesNotMatch(paint, /hardReset\(/);
   assert.doesNotMatch(paint, /autostartAfterReady\(/);
+  assert.doesNotMatch(paint, /ios-paint-poll/);
+});
+
+test("iOS WebGL backing is locked to 384x272 before the first context", () => {
+  assert.match(host, /this\.width = 384/);
+  assert.match(host, /this\.height = 272/);
+  assert.match(host, /lockIosBacking/);
 });
 
 test("iPhone floppy Play still recycles — never hot-swap (locked)", () => {

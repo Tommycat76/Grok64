@@ -82,7 +82,9 @@ import { bootFileName, driveForPlay, d64DiskName, isDiskKind, isWorkDiskImage, k
 import { wrapForDiskSwap, prepareAutostartDisk, wantsCracktroNudge } from "@/lib/emu/d64";
 import { isSid, psidToPrg } from "@/lib/emu/psid";
 import { toArrayBuffer } from "@/lib/emu/archive";
-import { glog, glogFire, subscribeLog } from "@/lib/emu/debug";
+import { BuildId } from "@/components/emu/BuildId";
+import { debugQueryOn, glog, glogFire, setDebugUi, subscribeLog } from "@/lib/emu/debug";
+import { readBuildId } from "@/lib/emu/build-id";
 import { createMenuJoyGate, menuJoyStep, resetMenuJoyGate } from "@/lib/emu/menu-joy.mjs";
 import { applyStickPrecision, createStickPrecision, resetStickPrecision } from "@/lib/emu/stick-precision.mjs";
 import { publicUrl } from "@/lib/public-url";
@@ -95,13 +97,14 @@ import {
   isIosMirrorActive,
   isIosMirrorPainted,
   isIosPaintSettled,
-  kickIosPaint,
+  presentIosCrt,
   resetIosPaintState,
-  scheduleIosPaintKicks,
+  scheduleIosCrtPresents,
   shotDisplayCanvas,
   startIosPaintWatchdog,
+  stopIosCrt,
   stopIosPaintWatchdog,
-  stopIosViceMirror,
+  stripIosOverlay,
 } from "@/lib/emu/ios-paint";
 
 function frameMsForStandard(standard: string) {
@@ -356,7 +359,7 @@ export function Grok64App() {
     }));
     return () => {
       stopIosPaintWatchdog();
-      stopIosViceMirror();
+      stopIosCrt();
     };
   }, []);
   useEffect(() => {
@@ -382,6 +385,22 @@ export function Grok64App() {
       paintPath: () => iosCrtPath(),
       mirrorPainted: () => isIosMirrorPainted(),
       mirrorActive: () => isIosMirrorActive(),
+      buildId: () => readBuildId(),
+      crt: () => {
+        const root = document.getElementById("grok64-player");
+        const c = root?.querySelector("canvas");
+        return {
+          path: iosCrtPath(),
+          settled: isIosPaintSettled(),
+          overlay: Boolean(root?.querySelector(".g64-ios-mirror")),
+          live: root?.classList.contains("g64-ios-crt-live") ?? false,
+          w: c?.width ?? 0,
+          h: c?.height ?? 0,
+          cw: c?.clientWidth ?? 0,
+          ch: c?.clientHeight ?? 0,
+          hidden: c ? getComputedStyle(c).visibility === "hidden" || getComputedStyle(c).opacity === "0" : true,
+        };
+      },
       media: () =>
         readMountedMedia(emuRef.current).map((m) => ({
           name: m.name,
@@ -525,7 +544,22 @@ export function Grok64App() {
       delete w.__g64;
     };
   }, []);
-  useEffect(() => subscribeLog(setLogLines), []);
+  useEffect(() => {
+    if (debugQueryOn()) {
+      useEmu.getState().setDebugLog(true);
+      setDebugUi(true);
+    }
+  }, []);
+  useEffect(() => {
+    setDebugUi(s.debugLog || debugQueryOn());
+  }, [s.debugLog]);
+  useEffect(() => {
+    if (!(s.debugLog || debugQueryOn())) {
+      setLogLines([]);
+      return;
+    }
+    return subscribeLog(setLogLines);
+  }, [s.debugLog]);
   useEffect(() => {
     const quiet = /setImmediates|Wake Lock|NotAllowedError/i;
     const onErr = (ev) => {
@@ -565,7 +599,7 @@ export function Grok64App() {
         fitEmu(root, emuRef.current);
       }
       if (isIosPhone() && emuRef.current && useEmu.getState().running && !isIosPaintSettled()) {
-        kickIosPaint(emuRef.current, root, "poll");
+        presentIosCrt(emuRef.current, root, "running");
       }
       if (isIosPhone() && emuRef.current && useEmu.getState().running && !useEmu.getState().muted) {
         if (audioLocked(emuRef.current)) unlockAudio(emuRef.current);
@@ -651,7 +685,7 @@ export function Grok64App() {
           persistGateRef.current = true;
           if (isIosPhone()) {
             const playerEl = document.getElementById("grok64-player");
-            kickIosPaint(emuRef.current, playerEl, "play-unlock");
+            presentIosCrt(emuRef.current, playerEl, "play-unlock");
             startIosAutoPaint();
           }
         }, lockMs),
@@ -701,8 +735,8 @@ export function Grok64App() {
       if (isIosPhone()) {
         const playerEl = document.getElementById("grok64-player");
         fitEmu(playerEl, emu);
-        kickIosPaint(emu, playerEl, "user-reset");
-        scheduleIosPaintKicks(emu, playerEl);
+        presentIosCrt(emu, playerEl, "user-reset", true);
+        scheduleIosCrtPresents(emu, playerEl, "user-reset");
       }
     })();
     toast.message("Reset — READY");
@@ -711,7 +745,7 @@ export function Grok64App() {
   const resumePlayback = useCallback(() => {
     unlockAudio(emuRef.current);
     const playerEl = document.getElementById("grok64-player");
-    kickIosPaint(emuRef.current, playerEl, "resume", true);
+    presentIosCrt(emuRef.current, playerEl, "resume", true);
     iosTapResumeCooldown();
     dismissEjsPrompts(playerEl, "play");
     s.setPaused(false);
@@ -720,11 +754,8 @@ export function Grok64App() {
     setAwaitingStart(false);
     setIosResume(false);
     glog("resumePlayback");
-    void forceIosMirrorBlit(emuRef.current, playerEl, true).then((ok) => {
-      if (ok) {
-        setIosResume(false);
-        glog("ios-resume-blit-ok");
-      }
+    void forceIosMirrorBlit(emuRef.current, playerEl, true).then(() => {
+      setIosResume(false);
       startIosAutoPaint();
     });
   }, [s, startIosAutoPaint]);
@@ -732,8 +763,9 @@ export function Grok64App() {
     if (!isIosPhone() || !emu) return;
     const playerEl = document.getElementById("grok64-player");
     fitEmu(playerEl, emu);
-    kickIosPaint(emu, playerEl, tag);
-    scheduleIosPaintKicks(emu, playerEl);
+    stripIosOverlay(playerEl);
+    presentIosCrt(emu, playerEl, tag);
+    scheduleIosCrtPresents(emu, playerEl, tag);
     startIosAutoPaint(() => {
       if (gen != null && loadGenRef.current !== gen) return;
       if (playLockRef.current || bootHoldRef.current) return;
@@ -924,7 +956,7 @@ export function Grok64App() {
       });
       if (emuRef.current) {
         stopIosPaintWatchdog();
-        stopIosViceMirror();
+        stopIosCrt();
         resetIosPaintState();
         await recycleCore(emuRef.current, el);
         emuRef.current = null;
@@ -932,7 +964,7 @@ export function Grok64App() {
         setCmdSwapped(false);
       } else {
         stopIosPaintWatchdog();
-        stopIosViceMirror();
+        stopIosCrt();
         resetIosPaintState();
         destroyEmu(null, el);
       }
@@ -1509,7 +1541,7 @@ export function Grok64App() {
     const playerEl = document.getElementById("grok64-player");
     if (!s.booting && !s.running) return;
     if (s.booting || (s.running && !isIosPaintSettled())) {
-      kickIosPaint(emuRef.current, playerEl, s.booting ? "booting" : "running");
+      presentIosCrt(emuRef.current, playerEl, s.booting ? "booting" : "running");
       startIosAutoPaint(() => {
         if (bootHoldRef.current || playLockRef.current) return;
         useEmu.getState().setBooting(false);
@@ -1799,6 +1831,11 @@ export function Grok64App() {
     void (async () => {
       const on = await syncJiffy(emuRef.current, "hard");
       useEmu.getState().setBooting(false);
+      if (isIosPhone()) {
+        const playerEl = document.getElementById("grok64-player");
+        presentIosCrt(emuRef.current, playerEl, "jiffy");
+        scheduleIosCrtPresents(emuRef.current, playerEl, "jiffy");
+      }
       if (on) toast.message("JiffyDOS applied — real KERNAL + 1541 ROMs");
       else if (s.jiffyDos) toast.error("JiffyDOS ROMs did not land — stock KERNAL");
     })();
@@ -2017,10 +2054,12 @@ export function Grok64App() {
                 ? "Still starting — tap again if the screen stays dark."
                 : "Tap the power button. The C64 boots to READY with a blank work disk. Grab games from Software."}
           </p>
+          <BuildId />
         </div>
       ) : null}
       <header className="g64-top" hidden={!s.powered}>
         <h1>Grok64</h1>
+        <BuildId />
         <div className="g64-top-rail">
           <button type="button" className="g64-chip" onClick={() => s.setSettingsOpen(true)} title={detectLine(resolved)}>
             {resolved.chip}
@@ -2208,11 +2247,13 @@ export function Grok64App() {
         </button>
         </div>
       </header>
-      <div className="g64-log" aria-live="polite" hidden={!s.powered}>
-        {logLines.slice(-5).map((l) => (
-          <div key={l}>{l}</div>
-        ))}
-      </div>
+      {s.powered && (s.debugLog || debugQueryOn()) ? (
+        <div className="g64-log" aria-live="polite">
+          {logLines.slice(-5).map((l) => (
+            <div key={l}>{l}</div>
+          ))}
+        </div>
+      ) : null}
       <div className="g64-stage">
         <div className="g64-bezel">
           <div

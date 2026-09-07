@@ -19,6 +19,26 @@ export function subscribeLog(fn: (lines: string[]) => void) {
   };
 }
 
+export function debugQueryOn(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return new URLSearchParams(window.location.search).get("debug") === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function debugUiOn(): boolean {
+  if (typeof window === "undefined") return false;
+  const w = window as unknown as { __g64debug?: boolean };
+  return debugQueryOn() || w.__g64debug === true;
+}
+
+export function setDebugUi(on: boolean) {
+  if (typeof window === "undefined") return;
+  (window as unknown as { __g64debug?: boolean }).__g64debug = on;
+}
+
 export function glog(msg: string, extra?: Record<string, unknown>) {
   const stamp = new Date().toISOString().slice(11, 23);
   const line = extra ? `${stamp} ${msg} ${JSON.stringify(extra)}` : `${stamp} ${msg}`;
@@ -29,6 +49,7 @@ export function glog(msg: string, extra?: Record<string, unknown>) {
   if (typeof window !== "undefined") {
     const w = window as unknown as { __g64log?: string[] };
     w.__g64log = snap;
+    if (!debugUiOn()) return;
     if (flushTimer) return;
     flushTimer = window.setTimeout(() => {
       flushTimer = null;

@@ -1,7 +1,20 @@
+import { execSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import type { Plugin } from "vite";
 import { defineConfig } from "vite";
+
+function g64GitShort() {
+  try {
+    return execSync("git rev-parse --short=7 HEAD", {
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .trim();
+  } catch {
+    return "dev";
+  }
+}
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import viteReact from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -174,6 +187,9 @@ export default defineConfig(({ command, isPreview }) => {
       strictPort: true,
     },
     resolve: { tsconfigPaths: true },
+    define: {
+      "import.meta.env.VITE_G64_GIT": JSON.stringify(g64GitShort()),
+    },
     oxc: production
       ? {
           jsx: {

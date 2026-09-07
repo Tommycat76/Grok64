@@ -127,6 +127,32 @@ let restartArmed = false;
 let webglPatched = false;
 let userJoyPort: JoyPort = 2;
 
+function lockIosBacking(canvas: HTMLCanvasElement, w: number, h: number) {
+  const tagged = canvas as HTMLCanvasElement & { __g64lock?: boolean };
+  if (tagged.__g64lock) return;
+  tagged.__g64lock = true;
+  try {
+    Object.defineProperty(canvas, "width", {
+      configurable: true,
+      enumerable: true,
+      get: () => w,
+      set: () => {
+        /* RetroArch resize would wipe the CriOS WebGL context. */
+      },
+    });
+    Object.defineProperty(canvas, "height", {
+      configurable: true,
+      enumerable: true,
+      get: () => h,
+      set: () => {
+        /* ignore */
+      },
+    });
+  } catch {
+    /* engine refused redefine */
+  }
+}
+
 function preserveWebglBuffer() {
   if (webglPatched || typeof HTMLCanvasElement === "undefined") return;
   webglPatched = true;
@@ -139,16 +165,23 @@ function preserveWebglBuffer() {
     attrs?: Record<string, unknown>,
   ) {
     if (type === "webgl" || type === "webgl2" || type === "experimental-webgl") {
+      // Size the VICE framebuffer before the first context. Assigning width
+      // after GL exists wipes CriOS. CSS fills the CRT around 384×272.
+      if (ios && (this.width !== 384 || this.height !== 272)) {
+        this.width = 384;
+        this.height = 272;
+      }
       // iOS WebKit needs preserveDrawingBuffer for CRT compositing; Android tablets do not
       // and pay a large fill-rate cost when it is forced on every WebGL context.
       const merged: Record<string, unknown> = { ...attrs, antialias: false, alpha: false };
       if (ios) merged.preserveDrawingBuffer = true;
       const ctx = orig.call(this, type, merged);
-      // Remember VICE's context. ios-paint must never getContext() itself —
-      // a second getContext with different attrs returns null on WebKit, and a
-      // first getContext before RetroArch steals the canvas (black CRT, no PNG).
+      // Remember VICE's context. The iOS CRT path must never getContext()
+      // itself — a second WebGL context on WebKit returns null or steals the
+      // canvas (solid black CRT).
       if (ctx) {
         (this as HTMLCanvasElement & { __g64gl?: unknown }).__g64gl = ctx;
+        if (ios) lockIosBacking(this, 384, 272);
       }
       return ctx;
     }
@@ -985,9 +1018,9 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       const dpr = touchMobile ? 1 : Math.min(window.devicePixelRatio || 1, 2);
       let bw = Math.max(384, Math.round(cw * dpr));
       let bh = Math.max(272, Math.round(ch * dpr));
-      if (tablet) {
-        // VICE framebuffer is 384×272. Stretching the canvas past that leaves the
-        // C64 picture in the top-left with a black gap (Onn tablet + log/keyboard).
+      if (tablet || iosPhone) {
+        // VICE framebuffer is 384×272. Stretching the backing store past that
+        // leaves a black gap. CriOS CSS fills the CRT; do not grow the buffer.
         bw = 384;
         bh = 272;
       } else if (touchMobile) {
@@ -1000,10 +1033,10 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
         }
       }
       const backingOk = canvas.width === bw && canvas.height === bh && canvas.width >= 64;
-      // Reassigning canvas.width wipes the WebGL context. On iPhone that also
-      // kills cmd_take_screenshot (paint-poll hang). Never resize an already
-      // live iPhone backing store — CSS scales the 384×272 framebuffer.
-      const canResizeBacking = !iosPhone || canvas.width < 64 || canvas.height < 64;
+      const glLive = Boolean((canvas as HTMLCanvasElement & { __g64gl?: unknown }).__g64gl);
+      // Reassigning canvas.width wipes the WebGL context on CriOS. Never
+      // resize after VICE has a context — CSS scales 384×272.
+      const canResizeBacking = !iosPhone || !glLive || canvas.width < 64 || canvas.height < 64;
       if (
         canResizeBacking &&
         !backingOk &&
