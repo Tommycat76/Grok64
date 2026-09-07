@@ -26,6 +26,7 @@ import {
   ensureRuntime,
   prefetchViceCores,
   fitEmu,
+  layoutIosCrtHost,
   hardReset,
   hasRealGamepad,
   joyInput,
@@ -606,9 +607,11 @@ export function Grok64App() {
   }, []);
   useEffect(() => {
     if (!s.powered) return;
+    if (isIosPhone()) layoutIosCrtHost(document.getElementById("grok64-player"));
     const id = window.setInterval(() => {
       const root = document.getElementById("grok64-player");
       if (!root) return;
+      if (isIosPhone()) layoutIosCrtHost(root);
       dismissEjsPrompts(root, useEmu.getState().booting ? "boot" : "play");
       const canvas = root.querySelector("canvas");
       if (canvas && canvas.clientWidth > 16 && !bootHoldRef.current && !playLockRef.current && emuRef.current) {
@@ -617,8 +620,8 @@ export function Grok64App() {
       if (canvas && (canvas.width < 64 || canvas.height < 64)) {
         fitEmu(root, emuRef.current);
       }
-      if (isIosPhone() && emuRef.current && useEmu.getState().running && !isIosPaintSettled()) {
-        presentIosCrt(emuRef.current, root, "running");
+      if (isIosPhone() && emuRef.current && (useEmu.getState().running || useEmu.getState().booting) && !isIosPaintSettled()) {
+        presentIosCrt(emuRef.current, root, useEmu.getState().booting ? "booting" : "running");
       }
       if (isIosPhone() && emuRef.current && useEmu.getState().running && !useEmu.getState().muted) {
         if (audioLocked(emuRef.current)) unlockAudio(emuRef.current);
@@ -2325,8 +2328,10 @@ export function Grok64App() {
               if (!pendingKickRef.current) onFire(false);
             }}
           >
-            <div className="g64-ios-zoom" data-g64-ios-zoom="">
-              <PlayerMount />
+            <div className="g64-ios-slot" data-g64-ios-slot="">
+              <div className="g64-ios-zoom" data-g64-ios-zoom="">
+                <PlayerMount />
+              </div>
             </div>
             {s.crtFilter && snap.os !== "ios" ? <div className="g64-scan" /> : null}
             {iosResume && !s.booting ? (

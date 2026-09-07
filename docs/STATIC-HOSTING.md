@@ -44,8 +44,12 @@ phone went black. **#48** (`main@6c10228`, #7) and **#49** (`main@9c35eb7`, #8)
 were honestly red: CSS 100% + clientWidth lie/unlock, paint `count:0` solid
 black. That family is dead. `#50` (`main@5a43c67`, #9) painted on Plex
 (`~853k`) but Tom’s CriOS was a postage stamp — **Plex paint-count ≠ Tom
+geometry**. `#51` (`main@7d09f7a` / `routes-2Aufi9H1.js`, #10) zoomed the
+non-GL host (`zoom:3` on Plex) — Tom got a bigger picture still flush
+**top-right** with a purple **L left+bottom**. **Plex `zoom:3` ≠ Tom
 geometry**. Current ship is live 384×272 WebGL + CSS `zoom` on a non-GL
-`.g64-ios-zoom` host. Zero PASS without Tom.
+`.g64-ios-zoom` host, centered by a non-zoomed `.g64-ios-slot`. Zero PASS
+without Tom.
 
 ### CRT fill gate (required after deploy)
 
@@ -60,9 +64,9 @@ node scripts/crt-fill-gate.mjs http://127.0.0.1:8091/
 It launches Playwright Chromium at an iPhone viewport (390×844, touch, CriOS UA), powers on, then:
 
 1. Hides on-screen chrome, crops `.g64-screen`, and measures the **painted** pixel bbox **and coverage** of the **live WebGL** canvas. Solid black / `count:0` **fail**. Tom #44 top-right and GL-origin bottom-left stamps still fail, even when wrapper rects report fill 1.00. **Plex paint-count ≠ Tom geometry** (#50 / #9).
-2. Requires **untransformed** computed CSS px of the live GL canvas and `#grok64-player` to be the **native 384×272 box** (not CSS 100%, not a 2D present, not a CSS transform on GL). The non-GL `.g64-ios-zoom` host must carry `zoom`.
+2. Requires **untransformed** computed CSS px of the live GL canvas and `#grok64-player` to be the **native 384×272 box** (not CSS 100%, not a 2D present, not a CSS transform on GL). The non-GL `.g64-ios-zoom` host must carry `zoom`. The non-zoomed `.g64-ios-slot` must share a center with the bezel (not a #51 top-right / L-border crop).
 3. Fails if the boot overlay is a full-bezel black sheet, or if power → first READY frame takes longer than 18s (flags the ~39s iPhone blank). Plex Chromium may not reproduce iPhone WASM time.
-4. **Session hold** (~8s after first READY): still powered (no splash remount), `__g64` still mounted, no full page reload / tab crash, **no 2D present canvas covering GL**, VICE backing still 384×272, **clientWidth is the real 384×272 CSS box**, CRT still painted (not #46–#50 solid black / postage stamp).
+4. **Session hold** (~8s after first READY): still powered (no splash remount), `__g64` still mounted, no full page reload / tab crash, **no 2D present canvas covering GL**, VICE backing still 384×272, **clientWidth is the real 384×272 CSS box**, CRT still painted (not #46–#51 solid black / postage stamp / L-border).
 
 Screenshots land in `screenshots/crt-fill-gate-*.png` (including `*-bezel.png` and `*-hold-bezel.png` crops).
 

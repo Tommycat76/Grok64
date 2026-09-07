@@ -14,10 +14,11 @@
  *   node scripts/crt-fill-gate.mjs http://127.0.0.1:8091/
  *
  * HARD: asserts the *painted* live-GL picture is not solid black.
- * After #50, CSS zoom lives on the non-GL `.g64-ios-zoom` host; the GL
- * canvas stays native 384×272 CSS. Tom #44 top-right and GL-origin
- * bottom-left still fail. DOM wrapper fill of 1.0 is never a pass.
- * Plex paint-count ≠ Tom geometry.
+ * After #51, CSS zoom lives on the non-GL `.g64-ios-zoom` host; a
+ * non-zoomed `.g64-ios-slot` is centered on the post-zoom used box. The
+ * GL canvas stays native 384×272 CSS. Tom #44 / #51 top-right and
+ * GL-origin bottom-left still fail. DOM wrapper fill of 1.0 is never a
+ * pass. Plex paint-count ≠ Tom geometry. Plex `zoom:3` ≠ Tom geometry.
  *
  * Also holds after first READY paint and fails if the session remounts
  * to the power splash, __g64 is torn down, the page reloads, or the CRT
@@ -48,6 +49,17 @@ import {
   oldStampLayoutFails,
   paintedContent,
 } from "./crt-fill-paint.mjs";
+
+function slotSharesCenter(slot, bezel, slop = 28) {
+  if (!slot || !bezel || !(slot.w >= 8) || !(slot.h >= 8) || !(bezel.w >= 8) || !(bezel.h >= 8)) {
+    return false;
+  }
+  const sx = slot.x + slot.w / 2;
+  const sy = slot.y + slot.h / 2;
+  const bx = bezel.x + bezel.w / 2;
+  const by = bezel.y + bezel.h / 2;
+  return Math.abs(sx - bx) <= slop && Math.abs(sy - by) <= slop;
+}
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const url = process.argv[2] || process.env.G64_GATE_URL || "https://grok64.tomsprojects.cc/";
@@ -113,12 +125,14 @@ const measureSrc = () => {
   const boot = document.querySelector(".g64-boot");
   const player = document.getElementById("grok64-player");
   const zoomHost = document.querySelector(".g64-ios-zoom");
+  const zoomSlot = document.querySelector(".g64-ios-slot");
   const present = document.querySelector("canvas.g64-ios-present");
   const canvas = player?.querySelector("canvas:not(.g64-ios-present)");
   const cs = canvas ? getComputedStyle(canvas) : null;
   const ns = present ? getComputedStyle(present) : null;
   const ps = player ? getComputedStyle(player) : null;
   const zs = zoomHost ? getComputedStyle(zoomHost) : null;
+  const slotCs = zoomSlot ? getComputedStyle(zoomSlot) : null;
   const ss = screen ? getComputedStyle(screen) : null;
   const bs = boot ? getComputedStyle(boot) : null;
   const bezelBox = box(bezel);
@@ -170,6 +184,11 @@ const measureSrc = () => {
       ? { w: zs.width, h: zs.height, xf: zs.transform, zoom: zs.zoom }
       : null,
     zoomBox: box(zoomHost),
+    zoomSlot: Boolean(zoomSlot),
+    slotCss: slotCs
+      ? { w: slotCs.width, h: slotCs.height, xf: slotCs.transform, zoom: slotCs.zoom, left: slotCs.left, top: slotCs.top }
+      : null,
+    slotBox: box(zoomSlot),
     screenCss: ss ? { w: ss.width, h: ss.height } : null,
     bootCss: bs ? { w: bs.width, h: bs.height } : null,
     playerXf: ps?.transform ?? null,
@@ -268,7 +287,7 @@ console.log("GATE viewport", JSON.stringify({ ...IPHONE, dpr: 3, ua: "CriOS-iPho
 console.log("GATE read docs/IOS_CRT_KNOWN_FAILURES.md first.");
 console.log("GATE note Cursor-sandbox WebKit is not a ship gate. This script is the Plex painted-CRT check.");
 console.log("GATE note DOM getBoundingClientRect fill of 1.0 is not a pass — painted bbox + untransformed CSS px must fill.");
-console.log("GATE this is NOT a real CriOS PASS. Chromium-on-Plex can go green while CriOS blacks out (#47) or stamps (#50).");
+console.log("GATE this is NOT a real CriOS PASS. Chromium-on-Plex can go green while CriOS blacks out (#47), stamps (#50), or L-borders (#51).");
 console.log("GATE Plex paint-count ≠ Tom geometry. Tom's phone is the only PASS. This script must never claim PASS.");
 
 await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
@@ -397,6 +416,24 @@ note(Boolean(ready?.zoomHost), "non-GL .g64-ios-zoom host is in the tree", {
   zoomHost: ready?.zoomHost,
   zoomCss: ready?.zoomCss,
 });
+note(Boolean(ready?.zoomSlot), "non-zoomed .g64-ios-slot is in the tree (centers #51 zoom)", {
+  zoomSlot: ready?.zoomSlot,
+  slotCss: ready?.slotCss,
+  slotBox: ready?.slotBox,
+});
+{
+  const slotZoom = Number.parseFloat(String(ready?.slotCss?.zoom ?? "1"));
+  note(
+    !Number.isFinite(slotZoom) || Math.abs(slotZoom - 1) < 0.02,
+    "centering slot itself is not zoomed (zoom stays on .g64-ios-zoom)",
+    { slotZoom: ready?.slotCss?.zoom },
+  );
+  note(
+    !hasCssScale(ready?.slotCss?.xf),
+    "centering slot has no CSS transform (not a #2 scale path)",
+    { slotXf: ready?.slotCss?.xf },
+  );
+}
 {
   const z = Number.parseFloat(String(ready?.zoomCss?.zoom ?? ""));
   note(
@@ -451,6 +488,13 @@ if (ready?.playerCss && bezelInner) {
 }
 if (ready?.screenCss && bezelInner) {
   assertCssFill("screen CSS px vs bezel (untransformed)", ready.screenCss.w, ready.screenCss.h, bezelInner);
+}
+if (ready?.slotBox && bezelInner) {
+  note(
+    slotSharesCenter(ready.slotBox, bezelInner),
+    "zoom slot shares a center with the bezel (not a #51 top-right / L-border)",
+    { slotBox: ready.slotBox, bezelInner, slotCss: ready.slotCss },
+  );
 }
 
 const paint = assertPainted("READY", readyShot, { title: ready?.title, crtMs });

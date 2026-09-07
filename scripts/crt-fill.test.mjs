@@ -57,6 +57,7 @@ test("Plex CRT fill gate script exists and documents iPhone viewport fill", () =
   assert.match(gate, /no full page reload/);
   assert.match(gate, /__g64 still mounted/);
   assert.match(gate, /g64-ios-zoom|zoom host/);
+  assert.match(gate, /g64-ios-slot|zoom slot/);
   assert.match(gate, /letterboxPaintFails/);
   assert.match(gate, /Plex paint-count ≠ Tom geometry|paint-count ≠ Tom geometry/);
   assert.match(gate, /Tom's phone is the only PASS/);
@@ -184,14 +185,17 @@ test("remapViceViewport expands a 384×272 stamp in a larger drawing buffer", ()
   assert.match(host, /w: drawingW, h: drawingH/);
 });
 
-test("iOS CRT is native 384×272 + non-GL zoom, never wrapper transform or 2D present", () => {
+test("iOS CRT is native 384×272 + centered zoom slot, never wrapper transform or 2D present", () => {
   const iosFn = host.slice(host.indexOf("function letterboxNativeCss"), host.indexOf("export async function recycleCore"));
   assert.match(iosFn, /width", "384px"/);
   assert.match(iosFn, /height", "272px"/);
   assert.match(iosFn, /flex", "0 0 384px"/);
   assert.match(iosFn, /stripIosPresent/);
   assert.match(iosFn, /ensureIosZoomHost/);
+  assert.match(iosFn, /ensureIosZoomSlot/);
   assert.match(iosFn, /applyIosZoomHost/);
+  assert.match(iosFn, /applyIosZoomSlot/);
+  assert.match(iosFn, /layoutIosCrtHost/);
   assert.match(iosFn, /"zoom"/);
   assert.doesNotMatch(iosFn, /fillBezelCss/);
   assert.doesNotMatch(iosFn, /(?<!un)lockIosClientBox\(canvas/);
@@ -205,6 +209,7 @@ test("iOS CRT is native 384×272 + non-GL zoom, never wrapper transform or 2D pr
   assert.doesNotMatch(host, /lockIosClientBox\(this, 384, 272\)/);
   const zoomMod = readFileSync(join(root, "src/lib/emu/ios-zoom.ts"), "utf8");
   assert.match(zoomMod, /export function iosCrtZoom/);
+  assert.match(zoomMod, /export function iosZoomLayout/);
   assert.match(zoomMod, /pixel ratio/);
 });
 
@@ -225,6 +230,7 @@ test("iOS phone screen CSS keeps 384×272 GL — no #43 cqh, no CSS 100%", () =>
   assert.match(css, /\.g64-ios-present/);
   assert.match(css, /html\[data-g64os="ios"\] \.g64-screen > canvas\.g64-ios-present/);
   assert.match(css, /\.g64-ios-zoom/);
+  assert.match(css, /\.g64-ios-slot/);
 });
 
 test("letterboxPaintFails accepts a centered native READY and rejects black / #44", () => {

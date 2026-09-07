@@ -13,7 +13,7 @@ const present = readFileSync(join(root, "src/lib/emu/ios-present.ts"), "utf8");
 const gate = readFileSync(join(root, "scripts/crt-fill-gate.mjs"), "utf8");
 const docs = readFileSync(join(root, "docs/STATIC-HOSTING.md"), "utf8");
 
-test("known-failures doc exists and lists Tom phone failures 1–9", () => {
+test("known-failures doc exists and lists Tom phone failures 1–10", () => {
   assert.equal(existsSync(docPath), true);
   const doc = readFileSync(docPath, "utf8");
   assert.match(doc, /Read `docs\/IOS_CRT_KNOWN_FAILURES\.md` first/);
@@ -39,6 +39,12 @@ test("known-failures doc exists and lists Tom phone failures 1–9", () => {
   assert.match(doc, /5a43c67/);
   assert.match(doc, /BPUU8W3r|postage stamp/);
   assert.match(doc, /Plex paint-count ≠ Tom geometry|paint-count ≠ Tom geometry/);
+  assert.match(doc, /### 10\.|#10|#51/);
+  assert.match(doc, /7d09f7a/);
+  assert.match(doc, /2Aufi9H1/);
+  assert.match(doc, /zoom-from-default-origin|top-left origin/);
+  assert.match(doc, /L on left \+ bottom|L-border|L left\+bottom/);
+  assert.match(doc, /Plex `zoom:3` still ≠ Tom geometry|Plex `zoom:3` ≠ Tom/);
   assert.match(doc, /JiffyDOS/);
   assert.match(doc, /#39/);
   assert.match(doc, /build-id|build id/i);
@@ -50,8 +56,8 @@ test("known-failures doc exists and lists Tom phone failures 1–9", () => {
 
 test("project agents and CRT follow-ups point at the known-failures doc", () => {
   assert.match(agents, /docs\/IOS_CRT_KNOWN_FAILURES\.md/);
-  assert.match(agents, /1–9|1-9/);
-  assert.match(agents, /zoom|postage stamp|#50/);
+  assert.match(agents, /1–10|1-10/);
+  assert.match(agents, /zoom|#51|#50|g64-ios-slot/);
   assert.match(paint, /docs\/IOS_CRT_KNOWN_FAILURES\.md/);
   assert.match(host, /docs\/IOS_CRT_KNOWN_FAILURES\.md/);
   assert.match(present, /docs\/IOS_CRT_KNOWN_FAILURES\.md/);
@@ -59,12 +65,15 @@ test("project agents and CRT follow-ups point at the known-failures doc", () => 
   assert.match(docs, /docs\/IOS_CRT_KNOWN_FAILURES\.md/);
 });
 
-test("new CRT path is native 384×272 + non-GL zoom, not failed approaches 1–9", () => {
+test("new CRT path is native 384×272 + centered zoom slot, not failed approaches 1–10", () => {
   const iosFn = host.slice(host.indexOf("function letterboxNativeCss"), host.indexOf("export async function recycleCore"));
   assert.match(iosFn, /letterboxNativeCss/);
   assert.match(iosFn, /ensureIosZoomHost/);
+  assert.match(iosFn, /ensureIosZoomSlot/);
   assert.match(iosFn, /applyIosZoomHost/);
-  assert.match(iosFn, /iosCrtZoom/);
+  assert.match(iosFn, /applyIosZoomSlot/);
+  assert.match(iosFn, /layoutIosCrtHost/);
+  assert.match(iosFn, /iosZoomLayout/);
   assert.match(iosFn, /"zoom"/);
   assert.match(iosFn, /width", "384px"/);
   assert.match(iosFn, /height", "272px"/);
@@ -82,18 +91,21 @@ test("new CRT path is native 384×272 + non-GL zoom, not failed approaches 1–9
   assert.doesNotMatch(presentCode, /toDataURL/);
   assert.match(paint, /live-webgl/);
   assert.match(paint, /zoom/);
+  assert.match(paint, /layoutIosCrtHost/);
   const patched = host.slice(host.indexOf("function preserveWebglBuffer"), host.indexOf("type GuardedGm"));
   assert.match(patched, /width", "384px"/);
   assert.doesNotMatch(patched, /lockIosClientBox\(this,\s*384,\s*272\)/);
 });
 
-test("gate never claims PASS and requires non-GL zoom plus native GL CSS", () => {
+test("gate never claims PASS and requires centered slot plus native GL CSS", () => {
   assert.match(gate, /Tom's phone is the only PASS/);
   assert.match(gate, /must never claim PASS|never claim PASS/i);
   assert.doesNotMatch(gate, /GATE PASS/);
   assert.match(gate, /Plex paint-count ≠ Tom geometry|paint-count ≠ Tom geometry/);
   assert.match(gate, /letterboxPaintFails/);
   assert.match(gate, /g64-ios-zoom/);
+  assert.match(gate, /g64-ios-slot/);
+  assert.match(gate, /slotSharesCenter|shares a center/);
   assert.match(gate, /no 2D present canvas covering live GL/);
   assert.match(gate, /GL clientWidth is native 384x272/);
   assert.doesNotMatch(gate, /present canvas revealed after a lit copy/);

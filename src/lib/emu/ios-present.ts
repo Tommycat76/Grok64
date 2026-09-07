@@ -7,7 +7,7 @@
  *
  * This module only removes stale `.g64-ios-present` nodes from cached JS.
  * Presentation is the live WebGL canvas (ios-paint + applyIosCrtStyle +
- * non-GL `.g64-ios-zoom`).
+ * centered non-GL `.g64-ios-slot` / `.g64-ios-zoom`).
  */
 
 export const IOS_PRESENT_CLASS = "g64-ios-present";

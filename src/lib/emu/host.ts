@@ -17,9 +17,22 @@ import type { DriveMode, IecDrive, IecMap, IecUnit, JoyPort, ReuSize, ScpuSimm, 
 import { RETRO_BTN } from "./types";
 import { glog } from "./debug";
 import { stopIosPresent, stripIosPresent } from "./ios-present";
-import { IOS_ZOOM_CLASS, iosCrtZoom, NATIVE_FB_H, NATIVE_FB_W } from "./ios-zoom";
+import {
+  IOS_SLOT_CLASS,
+  IOS_ZOOM_CLASS,
+  iosZoomLayout,
+  NATIVE_FB_H,
+  NATIVE_FB_W,
+} from "./ios-zoom";
 
-export { IOS_ZOOM_CLASS, iosCrtZoom, NATIVE_FB_H, NATIVE_FB_W } from "./ios-zoom";
+export {
+  IOS_SLOT_CLASS,
+  IOS_ZOOM_CLASS,
+  iosCrtZoom,
+  iosZoomLayout,
+  NATIVE_FB_H,
+  NATIVE_FB_W,
+} from "./ios-zoom";
 
 const DATA = "https://cdn.emulatorjs.org/stable/data/";
 
@@ -1151,7 +1164,7 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       let bh = Math.max(272, Math.round(ch * dpr));
       if (tablet || iosPhone) {
         // VICE framebuffer is 384×272. Growing the backing store is solid
-        // black. iOS: native CSS box + non-GL zoom host. Tablet: CSS transform.
+        // black. iOS: native CSS box + centered zoom slot. Tablet: CSS transform.
         bw = 384;
         bh = 272;
       } else if (touchMobile) {
@@ -1183,7 +1196,7 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       if (tablet || iosPhone) {
         // VICE paints 384×272. WebGL on some Android GPUs ignores object-fit.
         // Tablet: CSS-pixel transform on the canvas. iOS: native 384×272
-        // CSS + zoom on a non-GL host. CSS 100% + clientWidth is #7/#8.
+        // CSS + centered zoom slot. CSS 100% + clientWidth is #7/#8.
         if (isIos()) applyIosCrtStyle(canvas, el, parent);
         else applyTabletCrtStyle(canvas, el, parent);
       } else {
@@ -1237,6 +1250,15 @@ function crtBoxSize(box: HTMLElement, fallback: HTMLElement) {
   return {
     sw: Math.max(box.clientWidth || 0, Math.round(br.width) || 0, fallback.clientWidth || 0, 1),
     sh: Math.max(box.clientHeight || 0, Math.round(br.height) || 0, fallback.clientHeight || 0, 1),
+  };
+}
+
+/** Bezel / `.g64-screen` only — do not floor to the 384×272 player box. */
+function crtScreenSize(box: HTMLElement) {
+  const br = box.getBoundingClientRect();
+  return {
+    sw: Math.max(box.clientWidth || 0, Math.round(br.width) || 0, 1),
+    sh: Math.max(box.clientHeight || 0, Math.round(br.height) || 0, 1),
   };
 }
 
@@ -1341,17 +1363,54 @@ function ensureIosZoomHost(player: HTMLElement, box: HTMLElement): HTMLElement {
   return host;
 }
 
+function ensureIosZoomSlot(host: HTMLElement, box: HTMLElement): HTMLElement {
+  const existing = host.closest(`.${IOS_SLOT_CLASS}`) as HTMLElement | null;
+  if (existing) return existing;
+  const slot = document.createElement("div");
+  slot.className = IOS_SLOT_CLASS;
+  slot.setAttribute("data-g64-ios-slot", "");
+  const parent = host.parentElement ?? box;
+  parent.insertBefore(slot, host);
+  slot.appendChild(host);
+  return slot;
+}
+
+/**
+ * Non-zoomed slot sized to the post-zoom used box, absolutely placed at
+ * the centering offset. Not `transform:scale`. Not zoom-from-default-origin
+ * without a recenter (#51 / #10).
+ */
+function applyIosZoomSlot(slot: HTMLElement, layout: { left: number; top: number; usedW: number; usedH: number }) {
+  slot.classList.add(IOS_SLOT_CLASS);
+  slot.style.setProperty("display", "block", "important");
+  slot.style.setProperty("position", "absolute", "important");
+  slot.style.setProperty("inset", "auto", "important");
+  slot.style.setProperty("left", `${layout.left}px`, "important");
+  slot.style.setProperty("top", `${layout.top}px`, "important");
+  slot.style.setProperty("right", "auto", "important");
+  slot.style.setProperty("bottom", "auto", "important");
+  slot.style.setProperty("margin", "0", "important");
+  slot.style.setProperty("width", `${layout.usedW}px`, "important");
+  slot.style.setProperty("height", `${layout.usedH}px`, "important");
+  slot.style.setProperty("min-width", "0", "important");
+  slot.style.setProperty("min-height", "0", "important");
+  slot.style.setProperty("max-width", "none", "important");
+  slot.style.setProperty("max-height", "none", "important");
+  slot.style.setProperty("overflow", "hidden", "important");
+  slot.style.setProperty("flex", "0 0 auto", "important");
+  slot.style.setProperty("transform", "none", "important");
+  slot.style.setProperty("-webkit-transform", "none", "important");
+  slot.style.setProperty("zoom", "1");
+}
+
 /** CSS zoom on the non-GL host only. Never a transform on the GL canvas. */
-function applyIosZoomHost(host: HTMLElement, sw: number, sh: number) {
-  const dpr =
-    isIosPhone() && typeof window !== "undefined" ? Math.max(1, window.devicePixelRatio || 1) : 1;
-  const z = iosCrtZoom(sw, sh, dpr);
+function applyIosZoomHost(host: HTMLElement, z: number) {
   host.classList.add(IOS_ZOOM_CLASS);
   host.style.setProperty("display", "block", "important");
-  host.style.setProperty("position", "relative", "important");
+  host.style.setProperty("position", "absolute", "important");
   host.style.setProperty("inset", "auto", "important");
-  host.style.setProperty("left", "auto", "important");
-  host.style.setProperty("top", "auto", "important");
+  host.style.setProperty("left", "0", "important");
+  host.style.setProperty("top", "0", "important");
   host.style.setProperty("right", "auto", "important");
   host.style.setProperty("bottom", "auto", "important");
   host.style.setProperty("margin", "0", "important");
@@ -1369,13 +1428,40 @@ function applyIosZoomHost(host: HTMLElement, sw: number, sh: number) {
 }
 
 /**
- * CriOS CRT after #50 postage-stamp letterbox.
+ * Size and center the zoom slot from the bezel. Safe with no canvas / no
+ * emu — used on power so first phosphor is not a #51 top-left zoom.
+ */
+export function layoutIosCrtHost(root?: HTMLElement | null) {
+  if (typeof document === "undefined" || !isIos()) return null;
+  const player =
+    (root?.id === "grok64-player"
+      ? root
+      : ((root?.closest("#grok64-player") as HTMLElement | null) ??
+        (document.getElementById("grok64-player") as HTMLElement | null)));
+  if (!player) return null;
+  const box = (player.closest(".g64-screen") as HTMLElement | null) ?? player.parentElement;
+  if (!box) return null;
+  const host = ensureIosZoomHost(player, box);
+  const slot = ensureIosZoomSlot(host, box);
+  const { sw, sh } = crtScreenSize(box);
+  const dpr =
+    isIosPhone() && typeof window !== "undefined" ? Math.max(1, window.devicePixelRatio || 1) : 1;
+  const layout = iosZoomLayout(sw, sh, dpr);
+  applyIosZoomSlot(slot, layout);
+  applyIosZoomHost(host, layout.z);
+  letterboxNativeCss(player);
+  return { player, box, host, slot, layout };
+}
+
+/**
+ * CriOS CRT after #51 un-centered zoom.
  *
- * Read `docs/IOS_CRT_KNOWN_FAILURES.md` first. This is not 1–9:
- * live WebGL stays native 384×272 CSS + backing (the #39/#50 paint path).
- * CSS `zoom` on the non-GL `.g64-ios-zoom` host contain-fits that box
- * into the bezel. No wrapper CSS transform, no CSS 100% on GL, no
- * clientWidth lie/unlock, no 2D present, no PNG.
+ * Read `docs/IOS_CRT_KNOWN_FAILURES.md` first. This is not 1–10:
+ * live WebGL stays native 384×272 CSS + backing (the #39/#50/#51 paint
+ * path). CSS `zoom` on the non-GL `.g64-ios-zoom` host; a non-zoomed
+ * `.g64-ios-slot` is absolutely placed at the post-zoom centering offset.
+ * No wrapper CSS transform, no CSS 100% on GL, no clientWidth lie/unlock,
+ * no 2D present, no PNG, no bare zoom-from-default-origin.
  */
 export function applyIosCrtStyle(
   canvas: HTMLCanvasElement,
@@ -1390,18 +1476,13 @@ export function applyIosCrtStyle(
 
   const apply = () => {
     unlockIosClientBox(canvas);
-    box.style.setProperty("display", "flex", "important");
-    box.style.setProperty("align-items", "center", "important");
-    box.style.setProperty("justify-content", "center", "important");
-    const host = ensureIosZoomHost(player, box);
-    const { sw, sh } = crtBoxSize(box, el);
-    applyIosZoomHost(host, sw, sh);
-    letterboxNativeCss(player);
+    layoutIosCrtHost(player);
     const canvasParent = canvas.parentElement;
     if (
       canvasParent &&
       canvasParent !== player &&
-      !canvasParent.classList.contains(IOS_ZOOM_CLASS)
+      !canvasParent.classList.contains(IOS_ZOOM_CLASS) &&
+      !canvasParent.classList.contains(IOS_SLOT_CLASS)
     ) {
       letterboxNativeCss(canvasParent);
     }
