@@ -155,7 +155,10 @@ export async function viceScreenshot(
       if (pngTimeouts >= 1) pngAbandoned = true;
       return null;
     }
-    if (typeof gm.screenshot !== "function") return null;
+    if (typeof gm.screenshot !== "function") {
+      if (pngTimeouts === 0) glog("ios-screenshot-no-cmd");
+      return null;
+    }
     try {
       const raced = await Promise.race([
         gm.screenshot().then((raw) => copyBytes(raw)),
@@ -703,6 +706,7 @@ export function startIosViceMirror(
   let pending = false;
   let ticks = 0;
   let paintedCb = onFirstPaint ?? null;
+  const startedAt = performance.now();
 
   const settleLive = (reason: string) => {
     if (gen !== mirrorGen) return;
@@ -712,7 +716,7 @@ export function startIosViceMirror(
     haltMirrorLoop();
   };
 
-  const tryNonPngBlit = async (): Promise<boolean> => {
+  const tryCrtPaint = async (): Promise<boolean> => {
     const src = playerCanvas(root);
     if (src) forceCanvasPresent(src);
     const glm = src ? sampleGlCanvas(src) : null;
@@ -725,6 +729,27 @@ export function startIosViceMirror(
         signalMirrorPainted(paintedCb);
         paintedCb = null;
         return true;
+      }
+    }
+    // Optional PNG once the screenshot command exists. Overlay stays hidden
+    // until blit succeeds, so a miss cannot leave a black CRT.
+    const gm = emu.gameManager;
+    const canShot =
+      typeof gm?.functions?.screenshot === "function" || typeof gm?.screenshot === "function";
+    if (!pngAbandoned && canShot) {
+      const raw = await viceScreenshot(emu, 900);
+      if (raw && pngLooksValid(raw)) {
+        const m = await frameImageMetrics(raw);
+        if (mirrorPainted || frameLooksReady(m) || pixelsLookLive(m)) {
+          const ok = await blitPngToMirror(root, raw, m, true);
+          if (ok) {
+            paintPath = "png";
+            if (!mirrorPainted) glog("ios-mirror-metrics", { lum: m?.lum, uniq: m?.uniq });
+            signalMirrorPainted(paintedCb);
+            paintedCb = null;
+            return true;
+          }
+        }
       }
     }
     return false;
@@ -741,11 +766,13 @@ export function startIosViceMirror(
     if (pending) return;
     pending = true;
     mirrorLastCapture = now;
-    void tryNonPngBlit()
+    void tryCrtPaint()
       .then((ok) => {
         if (gen !== mirrorGen) return;
         if (ok) return;
-        if (!paintSettled && ticks >= 24) settleLive("no-png");
+        if (!paintSettled && (pngAbandoned || performance.now() - startedAt > 3500)) {
+          settleLive("no-png");
+        }
       })
       .finally(() => {
         pending = false;

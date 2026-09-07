@@ -58,7 +58,7 @@ for (let i = 0; i < 80; i++) {
     };
   });
   if (paint.fs && paint.running && paint.title === "BASIC" && (paint.paintSettled || paint.mirrorPainted || paint.painted)) {
-    await page.waitForTimeout(800);
+    await page.waitForTimeout(2500);
     paint = await page.evaluate(() => {
       const logs = window.__g64log || [];
       return {
@@ -78,6 +78,12 @@ for (let i = 0; i < 80; i++) {
           logs.filter((l) => /ios-paint-poll/.test(String(l))).length >= 4 &&
           !logs.some((l) => /ios-mirror-painted|ios-frame-ok|ios-live-webgl|ios-gl-blit/.test(String(l))),
         last: logs.slice(-8),
+        canvases: [...document.querySelectorAll("#grok64-player canvas")].map((c) => ({
+          w: c.width,
+          h: c.height,
+          cls: c.className,
+          live: document.getElementById("grok64-player")?.classList.contains("g64-ios-mirror-on") ?? false,
+        })),
       };
     });
     break;
