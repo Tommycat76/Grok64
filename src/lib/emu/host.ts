@@ -533,6 +533,8 @@ export async function bootEmulator(el: HTMLElement, cfg: BootConfig): Promise<Ej
   await ensureRuntime();
   preserveWebglBuffer();
   keyboardArmed = false;
+  const defaults = coreOptions(cfg);
+  rememberWorkDisk(defaults.vice_work_disk);
   const config: Record<string, unknown> = {
     gameUrl: cfg.gameUrl,
     dataPath: DATA,
@@ -550,7 +552,7 @@ export async function bootEmulator(el: HTMLElement, cfg: BootConfig): Promise<Ej
     language: "en-US",
     browserMode: 2,
     keyboardInput: true,
-    defaultOptions: coreOptions(cfg),
+    defaultOptions: defaults,
     defaultControllers: padControllers(),
     retroarchOpts: [
       { name: "input_libretro_device_p1", default: "1", isString: false },
@@ -992,15 +994,55 @@ export async function recycleCore(emu: EjsInstance | null, el: HTMLElement | nul
   await new Promise((r) => setTimeout(r, isIosPhone() ? 700 : 250));
 }
 
+let lastWorkDisk: string | null = null;
+
+export function lastAppliedWorkDisk(): string | null {
+  return lastWorkDisk;
+}
+
+export function rememberWorkDisk(work: string | null | undefined) {
+  if (typeof work === "string" && work.trim()) lastWorkDisk = work.trim();
+}
+
 export function applyRuntimeOptions(emu: EjsInstance | null, opts: Record<string, string>) {
   if (!emu?.gameManager?.setVariable) return;
   for (const [k, v] of Object.entries(opts)) {
     try {
       emu.gameManager.setVariable(k, v);
+      if (k === "vice_work_disk") rememberWorkDisk(v);
     } catch {
       /* option may not exist on this core */
     }
   }
+}
+
+/** Flush MEMFS/IDBFS so CriOS sees the disk bytes before Autostart types LOAD. */
+export async function flushEmuFs(emu: EjsInstance | null, timeoutMs = 1500): Promise<boolean> {
+  const FS = fsOf(emu);
+  if (!FS) return false;
+  const sync = FS.syncfs;
+  if (!sync) {
+    if (isIosPhone()) await new Promise((r) => setTimeout(r, 80));
+    return true;
+  }
+  return await new Promise((resolve) => {
+    let settled = false;
+    const done = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+    const timer = setTimeout(() => done(false), timeoutMs);
+    try {
+      sync(false, (err?: unknown) => {
+        clearTimeout(timer);
+        done(!err);
+      });
+    } catch {
+      clearTimeout(timer);
+      done(false);
+    }
+  });
 }
 
 export function hardReset(emu: EjsInstance | null) {
@@ -1176,9 +1218,13 @@ export function clearUnitMounts() {
 export function applyIecUnit(emu: EjsInstance | null, iec: IecDrive, unit: IecUnit) {
   const work = workDiskFor(iec, unit);
   if (work === "disabled") return;
+  rememberWorkDisk(work);
   const opts: Record<string, string> = { vice_work_disk: work };
   if (iec === "sd2iec" || iec === "cmdhd") {
     opts.vice_virtual_device_traps = "enabled";
+  } else if (iec === "1541" || iec === "1581") {
+    opts.vice_virtual_device_traps = "disabled";
+    opts.vice_drive_true_emulation = "enabled";
   }
   applyRuntimeOptions(emu, opts);
 }
@@ -1241,6 +1287,8 @@ export function swapBootDisk(emu: EjsInstance | null, data: Uint8Array, fallback
 /**
  * Attach a floppy for VICE autostart: force 1541/1581 on the given unit
  * (unit 8 for LOAD"*",8,1), then overwrite the current boot file.
+ * Only safe when the live core already has a 1541/1581 — SD2IEC 8_fs
+ * needs a full core recycle (see floppyPlayCanHotSwap).
  */
 export function attachAutostartDisk(
   emu: EjsInstance | null,
@@ -1254,6 +1302,7 @@ export function attachAutostartDisk(
   if (wrote) {
     const boot = bootFileOf(emu) ?? fallbackName?.replace(/^\//, "") ?? null;
     if (boot) unitMounts.set(unit, boot);
+    applyIecUnit(emu, iec, unit);
   }
   return wrote;
 }

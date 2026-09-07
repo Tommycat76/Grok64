@@ -33,6 +33,8 @@ import {
   mountDiskOnUnit,
   applyIecUnit,
   attachAutostartDisk,
+  flushEmuFs,
+  lastAppliedWorkDisk,
   swapBootDisk,
   plugJoysticks,
   probeCore,
@@ -59,7 +61,7 @@ import { snapshotDevice, readViewport, applyViewport, isIosPhone, isTouchMobile 
 import { detectJoyPort, detectSoftwareStandard } from "@/lib/emu/region";
 import { RETRO_BTN } from "@/lib/emu/types";
 import { dispatchC64Key, isJoyFireKey } from "@/lib/emu/keys";
-import { bootFileName, driveForPlay, d64DiskName, iecForAutostart, isDiskKind, isWorkDiskImage, kindOf, needsTypedBoot } from "@/lib/emu/formats";
+import { bootFileName, driveForPlay, d64DiskName, floppyPlayCanHotSwap, iecForAutostart, isDiskKind, isFsWorkDisk, isWorkDiskImage, kindOf, needsTypedBoot } from "@/lib/emu/formats";
 import { wrapForDiskSwap } from "@/lib/emu/d64";
 import { isSid, psidToPrg } from "@/lib/emu/psid";
 import { toArrayBuffer } from "@/lib/emu/archive";
@@ -335,6 +337,8 @@ export function Grok64App() {
     const w = window;
     w.__g64 = {
       playMode: () => playModeRef.current,
+      sessionIec: () => sessionIecRef.current,
+      workDisk: () => lastAppliedWorkDisk(),
       title: () => useEmu.getState().currentTitle,
       bootPath: () => bootPathRef.current,
       hasFs: () => coreHasFs(emuRef.current),
@@ -801,6 +805,7 @@ export function Grok64App() {
                 opts.iecUnit ?? sessionUnitRef.current ?? useEmu.getState().iecUnit,
               );
               const injectExtras = async () => {
+                if (loadGenRef.current !== gen || playModeRef.current === "disk") return;
                 try {
                   const roms = await romFileMap();
                   if (Object.keys(roms).length) injectRoms(emu, roms);
@@ -809,24 +814,31 @@ export function Grok64App() {
                 } catch {
                   /* optional */
                 }
+                if (loadGenRef.current !== gen || playModeRef.current === "disk") return;
                 if (useEmu.getState().jiffyDos) {
                   await applyJiffyDos(emu, true);
-                  if (opts.autostart === false) hardReset(emu);
+                  if (opts.autostart === false && playModeRef.current !== "disk" && !playLockRef.current) {
+                    hardReset(emu);
+                  }
                 }
                 const pending = pendingSnapshotRef.current;
                 if (pending) {
                   restoreState(emu, pending.data);
                   pendingSnapshotRef.current = null;
                 }
-                if ((opts.iec ?? sessionIecRef.current) === "sd2iec") {
+                if ((opts.iec ?? sessionIecRef.current) === "sd2iec" && playModeRef.current !== "disk") {
                   const unit = opts.iecUnit ?? sessionUnitRef.current ?? useEmu.getState().iecUnit;
                   setIecDevice(unit);
-                  window.setTimeout(() => {
-                    const ok = installSd2iecHooks(emu);
-                    if (ok) {
-                      toast.message(`SD2IEC on unit ${unit} — LOAD"$",${unit}`);
-                    }
-                  }, 2200);
+                  bootTimersRef.current.push(
+                    window.setTimeout(() => {
+                      if (loadGenRef.current !== gen) return;
+                      if (sessionIecRef.current !== "sd2iec" || playModeRef.current === "disk") return;
+                      const ok = installSd2iecHooks(emu);
+                      if (ok) {
+                        toast.message(`SD2IEC on unit ${unit} — LOAD"$",${unit}`);
+                      }
+                    }, 2200),
+                  );
                 }
               };
               if (isIosPhone()) {
@@ -975,6 +987,8 @@ export function Grok64App() {
       const origKind = kindOf(bootName);
       const diskLoad = !work && needsTypedBoot(origKind) && opts.autostart === false;
       playModeRef.current = work ? "basic" : needsTypedBoot(origKind) ? "disk" : "auto";
+      const liveIec = sessionIecRef.current;
+      const liveWork = lastAppliedWorkDisk();
       const attach =
         work
           ? null
@@ -989,6 +1003,7 @@ export function Grok64App() {
         sessionIecRef.current = useEmu.getState().iecDrive;
         sessionUnitRef.current = playUnit;
       }
+      const canHotSwap = !attach || floppyPlayCanHotSwap(liveIec, liveWork);
       glog("play", {
         filename,
         kind: origKind,
@@ -997,6 +1012,9 @@ export function Grok64App() {
         bytes: safe.byteLength,
         iec: sessionIecRef.current,
         unit: sessionUnitRef.current,
+        fromIec: liveIec,
+        fromWork: liveWork,
+        canHotSwap,
       });
       if (work) workDiskBytesRef.current = new Uint8Array(safe);
       if (!work && opts.libraryId) {
@@ -1024,12 +1042,19 @@ export function Grok64App() {
       }
       const live = Boolean(emuRef.current && coreHasFs(emuRef.current));
       const wrapped = wrapForDiskSwap(origKind, media, bootName);
-      if (live && emuRef.current && (wrapped || origKind === "d64")) {
+      if (attach && !canHotSwap) {
+        glog("play-recycle", {
+          reason: "fs-drive",
+          from: liveIec,
+          work: liveWork,
+          iec: attach.iec,
+          unit: attach.unit,
+        });
+      }
+      if (live && canHotSwap && emuRef.current && (wrapped || origKind === "d64")) {
         const payloadDisk = wrapped ?? media;
         const playIec = attach?.iec ?? "1541";
         const playAttachUnit = attach?.unit ?? 8;
-        // Overwrite WORK DISK.D64 and force a real 1541/1581 on unit 8 so
-        // autostart LOAD"*",8,1 does not hit SD2IEC 8_fs (DEVICE NOT PRESENT).
         const wrote = attach
           ? attachAutostartDisk(emuRef.current, payloadDisk, bootName, playIec, playAttachUnit)
           : swapBootDisk(emuRef.current, payloadDisk, bootName);
@@ -1074,12 +1099,24 @@ export function Grok64App() {
             vice_autostart_warp: work ? "disabled" : "enabled",
             vice_autoloadwarp: work ? "disabled" : "enabled",
             vice_reset: work ? "hard" : "autostart",
-            ...(attach ? { vice_work_disk: workDiskFor(playIec, playAttachUnit) } : {}),
+            ...(attach
+              ? {
+                  vice_work_disk: workDiskFor(playIec, playAttachUnit),
+                  vice_drive_true_emulation: "enabled",
+                  vice_virtual_device_traps: "disabled",
+                }
+              : {}),
             ...viceJoyOptions(useEmu.getState().joyPort),
           });
+          if (attach) applyIecUnit(emuRef.current, playIec, playAttachUnit);
+          const flushed = await flushEmuFs(emuRef.current, isIosPhone() ? 2000 : 800);
+          glog("play-mount", { flushed, workDisk: lastAppliedWorkDisk(), ios: isIosPhone() });
+          if (isIosPhone()) await new Promise((r) => setTimeout(r, 180));
+          if (attach) applyIecUnit(emuRef.current, playIec, playAttachUnit);
           await syncJiffy(emuRef.current, "none");
           if (work) hardReset(emuRef.current);
           else resetEmu(emuRef.current);
+          if (attach) applyIecUnit(emuRef.current, playIec, playAttachUnit);
           plugJoysticks(emuRef.current, useEmu.getState().joyPort);
           if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, "hot-swap");
           s.setCurrentTitle(title);
@@ -1106,7 +1143,7 @@ export function Grok64App() {
       blobRef.current = url;
       await startWithUrl(url, bootName, {
         autostart: work ? false : opts.autostart !== false,
-        diskLoad,
+        diskLoad: diskLoad || Boolean(attach),
         title,
         iec: sessionIecRef.current,
         iecUnit: sessionUnitRef.current,
@@ -1450,7 +1487,16 @@ export function Grok64App() {
   }, [s.iecDrive, s.iecUnit]);
   useEffect(() => {
     const emu = emuRef.current;
-    applyRuntimeOptions(emu, expansionOpts());
+    const extras = expansionOpts();
+    if (playModeRef.current === "disk" && isFsWorkDisk(extras.vice_work_disk)) {
+      extras.vice_work_disk = workDiskFor(
+        sessionIecRef.current === "1581" ? "1581" : "1541",
+        sessionUnitRef.current || 8,
+      );
+      extras.vice_virtual_device_traps = "disabled";
+      extras.vice_drive_true_emulation = "enabled";
+    }
+    applyRuntimeOptions(emu, extras);
     void syncJiffy(emu, "none");
     const st = useEmu.getState();
     if (st.mouseMode) plugJoysticks(emu, st.joyPort);

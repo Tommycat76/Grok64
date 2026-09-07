@@ -4,7 +4,9 @@ import { createServer } from "vite";
 
 const server = await createServer({ server: { middlewareMode: true }, appType: "custom" });
 const { workDiskFor } = await server.ssrLoadModule("/src/lib/emu/vice-extras.ts");
-const { iecForAutostart, kindOf } = await server.ssrLoadModule("/src/lib/emu/formats.ts");
+const { floppyPlayCanHotSwap, iecForAutostart, isFsWorkDisk, kindOf } = await server.ssrLoadModule(
+  "/src/lib/emu/formats.ts",
+);
 await server.close();
 
 test("workDiskFor maps IEC storage modes to VICE work-disk units", () => {
@@ -20,8 +22,24 @@ test("workDiskFor maps IEC storage modes to VICE work-disk units", () => {
 test("floppy Play attaches 1541/1581 on unit 8 — never SD2IEC 8_fs", () => {
   assert.deepEqual(iecForAutostart(kindOf("Burger_Time_1983.d64")), { iec: "1541", unit: 8 });
   assert.deepEqual(iecForAutostart(kindOf("paradroid.d64")), { iec: "1541", unit: 8 });
+  assert.deepEqual(iecForAutostart(kindOf("paradroidalldri.d64")), { iec: "1541", unit: 8 });
   assert.deepEqual(iecForAutostart(kindOf("uridiumfcs.d64")), { iec: "1541", unit: 8 });
   assert.deepEqual(iecForAutostart(kindOf("sideb.d81")), { iec: "1581", unit: 8 });
   assert.equal(iecForAutostart(kindOf("game.crt")), null);
   assert.equal(workDiskFor(iecForAutostart(kindOf("Burger_Time.d64")).iec, 8), "8_d64");
+});
+
+test("floppy Play cannot hot-swap on a live SD2IEC / 8_fs core", () => {
+  assert.equal(isFsWorkDisk("8_fs"), true);
+  assert.equal(isFsWorkDisk("11_fs"), true);
+  assert.equal(isFsWorkDisk("8_d64"), false);
+  assert.equal(floppyPlayCanHotSwap("sd2iec", "8_fs"), false);
+  assert.equal(floppyPlayCanHotSwap("sd2iec", "8_d64"), false);
+  assert.equal(floppyPlayCanHotSwap("cmdhd", "8_fs"), false);
+  assert.equal(floppyPlayCanHotSwap("1541", "8_fs"), false);
+  assert.equal(floppyPlayCanHotSwap("1541", "8_d64"), true);
+  assert.equal(floppyPlayCanHotSwap("1581", "8_d81"), true);
+  // #33 setVariable(8_d64) on a live 8_fs core is not a mount — must recycle.
+  const afterFakeForce = "8_d64";
+  assert.equal(floppyPlayCanHotSwap("sd2iec", afterFakeForce), false);
 });
