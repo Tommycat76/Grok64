@@ -356,3 +356,39 @@ export function nextDiskIndex(current: number, count: number, dir: 1 | -1 = 1): 
   if (count <= 0) return 0;
   return ((current + dir) % count + count) % count;
 }
+
+/**
+ * After Autostart has typed LOAD"*",8,1 these stay on for the rest of play.
+ * Leaving `vice_reset=autostart` armed is what yanked Boulder Dash / Paradroid
+ * back to BASIC READY: libretro `emu_reset(0)` power-cycles, and VICE's
+ * WAITLOADREADY state machine still hunts for "READY." (or a Space on the
+ * HTML Reset button re-fires Autostart).
+ *
+ * Apply with setVariable only — never restart/recycle here.
+ */
+export const PLAY_UNLOCK_VICE_OPTS = {
+  vice_autostart: "disabled",
+  vice_autostart_warp: "disabled",
+  vice_autoloadwarp: "disabled",
+  vice_reset: "hard",
+} as const;
+
+/** Toolbar Reset is always a cold boot to READY — never Autostart re-fire. */
+export function userResetKind(_mode?: string): "hard" {
+  return "hard";
+}
+
+/** Recover/recycle to BASIC only when a cold start actually failed. */
+export function shouldRecoverBoot(input: {
+  playMode: string;
+  playLock: boolean;
+  inGameplay: boolean;
+  powered: boolean;
+  hasFs: boolean;
+}): boolean {
+  if (!input.powered) return false;
+  if (input.playLock || input.inGameplay) return false;
+  if (input.playMode !== "basic") return false;
+  if (input.hasFs) return false;
+  return true;
+}

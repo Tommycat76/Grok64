@@ -3,7 +3,7 @@ import test from "node:test";
 import { createServer } from "vite";
 
 const server = await createServer({ server: { middlewareMode: true }, appType: "custom" });
-const { frameLooksReady, viceScreenshot, chooseIosCrtPath, resetIosPaintState } = await server.ssrLoadModule("/src/lib/emu/ios-paint.ts");
+const { frameLooksReady, viceScreenshot, chooseIosCrtPath, resetIosPaintState, WATCHDOG_RECYCLES_CORE } = await server.ssrLoadModule("/src/lib/emu/ios-paint.ts");
 await server.close();
 
 function fakePng(n = 400) {
@@ -106,4 +106,8 @@ test("viceScreenshot serializes overlapping callers (no second hang)", async () 
   assert.ok(a && a.byteLength >= 350);
   assert.ok(b && b.byteLength >= 350);
   assert.equal(emu.cmds(), 2);
+});
+
+test("paint watchdog must never recycle or hard-reset the core", () => {
+  assert.equal(WATCHDOG_RECYCLES_CORE, false);
 });

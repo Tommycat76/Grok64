@@ -20,6 +20,9 @@ const {
   userAttachFromMap,
   mapHasDrive,
   withLiveFloppy,
+  PLAY_UNLOCK_VICE_OPTS,
+  userResetKind,
+  shouldRecoverBoot,
 } = await server.ssrLoadModule("/src/lib/emu/play-session.ts");
 const {
   classifyPress,
@@ -362,4 +365,60 @@ test("IEC map: one unit number is one drive", () => {
   const live = withLiveFloppy(sd, { iec: "1541", unit: 8 });
   assert.equal(live[8], "1541");
   assert.equal(live[9], "cmdhd");
+});
+
+test("play-unlock disarms Autostart so a later reset cannot re-LOAD to READY", () => {
+  assert.equal(PLAY_UNLOCK_VICE_OPTS.vice_autostart, "disabled");
+  assert.equal(PLAY_UNLOCK_VICE_OPTS.vice_autostart_warp, "disabled");
+  assert.equal(PLAY_UNLOCK_VICE_OPTS.vice_autoloadwarp, "disabled");
+  assert.equal(PLAY_UNLOCK_VICE_OPTS.vice_reset, "hard");
+});
+
+test("toolbar Reset is always a cold boot — never Autostart re-fire", () => {
+  assert.equal(userResetKind("disk"), "hard");
+  assert.equal(userResetKind("basic"), "hard");
+  assert.equal(userResetKind("auto"), "hard");
+});
+
+test("boot recover must not replace a live floppy session with BASIC", () => {
+  assert.equal(
+    shouldRecoverBoot({
+      playMode: "disk",
+      playLock: false,
+      inGameplay: true,
+      powered: true,
+      hasFs: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldRecoverBoot({
+      playMode: "disk",
+      playLock: true,
+      inGameplay: false,
+      powered: true,
+      hasFs: false,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldRecoverBoot({
+      playMode: "basic",
+      playLock: false,
+      inGameplay: false,
+      powered: true,
+      hasFs: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldRecoverBoot({
+      playMode: "basic",
+      playLock: false,
+      inGameplay: false,
+      powered: true,
+      hasFs: false,
+    }),
+    true,
+  );
 });

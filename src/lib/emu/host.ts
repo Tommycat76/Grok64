@@ -5,6 +5,7 @@ import { buildViceExtras, workDiskFor } from "./vice-extras";
 import {
   iecMapFromLegacy,
   liveDriveOptions,
+  PLAY_UNLOCK_VICE_OPTS,
   viceDriveTypeVars,
   viceMapFromIecMap,
   viceRcForDrives,
@@ -466,11 +467,22 @@ function patchEjsInput() {
         'input_pause_toggle = "nul"\n' +
         'input_reset = "nul"\n' +
         'input_exit_emulator = "nul"\n' +
-        'input_menu_toggle = "nul"\n'
+        'input_menu_toggle = "nul"\n' +
+        'input_load_state = "nul"\n' +
+        'input_save_state = "nul"\n' +
+        'input_state_slot_increase = "nul"\n' +
+        'input_state_slot_decrease = "nul"\n'
       );
     };
   }
-  const Ejs = window.EmulatorJS as unknown as { prototype?: { getCoreSettings?: () => string; __g64opt?: boolean } };
+  const Ejs = window.EmulatorJS as unknown as {
+    prototype?: {
+      getCoreSettings?: () => string;
+      keyChange?: (e: KeyboardEvent) => void;
+      __g64opt?: boolean;
+      __g64keys?: boolean;
+    };
+  };
   const eproto = Ejs?.prototype;
   if (eproto && !eproto.__g64opt && typeof eproto.getCoreSettings === "function") {
     eproto.__g64opt = true;
@@ -481,6 +493,17 @@ function patchEjsInput() {
         rv += `${k} = "${opts[k]}"\n`;
       }
       return rv;
+    };
+  }
+  if (eproto && !eproto.__g64keys && typeof eproto.keyChange === "function") {
+    eproto.__g64keys = true;
+    const origKey = eproto.keyChange;
+    eproto.keyChange = function patchedKeys(this: unknown, e: KeyboardEvent) {
+      // Space is PETSCII $20. Never Start / Reset / retro-pad.
+      if (e.code === "Space" || e.key === " " || (e as KeyboardEvent & { keyCode?: number }).keyCode === 32) {
+        return;
+      }
+      return origKey.call(this, e);
     };
   }
 }
@@ -562,7 +585,7 @@ export async function bootEmulator(el: HTMLElement, cfg: BootConfig): Promise<Ej
     disableCue: true,
     language: "en-US",
     browserMode: 2,
-    keyboardInput: true,
+    keyboardInput: "enabled",
     defaultOptions: defaults,
     defaultControllers: padControllers(),
     retroarchOpts: [
@@ -1591,6 +1614,15 @@ export function autostartAfterReady(
       : {}),
   });
   resetEmu(emu);
+}
+
+/**
+ * Stop Autostart / autoload-warp after LOAD has been typed. Does not restart
+ * the core, recycle WASM, or touch unit 8.
+ */
+export function disarmAutostart(emu: EjsInstance | null) {
+  applyRuntimeOptions(emu, { ...PLAY_UNLOCK_VICE_OPTS });
+  glog("autostart-disarmed");
 }
 
 function removeMediaFile(FS: EmscriptenFS, name: string) {

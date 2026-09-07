@@ -174,6 +174,10 @@ export function keyCodeOf(code: string, key: string): number {
 /** Right Ctrl is the only host key mapped to joystick fire. All other keys are C64. */
 export const FIRE_KEY_CODE = "ControlRight";
 
+/** PETSCII space. Must never be treated as host Reset / RetroArch Start. */
+export const C64_SPACE_KEYCODE = 32;
+export const KEY_BROADCAST_WINDOW = false;
+
 export function isJoyFireKey(code: string): boolean {
   return code === FIRE_KEY_CODE;
 }
@@ -218,8 +222,9 @@ export function dispatchC64Key(
     document.querySelector("#canvas") ??
     document.querySelector("#grok64-player canvas");
   canvas?.dispatchEvent(make());
-  window.dispatchEvent(make());
-  document.dispatchEvent(make());
+  // Do not broadcast to window/document. Space on a focused <button>
+  // (toolbar Reset) is a click — that used to re-fire Autostart / hard reset
+  // and yank Paradroid's cracktro back to BASIC READY.
 }
 
 export interface C64Stroke {

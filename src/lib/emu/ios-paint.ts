@@ -798,6 +798,8 @@ export function stopIosPaintWatchdog() {
   watchdogEmu = null;
 }
 
+export const WATCHDOG_RECYCLES_CORE = false;
+
 export type IosPaintWatchdogOpts = {
   onPainted?: () => void;
   /** Last resort when auto-paint (mirror + native kicks) fails — show tap-to-wake. */
@@ -885,6 +887,7 @@ export function startIosPaintWatchdog(
       return;
     }
     glog("ios-watchdog-timeout", { frames, mirror: mirrorActive, mirrorPainted, elapsed: Math.round(elapsed) });
+    // Paint only — never recycle the WASM core or re-kick Autostart.
     if (!painted && !mirrorPainted && elapsed >= 20_000) {
       if (performance.now() < tapCooldownUntil) {
         glog("ios-resume-cooldown");

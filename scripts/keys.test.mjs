@@ -16,6 +16,8 @@ const {
   TOUCH_ABC,
   TOUCH_SYM,
   LETTER_IDS,
+  C64_SPACE_KEYCODE,
+  KEY_BROADCAST_WINDOW,
 } = await server.ssrLoadModule("/src/lib/emu/keys.ts");
 const { petsciiToScreen, glyphHasPixels } = await server.ssrLoadModule("/src/lib/emu/petscii-glyphs.ts");
 const { needsTypedBoot, kindOf, driveForPlay, isDiskKind } = await server.ssrLoadModule("/src/lib/emu/formats.ts");
@@ -76,7 +78,13 @@ test("letter and space keyCodes match VICE/Chrome", () => {
   assert.equal(keyCodeOf("KeyA", "a"), 65);
   assert.equal(keyCodeOf("KeyB", "b"), 66);
   assert.equal(keyCodeOf("Space", " "), 32);
+  assert.equal(keyCodeOf("Space", " "), C64_SPACE_KEYCODE);
   assert.equal(keyCodeOf("KeyK", "k"), 75);
+});
+
+test("PETSCII space is locked to #32 and is not broadcast to window (Reset)", () => {
+  assert.equal(C64_SPACE_KEYCODE, 32);
+  assert.equal(KEY_BROADCAST_WINDOW, false);
 });
 
 test("every letter keycap has real C= and SHIFT PETSCII", () => {
