@@ -10,8 +10,9 @@
  * 1. The RetroArch/VICE WebGL canvas stays in the DOM at 384×272 (the only
  *    CSS size that blits). CriOS ignores CSS transform on the GL layer — #44's
  *    scale on #grok64-player was a stamp (photo: top-right) with DOM fill 1.0.
- *    A 2D present canvas (ios-present.ts) drawImages the live GL buffer into
- *    .g64-screen. Not PNG / paint-poll / getContext on the VICE canvas.
+ *    A 2D present canvas (ios-present.ts) copies the live 384×272 GL buffer
+ *    at ~14fps and CSS-fills .g64-screen. Not a 60fps bezel-sized readback
+ *    (#46 CriOS black→splash), not PNG / paint-poll / getContext on VICE.
  * 2. Never call getContext on that canvas. host.ts already captured
  *    VICE's context on `__g64gl`. A second WebGL context on WebKit returns null
  *    or steals the canvas (solid black CRT).
@@ -29,7 +30,7 @@
 
 import type { EjsInstance } from "./host";
 import { applyIosCrtStyle, dismissEjsPrompts, fitEmu, unlockAudio } from "./host";
-import { stopIosPresent } from "./ios-present";
+import { pauseIosPresentKeepFrame, resumeIosPresent, stopIosPresent } from "./ios-present";
 import { isIosPhone } from "./detect";
 import { glog } from "./debug";
 
@@ -343,10 +344,13 @@ export function installIosPaintHooks(getTarget: () => PaintTarget) {
   const onCtxLost = (ev: Event) => {
     glog("webgl-context-lost");
     ev.preventDefault();
-    resetIosPaintState();
+    // Keep the last 2D frame and paintSettled. Resetting settled made the
+    // 350ms poll call presentIosCrt again and restart the crash loop.
+    pauseIosPresentKeepFrame();
   };
   const onCtxRestored = () => {
     glog("webgl-context-restored");
+    resumeIosPresent();
     resume("ctx-restored");
   };
 

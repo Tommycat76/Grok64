@@ -17,6 +17,8 @@ export const STAMP_AREA_MAX = 0.55;
 export const FIRST_OVERLAY_MAX_MS = 4000;
 export const FIRST_CRT_MAX_MS = 18000;
 export const FIRST_CRT_WARN_MS = 8000;
+/** After first READY paint: session must stay powered, no splash remount, CRT stays lit. */
+export const SESSION_HOLD_MS = 8000;
 /** #000 vs bezel #0c0c0e is ~22 — keep this under that so a filled dark CRT counts. */
 export const PAINT_THRESH = 20;
 /** Lit pixels / crop. A 384×272 stamp in a tall bezel is ~0.04; chrome-only is lower. */

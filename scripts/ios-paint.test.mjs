@@ -79,6 +79,7 @@ test("iOS GL canvas stays 384px; present canvas fills the screen", () => {
   assert.match(iosCanvas, /height: 272px !important/);
   assert.match(iosCanvas, /transform: none !important/);
   assert.match(css, /canvas\.g64-ios-present/);
+  assert.match(css, /g64-ios-present:not\(\.g64-ios-present-on\)/);
   assert.match(paintSrc, /applyIosCrtStyle/);
 });
 

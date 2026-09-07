@@ -37,6 +37,8 @@ test("boot recover cannot yank a floppy session back to BASIC READY", () => {
   assert.match(app, /shouldRecoverBoot/);
   assert.match(app, /boot-recover-skipped/);
   assert.match(app, /boot-stuck-skipped/);
+  assert.match(app, /boot-recover-fail-kept/);
+  assert.match(app, /boot-stuck-kept/);
 });
 
 test("disarmAutostart does not call resetEmu / recycleCore", () => {
@@ -86,6 +88,9 @@ test("iPhone CRT fills with a live-GL present canvas, not wrapper scale", () => 
   assert.doesNotMatch(host, /translate3d\(0,0,0\) scale\(/);
   assert.doesNotMatch(host, /klass === "g64-ios-fb" \? Math.max\(1, window.devicePixelRatio/);
   assert.doesNotMatch(host, /sw \* dpr/);
+  const present = readFileSync(join(root, "src/lib/emu/ios-present.ts"), "utf8");
+  assert.match(present, /IOS_PRESENT_MIN_FRAME_MS/);
+  assert.doesNotMatch(present, /dest\.width = sw/);
 });
 
 test("iPhone floppy Play still recycles — never hot-swap (locked)", () => {

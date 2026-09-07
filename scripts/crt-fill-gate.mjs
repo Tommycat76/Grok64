@@ -16,6 +16,11 @@
  * false green on #44's wrapper-scale stamp. Tom's photo is top-right
  * (L-shaped purple left+bottom); a GL-origin stamp is bottom-left.
  *
+ * Also holds after first READY paint and fails if the session remounts
+ * to the power splash, __g64 is torn down, the page reloads, or the CRT
+ * goes solid black. That is the #46 CriOS failure (black ~5s, splash ~15s)
+ * — Chromium-on-Plex can still pass while real CriOS crashes.
+ *
  * Optional later: BrowserStack real CriOS — not required this PR.
  *
  * Env:
@@ -31,6 +36,7 @@ import {
   FIRST_CRT_MAX_MS,
   FIRST_CRT_WARN_MS,
   FIRST_OVERLAY_MAX_MS,
+  SESSION_HOLD_MS,
   boxFill,
   cssPx,
   decodePng,
@@ -144,6 +150,9 @@ const measureSrc = () => {
     title: window.__g64?.title?.() ?? null,
     overlay: Boolean(player?.querySelector(".g64-ios-mirror")),
     present: Boolean(present),
+    presentOn: present?.classList.contains("g64-ios-present-on") ?? false,
+    presentBuf: present ? { w: present.width, h: present.height } : null,
+    hasG64: typeof window.__g64 === "object" && window.__g64 != null,
     fb: canvas?.classList.contains("g64-ios-fb") ?? false,
     buf: canvas ? { w: canvas.width, h: canvas.height } : null,
     canvasClient: canvas ? { w: canvas.clientWidth, h: canvas.clientHeight } : null,
@@ -227,13 +236,21 @@ const context = await browser.newContext({
 });
 const page = await context.newPage();
 const pageErrors = [];
+let mainNavs = 0;
+let tabCrashed = false;
 page.on("pageerror", (e) => pageErrors.push(e.message));
+page.on("framenavigated", (frame) => {
+  if (frame === page.mainFrame()) mainNavs += 1;
+});
+page.on("crash", () => {
+  tabCrashed = true;
+});
 
 console.log("GATE url", url);
 console.log("GATE viewport", JSON.stringify({ ...IPHONE, dpr: 3, ua: "CriOS-iPhone" }));
 console.log("GATE note Cursor-sandbox WebKit is not a ship gate. This script is the Plex painted-CRT check.");
 console.log("GATE note DOM getBoundingClientRect fill of 1.0 is not a pass — painted bbox + untransformed CSS px must fill.");
-console.log("GATE this is NOT a real CriOS PASS.");
+console.log("GATE this is NOT a real CriOS PASS. Chromium-on-Plex can go green while CriOS blacks out and remounts.");
 
 await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
 await page.waitForFunction(() => typeof window.__g64?.power === "function", { timeout: 25000 });
@@ -329,6 +346,7 @@ note(Boolean(ready?.build), "build id visible after power", { build: ready?.buil
 note(!ready?.log, "debug log still off");
 note(!ready?.overlay, "no PNG/paint-poll overlay covering WebGL");
 note(Boolean(ready?.present), "live-GL present canvas fills the bezel (not a PNG mirror)");
+note(ready?.presentBuf?.w === 384 && ready?.presentBuf?.h === 272, "present bitmap stays 384x272 (not a bezel-sized readback)", ready?.presentBuf);
 note(ready?.buf?.w === 384 && ready?.buf?.h === 272, "VICE backing 384x272", ready?.buf);
 note(
   ready?.canvasClient?.w === 384 && ready?.canvasClient?.h === 272,
@@ -400,6 +418,40 @@ note(crtMs <= FIRST_CRT_MAX_MS, `boot→first CRT ${crtMs}ms (limit ${FIRST_CRT_
   overlayMs,
 });
 
+const navsAfterReady = mainNavs;
+console.log("GATE hold", SESSION_HOLD_MS, "ms — session must stay powered, CRT must stay painted, no reload");
+let hold = null;
+let holdShot = null;
+try {
+  await page.waitForTimeout(SESSION_HOLD_MS);
+  hold = await page.evaluate(measureSrc);
+  holdShot = await shotPaint(page, "crt-fill-gate-hold-bezel.png");
+} catch (err) {
+  note(false, `session died during hold (${err instanceof Error ? err.message : String(err)})`);
+}
+
+note(!tabCrashed, "browser tab did not crash during hold");
+note(mainNavs === navsAfterReady, "no full page reload / navigation after READY", {
+  mainNavs,
+  navsAfterReady,
+});
+if (hold) {
+  note(Boolean(hold.hasG64), "__g64 still mounted (no teardown / remount)");
+  note(hold.powered && !hold.splash, "session still powered (no splash remount)", {
+    powered: hold.powered,
+    splash: hold.splash,
+    running: hold.running,
+    title: hold.title,
+  });
+  note(hold.presentBuf?.w === 384 && hold.presentBuf?.h === 272, "present bitmap still 384x272 after hold", hold.presentBuf);
+}
+if (holdShot) {
+  const holdPaint = assertPainted("READY hold", holdShot, { title: hold?.title });
+  if (holdPaint.empty) {
+    note(false, "CRT went solid black after first paint (Tom #46 ~5s black)");
+  }
+}
+
 if (pageErrors.length) {
   note(false, `page errors: ${pageErrors.slice(0, 3).join(" | ")}`);
 }
@@ -411,15 +463,18 @@ console.log(
   "GATE summary",
   JSON.stringify({
     url,
-    build: ready?.build ?? splash.build,
+    build: hold?.build ?? ready?.build ?? splash.build,
     overlayMs,
     crtMs,
+    holdMs: SESSION_HOLD_MS,
     paint: { fill: paint.fill, corner: paint.corner, empty: paint.empty },
+    holdPaint: holdShot ? { fill: holdShot.paint.fill, corner: holdShot.paint.corner, empty: holdShot.paint.empty } : null,
     failures: failures.length,
     fail: failures,
   }),
 );
 console.log("GATE this is a Plex painted-layout check, not a real CriOS PASS.");
+console.log("GATE Chromium-on-Plex still is not CriOS PASS — Tom hard-refresh on the phone is the only CRT sign-off.");
 if (failures.length) process.exit(2);
-console.log("GATE painted layout OK — coordinator still needs Tom hard-refresh on the phone.");
+console.log("GATE painted layout + session hold OK — coordinator still needs Tom hard-refresh on the phone.");
 process.exit(0);

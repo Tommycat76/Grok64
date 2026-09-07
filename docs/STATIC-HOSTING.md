@@ -37,6 +37,7 @@ node scripts/flatten-dist.mjs dist
 ```
 
 Do not claim an iPhone CRT PASS from this box. Tom’s real CriOS is the only PASS.
+**Chromium-on-Plex still is not CriOS PASS** — #46’s painted gate went green while real iPhone Chrome went solid black (~5s) then remounted the power splash (~15s).
 
 ### CRT fill gate (required after deploy)
 
@@ -53,12 +54,13 @@ It launches Playwright Chromium at an iPhone viewport (390×844, touch, CriOS UA
 1. Hides on-screen chrome, crops `.g64-screen`, and measures the **painted** pixel bbox **and coverage** of the live-GL present canvas. A 384×272 stamp (Tom #44 photo: top-right; GL-origin: bottom-left) or joystick-only / solid-black pixels **fail**, even when wrapper rects report fill 1.00.
 2. Compares **untransformed** computed CSS px of the present canvas (not the transformed DOM rect) to the bezel. The old #44 `384×272` + `scale()` layout fails this on a tall phone bezel.
 3. Fails if the boot overlay is missing / blank, or if power → first READY frame takes longer than 18s (flags the ~39s iPhone blank). Plex Chromium may not reproduce iPhone WASM time.
+4. **Session hold** (~8s after first READY): still powered (no splash remount), `__g64` still mounted, no full page reload / tab crash, present bitmap still 384×272 (not a bezel-sized GPU readback), CRT still painted (not #46’s solid black).
 
-Screenshots land in `screenshots/crt-fill-gate-*.png` (including `*-bezel.png` crops).
+Screenshots land in `screenshots/crt-fill-gate-*.png` (including `*-bezel.png` and `*-hold-bezel.png` crops).
 
 Needs Playwright's Chromium once: `npx playwright install chromium`. If Chromium is already installed, set `G64_CHROME` to that executable.
 
-A green gate is a **painted-layout check**, **not** a real CriOS PASS. Optional later: BrowserStack real CriOS. Tom hard-refresh remains the CRT picture sign-off.
+A green gate is a **painted-layout + hold check**, **not** a real CriOS PASS. Chromium-on-Plex can still pass while CriOS OOM-kills the tab. Optional later: BrowserStack real CriOS. Tom hard-refresh remains the CRT picture sign-off.
 
 
 ## EmulatorJS

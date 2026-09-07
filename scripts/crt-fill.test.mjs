@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   FILL_MIN,
+  SESSION_HOLD_MS,
   classifyStampCorner,
   cssPx,
   decodePng,
@@ -48,6 +49,12 @@ test("Plex CRT fill gate script exists and documents iPhone viewport fill", () =
   assert.match(gate, /hideChrome|g64-screen/);
   assert.match(gate, /untransformed/);
   assert.match(gate, /FIRST_CRT_MAX_MS/);
+  assert.match(gate, /SESSION_HOLD_MS/);
+  assert.match(gate, /session still powered/);
+  assert.match(gate, /no full page reload/);
+  assert.match(gate, /__g64 still mounted/);
+  assert.match(gate, /present bitmap stays 384x272/);
+  assert.match(gate, /Chromium-on-Plex still is not CriOS PASS/);
   assert.match(gate, /function hasCssScale/);
   assert.doesNotMatch(gate, /note\(\/scale\\\(\/i\.test\(String\(ready\?\.playerXf/);
 });
@@ -89,6 +96,10 @@ test("gate fails every corner stamp, not only bottom-left", () => {
   const paint = paintedContent(img.data, w, h);
   assert.equal(paint.corner, "top-right");
   assert.ok(paintFails(paint));
+});
+
+test("session hold is long enough to catch the #46 5s black", () => {
+  assert.ok(SESSION_HOLD_MS >= 8000);
 });
 
 test("filled CRT painted bbox passes", () => {
@@ -152,6 +163,9 @@ test("hosting docs tell the coordinator how to run the fill gate", () => {
   assert.match(docs, /node scripts\/crt-fill-gate\.mjs/);
   assert.match(docs, /PLEXnTORRENT_HP|Plex/);
   assert.match(docs, /painted|screenshot/i);
+  assert.match(docs, /session hold|splash remount|page reload/i);
+  assert.match(docs, /not a real CriOS PASS/);
+  assert.match(docs, /Chromium-on-Plex/);
 });
 
 test("remapViceViewport expands a 384×272 stamp in a larger drawing buffer", () => {
@@ -165,6 +179,7 @@ test("iOS CRT fill is native 384 CSS + present canvas, never wrapper scale", () 
   assert.match(iosFn, /width", "384px"/);
   assert.match(iosFn, /height", "272px"/);
   assert.match(iosFn, /startIosPresent/);
+  assert.match(iosFn, /14fps|IOS_PRESENT|bezel/);
   assert.doesNotMatch(iosFn, /translate3d\(0,0,0\) scale\(/);
   assert.doesNotMatch(iosFn, /devicePixelRatio/);
   assert.match(host, /remapViceViewport/);

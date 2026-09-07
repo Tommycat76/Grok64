@@ -1303,7 +1303,9 @@ function lockNativeFbCss(el: HTMLElement) {
  * GL layer (#43 / #44) — Tom's photo is a top-right stamp with DOM fill 1.0.
  *
  * Keep the GL canvas at 384×272 (no transform). A 2D present canvas copies
- * the live framebuffer into .g64-screen (see ios-present.ts).
+ * the live 384×272 framebuffer at ~14fps; CSS stretches that 2D layer to
+ * fill .g64-screen (see ios-present.ts). Do not size the present bitmap to
+ * the bezel or copy every rAF — that OOM-killed CriOS on #46.
  */
 export function applyIosCrtStyle(
   canvas: HTMLCanvasElement,

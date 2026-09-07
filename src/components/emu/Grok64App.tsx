@@ -107,6 +107,7 @@ import {
   stopIosPaintWatchdog,
   stripIosOverlay,
 } from "@/lib/emu/ios-paint";
+import { isIosPresentPainted, iosPresentInfo } from "@/lib/emu/ios-present";
 
 function frameMsForStandard(standard: string) {
   return standard === "ntsc" ? 1000 / 60 : 20;
@@ -400,6 +401,10 @@ export function Grok64App() {
           settled: isIosPaintSettled(),
           overlay: Boolean(root?.querySelector(".g64-ios-mirror")),
           present: Boolean(present),
+          presentOn: present?.classList.contains("g64-ios-present-on") ?? false,
+          presentPainted: isIosPresentPainted(),
+          presentBuf: present ? { w: present.width, h: present.height } : null,
+          presentLoop: iosPresentInfo(),
           live: root?.classList.contains("g64-ios-crt-live") ?? false,
           w: c?.width ?? 0,
           h: c?.height ?? 0,
@@ -1483,6 +1488,10 @@ export function Grok64App() {
     }).catch((err) => {
       bootKickRef.current = false;
       glog("boot-recover-fail", { m: err instanceof Error ? err.message : String(err) });
+      if (coreHasFs(emuRef.current) || useEmu.getState().running) {
+        glog("boot-recover-fail-kept");
+        return;
+      }
       useEmu.setState({ powered: false, booting: false, running: false });
       toast.error("The C64 didn’t start. Tap power to try again.");
     });
@@ -1539,6 +1548,12 @@ export function Grok64App() {
       if (!recoverOnceRef.current) {
         recoverOnceRef.current = true;
         recoverBoot();
+        return;
+      }
+      if (coreHasFs(emuRef.current) || useEmu.getState().running) {
+        useEmu.getState().setBooting(false);
+        useEmu.getState().setRunning(true);
+        glog("boot-stuck-kept");
         return;
       }
       useEmu.setState({ powered: false, booting: false, running: false, bootProgress: 0 });
