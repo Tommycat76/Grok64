@@ -1913,13 +1913,17 @@ html[data-g64os="ios"] .g64-log {
  * iPhone CRT: .g64-screen absolutely fills the bezel (no flex % / cqh).
  * Read docs/IOS_CRT_KNOWN_FAILURES.md first.
  *
- * #43–#44: scale() on GL / player — CriOS ignores transform (stamp).
+ * #43–#44: CSS transform on GL / player — CriOS ignores it (stamp).
  * #46–#47: 2D present (drawImage / readPixels) — OOM or Tom black.
  * #48–#49 / #7–#8: CSS 100% + clientWidth lie/unlock — Plex paint count:0.
+ * #50 / #9: native 384×272 + flex letterbox — Tom postage stamp, L+B border.
  *
- * This path: paint over fill. Live GL at native 384×272 CSS, flex-centered
- * in the bezel (letterbox). No scale(), no CSS 100% on GL. Compact boot chip.
+ * This path: live GL stays 384×272 CSS. CSS zoom on .g64-ios-zoom (non-GL).
+ * No CSS transform on GL, no CSS 100% on GL. Compact boot chip.
  */
+.g64-ios-zoom {
+  display: contents;
+}
 html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-bezel {
   position: relative;
   display: block;
@@ -1972,6 +1976,24 @@ html[data-g64os="ios"] .g64-ios-mirror {
   visibility: hidden !important;
   opacity: 0 !important;
   pointer-events: none !important;
+}
+html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-ios-zoom,
+html[data-g64os="ios"] .g64-ios-zoom[data-g64-ios-zoom] {
+  display: block;
+  position: relative;
+  inset: auto;
+  left: auto;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  margin: 0 !important;
+  width: 384px;
+  height: 272px;
+  flex: 0 0 auto;
+  transform: none !important;
+  -webkit-transform: none !important;
+  transform-origin: 0 0 !important;
+  z-index: 1;
 }
 html[data-g64os="ios"] #grok64-player {
   position: relative;

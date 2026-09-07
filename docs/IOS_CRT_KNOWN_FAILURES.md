@@ -17,7 +17,8 @@ green while Tom’s phone went solid black (`main@8876d8a`, #47).
 ## Approaches that FAILED on Tom’s real iPhone
 
 Do **not** re-try these without new evidence from the same phone (photo +
-build id). “It is green on Plex” is not new evidence.
+build id). “It is green on Plex” is not new evidence. Plex paint-count
+is not Tom geometry (#50 / #9).
 
 ### 1. Continuous `toDataURL` / PNG poll / mirror overlay
 
@@ -116,6 +117,29 @@ family is dead** until Tom’s phone produces new evidence. Do not iterate
 another variant of stretching the live GL canvas to the bezel via CSS
 100% and client-box tricks.
 
+### 9. #50 — letterbox claim failed on CriOS (postage stamp)
+
+`main@5a43c67` / `routes-BPUU8W3r.js` (Plex deploy of the paint-first
+native 384×272 + flex letterbox):
+
+- Live VICE WebGL at **intrinsic 384×272 CSS** (the #39 paint path).
+- Flex-center in `.g64-screen`. No `zoom`, no CSS 100% on GL, no
+  clientWidth lie, no 2D present.
+- Code review: canvas / `#grok64-player` stayed native CSS size only.
+
+**Tom FAIL (CriOS photo):** paint EXISTS (purple VIC outer + dark indigo
+inner) but the picture is a **tiny unreadable postage stamp** in the
+large black bezel. VIC border only **left + bottom** (not a centered
+letterbox that fills the bezel). Header showed `5a43c67` + PAL + MOUSE.
+
+**Plex painted gate stayed false-green** (`0 failures` / paint count
+`~853k`) vs Tom. **Plex paint-count ≠ Tom geometry.** A green chroma
+count does not mean the framebuffer fills or centers the bezel on
+real CriOS.
+
+Do not ship another unzoomed 384×272 flex letterbox and call it a
+fill. Do not treat Plex `count > 0` as geometry.
+
 ---
 
 ## Briefly WORKED (do not regress these unrelated wins)
@@ -140,7 +164,7 @@ Locked, unrelated:
 
 ## What a NEW approach must not be
 
-Not 1, not 2, not 3, not 6, not 7, not 8.
+Not 1, not 2, not 3, not 6, not 7, not 8, not 9.
 
 In particular:
 
@@ -152,22 +176,29 @@ In particular:
 - No CSS 100% fill + `clientWidth` **lie** (#7).
 - No CSS 100% fill + `clientWidth` **unlock** (#8).
 - No further CSS-100% + client-box games on the live GL canvas.
+- No unzoomed intrinsic-384×272 flex letterbox (#9 / #50).
 
-Current attempt after #49/#8 (this tree): **paint over fill**.
+Current attempt after #50/#9 (this tree): **CSS `zoom` on a non-GL host**.
 
-Live WebGL canvas at **native 384×272 CSS**, centered in the bezel
-(flex, no `scale()`, no CSS 100% on GL). Backing 384×272. Real
-`clientWidth` matches the 384×272 CSS box (not a lie). No 2D present.
-Compact cold-start chip.
+Why this and not 1–9:
 
-**Tradeoff:** READY should paint (Plex chroma `count > 0`) but the
-picture is **letterboxed** in the tall phone bezel. Bezel fill is
-deferred until there is a path that is not 1–8. Future fill ideas
-(only after Plex shows paint): `zoom` on a **non-GL** wrapper around
-this native canvas — not `scale()` on the GL layer.
+- **Not 1.** Live WebGL only. No PNG / `toDataURL` / mirror poll.
+- **Not 2 / #43 / #44.** No CSS transform on the GL canvas or
+  `#grok64-player`. `zoom` is on `.g64-ios-zoom` only (a plain div).
+- **Not 3 / #46.** No `drawImage` of live WebGL, no tall 2D present.
+- **Not 6 / #47.** No `readPixels` present loop.
+- **Not 7 / #48.** Canvas CSS stays 384×272. No CSS 100%. No clientWidth lie.
+- **Not 8 / #49.** Client box stays the real 384×272 CSS box after GL.
+- **Not 9 / #50.** The 384×272 canvas is no longer the only sized box;
+  the non-GL host is zoomed to contain-fit the bezel (× device pixel
+  ratio on iPhone so a 1:1 device-pixel blit is readable).
 
-If letterbox is still `count:0` on Plex, add **#9** before the next
-experiment. Do not silently retry 1–8.
+Live WebGL canvas at **native 384×272 CSS + backing** (keep #39/#50
+purple VIC + dark inner). Real `clientWidth` matches that box. No 2D
+present. Compact cold-start chip. `.g64-ios-zoom` gets `zoom`.
+
+**Not a PASS** until Tom’s CriOS photo shows a readable, centered
+framebuffer. Plex paint-count ≠ Tom geometry.
 
 ---
 
@@ -177,11 +208,13 @@ experiment. Do not silently retry 1–8.
 on Chromium-on-Plex (iPhone viewport + CriOS UA). It must stay honest:
 
 - **First:** non-empty painted READY (`count > 0`). Solid black fails.
-- Letterboxed 384×272 (centered) is an **accepted tradeoff** after #7/#8.
-  Fail Tom #44 top-right and GL-origin bottom-left stamps, not a
-  centered native-size picture.
+- **Plex paint-count ≠ Tom geometry.** #50 was `0 failures` / `~853k`
+  chroma while Tom’s phone showed a postage stamp. A green count does
+  not prove bezel fill or centering on CriOS.
+- Fail Tom #44 top-right and GL-origin bottom-left stamps.
 - Fail leftover 2D present/mirror covers and CSS 100% + client-box games.
+- GL canvas computed CSS and `clientWidth` stay the native 384×272 box.
+- Non-GL `.g64-ios-zoom` must carry `zoom` (not a CSS transform on GL).
 - Hold after first READY (no splash remount, no tab death).
-- Bezel fill is **not** required until a non-1–8 fill path exists.
 
 A green gate is **not** a CriOS PASS. **Tom’s phone is the only PASS.**

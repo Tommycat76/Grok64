@@ -79,11 +79,13 @@ test("iOS WebGL backing is locked to 384x272 before the first context", () => {
   assert.doesNotMatch(patched, /lockIosClientBox\(this,\s*384,\s*272\)/);
 });
 
-test("iPhone CRT is a native 384×272 letterbox, not wrapper scale or 2D present", () => {
+test("iPhone CRT is native 384×272 + non-GL zoom, not wrapper transform or 2D present", () => {
   assert.match(host, /applyIosCrtStyle/);
   assert.match(host, /g64-ios-fb/);
   assert.match(host, /if \(isIos\(\)\) applyIosCrtStyle/);
   assert.match(host, /letterboxNativeCss/);
+  assert.match(host, /ensureIosZoomHost/);
+  assert.match(host, /applyIosZoomHost/);
   assert.match(host, /stripIosPresent/);
   assert.match(host, /#grok64-player/);
   assert.match(host, /remapViceViewport/);

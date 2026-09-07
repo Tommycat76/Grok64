@@ -73,7 +73,7 @@ test("CSS never hides live WebGL behind a 2D overlay", () => {
   );
 });
 
-test("iOS GL canvas is a native 384×272 letterbox; leftover 2D present is hidden", () => {
+test("iOS GL canvas stays native 384×272; leftover 2D present is hidden", () => {
   const iosCanvas = css.slice(css.indexOf("html[data-g64os=\"ios\"] #grok64-player canvas"));
   assert.match(iosCanvas, /width: 384px !important/);
   assert.match(iosCanvas, /height: 272px !important/);
@@ -81,8 +81,9 @@ test("iOS GL canvas is a native 384×272 letterbox; leftover 2D present is hidde
   assert.match(iosCanvas, /object-fit: contain !important/);
   assert.doesNotMatch(iosCanvas.slice(0, 900), /width: 100% !important/);
   assert.match(css, /canvas\.g64-ios-present/);
+  assert.match(css, /g64-ios-zoom/);
   assert.match(paintSrc, /applyIosCrtStyle/);
-  assert.match(paintSrc, /letterbox/);
+  assert.match(paintSrc, /zoom/);
   assert.match(paintSrc, /IOS_CRT_KNOWN_FAILURES/);
 });
 
@@ -94,6 +95,12 @@ test("iOS phone CRT screen fills the bezel without cqh self-size", () => {
   assert.doesNotMatch(phoneScreen, /100cqh/);
   assert.doesNotMatch(phoneScreen, /container-type/);
   assert.match(css, /\.g64-boot \{[\s\S]*?height: 100%/);
+});
+
+test("PlayerMount sits inside the non-GL zoom host", () => {
+  assert.match(app, /className="g64-ios-zoom"/);
+  assert.match(app, /data-g64-ios-zoom/);
+  assert.match(app, /<PlayerMount \/>/);
 });
 
 test("production UI shows build id; debug log is opt-in", () => {

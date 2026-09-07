@@ -17,6 +17,9 @@ import type { DriveMode, IecDrive, IecMap, IecUnit, JoyPort, ReuSize, ScpuSimm, 
 import { RETRO_BTN } from "./types";
 import { glog } from "./debug";
 import { stopIosPresent, stripIosPresent } from "./ios-present";
+import { IOS_ZOOM_CLASS, iosCrtZoom, NATIVE_FB_H, NATIVE_FB_W } from "./ios-zoom";
+
+export { IOS_ZOOM_CLASS, iosCrtZoom, NATIVE_FB_H, NATIVE_FB_W } from "./ios-zoom";
 
 const DATA = "https://cdn.emulatorjs.org/stable/data/";
 
@@ -1148,7 +1151,7 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       let bh = Math.max(272, Math.round(ch * dpr));
       if (tablet || iosPhone) {
         // VICE framebuffer is 384×272. Growing the backing store is solid
-        // black. iOS: native CSS box (letterbox after #7/#8). Tablet: scale.
+        // black. iOS: native CSS box + non-GL zoom host. Tablet: CSS transform.
         bw = 384;
         bh = 272;
       } else if (touchMobile) {
@@ -1179,8 +1182,8 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       canvas.style.visibility = "visible";
       if (tablet || iosPhone) {
         // VICE paints 384×272. WebGL on some Android GPUs ignores object-fit.
-        // Tablet: scale the canvas in CSS pixels. iOS: native 384×272 CSS
-        // letterbox — CSS 100% + clientWidth games are #7/#8 (empty black).
+        // Tablet: CSS-pixel transform on the canvas. iOS: native 384×272
+        // CSS + zoom on a non-GL host. CSS 100% + clientWidth is #7/#8.
         if (isIos()) applyIosCrtStyle(canvas, el, parent);
         else applyTabletCrtStyle(canvas, el, parent);
       } else {
@@ -1208,8 +1211,6 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
   }
 }
 
-const NATIVE_FB_W = 384;
-const NATIVE_FB_H = 272;
 const NATIVE_FB_PROPS = [
   "inset",
   "left",
@@ -1304,10 +1305,11 @@ function watchIosCrtBox(box: HTMLElement, apply: () => void) {
 }
 
 /**
- * Native 384×272 CSS box — paint over fill after #7/#8.
- * Flex on .g64-screen centers this; no scale(), no CSS 100% on GL.
+ * Native 384×272 CSS box on the GL canvas / player — VICE blit size.
+ * Do not put CSS zoom or a CSS transform on these nodes.
  */
 function letterboxNativeCss(el: HTMLElement) {
+  el.style.removeProperty("zoom");
   el.style.setProperty("position", "relative", "important");
   el.style.setProperty("inset", "auto", "important");
   el.style.setProperty("left", "auto", "important");
@@ -1327,13 +1329,53 @@ function letterboxNativeCss(el: HTMLElement) {
   el.style.setProperty("transform-origin", "0 0", "important");
 }
 
+function ensureIosZoomHost(player: HTMLElement, box: HTMLElement): HTMLElement {
+  const existing = player.closest(`.${IOS_ZOOM_CLASS}`) as HTMLElement | null;
+  if (existing) return existing;
+  const host = document.createElement("div");
+  host.className = IOS_ZOOM_CLASS;
+  host.setAttribute("data-g64-ios-zoom", "");
+  const parent = player.parentElement ?? box;
+  parent.insertBefore(host, player);
+  host.appendChild(player);
+  return host;
+}
+
+/** CSS zoom on the non-GL host only. Never a transform on the GL canvas. */
+function applyIosZoomHost(host: HTMLElement, sw: number, sh: number) {
+  const dpr =
+    isIosPhone() && typeof window !== "undefined" ? Math.max(1, window.devicePixelRatio || 1) : 1;
+  const z = iosCrtZoom(sw, sh, dpr);
+  host.classList.add(IOS_ZOOM_CLASS);
+  host.style.setProperty("display", "block", "important");
+  host.style.setProperty("position", "relative", "important");
+  host.style.setProperty("inset", "auto", "important");
+  host.style.setProperty("left", "auto", "important");
+  host.style.setProperty("top", "auto", "important");
+  host.style.setProperty("right", "auto", "important");
+  host.style.setProperty("bottom", "auto", "important");
+  host.style.setProperty("margin", "0", "important");
+  host.style.setProperty("width", `${NATIVE_FB_W}px`, "important");
+  host.style.setProperty("height", `${NATIVE_FB_H}px`, "important");
+  host.style.setProperty("min-width", "0", "important");
+  host.style.setProperty("min-height", "0", "important");
+  host.style.setProperty("max-width", "none", "important");
+  host.style.setProperty("max-height", "none", "important");
+  host.style.setProperty("flex", "0 0 auto", "important");
+  host.style.setProperty("transform", "none", "important");
+  host.style.setProperty("-webkit-transform", "none", "important");
+  host.style.setProperty("transform-origin", "0 0", "important");
+  host.style.setProperty("zoom", String(z));
+}
+
 /**
- * CriOS CRT after #47 / #48 / #49.
+ * CriOS CRT after #50 postage-stamp letterbox.
  *
- * Read `docs/IOS_CRT_KNOWN_FAILURES.md` first. This is not 1–8:
- * live WebGL at native 384×272 CSS, centered in the bezel (letterbox).
- * Paint first; bezel fill deferred. No wrapper scale, no CSS 100% on GL,
- * no clientWidth lie/unlock games, no 2D present.
+ * Read `docs/IOS_CRT_KNOWN_FAILURES.md` first. This is not 1–9:
+ * live WebGL stays native 384×272 CSS + backing (the #39/#50 paint path).
+ * CSS `zoom` on the non-GL `.g64-ios-zoom` host contain-fits that box
+ * into the bezel. No wrapper CSS transform, no CSS 100% on GL, no
+ * clientWidth lie/unlock, no 2D present, no PNG.
  */
 export function applyIosCrtStyle(
   canvas: HTMLCanvasElement,
@@ -1351,9 +1393,18 @@ export function applyIosCrtStyle(
     box.style.setProperty("display", "flex", "important");
     box.style.setProperty("align-items", "center", "important");
     box.style.setProperty("justify-content", "center", "important");
+    const host = ensureIosZoomHost(player, box);
+    const { sw, sh } = crtBoxSize(box, el);
+    applyIosZoomHost(host, sw, sh);
     letterboxNativeCss(player);
     const canvasParent = canvas.parentElement;
-    if (canvasParent && canvasParent !== player) letterboxNativeCss(canvasParent);
+    if (
+      canvasParent &&
+      canvasParent !== player &&
+      !canvasParent.classList.contains(IOS_ZOOM_CLASS)
+    ) {
+      letterboxNativeCss(canvasParent);
+    }
     letterboxNativeCss(canvas);
     canvas.style.setProperty("position", "absolute", "important");
     canvas.style.setProperty("left", "0", "important");
