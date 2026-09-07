@@ -70,25 +70,24 @@ test("iOS WebGL backing is locked to 384x272 before the first context", () => {
   assert.match(host, /lockIosBacking/);
   assert.match(host, /remapViceViewport/);
   const patched = host.slice(host.indexOf("function preserveWebglBuffer"), host.indexOf("type GuardedGm"));
-  assert.match(patched, /width", "384px"/);
-  assert.match(patched, /height", "272px"/);
+  assert.doesNotMatch(patched, /width", "384px"/);
+  assert.doesNotMatch(patched, /height", "272px"/);
   assert.ok(
-    patched.indexOf('width", "384px"') < patched.indexOf("orig.call(this, type, merged)"),
-    "native CSS box must be set before getContext (no #7 clientWidth lie)",
+    patched.indexOf("this.width = 384") < patched.indexOf("orig.call(this, type, merged)"),
+    "native backing must be set before getContext (CSS 384px lock is #50/#52)",
   );
   assert.doesNotMatch(patched, /lockIosClientBox\(this,\s*384,\s*272\)/);
 });
 
-test("iPhone CRT is native 384×272 + centered zoom slot, not wrapper transform or 2D present", () => {
+test("iPhone CRT is restored ee0b445 glass, not zoom/slot or 2D present", () => {
   assert.match(host, /applyIosCrtStyle/);
-  assert.match(host, /layoutIosCrtHost/);
   assert.match(host, /g64-ios-fb/);
-  assert.match(host, /if \(isIos\(\)\) applyIosCrtStyle/);
-  assert.match(host, /letterboxNativeCss/);
-  assert.match(host, /ensureIosZoomHost/);
-  assert.match(host, /ensureIosZoomSlot/);
-  assert.match(host, /applyIosZoomHost/);
-  assert.match(host, /applyIosZoomSlot/);
+  assert.match(host, /unwrapIosZoomChrome/);
+  assert.match(host, /style\.width = "100%"/);
+  assert.doesNotMatch(host, /layoutIosCrtHost/);
+  assert.doesNotMatch(host, /letterboxNativeCss/);
+  assert.doesNotMatch(host, /ensureIosZoomHost/);
+  assert.doesNotMatch(host, /applyIosZoomHost/);
   assert.match(host, /stripIosPresent/);
   assert.match(host, /#grok64-player/);
   assert.match(host, /remapViceViewport/);

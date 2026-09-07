@@ -16,8 +16,11 @@ import {
   letterboxPaintFails,
   letterboxedCrtFixture,
   makeRgba,
+  isC64Aspect,
+  isTallBezelBox,
   oldStampLayoutFails,
   paintFails,
+  bottomStripFails,
   paintedContent,
   tomStampBottomLeftFixture,
   tomStampFixture,
@@ -56,15 +59,15 @@ test("Plex CRT fill gate script exists and documents iPhone viewport fill", () =
   assert.match(gate, /session still powered/);
   assert.match(gate, /no full page reload/);
   assert.match(gate, /__g64 still mounted/);
-  assert.match(gate, /g64-ios-zoom|zoom host/);
-  assert.match(gate, /g64-ios-slot|zoom slot/);
+  assert.match(gate, /isC64Aspect|384:272 glass/);
+  assert.match(gate, /bottomStripFails|#52/);
   assert.match(gate, /letterboxPaintFails/);
   assert.match(gate, /Plex paint-count ≠ Tom geometry|paint-count ≠ Tom geometry/);
   assert.match(gate, /Tom's phone is the only PASS/);
   assert.match(gate, /Chromium-on-Plex still is not CriOS PASS|#47/);
   assert.match(gate, /function hasCssScale/);
   assert.match(gate, /IOS_CRT_KNOWN_FAILURES/);
-  assert.match(gate, /GL clientWidth is native 384x272/);
+  assert.match(gate, /VICE backing 384x272/);
   assert.doesNotMatch(gate, /note\(\/scale\\\(\/i\.test\(String\(ready\?\.playerXf/);
   assert.doesNotMatch(gate, /GATE PASS/);
   assert.doesNotMatch(gate, /live GL CSS px vs bezel/);
@@ -185,52 +188,39 @@ test("remapViceViewport expands a 384×272 stamp in a larger drawing buffer", ()
   assert.match(host, /w: drawingW, h: drawingH/);
 });
 
-test("iOS CRT is native 384×272 + centered zoom slot, never wrapper transform or 2D present", () => {
-  const iosFn = host.slice(host.indexOf("function letterboxNativeCss"), host.indexOf("export async function recycleCore"));
-  assert.match(iosFn, /width", "384px"/);
-  assert.match(iosFn, /height", "272px"/);
-  assert.match(iosFn, /flex", "0 0 384px"/);
+test("iOS CRT is restored ee0b445 glass, never wrapper transform or 2D present", () => {
+  const iosFn = host.slice(host.indexOf("function unwrapIosZoomChrome"), host.indexOf("export async function recycleCore"));
   assert.match(iosFn, /stripIosPresent/);
-  assert.match(iosFn, /ensureIosZoomHost/);
-  assert.match(iosFn, /ensureIosZoomSlot/);
-  assert.match(iosFn, /applyIosZoomHost/);
-  assert.match(iosFn, /applyIosZoomSlot/);
-  assert.match(iosFn, /layoutIosCrtHost/);
-  assert.match(iosFn, /"zoom"/);
+  assert.match(iosFn, /unwrapIosZoomChrome/);
+  assert.match(iosFn, /style\.width = "100%"/);
   assert.doesNotMatch(iosFn, /fillBezelCss/);
   assert.doesNotMatch(iosFn, /(?<!un)lockIosClientBox\(canvas/);
   assert.doesNotMatch(iosFn, /startIosPresent/);
-  assert.doesNotMatch(iosFn, /width", "100%"/);
+  assert.doesNotMatch(iosFn, /ensureIosZoomHost/);
+  assert.doesNotMatch(iosFn, /layoutIosCrtHost/);
+  assert.doesNotMatch(iosFn, /letterboxNativeCss/);
   assert.doesNotMatch(iosFn, /translate3d\(0,0,0\) scale\(/);
-  assert.doesNotMatch(iosFn, /scale\(/);
   assert.match(host, /remapViceViewport/);
   assert.match(host, /prefetchViceCores/);
   assert.match(host, /this\.width = 384/);
   assert.doesNotMatch(host, /lockIosClientBox\(this, 384, 272\)/);
-  const zoomMod = readFileSync(join(root, "src/lib/emu/ios-zoom.ts"), "utf8");
-  assert.match(zoomMod, /export function iosCrtZoom/);
-  assert.match(zoomMod, /export function iosZoomLayout/);
-  assert.match(zoomMod, /pixel ratio/);
+  assert.equal(existsSync(join(root, "src/lib/emu/ios-zoom.ts")), false);
 });
 
-test("iOS phone screen CSS keeps 384×272 GL — no #43 cqh, no CSS 100%", () => {
+test("iOS phone screen CSS is the 384:272 glass — no tall inset, no zoom slot", () => {
   const idx = css.indexOf('html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-screen {');
   assert.ok(idx >= 0);
   const rule = css.slice(idx, css.indexOf("}", idx) + 1);
-  assert.match(rule, /inset: 8px/);
-  assert.match(rule, /display: flex/);
+  assert.match(rule, /aspect-ratio: 384 \/ 272/);
+  assert.doesNotMatch(rule, /inset: 8px/);
   assert.doesNotMatch(rule, /100cqh/);
   assert.doesNotMatch(rule, /container-type/);
   const canvas = css.slice(css.indexOf('html[data-g64os="ios"] #grok64-player canvas'));
-  assert.match(canvas, /width: 384px !important/);
-  assert.match(canvas, /height: 272px !important/);
-  assert.match(canvas, /transform: none !important/);
-  assert.match(canvas, /object-fit: contain !important/);
-  assert.doesNotMatch(canvas.slice(0, 900), /width: 100% !important/);
+  assert.doesNotMatch(canvas.slice(0, 900), /width: 384px !important/);
+  assert.doesNotMatch(canvas.slice(0, 900), /height: 272px !important/);
   assert.match(css, /\.g64-ios-present/);
   assert.match(css, /html\[data-g64os="ios"\] \.g64-screen > canvas\.g64-ios-present/);
-  assert.match(css, /\.g64-ios-zoom/);
-  assert.match(css, /\.g64-ios-slot/);
+  assert.match(css, /display: contents/);
 });
 
 test("letterboxPaintFails accepts a centered native READY and rejects black / #44", () => {
@@ -255,6 +245,21 @@ test("letterboxPaintFails accepts a centered native READY and rejects black / #4
   const bigBl = makeRgba(374, 652, [0x6c, 0x5a, 0x9a, 255]);
   fillRect(bigBl, 8, 652 - 8 - 180, 220, 180, [0x12, 0x16, 0x3a, 255]);
   assert.match(letterboxPaintFails(paintedContent(bigBl.data, bigBl.width, bigBl.height)) ?? "", /bottom-left/);
+});
+
+test("isC64Aspect and bottomStripFails describe restored glass vs #52", () => {
+  assert.equal(isC64Aspect(370, 262), true);
+  assert.equal(isC64Aspect(354, 652), false);
+  assert.equal(isTallBezelBox(354, 652), true);
+  assert.equal(isTallBezelBox(370, 262), false);
+  assert.equal(
+    bottomStripFails({ x: 8, y: 520, w: 360, h: 40 }, { x: 0, y: 0, w: 374, h: 652 }),
+    true,
+  );
+  assert.equal(
+    bottomStripFails({ x: 8, y: 180, w: 358, h: 254 }, { x: 0, y: 0, w: 374, h: 652 }),
+    false,
+  );
 });
 
 test("isNativeFbCssBox is the real 384×272 box, not a bezel-sized unlock", () => {

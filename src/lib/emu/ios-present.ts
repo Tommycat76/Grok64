@@ -6,8 +6,8 @@
  * loop. Read `docs/IOS_CRT_KNOWN_FAILURES.md` first.
  *
  * This module only removes stale `.g64-ios-present` nodes from cached JS.
- * Presentation is the live WebGL canvas (ios-paint + applyIosCrtStyle +
- * centered non-GL `.g64-ios-slot` / `.g64-ios-zoom`).
+ * Presentation is the live WebGL canvas (ios-paint + restored ee0b445
+ * `.g64-screen` glass; no zoom slot).
  */
 
 export const IOS_PRESENT_CLASS = "g64-ios-present";

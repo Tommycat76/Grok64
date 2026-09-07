@@ -168,6 +168,29 @@ On CriOS the expanded used box is not re-centered in the tall bezel
 ship another un-centered zoom-from-default-origin variant without
 fixing alignment.
 
+### 11. #52 — centered zoom slot failed (CRT too small, stuck along the BOTTOM)
+
+`main@156a07f` / `routes-D2Yf0JqE.js` (Plex deploy of PR #52; evolution
+of the zoom/slot path #10 / #51):
+
+- Keep live VICE WebGL at native 384×272 CSS + backing.
+- CSS `zoom` on `.g64-ios-zoom` (contain-fit × dpr).
+- A non-zoomed `.g64-ios-slot` sized to the post-zoom used box and
+  absolutely placed at `(bezel − used) / 2` so overflow would be a
+  symmetric center-fill crop (or a centered letterbox).
+
+**Tom FAIL (CriOS photo after #52):** long black boot, then the CRT is
+a **thin purple strip stuck along the BOTTOM** of the tall black bezel.
+Too small. Not a centered letterbox. Not a bezel fill. Header:
+Grok64 + green `156a07f` + PAL + MOUSE.
+
+This is the same zoom/slot family as #10 / #51, not a new paint bug.
+Plex geometry still ≠ Tom. **Strategy change:** stop inventing
+zoom-v3 / slot-v2 / contain-fit / CSS-100% theories. **Restore the
+last-good CRT layout** from before the #42 rewrite thrash (presentation
+CSS + host present path at `ee0b445` / pre-`30d158a`), then re-apply
+only non-layout locks.
+
 ---
 
 ## Briefly WORKED (do not regress these unrelated wins)
@@ -192,7 +215,7 @@ Locked, unrelated:
 
 ## What a NEW approach must not be
 
-Not 1, not 2, not 3, not 6, not 7, not 8, not 9, not 10.
+Not 1, not 2, not 3, not 6, not 7, not 8, not 9, not 10, not 11.
 
 In particular:
 
@@ -201,40 +224,46 @@ In particular:
 - No DPR / bezel-sized WebGL backing resize (`canvas.width` assignment).
 - No `drawImage` of the live WebGL canvas.
 - No `readPixels` present loop (any fps) into a 2D overlay.
-- No CSS 100% fill + `clientWidth` **lie** (#7).
-- No CSS 100% fill + `clientWidth` **unlock** (#8).
-- No further CSS-100% + client-box games on the live GL canvas.
-- No unzoomed intrinsic-384×272 flex letterbox (#9 / #50).
+- No CSS 100% fill of a **tall full-bezel** `.g64-screen` + `clientWidth`
+  **lie** (#7 / #48).
+- No CSS 100% fill of a **tall full-bezel** `.g64-screen` + `clientWidth`
+  **unlock** (#8 / #49).
+- No further CSS-100% + client-box games that stretch live GL to the
+  tall bezel.
+- No unzoomed intrinsic-384×272 flex letterbox inside a tall
+  absolute-inset `.g64-screen` (#9 / #50).
 - No bare CSS `zoom` on `.g64-ios-zoom` from default origin without
   recentering the post-zoom used box (#10 / #51).
+- No centered zoom slot / post-zoom used-size offset (#11 / #52).
+- No zoom-v3 / slot-v2 / another contain-fit theory.
 
-Current attempt after #51/#10 (this tree): **centered zoom slot**.
+Current attempt after #52/#11 (this tree): **restore pre-thrash CRT
+layout** from `ee0b445` (last commit before the #42 rewrite at
+`30d158a` / `162e0f9`). That is the era when READY filled the
+aspect-ratio `.g64-screen` on phone (Tom: CRT good enough after #18;
+tablet framing in #33/#40). Live WebGL paint stays the #39 path.
 
-Why this and not 1–10:
+Why this and not 1–11:
 
 - **Not 1.** Live WebGL only. No PNG / `toDataURL` / mirror poll.
-- **Not 2 / #43 / #44.** No CSS transform on the GL canvas or
-  `#grok64-player`. `zoom` stays on `.g64-ios-zoom` only (a plain div).
-  The slot is positioned with `left`/`top` — not `transform:scale`.
+- **Not 2 / #43 / #44.** No CSS `transform:scale` on the GL canvas or
+  `#grok64-player`. Tablet-only transform is unchanged (Android).
 - **Not 3 / #46.** No `drawImage` of live WebGL, no tall 2D present.
 - **Not 6 / #47.** No `readPixels` present loop.
-- **Not 7 / #48.** Canvas CSS stays 384×272. No CSS 100%. No clientWidth lie.
-- **Not 8 / #49.** Client box stays the real 384×272 CSS box after GL.
-- **Not 9 / #50.** Still zoomed (not an unzoomed 384 flex letterbox).
-- **Not 10 / #51.** Not another un-centered zoom-from-default-origin.
-  A non-zoomed `.g64-ios-slot` is sized to the post-zoom used box and
-  absolutely placed at `(bezel − used) / 2` so overflow is a **symmetric
-  center-fill crop** (or a **centered letterbox** when used < bezel).
-  Layout runs on power even before the emu exists (cheap READY-paint
-  geometry; not a PNG path).
+- **Not 7 / #48.** Not CSS 100% of a **tall bezel-sized** screen plus a
+  384 clientWidth lie. `.g64-screen` is again `aspect-ratio: 384 / 272`
+  (the glass). Canvas CSS 100% fills **that** glass, not the tall bezel.
+- **Not 8 / #49.** No clientWidth unlock-to-bezel. No tall CSS 100%.
+- **Not 9 / #50.** Not a 384×272 canvas sitting in a tall absolute-inset
+  `.g64-screen`. The screen itself is the 384:272 frame.
+- **Not 10 / #51.** No CSS `zoom` on `.g64-ios-zoom`.
+- **Not 11 / #52.** No centering slot, no post-zoom used-size offset.
 
-Live WebGL canvas at **native 384×272 CSS + backing** (keep #39/#50/#51
-purple VIC + dark inner). Real `clientWidth` matches that box. No 2D
-present. Compact cold-start chip. `.g64-ios-zoom` gets `zoom`;
-`.g64-ios-slot` gets the centering offset.
+Backing store stays **384×272** (VICE blit). No 2D present. Compact
+cold-start chip. Build-id chip stays visible. Debug log off by default.
 
-**Not a PASS** until Tom’s CriOS photo shows a readable, centered
-framebuffer. Plex paint-count ≠ Tom geometry. Plex `zoom:3` ≠ Tom.
+**Not a PASS** until Tom’s CriOS photo shows a readable, filled CRT.
+Plex paint-count ≠ Tom geometry.
 
 ---
 
@@ -250,9 +279,10 @@ on Chromium-on-Plex (iPhone viewport + CriOS UA). It must stay honest:
 - Fail Tom #44 top-right and GL-origin bottom-left stamps.
 - Fail leftover 2D present/mirror covers and CSS 100% + client-box games.
 - GL canvas computed CSS and `clientWidth` stay the native 384×272 box.
-- Non-GL `.g64-ios-zoom` must carry `zoom` (not a CSS transform on GL).
-- Non-zoomed `.g64-ios-slot` must share a center with the bezel (not a
-  top-right / L-border #51 crop).
+- No `.g64-ios-zoom` CSS `zoom` and no `.g64-ios-slot` centering offset
+  (#10 / #11).
+- `.g64-screen` is `aspect-ratio: 384 / 272` (pre-#42 glass), not a
+  tall absolute-inset bezel fill. Live GL CSS fills **that** glass.
 - Hold after first READY (no splash remount, no tab death).
 
 A green gate is **not** a CriOS PASS. **Tom’s phone is the only PASS.**
