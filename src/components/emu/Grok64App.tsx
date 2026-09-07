@@ -2325,7 +2325,9 @@ export function Grok64App() {
               if (!pendingKickRef.current) onFire(false);
             }}
           >
-            <PlayerMount />
+            <div className="g64-ios-zoom" data-g64-ios-zoom="">
+              <PlayerMount />
+            </div>
             {s.crtFilter && snap.os !== "ios" ? <div className="g64-scan" /> : null}
             {iosResume && !s.booting ? (
               <button

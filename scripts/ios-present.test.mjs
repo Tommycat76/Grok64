@@ -40,7 +40,7 @@ test("no present bitmap — live GL is the picture", () => {
   assert.equal(isIosPresentLooping(), false);
 });
 
-test("CSS hides leftover 2D present nodes; live GL is a 384×272 letterbox", () => {
+test("CSS hides leftover 2D present nodes; live GL stays 384×272 CSS", () => {
   assert.match(css, /canvas\.g64-ios-present/);
   assert.match(css, /display: none !important/);
   const iosCanvas = css.slice(css.indexOf('html[data-g64os="ios"] #grok64-player canvas'));

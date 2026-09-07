@@ -1,14 +1,15 @@
 /**
- * CriOS CRT presentation — native 384×272 letterbox (after #7/#8).
+ * CriOS CRT presentation — live 384×272 WebGL + non-GL CSS zoom (after #50).
  *
  * Read `docs/IOS_CRT_KNOWN_FAILURES.md` first. Desktop Chromium / Plex
- * Playwright cannot PASS this.
+ * Playwright cannot PASS this. Plex paint-count is not Tom geometry.
  *
  * Architecture
  * ------------
- * 1. Show the live VICE WebGL canvas at native 384×272 CSS, centered in
- *    the bezel (flex). Paint over fill. Not CSS 100% (#7/#8), not wrapper
- *    scale (#43/#44), not a 2D present (#46/#47).
+ * 1. Show the live VICE WebGL canvas at native 384×272 CSS (the #39/#50
+ *    blit). CSS `zoom` on `.g64-ios-zoom` (non-GL) contain-fits that box
+ *    in the bezel. Not CSS 100% (#7/#8), not wrapper/GL transform
+ *    (#43/#44), not a 2D present (#46/#47), not unzoomed letterbox (#50).
  * 2. Backing store stays 384×272. Real clientWidth matches the 384 CSS
  *    box — no clientWidth lie, no unlock-to-bezel game.
  * 3. Never call getContext on that canvas.
@@ -101,7 +102,7 @@ function revealLiveCanvas(canvas: HTMLCanvasElement) {
   canvas.style.setProperty("display", "block", "important");
   canvas.style.setProperty("visibility", "visible", "important");
   canvas.style.setProperty("opacity", "1", "important");
-  // Live GL at native 384×272, centered (letterbox after #7/#8).
+  // Live GL at native 384×272; non-GL wrapper zoom after #50.
   const el =
     (canvas.closest("#grok64-player") as HTMLElement | null) ??
     (typeof document !== "undefined" ? document.getElementById("grok64-player") : null);
@@ -190,7 +191,7 @@ export function presentIosCrt(
     }
   }
 
-  // Refit CSS so the live canvas stays a native 384×272 letterbox.
+  // Refit CSS so the live canvas stays native 384×272 inside the zoom host.
   fitEmu(playerRoot(root), emu);
   if (canvas) nudgeCompositor(canvas);
   const shouldFit =

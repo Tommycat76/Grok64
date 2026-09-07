@@ -14,9 +14,10 @@
  *   node scripts/crt-fill-gate.mjs http://127.0.0.1:8091/
  *
  * HARD: asserts the *painted* live-GL picture is not solid black.
- * After #7/#8, a centered 384×272 letterbox is accepted (paint over fill).
- * Tom #44 top-right and GL-origin bottom-left still fail. DOM wrapper
- * fill of 1.0 is never a pass.
+ * After #50, CSS zoom lives on the non-GL `.g64-ios-zoom` host; the GL
+ * canvas stays native 384×272 CSS. Tom #44 top-right and GL-origin
+ * bottom-left still fail. DOM wrapper fill of 1.0 is never a pass.
+ * Plex paint-count ≠ Tom geometry.
  *
  * Also holds after first READY paint and fails if the session remounts
  * to the power splash, __g64 is torn down, the page reloads, or the CRT
@@ -111,11 +112,13 @@ const measureSrc = () => {
   const screen = document.querySelector(".g64-screen");
   const boot = document.querySelector(".g64-boot");
   const player = document.getElementById("grok64-player");
+  const zoomHost = document.querySelector(".g64-ios-zoom");
   const present = document.querySelector("canvas.g64-ios-present");
   const canvas = player?.querySelector("canvas:not(.g64-ios-present)");
   const cs = canvas ? getComputedStyle(canvas) : null;
   const ns = present ? getComputedStyle(present) : null;
   const ps = player ? getComputedStyle(player) : null;
+  const zs = zoomHost ? getComputedStyle(zoomHost) : null;
   const ss = screen ? getComputedStyle(screen) : null;
   const bs = boot ? getComputedStyle(boot) : null;
   const bezelBox = box(bezel);
@@ -159,9 +162,14 @@ const measureSrc = () => {
     buf: canvas ? { w: canvas.width, h: canvas.height } : null,
     canvasClient: canvas ? { w: canvas.clientWidth, h: canvas.clientHeight } : null,
     db: gl ? { w: gl.drawingBufferWidth, h: gl.drawingBufferHeight } : null,
-    canvasCss: cs ? { w: cs.width, h: cs.height, xf: cs.transform } : null,
+    canvasCss: cs ? { w: cs.width, h: cs.height, xf: cs.transform, zoom: cs.zoom } : null,
     presentCss: ns ? { w: ns.width, h: ns.height, xf: ns.transform } : null,
-    playerCss: ps ? { w: ps.width, h: ps.height, xf: ps.transform } : null,
+    playerCss: ps ? { w: ps.width, h: ps.height, xf: ps.transform, zoom: ps.zoom } : null,
+    zoomHost: Boolean(zoomHost),
+    zoomCss: zs
+      ? { w: zs.width, h: zs.height, xf: zs.transform, zoom: zs.zoom }
+      : null,
+    zoomBox: box(zoomHost),
     screenCss: ss ? { w: ss.width, h: ss.height } : null,
     bootCss: bs ? { w: bs.width, h: bs.height } : null,
     playerXf: ps?.transform ?? null,
@@ -222,7 +230,7 @@ function assertPainted(label, shot, extra = {}) {
     !fail,
     fail
       ? `${label} ${fail}`
-      : `${label} painted count:${shot.paint.count} ${shot.paint.corner} (letterbox OK after #7/#8)`,
+      : `${label} painted count:${shot.paint.count} ${shot.paint.corner} (chroma OK; Plex count ≠ Tom geometry)`,
     {
       bbox: shot.paint.bbox,
       size: { w: shot.w, h: shot.h },
@@ -260,8 +268,8 @@ console.log("GATE viewport", JSON.stringify({ ...IPHONE, dpr: 3, ua: "CriOS-iPho
 console.log("GATE read docs/IOS_CRT_KNOWN_FAILURES.md first.");
 console.log("GATE note Cursor-sandbox WebKit is not a ship gate. This script is the Plex painted-CRT check.");
 console.log("GATE note DOM getBoundingClientRect fill of 1.0 is not a pass — painted bbox + untransformed CSS px must fill.");
-console.log("GATE this is NOT a real CriOS PASS. Chromium-on-Plex can go green while CriOS blacks out (#47).");
-console.log("GATE Tom's phone is the only PASS. This script must never claim PASS.");
+console.log("GATE this is NOT a real CriOS PASS. Chromium-on-Plex can go green while CriOS blacks out (#47) or stamps (#50).");
+console.log("GATE Plex paint-count ≠ Tom geometry. Tom's phone is the only PASS. This script must never claim PASS.");
 
 await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
 await page.waitForFunction(() => typeof window.__g64?.power === "function", { timeout: 25000 });
@@ -376,8 +384,8 @@ note(
   ready?.canvasClient,
 );
 
-// #44 stamp path: wrapper scale + 384×272 CSS. CriOS ignores that scale on GL.
-note(!hasCssScale(ready?.playerXf), "player wrapper has no CSS scale (CriOS ignores it on the GL layer)", {
+// #44 stamp path: wrapper CSS transform + 384×272 CSS. CriOS ignores that on GL.
+note(!hasCssScale(ready?.playerXf), "player wrapper has no CSS transform (CriOS ignores it on the GL layer)", {
   playerXf: ready?.playerXf,
 });
 note(
@@ -385,6 +393,30 @@ note(
   "canvas transform is identity",
   { canvasXf: ready?.canvasCss?.xf },
 );
+note(Boolean(ready?.zoomHost), "non-GL .g64-ios-zoom host is in the tree", {
+  zoomHost: ready?.zoomHost,
+  zoomCss: ready?.zoomCss,
+});
+{
+  const z = Number.parseFloat(String(ready?.zoomCss?.zoom ?? ""));
+  note(
+    Number.isFinite(z) && z > 0.2 && z <= 8,
+    "non-GL zoom host has CSS zoom (not a transform on GL)",
+    { zoom: ready?.zoomCss?.zoom, playerZoom: ready?.playerCss?.zoom, canvasZoom: ready?.canvasCss?.zoom },
+  );
+  const canvasZoom = Number.parseFloat(String(ready?.canvasCss?.zoom ?? "1"));
+  const playerZoom = Number.parseFloat(String(ready?.playerCss?.zoom ?? "1"));
+  note(
+    !Number.isFinite(canvasZoom) || Math.abs(canvasZoom - 1) < 0.02,
+    "GL canvas itself is not zoomed",
+    { canvasZoom: ready?.canvasCss?.zoom },
+  );
+  note(
+    !Number.isFinite(playerZoom) || Math.abs(playerZoom - 1) < 0.02,
+    "#grok64-player itself is not zoomed",
+    { playerZoom: ready?.playerCss?.zoom },
+  );
+}
 
 const bezelInner = ready?.bezelInner;
 if (ready?.canvasCss && bezelInner) {
@@ -392,19 +424,19 @@ if (ready?.canvasCss && bezelInner) {
   const cssH = cssPx(ready.canvasCss.h);
   note(
     isNativeFbCssBox(cssW, cssH),
-    "live GL canvas CSS is native 384x272 (letterbox; fill deferred after #7/#8)",
+    "live GL canvas CSS is native 384x272 (zoom is on the non-GL host)",
     { bezelInner, glCss: { w: cssW, h: cssH } },
   );
   note(
     oldStampLayoutFails(cssW || 384, cssH || 272, bezelInner.w, bezelInner.h),
-    "384x272 CSS does not fill the tall bezel (documented letterbox tradeoff)",
+    "384x272 GL CSS does not by itself fill the tall bezel (host zoom is the fill)",
     { bezelInner, glCss: { w: cssW, h: cssH } },
   );
   if (ready.canvas) {
     const dom = boxFill(ready.canvas.w, ready.canvas.h, bezelInner.w, bezelInner.h);
     console.log(
-      "INFO canvas DOM-rect vs bezel (letterbox expected; paint count is the gate)",
-      JSON.stringify({ dom, css: { w: cssW, h: cssH } }),
+      "INFO canvas DOM-rect vs bezel (Plex paint-count ≠ Tom geometry)",
+      JSON.stringify({ dom, css: { w: cssW, h: cssH }, zoom: ready.zoomCss }),
     );
   }
 }
@@ -413,7 +445,7 @@ if (ready?.playerCss && bezelInner) {
   const ph = cssPx(ready.playerCss.h);
   note(
     isNativeFbCssBox(pw, ph),
-    "player wrapper CSS is native 384x272 (no scale, no CSS 100%)",
+    "player CSS is native 384x272 (no CSS 100%, no transform)",
     { playerCss: { w: pw, h: ph } },
   );
 }

@@ -56,8 +56,9 @@ test("Plex CRT fill gate script exists and documents iPhone viewport fill", () =
   assert.match(gate, /session still powered/);
   assert.match(gate, /no full page reload/);
   assert.match(gate, /__g64 still mounted/);
-  assert.match(gate, /letterbox/);
+  assert.match(gate, /g64-ios-zoom|zoom host/);
   assert.match(gate, /letterboxPaintFails/);
+  assert.match(gate, /Plex paint-count ≠ Tom geometry|paint-count ≠ Tom geometry/);
   assert.match(gate, /Tom's phone is the only PASS/);
   assert.match(gate, /Chromium-on-Plex still is not CriOS PASS|#47/);
   assert.match(gate, /function hasCssScale/);
@@ -183,25 +184,31 @@ test("remapViceViewport expands a 384×272 stamp in a larger drawing buffer", ()
   assert.match(host, /w: drawingW, h: drawingH/);
 });
 
-test("iOS CRT is a native 384×272 letterbox, never wrapper scale or 2D present", () => {
+test("iOS CRT is native 384×272 + non-GL zoom, never wrapper transform or 2D present", () => {
   const iosFn = host.slice(host.indexOf("function letterboxNativeCss"), host.indexOf("export async function recycleCore"));
   assert.match(iosFn, /width", "384px"/);
   assert.match(iosFn, /height", "272px"/);
   assert.match(iosFn, /flex", "0 0 384px"/);
   assert.match(iosFn, /stripIosPresent/);
+  assert.match(iosFn, /ensureIosZoomHost/);
+  assert.match(iosFn, /applyIosZoomHost/);
+  assert.match(iosFn, /"zoom"/);
   assert.doesNotMatch(iosFn, /fillBezelCss/);
   assert.doesNotMatch(iosFn, /(?<!un)lockIosClientBox\(canvas/);
   assert.doesNotMatch(iosFn, /startIosPresent/);
   assert.doesNotMatch(iosFn, /width", "100%"/);
   assert.doesNotMatch(iosFn, /translate3d\(0,0,0\) scale\(/);
-  assert.doesNotMatch(iosFn, /devicePixelRatio/);
+  assert.doesNotMatch(iosFn, /scale\(/);
   assert.match(host, /remapViceViewport/);
   assert.match(host, /prefetchViceCores/);
   assert.match(host, /this\.width = 384/);
   assert.doesNotMatch(host, /lockIosClientBox\(this, 384, 272\)/);
+  const zoomMod = readFileSync(join(root, "src/lib/emu/ios-zoom.ts"), "utf8");
+  assert.match(zoomMod, /export function iosCrtZoom/);
+  assert.match(zoomMod, /pixel ratio/);
 });
 
-test("iOS phone screen CSS letterboxes 384×272 — no #43 cqh, no CSS 100%", () => {
+test("iOS phone screen CSS keeps 384×272 GL — no #43 cqh, no CSS 100%", () => {
   const idx = css.indexOf('html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-screen {');
   assert.ok(idx >= 0);
   const rule = css.slice(idx, css.indexOf("}", idx) + 1);
@@ -217,6 +224,7 @@ test("iOS phone screen CSS letterboxes 384×272 — no #43 cqh, no CSS 100%", ()
   assert.doesNotMatch(canvas.slice(0, 900), /width: 100% !important/);
   assert.match(css, /\.g64-ios-present/);
   assert.match(css, /html\[data-g64os="ios"\] \.g64-screen > canvas\.g64-ios-present/);
+  assert.match(css, /\.g64-ios-zoom/);
 });
 
 test("letterboxPaintFails accepts a centered native READY and rejects black / #44", () => {
