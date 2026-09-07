@@ -38,6 +38,23 @@ node scripts/flatten-dist.mjs dist
 
 Do not claim an iPhone CRT PASS from this box. Tom’s real CriOS is the only PASS.
 
+### CRT fill gate (required after deploy)
+
+Cursor-sandbox WebKit is **not** a ship gate. After the static server is serving the new build, run this from the repo on **PLEXnTORRENT_HP**:
+
+```
+node scripts/crt-fill-gate.mjs
+node scripts/crt-fill-gate.mjs https://grok64.tomsprojects.cc/
+node scripts/crt-fill-gate.mjs http://127.0.0.1:8091/
+```
+
+It launches Playwright Chromium at an iPhone viewport (390×844, touch, CriOS UA), powers on, and **fails** if `.g64-screen` / boot overlay / canvas do not fill the CRT bezel (~0.85 area and width/height). Screenshots land in `screenshots/crt-fill-gate-*.png`.
+
+Needs Playwright's Chromium once: `npx playwright install chromium`. If Chromium is already installed, set `G64_CHROME` to that executable.
+
+A green gate is a **layout check**, not a real-iPhone PASS. Optional later: BrowserStack real CriOS. Tom hard-refresh remains the CRT picture sign-off.
+
+
 ## EmulatorJS
 
 VICE WASM cores load from `https://cdn.emulatorjs.org/stable/data/` (no bundling required). Power-on fetches `./software/blank.d64` relative to the app base.

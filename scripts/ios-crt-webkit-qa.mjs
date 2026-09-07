@@ -68,6 +68,8 @@ for (let i = 0; i < 80; i++) {
       fb: c?.classList.contains("g64-ios-fb") ?? false,
       screen: br(screen),
       canvasCss: br(c),
+      playerXf: root ? getComputedStyle(root).transform : null,
+      bezel: br(document.querySelector(".g64-bezel")),
     };
   });
   if (state.fs && state.running && state.title === "BASIC") break;
@@ -115,8 +117,8 @@ if (!state.fb) {
   console.log("FAIL missing g64-ios-fb");
   process.exit(2);
 }
-if (!/scale\(|matrix\(/i.test(String(state.xf || ""))) {
-  console.log("FAIL canvas transform has no scale", state.xf);
+if (!/scale\(|matrix\(/i.test(String(state.playerXf || ""))) {
+  console.log("FAIL player wrapper has no scale", state.playerXf);
   process.exit(2);
 }
 if (state.canvasCss && state.screen && state.screen.w > 0) {

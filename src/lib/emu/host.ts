@@ -1051,10 +1051,9 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       canvas.style.display = "block";
       canvas.style.visibility = "visible";
       if (tablet || iosPhone) {
-        // VICE paints 384×272. WebGL on some Android GPUs and CriOS ignores
-        // object-fit / CSS 100% and blits the buffer 1:1 (postage stamp).
-        // Size the CSS box to the native framebuffer, then scale from 0,0.
-        // iOS blits in device pixels — applyIosCrtStyle multiplies by DPR.
+        // VICE paints 384×272. WebGL on some Android GPUs ignores object-fit.
+        // Tablet: scale the canvas in CSS pixels. iOS: scale #grok64-player
+        // (CriOS ignores transform on the canvas itself — #43 stamp).
         if (isIos()) applyIosCrtStyle(canvas, el, parent);
         else applyTabletCrtStyle(canvas, el, parent);
       } else {
@@ -1099,26 +1098,27 @@ function clearNativeFbCrtStyle(canvas: HTMLCanvasElement) {
   canvas.classList.remove("g64-tablet-fb", "g64-ios-fb");
 }
 
+function crtBoxSize(box: HTMLElement, fallback: HTMLElement) {
+  const br = box.getBoundingClientRect();
+  return {
+    sw: Math.max(box.clientWidth || 0, Math.round(br.width) || 0, fallback.clientWidth || 0, 1),
+    sh: Math.max(box.clientHeight || 0, Math.round(br.height) || 0, fallback.clientHeight || 0, 1),
+  };
+}
+
 function applyNativeFbCrtStyle(
   canvas: HTMLCanvasElement,
   el: HTMLElement,
   parent: HTMLElement,
-  klass: "g64-tablet-fb" | "g64-ios-fb",
+  klass: "g64-tablet-fb",
 ) {
-  canvas.classList.remove(klass === "g64-ios-fb" ? "g64-tablet-fb" : "g64-ios-fb");
+  canvas.classList.remove("g64-ios-fb");
   canvas.classList.add(klass);
   const box = (el.closest(".g64-screen") as HTMLElement | null) ?? parent;
-  const sw = Math.max(box.clientWidth || 0, el.clientWidth || 0, 1);
-  const sh = Math.max(box.clientHeight || 0, el.clientHeight || 0, 1);
-  // CriOS WebGL ignores CSS 100% / object-fit and blits 384×272 in device
-  // pixels (Tom's postage stamp). Keep the CSS box at native FB size so
-  // RetroArch's viewport (clientWidth × clientHeight) matches the locked
-  // backing store — a 384/dpr box made VICE paint a stamp into the buffer.
-  // Scale by DPR on iOS so that device-pixel blit fills the CRT.
-  // Android tablets blit 1:1 in CSS pixels — dpr stays 1.
-  const dpr = klass === "g64-ios-fb" ? Math.max(1, window.devicePixelRatio || 1) : 1;
-  const sx = (sw * dpr) / NATIVE_FB_W;
-  const sy = (sh * dpr) / NATIVE_FB_H;
+  const { sw, sh } = crtBoxSize(box, el);
+  // Android tablets blit 1:1 in CSS pixels — never multiply by DPR.
+  const sx = sw / NATIVE_FB_W;
+  const sy = sh / NATIVE_FB_H;
   canvas.style.setProperty("position", "absolute", "important");
   canvas.style.setProperty("inset", "auto", "important");
   canvas.style.setProperty("left", "0", "important");
@@ -1144,13 +1144,95 @@ export function applyTabletCrtStyle(
   applyNativeFbCrtStyle(canvas, el, parent, "g64-tablet-fb");
 }
 
-/** CriOS / iPad CRT fill — device-pixel blit, scale by devicePixelRatio. */
+let iosCrtRo: ResizeObserver | null = null;
+let iosCrtBox: HTMLElement | null = null;
+let iosCrtApply: (() => void) | null = null;
+let iosCrtFitting = false;
+
+function watchIosCrtBox(box: HTMLElement, apply: () => void) {
+  iosCrtApply = apply;
+  if (typeof ResizeObserver === "undefined") return;
+  if (!iosCrtRo) {
+    iosCrtRo = new ResizeObserver(() => {
+      if (iosCrtFitting) return;
+      iosCrtFitting = true;
+      try {
+        iosCrtApply?.();
+      } finally {
+        iosCrtFitting = false;
+      }
+    });
+  }
+  if (iosCrtBox !== box) {
+    if (iosCrtBox) iosCrtRo.unobserve(iosCrtBox);
+    iosCrtBox = box;
+    iosCrtRo.observe(box);
+  }
+}
+
+/**
+ * CriOS CRT fill. Scale #grok64-player in CSS pixels (no devicePixelRatio).
+ * Transforming the canvas is ignored on real iPhone WebGL; transforming the
+ * wrapper is a compositor scale of the whole layer. Canvas CSS stays 384×272
+ * so RetroArch clientWidth matches the locked framebuffer.
+ */
 export function applyIosCrtStyle(
   canvas: HTMLCanvasElement,
   el: HTMLElement,
   parent: HTMLElement,
 ) {
-  applyNativeFbCrtStyle(canvas, el, parent, "g64-ios-fb");
+  canvas.classList.remove("g64-tablet-fb");
+  canvas.classList.add("g64-ios-fb");
+  const player =
+    (el.id === "grok64-player" ? el : (el.closest("#grok64-player") as HTMLElement | null)) ?? el;
+  const box = (player.closest(".g64-screen") as HTMLElement | null) ?? parent;
+
+  const apply = () => {
+    const { sw, sh } = crtBoxSize(box, player);
+    const sx = sw >= 32 ? sw / NATIVE_FB_W : 1;
+    const sy = sh >= 32 ? sh / NATIVE_FB_H : 1;
+    const xf = `translate3d(0,0,0) scale(${sx}, ${sy})`;
+    player.style.setProperty("position", "absolute", "important");
+    player.style.setProperty("inset", "auto", "important");
+    player.style.setProperty("left", "0", "important");
+    player.style.setProperty("top", "0", "important");
+    player.style.setProperty("right", "auto", "important");
+    player.style.setProperty("bottom", "auto", "important");
+    player.style.setProperty("width", `${NATIVE_FB_W}px`, "important");
+    player.style.setProperty("height", `${NATIVE_FB_H}px`, "important");
+    player.style.setProperty("max-width", "none", "important");
+    player.style.setProperty("max-height", "none", "important");
+    player.style.setProperty("transform-origin", "0 0", "important");
+    player.style.setProperty("transform", xf, "important");
+    player.style.setProperty("-webkit-transform", xf, "important");
+
+    const canvasParent = canvas.parentElement;
+    if (canvasParent && canvasParent !== player) {
+      canvasParent.style.setProperty("position", "absolute", "important");
+      canvasParent.style.setProperty("inset", "0", "important");
+      canvasParent.style.setProperty("width", "100%", "important");
+      canvasParent.style.setProperty("height", "100%", "important");
+      canvasParent.style.setProperty("transform", "none", "important");
+    }
+
+    canvas.style.setProperty("position", "absolute", "important");
+    canvas.style.setProperty("inset", "auto", "important");
+    canvas.style.setProperty("left", "0", "important");
+    canvas.style.setProperty("top", "0", "important");
+    canvas.style.setProperty("right", "auto", "important");
+    canvas.style.setProperty("bottom", "auto", "important");
+    canvas.style.setProperty("width", `${NATIVE_FB_W}px`, "important");
+    canvas.style.setProperty("height", `${NATIVE_FB_H}px`, "important");
+    canvas.style.setProperty("max-width", "none", "important");
+    canvas.style.setProperty("max-height", "none", "important");
+    canvas.style.setProperty("transform-origin", "0 0", "important");
+    canvas.style.setProperty("transform", "none", "important");
+    canvas.style.setProperty("object-fit", "fill", "important");
+    canvas.style.setProperty("object-position", "0 0", "important");
+  };
+
+  apply();
+  watchIosCrtBox(box, apply);
 }
 
 export async function recycleCore(emu: EjsInstance | null, el: HTMLElement | null) {

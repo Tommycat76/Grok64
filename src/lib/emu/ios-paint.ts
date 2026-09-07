@@ -8,7 +8,8 @@
  * Architecture
  * ------------
  * 1. The RetroArch/VICE WebGL canvas IS the screen. Keep it in the DOM,
- *    visible, and CSS-sized to the CRT. Never cover it with an empty 2D layer.
+ *    visible, CSS box 384×272. Scale #grok64-player to fill .g64-screen —
+ *    never cover it with an empty 2D layer, never scale(dpr) on the canvas.
  * 2. Never call getContext on that canvas. host.ts already captured
  *    VICE's context on `__g64gl`. A second WebGL context on WebKit returns null
  *    or steals the canvas (solid black CRT).
@@ -102,8 +103,7 @@ function revealLiveCanvas(canvas: HTMLCanvasElement) {
   canvas.style.setProperty("display", "block", "important");
   canvas.style.setProperty("visibility", "visible", "important");
   canvas.style.setProperty("opacity", "1", "important");
-  // Never force 100%×100% here — CriOS blits the 384×272 buffer in device
-  // pixels inside a stretched CSS box (postage stamp). Scale from native FB.
+  // Scale the player wrapper, not the canvas. Canvas CSS stays 384×272.
   const el =
     (canvas.closest("#grok64-player") as HTMLElement | null) ??
     (typeof document !== "undefined" ? document.getElementById("grok64-player") : null);
@@ -117,9 +117,16 @@ function revealLiveCanvas(canvas: HTMLCanvasElement) {
  */
 function nudgeCompositor(canvas: HTMLCanvasElement) {
   try {
+    const player = canvas.closest("#grok64-player") as HTMLElement | null;
+    const playerXf = player?.style.getPropertyValue("transform") ?? "";
+    // Scale lives on the wrapper. Do not replace it with translate3d.
+    if (/scale\(/.test(playerXf)) {
+      void canvas.offsetWidth;
+      void player?.offsetWidth;
+      return;
+    }
     const prev = canvas.style.getPropertyValue("transform");
     const pri = canvas.style.getPropertyPriority("transform") || "important";
-    // Do not drop the CRT scale — replacing it with translate3d reopens the stamp.
     if (/scale\(/.test(prev)) {
       void canvas.offsetWidth;
       return;
@@ -127,7 +134,7 @@ function nudgeCompositor(canvas: HTMLCanvasElement) {
     canvas.style.setProperty("transform", "translate3d(0,0,0.01px)", pri);
     void canvas.offsetWidth;
     requestAnimationFrame(() => {
-      canvas.style.setProperty("transform", prev || "translate3d(0,0,0)", pri);
+      canvas.style.setProperty("transform", prev || "none", pri);
     });
   } catch {
     /* ignore */
@@ -187,8 +194,7 @@ export function presentIosCrt(
     }
   }
 
-  // Always refit CSS. #42 left many present tags on width/height 100%, which
-  // is the postage-stamp path on real CriOS.
+  // Always refit CSS so the player wrapper fills .g64-screen.
   fitEmu(playerRoot(root), emu);
   if (canvas) nudgeCompositor(canvas);
   const shouldFit =
@@ -217,6 +223,9 @@ export function presentIosCrt(
     cw: canvas?.clientWidth ?? 0,
     ch: canvas?.clientHeight ?? 0,
     xf: canvas?.style.getPropertyValue("transform") ?? "",
+    playerXf:
+      (canvas?.closest("#grok64-player") as HTMLElement | null)?.style.getPropertyValue("transform") ??
+      "",
   });
 }
 

@@ -78,9 +78,21 @@ test("iOS canvas CSS is the native 384x272 box, not 100% fill", () => {
   assert.match(iosCanvas, /width: 384px !important/);
   assert.match(iosCanvas, /height: 272px !important/);
   assert.match(iosCanvas, /inset: auto !important/);
+  assert.match(iosCanvas, /transform: none !important/);
   assert.doesNotMatch(iosCanvas.slice(0, 900), /width: 100% !important/);
   assert.match(paintSrc, /applyIosCrtStyle/);
   assert.doesNotMatch(paintSrc, /setProperty\("width", "100%"/);
+});
+
+test("iOS phone CRT screen fills the bezel without cqh self-size", () => {
+  const idx = css.indexOf('html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-screen');
+  assert.ok(idx >= 0);
+  const phoneScreen = css.slice(idx, idx + 500);
+  assert.match(phoneScreen, /width: 100% !important/);
+  assert.match(phoneScreen, /height: 100% !important/);
+  assert.doesNotMatch(phoneScreen, /100cqh/);
+  assert.doesNotMatch(phoneScreen, /width: auto/);
+  assert.match(css, /\.g64-boot \{[\s\S]*?height: 100%/);
 });
 
 test("production UI shows build id; debug log is opt-in", () => {

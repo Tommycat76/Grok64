@@ -68,12 +68,15 @@ test("iOS WebGL backing is locked to 384x272 before the first context", () => {
   assert.match(host, /lockIosBacking/);
 });
 
-test("iPhone CRT scales the native 384x272 box (DPR), not CSS 100%", () => {
+test("iPhone CRT scales the player wrapper in CSS pixels, not canvas DPR", () => {
   assert.match(host, /applyIosCrtStyle/);
   assert.match(host, /g64-ios-fb/);
   assert.match(host, /if \(isIos\(\)\) applyIosCrtStyle/);
-  assert.match(host, /klass === "g64-ios-fb" \? Math.max\(1, window.devicePixelRatio/);
+  assert.match(host, /translate3d\(0,0,0\) scale\(/);
+  assert.match(host, /#grok64-player/);
   assert.match(host, /\$\{NATIVE_FB_W\}px/);
+  assert.doesNotMatch(host, /klass === "g64-ios-fb" \? Math.max\(1, window.devicePixelRatio/);
+  assert.doesNotMatch(host, /sw \* dpr/);
   assert.doesNotMatch(paint, /setProperty\("width", "100%"/);
 });
 

@@ -448,6 +448,8 @@ html, body, #app {
   z-index: 30;
   border: 0;
   width: 100%;
+  height: 100%;
+  box-sizing: border-box;
   pointer-events: none;
 }
 .g64-boot-copy {
@@ -1907,22 +1909,66 @@ html[data-g64os="ios"] .g64-top {
 html[data-g64os="ios"] .g64-log {
   margin-top: 0;
 }
-/* CriOS: live WebGL is the CRT. Never hide it, never cover it. */
-html[data-g64os="ios"] #grok64-player,
+/*
+ * iPhone CRT (#44): .g64-screen fills the bezel end-to-end. Boot overlay
+ * (.g64-boot) is inset:0 on that box — same fill rules as the player.
+ *
+ * #43 sized .g64-screen with width:auto + 100cqh while the screen itself
+ * was a size container. On real iPhone that collapsed to min-width (~200px),
+ * so Cold start + READY both stamped inside a large empty bezel.
+ *
+ * Do not size .g64-screen with its own cqh. Do not scale(dpr) on the canvas —
+ * CriOS ignores canvas CSS transform; #43's 384px box × DPR was the stamp.
+ * Scale #grok64-player (wrapper) in CSS pixels so the compositor scales the
+ * WebGL layer. Canvas CSS stays 384×272 so RetroArch's viewport matches the
+ * locked framebuffer.
+ */
+html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-bezel {
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  padding: 8px;
+}
+html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-screen {
+  flex: 1 1 auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  aspect-ratio: auto;
+}
+html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-boot {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+html[data-g64os="ios"] #grok64-player {
+  position: absolute;
+  inset: auto;
+  left: 0;
+  top: 0;
+  right: auto;
+  bottom: auto;
+  width: 384px !important;
+  height: 272px !important;
+  max-width: none !important;
+  max-height: none !important;
+  transform-origin: 0 0 !important;
+  transform: translate3d(0, 0, 0);
+  -webkit-transform: translate3d(0, 0, 0);
+}
 html[data-g64os="ios"] #grok64-player .ejs_canvas_parent {
   position: absolute;
   inset: 0;
   width: 100% !important;
   height: 100% !important;
-  transform: translate3d(0, 0, 0);
-  -webkit-transform: translate3d(0, 0, 0);
+  max-width: none !important;
+  max-height: none !important;
+  transform: none;
+  -webkit-transform: none;
 }
-/*
- * #42 set canvas to 100% + object-fit. CriOS still blits the locked 384×272
- * framebuffer in device pixels at the top-left (postage stamp). Match the
- * tablet native-FB box; JS applies transform: scale(sw*dpr/384, sh*dpr/272).
- * inset:0 + width:100% is the stamp path — do not restore it.
- */
 html[data-g64os="ios"] #grok64-player canvas,
 html[data-g64os="ios"] #grok64-player canvas.g64-ios-fb {
   display: block !important;
@@ -1942,30 +1988,9 @@ html[data-g64os="ios"] #grok64-player canvas.g64-ios-fb {
   min-height: 0;
   object-fit: fill !important;
   object-position: 0 0 !important;
+  transform: none !important;
   transform-origin: 0 0 !important;
   background: #000 !important;
-}
-/* Largest 384/272 CRT in the iPhone bezel — same recipe as tablet #40. */
-html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-bezel {
-  container-type: size;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-screen {
-  container-type: size;
-  flex: 0 0 auto;
-  width: auto;
-  height: auto;
-  max-width: 100%;
-  max-height: 100%;
-  min-width: 200px;
-  aspect-ratio: 384 / 272;
-}
-@supports (width: 1cqh) {
-  html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-screen {
-    width: min(100%, calc(100cqh * 384 / 272));
-  }
 }
 html[data-g64os="ios"] #grok64-player .g64-ios-mirror,
 html[data-g64os="ios"] #grok64-player.g64-ios-mirror-on .g64-ios-mirror {
