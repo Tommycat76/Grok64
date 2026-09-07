@@ -1870,13 +1870,19 @@ html[data-g64os="ios"] #grok64-player .g64-ios-mirror {
   background: #000;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
+  /* Empty overlay used to cover live WebGL (CriOS solid black + no-png). */
+  opacity: 0 !important;
+  visibility: hidden !important;
 }
-/* Keep GL visible until the 2D mirror actually paints. Hiding it first
-   stopped RetroArch from presenting, so screenshot.png never appeared and
-   CriOS stayed on ios-paint-poll with a black CRT. */
+html[data-g64os="ios"] #grok64-player.g64-ios-mirror-on .g64-ios-mirror {
+  opacity: 1 !important;
+  visibility: visible !important;
+}
+/* Live WebGL is the CriOS READY path. Never hide it unless the 2D overlay
+   actually has pixels — PNG screenshot is dead on real iPhone Chrome. */
 html[data-g64os="ios"] #grok64-player:not(.g64-ios-mirror-on) canvas:not(.g64-ios-mirror) {
-  opacity: 1;
-  visibility: visible;
+  opacity: 1 !important;
+  visibility: visible !important;
 }
 html[data-g64os="ios"] #grok64-player.g64-ios-mirror-on canvas:not(.g64-ios-mirror) {
   opacity: 0 !important;

@@ -141,7 +141,14 @@ function preserveWebglBuffer() {
       // and pay a large fill-rate cost when it is forced on every WebGL context.
       const merged: Record<string, unknown> = { ...attrs, antialias: false, alpha: false };
       if (ios) merged.preserveDrawingBuffer = true;
-      return orig.call(this, type, merged);
+      const ctx = orig.call(this, type, merged);
+      // Remember VICE's context. ios-paint must never getContext() itself —
+      // a second getContext with different attrs returns null on WebKit, and a
+      // first getContext before RetroArch steals the canvas (black CRT, no PNG).
+      if (ctx) {
+        (this as HTMLCanvasElement & { __g64gl?: unknown }).__g64gl = ctx;
+      }
+      return ctx;
     }
     return orig.call(this, type, attrs as never);
   } as typeof proto.getContext;
