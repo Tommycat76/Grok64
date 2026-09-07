@@ -99,7 +99,8 @@ export function isDiskKind(kind: MediaKind): boolean {
 
 /**
  * VICE autostart always types LOAD"*",8,1. Floppy Play must attach a 1541/1581
- * on unit 8 — never SD2IEC/CMD HD `*_fs`, which leaves device 8 missing.
+ * on unit 8. SD2IEC (`*_fs`) and CMD HD on unit 8 are real storage devices —
+ * they stay the user preference, but Autostart cannot talk to them as a 1541.
  */
 export function iecForAutostart(kind: MediaKind): { iec: IecDrive; unit: IecUnit } | null {
   if (kind === "d81") return { iec: "1581", unit: 8 };

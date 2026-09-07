@@ -101,4 +101,8 @@ export const RETRO_BTN = {
   X: 9,
   L: 10,
   R: 11,
+  L2: 12,
+  R2: 13,
+  L3: 14,
+  R3: 15,
 } as const;
