@@ -8,7 +8,7 @@ const server = await createServer({
   appType: "custom",
   logLevel: "error",
 });
-const { prgToD64, wrapForDiskSwap, canSwapKind, t64ToPrg, stripP00 } = await server.ssrLoadModule("/src/lib/emu/d64.ts");
+const { prgToD64, wrapForDiskSwap, canSwapKind, t64ToPrg, stripP00, listD64Directory, prepareAutostartDisk, isCracktroName, pickAutostartEntry } = await server.ssrLoadModule("/src/lib/emu/d64.ts");
 const { d64DiskName, isWorkDiskImage, kindOf } = await server.ssrLoadModule("/src/lib/emu/formats.ts");
 await server.close();
 
@@ -51,4 +51,26 @@ test("swap wrapper covers disks, programs and tape archives", () => {
 
 test("P00 without a header is rejected", () => {
   assert.equal(stripP00(new Uint8Array([1, 2, 3, 4])), null);
+});
+
+test("cracktro names and autostart promote PARADROID past INTRO", () => {
+  assert.equal(isCracktroName("INTRO"), true);
+  assert.equal(isCracktroName("NOTE"), true);
+  assert.equal(isCracktroName("PARADROID"), false);
+  const intro = prgToD64(new Uint8Array(hopper), "INTRO");
+  const dirOff = 0x16600;
+  const slot0 = intro.subarray(dirOff, dirOff + 32);
+  const disk = intro.slice();
+  disk.set(slot0, dirOff + 32);
+  const name = "PARADROID";
+  for (let i = 0; i < 16; i++) disk[dirOff + 32 + 5 + i] = i < name.length ? name.charCodeAt(i) : 0xa0;
+  const entries = listD64Directory(disk);
+  const prgs = entries.filter((e) => e.prg);
+  assert.ok(prgs.length >= 2);
+  assert.equal(prgs[0].name, "INTRO");
+  const pick = pickAutostartEntry(entries, "Paradroid");
+  assert.equal(pick?.name, "PARADROID");
+  const promoted = prepareAutostartDisk(disk, "paradroidalldri.d64", "Paradroid");
+  const after = listD64Directory(promoted).filter((e) => e.prg);
+  assert.equal(after[0].name, "PARADROID");
 });

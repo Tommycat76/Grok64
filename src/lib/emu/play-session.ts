@@ -1,4 +1,5 @@
-import type { IecDrive, IecUnit, MediaKind } from "./types";
+import type { IecDrive, IecMap, IecSlot, IecUnit, MediaKind } from "./types";
+import { IEC_UNITS } from "./types";
 import { floppyPlayCanHotSwap, iecForAutostart, isFsWorkDisk, kindOf, needsTypedBoot } from "./formats";
 
 /**
@@ -285,6 +286,69 @@ export function busyLabel(phase: BusyPhase, fallback = "Loading…"): string {
 
 export function defaultCmdUnit(current: IecUnit): IecUnit {
   return current === 8 ? 9 : current;
+}
+
+export function defaultIecMap(): IecMap {
+  return { 8: "1541", 9: "none", 10: "none", 11: "none" };
+}
+
+export function iecMapFromLegacy(drive: IecDrive, unit: IecUnit): IecMap {
+  const map = defaultIecMap();
+  if (drive === "cmdhd" && unit !== 8) {
+    map[8] = "1541";
+    map[unit] = "cmdhd";
+    return map;
+  }
+  map[8] = unit === 8 ? drive : "1541";
+  if (unit !== 8) map[unit] = drive;
+  return map;
+}
+
+export function setIecSlot(map: IecMap, unit: IecUnit, slot: IecSlot): IecMap {
+  const next: IecMap = { ...map, [unit]: slot };
+  if (slot === "sd2iec" || slot === "cmdhd") {
+    for (const u of IEC_UNITS) {
+      if (u !== unit && next[u] === slot) next[u] = u === 8 ? "1541" : "none";
+    }
+  }
+  if (next[8] === "none") next[8] = "1541";
+  return next;
+}
+
+export function mapHasDrive(map: IecMap | null | undefined, drive: IecDrive): boolean {
+  if (!map) return false;
+  return IEC_UNITS.some((u) => map[u] === drive);
+}
+
+export function unitOfDrive(map: IecMap | null | undefined, drive: IecDrive): IecUnit | null {
+  if (!map) return null;
+  return IEC_UNITS.find((u) => map[u] === drive) ?? null;
+}
+
+export function userAttachFromMap(map: IecMap | null | undefined): DriveAttach {
+  if (!map) return { iec: "1541", unit: 8 };
+  for (const unit of IEC_UNITS) {
+    const slot = map[unit];
+    if (slot === "sd2iec" || slot === "cmdhd") return { iec: slot, unit };
+  }
+  const slot = map[8];
+  return { iec: slot === "none" ? "1541" : slot, unit: 8 };
+}
+
+export function viceMapFromIecMap(map: IecMap): Partial<Record<IecUnit, IecDrive>> {
+  const out: Partial<Record<IecUnit, IecDrive>> = {};
+  for (const unit of IEC_UNITS) {
+    const slot = map[unit];
+    if (slot && slot !== "none") out[unit] = slot;
+  }
+  return out;
+}
+
+export function withLiveFloppy(map: IecMap, live: DriveAttach): IecMap {
+  if (live.iec === "1541" || live.iec === "1581") {
+    return { ...map, [live.unit]: live.iec };
+  }
+  return map;
 }
 
 /** SD2IEC disk-change button: wrap to the next/previous image. */

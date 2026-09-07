@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Drawer } from "vaul";
 import { ExpansionPanel } from "@/components/emu/ExpansionPanel";
-import { IecUnitSeg } from "@/components/emu/IecUnitSeg";
 import { detectLine, MACHINES, type ResolvedMachine } from "@/lib/emu/machines";
 import { ACTION_LABEL, useEmu } from "@/lib/emu/store";
-import type { ActionId, CorePref, DriveMode, IecDrive, ReuSize, ScpuSimm, SidEngine, SidModel, VideoPref } from "@/lib/emu/types";
-import { IEC_LABEL, REU_LABEL, SCPU_SIMM_LABEL } from "@/lib/emu/vice-extras";
+import type { ActionId, CorePref, DriveMode, IecSlot, ReuSize, ScpuSimm, SidEngine, SidModel, VideoPref } from "@/lib/emu/types";
+import { IEC_UNITS } from "@/lib/emu/types";
+import { IEC_SLOT_LABEL, REU_LABEL, SCPU_SIMM_LABEL } from "@/lib/emu/vice-extras";
 
 function Switch({ on, onToggle }: { on: boolean; onToggle: () => void }) {
   return (
@@ -85,9 +85,9 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
                 s.setJoyPort(1);
                 s.setDriveMode("true");
                 s.setJiffyDos(true);
-                s.setIecDrive("cmdhd");
-                s.setIecUnit(9);
-                toast.message("C64 OS kit — real 16 MB REU, CMD HD #9 (your ROM), 1541 #8. Hardware buttons: CART FZ, SD FZ, SD 8/9, CMD SW.");
+                s.setIecSlot(8, "1541");
+                s.setIecSlot(9, "cmdhd");
+                toast.message("C64 OS kit — 16 MB REU, 1541 on #8, CMD HD on #9. Hardware buttons appear when those devices are on.");
               }}
             >
               C64 OS kit
@@ -170,41 +170,52 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
             </div>
 
             <div className="g64-field">
-              <label>Storage / IEC</label>
-              <div className="g64-row" style={{ marginBottom: 8 }}>
-                <span>SD2IEC virtual card</span>
-                <Switch
-                  on={s.iecDrive === "sd2iec"}
-                  onToggle={() => {
-                    const next = s.iecDrive === "sd2iec" ? "1541" : "sd2iec";
-                    s.setIecDrive(next);
-                    toast.message(next === "sd2iec" ? "SD2IEC ON — applies on next reset" : "SD2IEC OFF — back to 1541");
-                  }}
-                />
-              </div>
+              <label>IEC drives</label>
               <p className="mb-2 text-xs text-fg-subtle">
-                {s.iecDrive === "sd2iec"
-                  ? "SD2IEC is ON. Device 8 is a FAT card (partitions //0:–//3:). Turn OFF to use a normal 1541 floppy."
-                  : "SD2IEC is OFF. Tap the switch to mount the virtual SD card instead of a 1541 disk drive."}
+                One number is one drive on the serial bus. <code>LOAD"$",8</code> talks to device 8,{" "}
+                <code>LOAD"$",9</code> to device 9. Floppy Play always uses a 1541 on #8 so games can{" "}
+                <code>LOAD"*",8,1</code>. Device 8 cannot be empty.
               </p>
-              <div className="g64-seg">
-                {(["1541", "1581", "sd2iec", "cmdhd"] as IecDrive[]).map((id) => (
-                  <button key={id} type="button" data-on={s.iecDrive === id} onClick={() => s.setIecDrive(id)}>
-                    {IEC_LABEL[id]}
-                  </button>
-                ))}
-              </div>
-              {s.iecDrive === "1541" || s.iecDrive === "1581" || s.iecDrive === "sd2iec" || s.iecDrive === "cmdhd" ? (
-                <div className="g64-field" style={{ marginTop: 8 }}>
-                  <label>Drive unit</label>
-                  <IecUnitSeg value={s.iecUnit} onChange={(u) => s.setIecUnit(u)} />
+              {IEC_UNITS.map((unit) => (
+                <div key={unit} className="g64-iec-row">
+                  <span>#{unit}</span>
+                  <div className="g64-seg" role="group" aria-label={`Device ${unit}`}>
+                    {(["none", "1541", "1581", "sd2iec", "cmdhd"] as IecSlot[]).map((id) => (
+                      <button
+                        key={id}
+                        type="button"
+                        data-on={(s.iecMap?.[unit] ?? (unit === 8 ? "1541" : "none")) === id}
+                        onClick={() => s.setIecSlot(unit, id)}
+                      >
+                        {IEC_SLOT_LABEL[id]}
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              ) : null}
-              <p className="text-xs text-fg-subtle">
-                1541 / 1581 / SD2IEC / CMD HD mount on the unit you pick (`LOAD"$",8` → use 8, or 9–11 for a second device). One disk per unit — remounting replaces the prior image on that drive. CMD HD still wants your Boot ROM 2.80.
-              </p>
+              ))}
               <p className="mt-2 text-xs text-fg-subtle">
-                Hardware buttons match the real devices — tap and hold, not just tap. CART FZ = freeze, hold = cart RESET. SD FZ = next disk, hold = previous. SD 8/9 swaps the card&apos;s device number. CMD SW swaps the HD with #8 (hold restores). SuperCPU shows SCPU RST when attached.
+                Example: #8 = 1541, #9 = another 1541, #10 = 1581. SD2IEC and CMD HD each appear once — freeze / SWAP buttons show on the top bar only while that device is on. CMD HD still wants your Boot ROM 2.80.
+              </p>
+            </div>
+
+            <div className="g64-field">
+              <label>On-screen extras</label>
+              <div className="g64-row" style={{ marginBottom: 8 }}>
+                <span>Jump button (stick up)</span>
+                <Switch on={s.jumpBtn} onToggle={() => s.setJumpBtn(!s.jumpBtn)} />
+              </div>
+              <button
+                type="button"
+                className="g64-btn mb-2 w-full"
+                onClick={() => {
+                  s.setSettingsOpen(false);
+                  s.setSnapsOpen(true);
+                }}
+              >
+                Freeze / snapshots
+              </button>
+              <p className="text-xs text-fg-subtle">
+                Jump, freeze, SD disk-change, and CMD SWAP stay out of the top bar until you turn those features on here.
               </p>
             </div>
 

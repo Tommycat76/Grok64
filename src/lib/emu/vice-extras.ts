@@ -1,4 +1,4 @@
-import type { IecDrive, IecUnit, JoyPort, ReuSize, ScpuSimm } from "./types";
+import type { IecDrive, IecSlot, IecUnit, JoyPort, ReuSize, ScpuSimm } from "./types";
 
 export interface ViceExtrasInput {
   reu: ReuSize;
@@ -98,6 +98,14 @@ export const REU_LABEL: Record<ReuSize, string> = {
 };
 
 export const IEC_LABEL: Record<IecDrive, string> = {
+  "1541": "1541",
+  "1581": "1581",
+  sd2iec: "SD2IEC",
+  cmdhd: "CMD HD",
+};
+
+export const IEC_SLOT_LABEL: Record<IecSlot, string> = {
+  none: "Off",
   "1541": "1541",
   "1581": "1581",
   sd2iec: "SD2IEC",

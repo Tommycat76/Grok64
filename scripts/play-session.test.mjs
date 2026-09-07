@@ -14,6 +14,12 @@ const {
   nextDiskIndex,
   viceDriveTypeVars,
   viceRcForDrives,
+  defaultIecMap,
+  iecMapFromLegacy,
+  setIecSlot,
+  userAttachFromMap,
+  mapHasDrive,
+  withLiveFloppy,
 } = await server.ssrLoadModule("/src/lib/emu/play-session.ts");
 const {
   classifyPress,
@@ -241,6 +247,8 @@ test("hardware buttons: short/long map matches real devices", () => {
   assert.deepEqual(ids, ["cart-fz", "sd-disk", "sd-swap", "cmd-swap", "scpu-rst"]);
   const noCmd = visibleHwButtons({ cart: true, sd2iec: true, cmdhd: false, scpu: false }).map((b) => b.id);
   assert.deepEqual(noCmd, ["cart-fz", "sd-disk", "sd-swap"]);
+  assert.deepEqual(visibleHwButtons({}).map((b) => b.id), []);
+  assert.deepEqual(visibleHwButtons({ cart: false, sd2iec: false }).map((b) => b.id), []);
   assert.ok(HW_BUTTONS.every((b) => b.shortAction));
 });
 
@@ -329,4 +337,29 @@ test("Autostart is never a core-start flag — always after ready", () => {
     autostart: true,
   });
   assert.equal(plan.autostartAfterReady, true);
+});
+
+test("IEC map: one unit number is one drive", () => {
+  const fresh = defaultIecMap();
+  assert.equal(fresh[8], "1541");
+  assert.equal(fresh[9], "none");
+  const two = setIecSlot(setIecSlot(fresh, 9, "1541"), 10, "1581");
+  assert.equal(two[8], "1541");
+  assert.equal(two[9], "1541");
+  assert.equal(two[10], "1581");
+  const cmd = iecMapFromLegacy("cmdhd", 9);
+  assert.equal(cmd[8], "1541");
+  assert.equal(cmd[9], "cmdhd");
+  assert.deepEqual(userAttachFromMap(cmd), { iec: "cmdhd", unit: 9 });
+  const sd = setIecSlot(cmd, 8, "sd2iec");
+  assert.equal(sd[8], "sd2iec");
+  assert.equal(mapHasDrive(sd, "sd2iec"), true);
+  const uniq = setIecSlot(sd, 11, "sd2iec");
+  assert.equal(uniq[8], "1541");
+  assert.equal(uniq[11], "sd2iec");
+  const empty8 = setIecSlot(fresh, 8, "none");
+  assert.equal(empty8[8], "1541");
+  const live = withLiveFloppy(sd, { iec: "1541", unit: 8 });
+  assert.equal(live[8], "1541");
+  assert.equal(live[9], "cmdhd");
 });

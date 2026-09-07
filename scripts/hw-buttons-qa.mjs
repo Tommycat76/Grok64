@@ -39,7 +39,9 @@ while (Date.now() - readyT0 < 20000) {
   await page.waitForTimeout(200);
 }
 
-await page.waitForSelector('[data-hw="cart-fz"]', { timeout: 15000 });
+await page.waitForFunction(() => window.__g64?.powered?.(), { timeout: 20000 });
+await page.waitForTimeout(400);
+
 const ids = await page.evaluate(() => {
   const chips = [...document.querySelectorAll("[data-hw]")].map((el) => el.getAttribute("data-hw"));
   return {
@@ -49,17 +51,25 @@ const ids = await page.evaluate(() => {
   };
 });
 
-if (!ids.chips.includes("cart-fz")) failed.push("CART FZ missing");
-if (!ids.chips.includes("sd-disk")) failed.push("SD FZ missing");
-if (!ids.chips.includes("sd-swap")) failed.push("SD 8/9 missing");
+if (ids.chips.includes("cart-fz")) failed.push("CART FZ should be hidden until a cart is attached");
+if (ids.chips.includes("sd-disk")) failed.push("SD FZ should be hidden until SD2IEC is on");
+if (ids.chips.includes("sd-swap")) failed.push("SD 8/9 should be hidden until SD2IEC is on");
 if (ids.chips.includes("cmd-swap")) failed.push("CMD SW should be hidden until CMD is attached");
 
-await page.locator(".g64-chip-pin", { hasText: /^CMD$/ }).click();
+await page.evaluate(() => window.__g64?.setIecSlot?.(8, "sd2iec"));
 await page.waitForTimeout(200);
-const afterCmd = await page.evaluate(() =>
+await page.evaluate(() => window.__g64?.setIecSlot?.(9, "cmdhd"));
+await page.waitForTimeout(200);
+await page.evaluate(() => window.__g64?.setCartLive?.(true));
+await page.waitForTimeout(200);
+
+const afterOn = await page.evaluate(() =>
   [...document.querySelectorAll("[data-hw]")].map((el) => el.getAttribute("data-hw")),
 );
-if (!afterCmd.includes("cmd-swap")) failed.push("CMD SW missing after attaching CMD HD");
+if (!afterOn.includes("sd-disk")) failed.push("SD FZ missing after SD2IEC on");
+if (!afterOn.includes("sd-swap")) failed.push("SD 8/9 missing after SD2IEC on");
+if (!afterOn.includes("cmd-swap")) failed.push("CMD SW missing after attaching CMD HD");
+if (!afterOn.includes("cart-fz")) failed.push("CART FZ missing after cart attach");
 
 await page.evaluate(() => window.__g64?.hwPress?.("cart-fz", "short"));
 await page.evaluate(() => window.__g64?.hwPress?.("sd-swap", "short"));
@@ -103,7 +113,7 @@ console.log(
       ok: failed.length === 0,
       failed,
       ids,
-      afterCmd,
+      afterOn,
       swap,
       swapped,
       restored,

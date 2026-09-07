@@ -109,6 +109,11 @@ const failures = [];
         `canvas not centered in screen (canvas ${JSON.stringify(layout.canvasCss)} screen ${JSON.stringify(layout.screen)})`,
       );
     }
+    if (Math.abs(layout.canvasCss.x - layout.screen.x) > 12) {
+      failures.push(
+        `canvas left bar / shift (canvas.x ${layout.canvasCss.x} screen.x ${layout.screen.x})`,
+      );
+    }
   }
   console.log("tablet-crt", failures.length ? "FAIL" : "OK", JSON.stringify(layout));
   await context.close();

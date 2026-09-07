@@ -173,6 +173,120 @@ export function canSwapKind(kind: MediaKind): boolean {
   return kind === "d64" || kind === "prg" || kind === "p00" || kind === "sid" || kind === "t64";
 }
 
+export interface D64DirEntry {
+  name: string;
+  type: number;
+  prg: boolean;
+  blocks: number;
+  /** Byte offset of the 32-byte directory slot. */
+  slot: number;
+}
+
+function petToAscii(raw: Uint8Array): string {
+  let s = "";
+  for (const b of raw) {
+    if (b === 0xa0 || b === 0) break;
+    s += String.fromCharCode(b & 0x7f);
+  }
+  return s.replace(/\s+/g, " ").trim();
+}
+
+export function listD64Directory(data: Uint8Array): D64DirEntry[] {
+  if (data.byteLength < D64_SIZE) return [];
+  const bam = lba(18, 0) * 256;
+  let track = data[bam] || 18;
+  let sector = data[bam + 1] || 1;
+  const out: D64DirEntry[] = [];
+  const seen = new Set<string>();
+  for (let hops = 0; hops < 18 && track >= 1 && track <= 35; hops++) {
+    const key = `${track}:${sector}`;
+    if (seen.has(key)) break;
+    seen.add(key);
+    const off = lba(track, sector) * 256;
+    if (off + 256 > data.byteLength) break;
+    const nextT = data[off]!;
+    const nextS = data[off + 1]!;
+    for (let i = 0; i < 8; i++) {
+      const slot = off + i * 32;
+      const type = data[slot + 2]!;
+      if (!type) continue;
+      const closed = (type & 0x80) !== 0;
+      const name = petToAscii(data.subarray(slot + 5, slot + 21));
+      const blocks = data[slot + 30]! | (data[slot + 31]! << 8);
+      out.push({
+        name,
+        type,
+        prg: closed && (type & 0x07) === 2,
+        blocks,
+        slot,
+      });
+    }
+    track = nextT;
+    sector = nextS;
+    if (!track) break;
+  }
+  return out;
+}
+
+const CRACKTRO_NAME =
+  /^(intro|int|crack|note|notes|nfo|info|hello|greetz|docs|readme|loader|\-|\/|\+|\*|!+|\.+)$/i;
+
+export function isCracktroName(name: string): boolean {
+  const n = name.replace(/\s+/g, " ").trim();
+  if (!n) return true;
+  if (CRACKTRO_NAME.test(n)) return true;
+  return /cracktro|crack\s*intro|\bintro\b|\bnote\b|\breadme\b/i.test(n);
+}
+
+function foldName(s: string): string {
+  return s.replace(/[^a-z0-9]+/gi, "").toLowerCase();
+}
+
+export function namesFuzzyMatch(fileName: string, title: string): boolean {
+  const a = foldName(fileName);
+  const b = foldName(title.replace(/\.[a-z0-9]{2,4}$/i, ""));
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.length >= 4 && b.includes(a)) return true;
+  if (b.length >= 4 && a.includes(b)) return true;
+  return false;
+}
+
+export function pickAutostartEntry(entries: D64DirEntry[], title: string): D64DirEntry | null {
+  const prgs = entries.filter((e) => e.prg);
+  if (!prgs.length) return null;
+  const first = prgs[0]!;
+  const titled = prgs.find((e) => namesFuzzyMatch(e.name, title) && !isCracktroName(e.name));
+  if (titled && isCracktroName(first.name) && titled.slot !== first.slot) return titled;
+  return first;
+}
+
+export function promoteD64Entry(data: Uint8Array, fromSlot: number, toSlot: number): Uint8Array {
+  if (fromSlot === toSlot) return data;
+  const out = data.slice();
+  const tmp = new Uint8Array(30);
+  tmp.set(out.subarray(toSlot + 2, toSlot + 32));
+  out.set(out.subarray(fromSlot + 2, fromSlot + 32), toSlot + 2);
+  out.set(tmp, fromSlot + 2);
+  return out;
+}
+
+/** If the first PRG is a cracktro and a later PRG matches the title, make the game LOAD"*" first. */
+export function prepareAutostartDisk(data: Uint8Array, filename: string, title?: string): Uint8Array {
+  if (data.byteLength < D64_SIZE) return data;
+  const hint = title || filename;
+  const entries = listD64Directory(data);
+  const pick = pickAutostartEntry(entries, hint);
+  const first = entries.find((e) => e.prg);
+  if (!pick || !first || pick.slot === first.slot) return data;
+  if (!isCracktroName(first.name)) return data;
+  return promoteD64Entry(data, pick.slot, first.slot);
+}
+
+export function wantsCracktroNudge(title: string): boolean {
+  return /paradroid/i.test(title);
+}
+
 export function wrapForDiskSwap(kind: MediaKind, data: Uint8Array, name: string): Uint8Array | null {
   if (kind === "d64") {
     if (data.byteLength < 174848) return null;
