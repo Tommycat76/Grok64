@@ -108,6 +108,7 @@ interface SessionSlice {
   muted: boolean;
   booting: boolean;
   bootMsg: string;
+  bootProgress: number;
   libraryOpen: boolean;
   settingsOpen: boolean;
   mapperOpen: boolean;
@@ -121,7 +122,7 @@ interface SessionSlice {
   setPaused: (v: boolean) => void;
   setWarped: (v: boolean) => void;
   setMuted: (v: boolean) => void;
-  setBooting: (v: boolean, msg?: string) => void;
+  setBooting: (v: boolean, msg?: string, progress?: number) => void;
   setLibraryOpen: (v: boolean) => void;
   setSettingsOpen: (v: boolean) => void;
   setMapperOpen: (v: boolean) => void;
@@ -204,6 +205,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       muted: false,
       booting: false,
       bootMsg: "",
+      bootProgress: 0,
       libraryOpen: false,
       settingsOpen: false,
       mapperOpen: false,
@@ -217,7 +219,8 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       setPaused: (paused) => set({ paused }),
       setWarped: (warped) => set({ warped }),
       setMuted: (muted) => set({ muted }),
-      setBooting: (booting, bootMsg = "") => set({ booting, bootMsg }),
+      setBooting: (booting, bootMsg = "", bootProgress = booting ? 8 : 0) =>
+        set({ booting, bootMsg, bootProgress: booting ? bootProgress : 0 }),
       setLibraryOpen: (libraryOpen) => set({ libraryOpen }),
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
       setMapperOpen: (mapperOpen) => set({ mapperOpen }),

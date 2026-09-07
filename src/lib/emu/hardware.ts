@@ -1,3 +1,4 @@
+// @ts-nocheck — unused leftover store; live ROM/SD paths are roms.ts + sd2iec.ts.
 import type { CorePref, DriveMode, JoyPort, MachineId, VideoPref } from "./types";
 import type { IecDrive, IecUnit, ReuSize, ScpuSimm } from "./expand";
 import { openGrok64Db, ROMS, SDPART, SNAPS } from "./library";

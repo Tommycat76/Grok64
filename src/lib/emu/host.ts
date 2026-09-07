@@ -1,7 +1,9 @@
 import { detectDevice, detectOs, isIos, isIosPhone, isTouchMobile } from "./detect";
 import { sidOptions } from "./machines";
-import { hasJiffyPair, romFileMap } from "./roms";
+import { hasCmdRom, hasJiffyPair, romFileMap } from "./roms";
 import { buildViceExtras, workDiskFor } from "./vice-extras";
+import { liveDriveOptions, viceDriveTypeVars, viceRcForDrives, viceRcForUser, type DriveAttach } from "./play-session";
+import { cmdDriveMap, cmdSwapUnits, sd2iecSwapUnit } from "./hw-buttons";
 import type { DriveMode, IecDrive, IecUnit, JoyPort, ReuSize, ScpuSimm, SidEngine, SidModel } from "./types";
 import { RETRO_BTN } from "./types";
 import { glog } from "./debug";
@@ -491,13 +493,6 @@ export interface BootConfig {
   onError?: (msg: string) => void;
 }
 
-function effectiveReu(reu: ReuSize = "none"): ReuSize {
-  if (isIosPhone()) {
-    if (reu === "16384kB" || reu === "2048kB" || reu === "512kB") return "256kB";
-  }
-  return reu;
-}
-
 function coreOptions(cfg: BootConfig): Record<string, string> {
   const trueDrive = cfg.driveMode === "true";
   return {
@@ -515,7 +510,7 @@ function coreOptions(cfg: BootConfig): Record<string, string> {
     vice_physical_keyboard_pass_through: "enabled",
     ...viceJoyOptions(cfg.joyPort),
     ...buildViceExtras({
-      reu: effectiveReu(cfg.reu),
+      reu: cfg.reu ?? "none",
       iec: cfg.iec ?? "1541",
       iecUnit: cfg.iecUnit ?? 8,
       mouse: !!cfg.mouse,
@@ -1055,6 +1050,125 @@ export function hardReset(emu: EjsInstance | null) {
   resetEmu(emu);
 }
 
+/**
+ * Cartridge freeze button (Action Replay / Retro Replay / Freeze Frame).
+ * VICE libretro `vice_reset=freeze` is the cart freeze line, not a machine reset.
+ */
+export function cartFreeze(emu: EjsInstance | null): boolean {
+  if (!emu?.gameManager?.setVariable && !emu?.gameManager?.restart) return false;
+  applyRuntimeOptions(emu, { vice_reset: "freeze" });
+  resetEmu(emu);
+  joyInput(emu, RETRO_BTN.R3, true);
+  window.setTimeout(() => {
+    joyInput(emu, RETRO_BTN.R3, false);
+    applyRuntimeOptions(emu, { vice_reset: "soft" });
+  }, 80);
+  return true;
+}
+
+/** Retro Replay / freezer-cart RESET button (long-press on CART FZ). */
+export function cartReset(emu: EjsInstance | null): boolean {
+  if (!emu?.gameManager?.setVariable && !emu?.gameManager?.restart) return false;
+  applyRuntimeOptions(emu, { vice_reset: "soft" });
+  resetEmu(emu);
+  return true;
+}
+
+/** SuperCPU front-panel RESET — resets the machine through the 65816. */
+export function scpuReset(emu: EjsInstance | null): boolean {
+  if (!emu) return false;
+  hardReset(emu);
+  return true;
+}
+
+export type CmdSwapResult = {
+  ok: boolean;
+  swapped: boolean;
+  cmd: IecUnit;
+  floppy: IecUnit;
+};
+
+/**
+ * CMD HD SWAP button. Real hardware exchanges the HD's IEC number with #8.
+ * Does not change Settings — live button state only. Does not reset the C64
+ * (the real SWAP button does not).
+ */
+export function cmdHdSwap(
+  emu: EjsInstance | null,
+  home: IecUnit,
+  swapped: boolean,
+): CmdSwapResult {
+  const nextSwapped = swapped;
+  const units = cmdSwapUnits(home, nextSwapped);
+  const map = cmdDriveMap(home, nextSwapped);
+  if (emu) {
+    injectViceRc(emu, viceRcForDrives(map, false));
+    applyRuntimeOptions(emu, viceDriveTypeVars(map));
+    applyIecUnit(emu, "cmdhd", units.cmd);
+  }
+  return { ok: true, swapped: nextSwapped, cmd: units.cmd, floppy: units.floppy };
+}
+
+export type SdSwapResult = {
+  ok: boolean;
+  unit: IecUnit;
+};
+
+/** SD2IEC SWAP 8/9 button — device number only; does not change the image. */
+export function sd2iecSwapDevice(emu: EjsInstance | null, unit: IecUnit): SdSwapResult {
+  if (emu) applyIecUnit(emu, "sd2iec", unit);
+  return { ok: true, unit };
+}
+
+export { sd2iecSwapUnit };
+
+export type SdFreezeResult = {
+  ok: boolean;
+  kind: "disk-swap" | "empty";
+  index: number;
+  count: number;
+};
+
+/**
+ * SD2IEC freeze / disk-change button (real hardware: short press = next image).
+ * Uses VICE disk-control when a playlist is mounted; otherwise swaps the
+ * next floppy bytes the caller provides (card directory).
+ */
+export function sd2iecFreeze(
+  emu: EjsInstance | null,
+  disks: { name: string; data: Uint8Array }[] = [],
+  dir: 1 | -1 = 1,
+  unit: IecUnit = 8,
+): SdFreezeResult {
+  const gm = emu?.gameManager;
+  const playlist = gm?.getDiskCount?.() ?? 0;
+  if (playlist > 1 && gm?.setCurrentDisk && gm.getCurrentDisk) {
+    const cur = gm.getCurrentDisk();
+    const next = ((cur + dir) % playlist + playlist) % playlist;
+    gm.setCurrentDisk(next);
+    return { ok: true, kind: "disk-swap", index: next, count: playlist };
+  }
+  if (disks.length > 1 && emu) {
+    const boot = bootFileOf(emu);
+    const cur = Math.max(
+      0,
+      disks.findIndex((d) => d.name === boot || boot?.endsWith(d.name)),
+    );
+    const next = ((cur + dir) % disks.length + disks.length) % disks.length;
+    const item = disks[next];
+    const wrote = swapBootDisk(emu, item.data, item.name);
+    if (wrote) {
+      applyIecUnit(emu, "sd2iec", unit);
+      resetEmu(emu);
+      return { ok: true, kind: "disk-swap", index: next, count: disks.length };
+    }
+  }
+  if (playlist === 1) {
+    return { ok: true, kind: "disk-swap", index: 0, count: 1 };
+  }
+  return { ok: false, kind: "empty", index: 0, count: disks.length };
+}
+
 function fsOf(emu: EjsInstance | null): EmscriptenFS | null {
   return emu?.gameManager?.FS ?? emu?.Module?.FS ?? null;
 }
@@ -1216,17 +1330,92 @@ export function clearUnitMounts() {
 }
 
 export function applyIecUnit(emu: EjsInstance | null, iec: IecDrive, unit: IecUnit) {
-  const work = workDiskFor(iec, unit);
-  if (work === "disabled") return;
-  rememberWorkDisk(work);
-  const opts: Record<string, string> = { vice_work_disk: work };
-  if (iec === "sd2iec" || iec === "cmdhd") {
-    opts.vice_virtual_device_traps = "enabled";
-  } else if (iec === "1541" || iec === "1581") {
-    opts.vice_virtual_device_traps = "disabled";
-    opts.vice_drive_true_emulation = "enabled";
-  }
+  const opts = liveDriveOptions({ iec, unit });
+  rememberWorkDisk(opts.vice_work_disk);
   applyRuntimeOptions(emu, opts);
+}
+
+export async function waitForCoreFs(emu: EjsInstance | null, timeoutMs = 12_000): Promise<boolean> {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    if (coreHasFs(emu)) return true;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  return coreHasFs(emu);
+}
+
+export function injectViceRc(emu: EjsInstance | null, body: string): number {
+  const FS = fsOf(emu);
+  if (!FS?.writeFile) return 0;
+  const roots = isIosPhone()
+    ? ["/home/web_user/retroarch/userdata/system/vice"]
+    : [
+        "/home/web_user/retroarch/userdata/system/vice",
+        "/home/web_user/.config/vice",
+        "/vice",
+      ];
+  for (const root of roots) mkdirFs(FS, root);
+  let n = 0;
+  for (const root of roots) {
+    try {
+      FS.writeFile(`${root}/vicerc`, body);
+      n += 1;
+    } catch {
+      /* try next */
+    }
+  }
+  return n;
+}
+
+/**
+ * After the core FS exists: inject Jiffy + CMD ROMs, write vicerc for real
+ * CMD HD, mount SD card files, apply live IEC. Does not Autostart.
+ * Jiffy is enabled only when both ROMs landed in the new core.
+ */
+export async function prepareCore(
+  emu: EjsInstance | null,
+  opts: {
+    live: DriveAttach;
+    user: DriveAttach;
+    jiffyWant: boolean;
+    sdParts?: { id: number; files: { name: string; data: Uint8Array }[] }[];
+  },
+): Promise<{ jiffy: boolean; roms: number; cmd: boolean }> {
+  if (!emu) return { jiffy: false, roms: 0, cmd: false };
+  let roms = 0;
+  let cmd = false;
+  try {
+    const map = await romFileMap();
+    if (Object.keys(map).length) roms = injectRoms(emu, map);
+    cmd = opts.user.iec === "cmdhd" && (await hasCmdRom());
+  } catch {
+    /* optional */
+  }
+  injectViceRc(emu, viceRcForUser(opts.user, opts.live));
+  if (opts.live.iec === "sd2iec" && opts.sdParts?.length) {
+    injectSdWork(emu, opts.sdParts);
+  }
+  applyIecUnit(emu, opts.live.iec, opts.live.unit);
+  const jiffy = await applyJiffyDos(emu, opts.jiffyWant);
+  await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
+  applyIecUnit(emu, opts.live.iec, opts.live.unit);
+  return { jiffy, roms, cmd };
+}
+
+export function autostartAfterReady(emu: EjsInstance | null, trueDrive = true) {
+  applyRuntimeOptions(emu, {
+    vice_autostart: "enabled",
+    vice_autostart_warp: "enabled",
+    vice_autoloadwarp: "enabled",
+    vice_reset: "autostart",
+    ...(trueDrive
+      ? {
+          vice_drive_true_emulation: "enabled",
+          vice_virtual_device_traps: "disabled",
+        }
+      : {}),
+  });
+  resetEmu(emu);
 }
 
 function removeMediaFile(FS: EmscriptenFS, name: string) {

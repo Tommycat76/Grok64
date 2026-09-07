@@ -81,13 +81,13 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               className="g64-btn g64-btn-primary mb-3"
               onClick={() => {
                 s.setReuSize("16384kB");
-                s.setIecDrive("sd2iec");
-                s.setIecUnit(8);
                 s.setMouseMode(true);
                 s.setJoyPort(1);
                 s.setDriveMode("true");
                 s.setJiffyDos(true);
-                toast.message('C64 OS kit — 16 MB REU, SD2IEC #8, 1351. Add system files to //0:os then LOAD"C64OS",8,1');
+                s.setIecDrive("cmdhd");
+                s.setIecUnit(9);
+                toast.message("C64 OS kit — real 16 MB REU, CMD HD #9 (your ROM), 1541 #8. Hardware buttons: CART FZ, SD FZ, SD 8/9, CMD SW.");
               }}
             >
               C64 OS kit
@@ -203,6 +203,9 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               <p className="text-xs text-fg-subtle">
                 1541 / 1581 / SD2IEC / CMD HD mount on the unit you pick (`LOAD"$",8` → use 8, or 9–11 for a second device). One disk per unit — remounting replaces the prior image on that drive. CMD HD still wants your Boot ROM 2.80.
               </p>
+              <p className="mt-2 text-xs text-fg-subtle">
+                Hardware buttons match the real devices — tap and hold, not just tap. CART FZ = freeze, hold = cart RESET. SD FZ = next disk, hold = previous. SD 8/9 swaps the card&apos;s device number. CMD SW swaps the HD with #8 (hold restores). SuperCPU shows SCPU RST when attached.
+              </p>
             </div>
 
             <div className="g64-field">
@@ -270,7 +273,7 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
                 ))}
               </div>
               <p className="text-xs text-fg-subtle">
-                GeoRAM-style cartridge on the expansion port — not SuperCPU RAM. 16 MB is what C64 OS and Nuvie need. .reu / nuvie / C64 OS filenames auto-enable 16 MB. Changing size usually needs a reload.
+                Real VICE REU on the expansion port — not stubbed, including on iPhone. 16 MB is what C64 OS needs. .reu / nuvie / C64 OS names auto-enable 16 MB. Size applies on the next core start.
               </p>
             </div>
 

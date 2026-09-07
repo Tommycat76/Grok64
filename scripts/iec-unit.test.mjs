@@ -12,7 +12,7 @@ await server.close();
 test("workDiskFor maps IEC storage modes to VICE work-disk units", () => {
   assert.equal(workDiskFor("sd2iec", 8), "8_fs");
   assert.equal(workDiskFor("sd2iec", 11), "11_fs");
-  assert.equal(workDiskFor("cmdhd", 9), "9_fs");
+  assert.equal(workDiskFor("cmdhd", 9), "disabled");
   assert.equal(workDiskFor("1581", 10), "10_d81");
   assert.equal(workDiskFor("1541", 8), "8_d64");
   assert.equal(workDiskFor("1541", 9), "9_d64");

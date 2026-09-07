@@ -12,9 +12,14 @@ export interface ViceExtrasInput {
   jiffy?: boolean;
 }
 
-/** VICE libretro `vice_work_disk` value for IEC units 8–11 (1541/1581/SD2IEC/CMD HD). */
+/**
+ * VICE libretro `vice_work_disk` for the live unit.
+ * CMD HD is a real drive (ROM + DriveNType=4844) — not an `*_fs` virtual card.
+ * SD2IEC uses the directory device (`N_fs`) for the FAT card files.
+ */
 export function workDiskFor(iec: IecDrive, unit: IecUnit = 8): string {
-  if (iec === "sd2iec" || iec === "cmdhd") return `${unit}_fs`;
+  if (iec === "cmdhd") return "disabled";
+  if (iec === "sd2iec") return `${unit}_fs`;
   if (iec === "1581") return `${unit}_d81`;
   if (iec === "1541") return `${unit}_d64`;
   return "disabled";
@@ -28,11 +33,17 @@ export function buildViceExtras(input: ViceExtrasInput): Record<string, string> 
   };
 
   const unit = input.iecUnit ?? 8;
-  if (input.iec === "sd2iec" || input.iec === "cmdhd") {
+  if (input.iec === "cmdhd") {
+    opts.vice_work_disk = "disabled";
+    opts.vice_virtual_device_traps = "disabled";
+    opts.vice_drive_true_emulation = "enabled";
+  } else if (input.iec === "sd2iec") {
     opts.vice_work_disk = workDiskFor(input.iec, unit);
     opts.vice_virtual_device_traps = "enabled";
   } else {
     opts.vice_work_disk = workDiskFor(input.iec, unit);
+    opts.vice_virtual_device_traps = "disabled";
+    opts.vice_drive_true_emulation = "enabled";
   }
 
   if (input.mouse) {
@@ -59,8 +70,16 @@ export function buildViceExtras(input: ViceExtrasInput): Record<string, string> 
   return opts;
 }
 
+/** C64 OS / Nuvie want a real 16 MB REU — never stub this down. */
+export const C64OS_REU: ReuSize = "16384kB";
+
 export function wantsLargeReu(name: string): boolean {
   return /\bnuvie\b|\.nuv($|\.)|\.reu($|\.)|c64[\s._-]?os/i.test(name);
+}
+
+/** Pass-through: C64 OS-class REU must stay the size VICE was given. */
+export function reuForVice(reu: ReuSize): ReuSize {
+  return reu;
 }
 
 export function wantsSuperCpu(name: string): boolean {

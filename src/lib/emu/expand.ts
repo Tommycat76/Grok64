@@ -38,7 +38,8 @@ export function needsScpu(name: string): boolean {
 }
 
 function workDiskFor(iec: IecDrive, unit: IecUnit = 8): string {
-  if (iec === "sd2iec" || iec === "cmdhd") return `${unit}_fs`;
+  if (iec === "cmdhd") return "disabled";
+  if (iec === "sd2iec") return `${unit}_fs`;
   if (iec === "1581") return `${unit}_d81`;
   if (iec === "1541") return `${unit}_d64`;
   return "disabled";
@@ -60,11 +61,17 @@ export function viceExpandOptions(opts: {
     vice_ram_expansion_unit: opts.reu,
     vice_floppy_multidrive: "enabled",
   };
-  if (opts.iec === "sd2iec" || opts.iec === "cmdhd") {
+  if (opts.iec === "cmdhd") {
+    o.vice_work_disk = "disabled";
+    o.vice_virtual_device_traps = "disabled";
+    o.vice_drive_true_emulation = "enabled";
+  } else if (opts.iec === "sd2iec") {
     o.vice_work_disk = workDiskFor(opts.iec, unit);
     o.vice_virtual_device_traps = "enabled";
   } else {
     o.vice_work_disk = workDiskFor(opts.iec, unit);
+    o.vice_virtual_device_traps = "disabled";
+    o.vice_drive_true_emulation = "enabled";
   }
   if (opts.mouse) {
     const p1 = opts.joyPort === 1;

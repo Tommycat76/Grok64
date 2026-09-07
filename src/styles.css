@@ -415,6 +415,8 @@ html, body, #app {
   inset: 0;
   display: grid;
   place-items: center;
+  align-content: center;
+  gap: 12px;
   text-align: center;
   padding: 24px;
   background: rgb(0 0 0 / 0.72);
@@ -426,6 +428,23 @@ html, body, #app {
   border: 0;
   width: 100%;
   pointer-events: none;
+}
+.g64-boot-copy {
+  max-width: 16rem;
+  line-height: 1.45;
+}
+.g64-boot-bar {
+  width: min(220px, 70%);
+  height: 4px;
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--color-phosphor) 18%, transparent);
+  overflow: hidden;
+}
+.g64-boot-bar > i {
+  display: block;
+  height: 100%;
+  background: var(--color-phosphor);
+  transition: width 200ms ease-out;
 }
 
 .g64-unlock {
@@ -1380,6 +1399,9 @@ div[class*="ejs_virtual"] {
     padding: 4px 6px;
     font-size: 8px;
   }
+  .g64-chip-pin {
+    scroll-snap-align: start;
+  }
   .g64-iconbtn {
     width: 40px;
     height: 40px;
@@ -1392,6 +1414,21 @@ div[class*="ejs_virtual"] {
     /* Chrome iOS bottom toolbar (~50–80px) sits below safe-area */
     padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
   }
+}
+
+.g64-hw-btn {
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+.g64-hw-btn[data-held="true"] {
+  border-color: var(--color-phosphor);
+  color: var(--color-phosphor);
+}
+.g64-hw-btn[data-long="true"] {
+  background: color-mix(in oklab, var(--color-phosphor) 42%, var(--color-bg-elevated));
+  color: #04120a;
+  border-color: var(--color-phosphor);
 }
 
 @media (max-width: 900px) {

@@ -117,6 +117,10 @@ export async function hasJiffyPair(): Promise<boolean> {
   return Boolean(c64 && d1541);
 }
 
+export async function hasCmdRom(): Promise<boolean> {
+  return Boolean(await getRom("cmdhd"));
+}
+
 /** Try fetching bundled ROM URLs when user hasn't uploaded yet. */
 export async function prefetchBundledRoms(): Promise<string[]> {
   const have = new Set((await listRoms()).map((r) => r.id));
