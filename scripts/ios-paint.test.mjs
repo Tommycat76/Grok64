@@ -73,14 +73,16 @@ test("CSS never hides live WebGL behind a 2D overlay", () => {
   );
 });
 
-test("iOS GL canvas stays 384px; present canvas fills the screen", () => {
+test("iOS GL canvas CSS-fills the bezel; leftover 2D present is hidden", () => {
   const iosCanvas = css.slice(css.indexOf("html[data-g64os=\"ios\"] #grok64-player canvas"));
-  assert.match(iosCanvas, /width: 384px !important/);
-  assert.match(iosCanvas, /height: 272px !important/);
+  assert.match(iosCanvas, /width: 100% !important/);
+  assert.match(iosCanvas, /height: 100% !important/);
   assert.match(iosCanvas, /transform: none !important/);
+  assert.match(iosCanvas, /object-fit: fill !important/);
+  assert.doesNotMatch(iosCanvas.slice(0, 900), /width: 384px/);
   assert.match(css, /canvas\.g64-ios-present/);
-  assert.match(css, /g64-ios-present:not\(\.g64-ios-present-on\)/);
   assert.match(paintSrc, /applyIosCrtStyle/);
+  assert.match(paintSrc, /IOS_CRT_KNOWN_FAILURES/);
 });
 
 test("iOS phone CRT screen fills the bezel without cqh self-size", () => {

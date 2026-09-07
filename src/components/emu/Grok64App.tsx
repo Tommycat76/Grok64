@@ -401,7 +401,7 @@ export function Grok64App() {
           settled: isIosPaintSettled(),
           overlay: Boolean(root?.querySelector(".g64-ios-mirror")),
           present: Boolean(present),
-          presentOn: present?.classList.contains("g64-ios-present-on") ?? false,
+          presentOn: false,
           presentPainted: isIosPresentPainted(),
           presentBuf: present ? { w: present.width, h: present.height } : null,
           presentLoop: iosPresentInfo(),
@@ -2286,7 +2286,7 @@ export function Grok64App() {
       <div className="g64-stage">
         <div className="g64-bezel">
           <div
-            className={s.running ? "g64-screen is-on" : "g64-screen"}
+            className={s.running || s.powered ? "g64-screen is-on" : "g64-screen"}
             onPointerDown={(e) => {
               unlockAudio(emuRef.current);
               if (iosResume) {

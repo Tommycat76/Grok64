@@ -1911,20 +1911,19 @@ html[data-g64os="ios"] .g64-log {
 }
 /*
  * iPhone CRT: .g64-screen absolutely fills the bezel (no flex % / cqh).
- * Boot overlay is a bezel child with the same inset so a collapsed screen
- * cannot hide “Loading…” for ~39s.
+ * Read docs/IOS_CRT_KNOWN_FAILURES.md first.
  *
  * #43: width:auto + 100cqh collapsed the screen to min-width (stamp).
  * #43: scale(dpr) on the canvas — CriOS ignores canvas CSS transform.
- * #44: 384×272 CSS + scale() on #grok64-player — DOM rect fill 1.0, but
- *      CriOS still paints the unscaled GL layer. Tom's #44 photo: dark CRT
- *      flush top-right of the light-purple bezel (L-shaped purple left+bottom).
- *      A GL-origin stamp in a tall buffer would be bottom-left — fail both.
+ * #44: 384×272 CSS + scale() on #grok64-player — DOM rect fill 1.0, stamp.
+ * #46: tall 2D drawImage present — CriOS OOM, black → splash.
+ * #47: readPixels 384×272 2D present + object-fit fill ~14fps — still
+ *      cold-start → solid black on Tom’s phone (Plex gate false-green).
  *
- * WebGL canvas stays 384×272 (VICE blit). A .g64-ios-present canvas
- * readPixels that 384×272 buffer (~14fps) and CSS-fills the bezel. #46's
- * 60fps bezel-sized drawImage OOM-killed CriOS (black → splash remount).
- * Hidden until the first lit copy so an empty 2D layer cannot cover READY.
+ * This path: live WebGL canvas is the only picture. Player + GL canvas
+ * use layout 100% (not transform scale). Backing stays 384×272 in JS.
+ * Leftover 2D present/mirror nodes are hidden/removed so they cannot
+ * cover READY. Cold-start copy is a compact chip, not a full black sheet.
  */
 html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-bezel {
   position: relative;
@@ -1945,46 +1944,47 @@ html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-screen {
 }
 html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-boot {
   position: absolute;
-  inset: 8px;
+  inset: auto;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  top: auto;
   width: auto;
   height: auto;
+  z-index: 4;
+  background: rgb(0 0 0 / 0.42);
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  pointer-events: none;
 }
-html[data-g64os="ios"] .g64-screen > canvas.g64-ios-present {
+html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-unlock {
+  inset: auto;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  top: auto;
+  height: auto;
+  padding: 12px 16px;
+  background: color-mix(in oklab, var(--color-bg) 88%, transparent);
+  font-size: 16px;
+}
+html[data-g64os="ios"] .g64-screen > canvas.g64-ios-present,
+html[data-g64os="ios"] .g64-ios-mirror {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+html[data-g64os="ios"] #grok64-player {
   position: absolute;
   inset: 0;
   left: 0;
   top: 0;
   right: 0;
   bottom: 0;
+  margin: 0 !important;
   width: 100% !important;
   height: 100% !important;
-  max-width: none !important;
-  max-height: none !important;
-  /* .g64-screen canvas uses object-fit:contain — that letterboxes a 384×272
-     bitmap in the tall bezel (the stamp the last gate shot). Fill stretches. */
-  object-fit: fill !important;
-  object-position: 0 0 !important;
-  z-index: 2;
-  pointer-events: none;
-  display: block;
-  transform: none !important;
-  image-rendering: pixelated;
-  image-rendering: crisp-edges;
-}
-html[data-g64os="ios"] .g64-screen > canvas.g64-ios-present:not(.g64-ios-present-on) {
-  visibility: hidden !important;
-  opacity: 0 !important;
-}
-html[data-g64os="ios"] #grok64-player {
-  position: absolute;
-  inset: auto;
-  left: 0;
-  top: 0;
-  right: auto;
-  bottom: auto;
-  margin: 0 !important;
-  width: 384px !important;
-  height: 272px !important;
   min-width: 0 !important;
   min-height: 0 !important;
   max-width: none !important;
@@ -1996,11 +1996,13 @@ html[data-g64os="ios"] #grok64-player {
 }
 html[data-g64os="ios"] #grok64-player .ejs_canvas_parent {
   position: absolute;
-  inset: auto;
+  inset: 0;
   left: 0;
   top: 0;
-  width: 384px !important;
-  height: 272px !important;
+  right: 0;
+  bottom: 0;
+  width: 100% !important;
+  height: 100% !important;
   max-width: none !important;
   max-height: none !important;
   transform: none !important;
@@ -2012,14 +2014,14 @@ html[data-g64os="ios"] #grok64-player canvas.g64-ios-fb {
   visibility: visible !important;
   opacity: 1 !important;
   position: absolute !important;
-  inset: auto !important;
+  inset: 0 !important;
   left: 0 !important;
   top: 0 !important;
-  right: auto !important;
-  bottom: auto !important;
+  right: 0 !important;
+  bottom: 0 !important;
   margin: 0 !important;
-  width: 384px !important;
-  height: 272px !important;
+  width: 100% !important;
+  height: 100% !important;
   min-width: 0;
   min-height: 0;
   max-width: none !important;
@@ -2029,7 +2031,7 @@ html[data-g64os="ios"] #grok64-player canvas.g64-ios-fb {
   transform: none !important;
   -webkit-transform: none !important;
   transform-origin: 0 0 !important;
-  background: #000 !important;
+  background: transparent !important;
 }
 html[data-g64os="ios"] #grok64-player .g64-ios-mirror,
 html[data-g64os="ios"] #grok64-player.g64-ios-mirror-on .g64-ios-mirror {

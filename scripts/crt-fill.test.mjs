@@ -44,7 +44,7 @@ test("Plex CRT fill gate script exists and documents iPhone viewport fill", () =
   assert.match(gate, /g64-screen/);
   assert.match(gate, /g64-bezel/);
   assert.match(gate, /paintedContent|shotPaint/);
-  assert.match(gate, /g64-ios-present/);
+  assert.match(gate, /no 2D present canvas/);
   assert.match(gate, /glPaintedSrc|readPixels/);
   assert.match(gate, /hideChrome|g64-screen/);
   assert.match(gate, /untransformed/);
@@ -53,11 +53,13 @@ test("Plex CRT fill gate script exists and documents iPhone viewport fill", () =
   assert.match(gate, /session still powered/);
   assert.match(gate, /no full page reload/);
   assert.match(gate, /__g64 still mounted/);
-  assert.match(gate, /present bitmap stays 384x272/);
-  assert.match(gate, /present canvas revealed after a lit copy/);
-  assert.match(gate, /Chromium-on-Plex still is not CriOS PASS/);
+  assert.match(gate, /live GL CSS px vs bezel/);
+  assert.match(gate, /Tom's phone is the only PASS/);
+  assert.match(gate, /Chromium-on-Plex still is not CriOS PASS|#47/);
   assert.match(gate, /function hasCssScale/);
+  assert.match(gate, /IOS_CRT_KNOWN_FAILURES/);
   assert.doesNotMatch(gate, /note\(\/scale\\\(\/i\.test\(String\(ready\?\.playerXf/);
+  assert.doesNotMatch(gate, /GATE PASS/);
 });
 
 test("gate treats computed matrix as scale (Plex getComputedStyle)", () => {
@@ -175,12 +177,13 @@ test("remapViceViewport expands a 384×272 stamp in a larger drawing buffer", ()
   assert.match(host, /w: drawingW, h: drawingH/);
 });
 
-test("iOS CRT fill is native 384 CSS + present canvas, never wrapper scale", () => {
-  const iosFn = host.slice(host.indexOf("function lockNativeFbCss"), host.indexOf("export async function recycleCore"));
-  assert.match(iosFn, /width", "384px"/);
-  assert.match(iosFn, /height", "272px"/);
-  assert.match(iosFn, /startIosPresent/);
-  assert.match(iosFn, /14fps|IOS_PRESENT|bezel/);
+test("iOS CRT fill is live-GL CSS 100%, never wrapper scale or 2D present", () => {
+  const iosFn = host.slice(host.indexOf("function fillBezelCss"), host.indexOf("export async function recycleCore"));
+  assert.match(iosFn, /width", "100%"/);
+  assert.match(iosFn, /height", "100%"/);
+  assert.match(iosFn, /stripIosPresent/);
+  assert.doesNotMatch(iosFn, /startIosPresent/);
+  assert.doesNotMatch(iosFn, /width", "384px"/);
   assert.doesNotMatch(iosFn, /translate3d\(0,0,0\) scale\(/);
   assert.doesNotMatch(iosFn, /devicePixelRatio/);
   assert.match(host, /remapViceViewport/);
@@ -197,12 +200,13 @@ test("iOS phone screen fill CSS does not use the #43 cqh or #44 384px lock", () 
   assert.doesNotMatch(rule, /100cqh/);
   assert.doesNotMatch(rule, /container-type/);
   const canvas = css.slice(css.indexOf('html[data-g64os="ios"] #grok64-player canvas'));
-  assert.match(canvas, /width: 384px !important/);
-  assert.match(canvas, /height: 272px !important/);
+  assert.match(canvas, /width: 100% !important/);
+  assert.match(canvas, /height: 100% !important/);
   assert.match(canvas, /transform: none !important/);
+  assert.match(canvas, /object-fit: fill !important/);
+  assert.doesNotMatch(canvas.slice(0, 900), /width: 384px/);
   assert.match(css, /\.g64-ios-present/);
   assert.match(css, /html\[data-g64os="ios"\] \.g64-screen > canvas\.g64-ios-present/);
-  assert.match(css, /object-fit: fill !important/);
 });
 
 function crc32(buf) {
