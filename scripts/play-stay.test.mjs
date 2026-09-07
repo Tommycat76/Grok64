@@ -68,16 +68,16 @@ test("iOS WebGL backing is locked to 384x272 before the first context", () => {
   assert.match(host, /lockIosBacking/);
 });
 
-test("iPhone CRT scales the player wrapper in CSS pixels, not canvas DPR", () => {
+test("iPhone CRT fills with CSS 100%, not wrapper scale or canvas DPR", () => {
   assert.match(host, /applyIosCrtStyle/);
   assert.match(host, /g64-ios-fb/);
   assert.match(host, /if \(isIos\(\)\) applyIosCrtStyle/);
-  assert.match(host, /translate3d\(0,0,0\) scale\(/);
+  assert.match(host, /fillCssBox/);
   assert.match(host, /#grok64-player/);
-  assert.match(host, /\$\{NATIVE_FB_W\}px/);
+  assert.match(host, /remapViceViewport/);
+  assert.doesNotMatch(host, /translate3d\(0,0,0\) scale\(/);
   assert.doesNotMatch(host, /klass === "g64-ios-fb" \? Math.max\(1, window.devicePixelRatio/);
   assert.doesNotMatch(host, /sw \* dpr/);
-  assert.doesNotMatch(paint, /setProperty\("width", "100%"/);
 });
 
 test("iPhone floppy Play still recycles — never hot-swap (locked)", () => {

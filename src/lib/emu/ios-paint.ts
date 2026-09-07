@@ -8,8 +8,9 @@
  * Architecture
  * ------------
  * 1. The RetroArch/VICE WebGL canvas IS the screen. Keep it in the DOM,
- *    visible, CSS box 384×272. Scale #grok64-player to fill .g64-screen —
- *    never cover it with an empty 2D layer, never scale(dpr) on the canvas.
+ *    visible. CSS width/height 100% of .g64-screen (no 384×272 lock, no
+ *    wrapper scale). CriOS ignores CSS transform on the GL layer — #44's
+ *    scale on #grok64-player was a bottom-left stamp with DOM fill 1.0.
  * 2. Never call getContext on that canvas. host.ts already captured
  *    VICE's context on `__g64gl`. A second WebGL context on WebKit returns null
  *    or steals the canvas (solid black CRT).
@@ -103,7 +104,7 @@ function revealLiveCanvas(canvas: HTMLCanvasElement) {
   canvas.style.setProperty("display", "block", "important");
   canvas.style.setProperty("visibility", "visible", "important");
   canvas.style.setProperty("opacity", "1", "important");
-  // Scale the player wrapper, not the canvas. Canvas CSS stays 384×272.
+  // CSS 100% fill — never scale() the wrapper or canvas (CriOS ignores it).
   const el =
     (canvas.closest("#grok64-player") as HTMLElement | null) ??
     (typeof document !== "undefined" ? document.getElementById("grok64-player") : null);
@@ -119,11 +120,9 @@ function nudgeCompositor(canvas: HTMLCanvasElement) {
   try {
     const player = canvas.closest("#grok64-player") as HTMLElement | null;
     const playerXf = player?.style.getPropertyValue("transform") ?? "";
-    // Scale lives on the wrapper. Do not replace it with translate3d.
-    if (/scale\(/.test(playerXf)) {
+    if (playerXf && playerXf !== "none" && !/matrix\(1,\s*0,\s*0,\s*1/.test(playerXf)) {
       void canvas.offsetWidth;
       void player?.offsetWidth;
-      return;
     }
     const prev = canvas.style.getPropertyValue("transform");
     const pri = canvas.style.getPropertyPriority("transform") || "important";
@@ -194,7 +193,7 @@ export function presentIosCrt(
     }
   }
 
-  // Always refit CSS so the player wrapper fills .g64-screen.
+  // Always refit CSS so the canvas fills .g64-screen.
   fitEmu(playerRoot(root), emu);
   if (canvas) nudgeCompositor(canvas);
   const shouldFit =

@@ -48,11 +48,17 @@ node scripts/crt-fill-gate.mjs https://grok64.tomsprojects.cc/
 node scripts/crt-fill-gate.mjs http://127.0.0.1:8091/
 ```
 
-It launches Playwright Chromium at an iPhone viewport (390×844, touch, CriOS UA), powers on, and **fails** if `.g64-screen` / boot overlay / canvas do not fill the CRT bezel (~0.85 area and width/height). Screenshots land in `screenshots/crt-fill-gate-*.png`.
+It launches Playwright Chromium at an iPhone viewport (390×844, touch, CriOS UA), powers on, then:
+
+1. Crops `.g64-bezel` and measures the **painted** (non-background pixel) bbox. A 384×272 stamp in the bottom-left of a large bezel **fails**, even when wrapper/screen/canvas `getBoundingClientRect` fill is 1.00.
+2. Compares **untransformed** computed CSS px (not the transformed DOM rect) to the bezel. The old #44 `384×272` + `scale()` layout fails this on a tall phone bezel.
+3. Fails if the boot overlay is missing / blank, or if power → first READY frame takes longer than 18s (flags the ~39s iPhone blank). Plex Chromium may not reproduce iPhone WASM time.
+
+Screenshots land in `screenshots/crt-fill-gate-*.png` (including `*-bezel.png` crops).
 
 Needs Playwright's Chromium once: `npx playwright install chromium`. If Chromium is already installed, set `G64_CHROME` to that executable.
 
-A green gate is a **layout check**, not a real-iPhone PASS. Optional later: BrowserStack real CriOS. Tom hard-refresh remains the CRT picture sign-off.
+A green gate is a **painted-layout check**, **not** a real CriOS PASS. Optional later: BrowserStack real CriOS. Tom hard-refresh remains the CRT picture sign-off.
 
 
 ## EmulatorJS

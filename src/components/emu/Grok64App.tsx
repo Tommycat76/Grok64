@@ -24,6 +24,7 @@ import {
   disarmAutostart,
   dismissEjsPrompts,
   ensureRuntime,
+  prefetchViceCores,
   fitEmu,
   hardReset,
   hasRealGamepad,
@@ -343,6 +344,7 @@ export function Grok64App() {
   }, [s.showKeyboard, view.orient]);
   useEffect(() => {
     void ensureRuntime().catch(() => undefined);
+    prefetchViceCores();
     prefetchBundledRoms()
       .then(async (added) => {
         if (added.length && (await hasJiffyPair())) {
@@ -389,6 +391,8 @@ export function Grok64App() {
       crt: () => {
         const root = document.getElementById("grok64-player");
         const c = root?.querySelector("canvas");
+        const cs = c ? getComputedStyle(c) : null;
+        const gl = c && c.__g64gl;
         return {
           path: iosCrtPath(),
           settled: isIosPaintSettled(),
@@ -398,7 +402,12 @@ export function Grok64App() {
           h: c?.height ?? 0,
           cw: c?.clientWidth ?? 0,
           ch: c?.clientHeight ?? 0,
-          hidden: c ? getComputedStyle(c).visibility === "hidden" || getComputedStyle(c).opacity === "0" : true,
+          cssW: cs?.width ?? null,
+          cssH: cs?.height ?? null,
+          xf: cs?.transform ?? null,
+          dbw: gl?.drawingBufferWidth ?? null,
+          dbh: gl?.drawingBufferHeight ?? null,
+          hidden: c ? cs.visibility === "hidden" || cs.opacity === "0" : true,
         };
       },
       media: () =>
@@ -2298,14 +2307,6 @@ export function Grok64App() {
           >
             <PlayerMount />
             {s.crtFilter && snap.os !== "ios" ? <div className="g64-scan" /> : null}
-            {s.booting ? (
-              <div className="g64-boot" aria-live="polite" aria-busy="true">
-                <div className="g64-boot-copy">{s.bootMsg || "Loading…"}</div>
-                <div className="g64-boot-bar" aria-hidden="true">
-                  <i style={{ width: `${Math.max(8, Math.min(100, s.bootProgress || 12))}%` }} />
-                </div>
-              </div>
-            ) : null}
             {iosResume && !s.booting ? (
               <button
                 type="button"
@@ -2317,6 +2318,14 @@ export function Grok64App() {
               </button>
             ) : null}
           </div>
+          {s.booting ? (
+            <div className="g64-boot" aria-live="polite" aria-busy="true">
+              <div className="g64-boot-copy">{s.bootMsg || "Loading…"}</div>
+              <div className="g64-boot-bar" aria-hidden="true">
+                <i style={{ width: `${Math.max(8, Math.min(100, s.bootProgress || 12))}%` }} />
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
       <TouchControls
