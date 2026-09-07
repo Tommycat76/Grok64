@@ -40,13 +40,10 @@ test("no present bitmap — live GL is the picture", () => {
   assert.equal(isIosPresentLooping(), false);
 });
 
-test("CSS hides leftover 2D present nodes; live GL stays 384×272 CSS", () => {
+test("CSS hides leftover 2D present nodes; live GL is not a 384px stamp lock", () => {
   assert.match(css, /canvas\.g64-ios-present/);
   assert.match(css, /display: none !important/);
   const iosCanvas = css.slice(css.indexOf('html[data-g64os="ios"] #grok64-player canvas'));
-  assert.match(iosCanvas, /width: 384px !important/);
-  assert.match(iosCanvas, /height: 272px !important/);
-  assert.match(iosCanvas, /object-fit: contain !important/);
-  assert.match(iosCanvas, /transform: none !important/);
-  assert.doesNotMatch(iosCanvas.slice(0, 800), /width: 100% !important/);
+  assert.doesNotMatch(iosCanvas.slice(0, 800), /width: 384px !important/);
+  assert.doesNotMatch(iosCanvas.slice(0, 800), /height: 272px !important/);
 });

@@ -213,6 +213,27 @@ export function isNativeFbCssBox(w, h, slop = 12) {
   return Math.abs((w || 0) - 384) <= slop && Math.abs((h || 0) - 272) <= slop;
 }
 
+export const C64_ASPECT = 384 / 272;
+
+/** Restored ee0b445 glass — CSS box is 384:272, not a tall bezel. */
+export function isC64Aspect(w, h, slop = 0.1) {
+  if (!(w >= 80) || !(h >= 60)) return false;
+  return Math.abs(w / h - C64_ASPECT) <= slop;
+}
+
+/** #48/#49 tall-bezel CSS 100% (~354×652). */
+export function isTallBezelBox(w, h) {
+  return w >= 80 && h >= 80 && h / w > 1.35;
+}
+
+/** #52: CRT used box is a thin strip along the bottom of the bezel. */
+export function bottomStripFails(box, bezel) {
+  if (!box || !bezel || !(box.h >= 1) || !(bezel.h >= 80)) return false;
+  const thin = box.h < bezel.h * 0.35;
+  const nearBottom = box.y + box.h > bezel.y + bezel.h * 0.75;
+  return thin && nearBottom;
+}
+
 /** #44 layout: locked 384×272 CSS box inside a taller phone bezel. */
 export function oldStampLayoutFails(canvasCssW, canvasCssH, bezelW, bezelH, min = FILL_MIN) {
   return !fillsBox(canvasCssW, canvasCssH, bezelW, bezelH, min);

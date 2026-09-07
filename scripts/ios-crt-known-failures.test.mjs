@@ -13,7 +13,7 @@ const present = readFileSync(join(root, "src/lib/emu/ios-present.ts"), "utf8");
 const gate = readFileSync(join(root, "scripts/crt-fill-gate.mjs"), "utf8");
 const docs = readFileSync(join(root, "docs/STATIC-HOSTING.md"), "utf8");
 
-test("known-failures doc exists and lists Tom phone failures 1–10", () => {
+test("known-failures doc exists and lists Tom phone failures 1–11", () => {
   assert.equal(existsSync(docPath), true);
   const doc = readFileSync(docPath, "utf8");
   assert.match(doc, /Read `docs\/IOS_CRT_KNOWN_FAILURES\.md` first/);
@@ -45,6 +45,11 @@ test("known-failures doc exists and lists Tom phone failures 1–10", () => {
   assert.match(doc, /zoom-from-default-origin|top-left origin/);
   assert.match(doc, /L on left \+ bottom|L-border|L left\+bottom/);
   assert.match(doc, /Plex `zoom:3` still ≠ Tom geometry|Plex `zoom:3` ≠ Tom/);
+  assert.match(doc, /### 11\.|#11|#52/);
+  assert.match(doc, /156a07f/);
+  assert.match(doc, /D2Yf0JqE/);
+  assert.match(doc, /thin purple strip|BOTTOM/);
+  assert.match(doc, /ee0b445/);
   assert.match(doc, /JiffyDOS/);
   assert.match(doc, /#39/);
   assert.match(doc, /build-id|build id/i);
@@ -56,8 +61,9 @@ test("known-failures doc exists and lists Tom phone failures 1–10", () => {
 
 test("project agents and CRT follow-ups point at the known-failures doc", () => {
   assert.match(agents, /docs\/IOS_CRT_KNOWN_FAILURES\.md/);
-  assert.match(agents, /1–10|1-10/);
-  assert.match(agents, /zoom|#51|#50|g64-ios-slot/);
+  assert.match(agents, /1–11|1-11/);
+  assert.match(agents, /ee0b445|restore/);
+  assert.match(agents, /Prefer restore|prefer restore/i);
   assert.match(paint, /docs\/IOS_CRT_KNOWN_FAILURES\.md/);
   assert.match(host, /docs\/IOS_CRT_KNOWN_FAILURES\.md/);
   assert.match(present, /docs\/IOS_CRT_KNOWN_FAILURES\.md/);
@@ -65,23 +71,17 @@ test("project agents and CRT follow-ups point at the known-failures doc", () => 
   assert.match(docs, /docs\/IOS_CRT_KNOWN_FAILURES\.md/);
 });
 
-test("new CRT path is native 384×272 + centered zoom slot, not failed approaches 1–10", () => {
-  const iosFn = host.slice(host.indexOf("function letterboxNativeCss"), host.indexOf("export async function recycleCore"));
-  assert.match(iosFn, /letterboxNativeCss/);
-  assert.match(iosFn, /ensureIosZoomHost/);
-  assert.match(iosFn, /ensureIosZoomSlot/);
-  assert.match(iosFn, /applyIosZoomHost/);
-  assert.match(iosFn, /applyIosZoomSlot/);
-  assert.match(iosFn, /layoutIosCrtHost/);
-  assert.match(iosFn, /iosZoomLayout/);
-  assert.match(iosFn, /"zoom"/);
-  assert.match(iosFn, /width", "384px"/);
-  assert.match(iosFn, /height", "272px"/);
-  assert.match(iosFn, /flex", "0 0 384px"/);
+test("new CRT path is restored ee0b445 glass, not failed approaches 1–11", () => {
+  const iosFn = host.slice(host.indexOf("function unwrapIosZoomChrome"), host.indexOf("export async function recycleCore"));
+  assert.match(iosFn, /unwrapIosZoomChrome/);
+  assert.match(iosFn, /applyIosCrtStyle/);
+  assert.match(iosFn, /style\.width = "100%"/);
   assert.match(iosFn, /stripIosPresent/);
+  assert.doesNotMatch(iosFn, /letterboxNativeCss/);
+  assert.doesNotMatch(iosFn, /ensureIosZoomHost/);
+  assert.doesNotMatch(iosFn, /layoutIosCrtHost/);
+  assert.doesNotMatch(iosFn, /iosZoomLayout/);
   assert.doesNotMatch(iosFn, /fillBezelCss/);
-  assert.doesNotMatch(iosFn, /width", "100%"/);
-  assert.doesNotMatch(iosFn, /scale\(/);
   assert.doesNotMatch(iosFn, /(?<!un)lockIosClientBox\(canvas/);
   const iosCode = iosFn.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
   assert.doesNotMatch(iosCode, /readPixels/);
@@ -90,24 +90,24 @@ test("new CRT path is native 384×272 + centered zoom slot, not failed approache
   assert.doesNotMatch(presentCode, /drawImage/);
   assert.doesNotMatch(presentCode, /toDataURL/);
   assert.match(paint, /live-webgl/);
-  assert.match(paint, /zoom/);
-  assert.match(paint, /layoutIosCrtHost/);
+  assert.match(paint, /ee0b445/);
+  assert.doesNotMatch(paint, /layoutIosCrtHost/);
   const patched = host.slice(host.indexOf("function preserveWebglBuffer"), host.indexOf("type GuardedGm"));
-  assert.match(patched, /width", "384px"/);
+  assert.doesNotMatch(patched, /width", "384px"/);
   assert.doesNotMatch(patched, /lockIosClientBox\(this,\s*384,\s*272\)/);
 });
 
-test("gate never claims PASS and requires centered slot plus native GL CSS", () => {
+test("gate never claims PASS and requires restored glass, not zoom/slot", () => {
   assert.match(gate, /Tom's phone is the only PASS/);
   assert.match(gate, /must never claim PASS|never claim PASS/i);
   assert.doesNotMatch(gate, /GATE PASS/);
   assert.match(gate, /Plex paint-count ≠ Tom geometry|paint-count ≠ Tom geometry/);
   assert.match(gate, /letterboxPaintFails/);
-  assert.match(gate, /g64-ios-zoom/);
-  assert.match(gate, /g64-ios-slot/);
-  assert.match(gate, /slotSharesCenter|shares a center/);
+  assert.match(gate, /isC64Aspect/);
+  assert.match(gate, /bottomStripFails/);
+  assert.match(gate, /no \.g64-ios-zoom host/);
+  assert.match(gate, /no \.g64-ios-slot/);
   assert.match(gate, /no 2D present canvas covering live GL/);
-  assert.match(gate, /GL clientWidth is native 384x272/);
   assert.doesNotMatch(gate, /present canvas revealed after a lit copy/);
   assert.doesNotMatch(gate, /present bitmap stays 384x272/);
   assert.doesNotMatch(gate, /live GL CSS px vs bezel/);

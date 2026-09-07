@@ -17,22 +17,6 @@ import type { DriveMode, IecDrive, IecMap, IecUnit, JoyPort, ReuSize, ScpuSimm, 
 import { RETRO_BTN } from "./types";
 import { glog } from "./debug";
 import { stopIosPresent, stripIosPresent } from "./ios-present";
-import {
-  IOS_SLOT_CLASS,
-  IOS_ZOOM_CLASS,
-  iosZoomLayout,
-  NATIVE_FB_H,
-  NATIVE_FB_W,
-} from "./ios-zoom";
-
-export {
-  IOS_SLOT_CLASS,
-  IOS_ZOOM_CLASS,
-  iosCrtZoom,
-  iosZoomLayout,
-  NATIVE_FB_H,
-  NATIVE_FB_W,
-} from "./ios-zoom";
 
 const DATA = "https://cdn.emulatorjs.org/stable/data/";
 
@@ -217,7 +201,7 @@ function lockIosClientBox(canvas: HTMLCanvasElement, w: number, h: number) {
   }
 }
 
-/** Strip a leftover #7 client-box lie. Letterbox CSS is already 384×272. */
+/** Strip a leftover #7 client-box lie. */
 function unlockIosClientBox(canvas: HTMLCanvasElement) {
   const tagged = canvas as HTMLCanvasElement & { __g64client?: boolean };
   if (!tagged.__g64client) return;
@@ -290,14 +274,13 @@ function preserveWebglBuffer() {
       if (ios) {
         // VICE only paints when the drawing buffer is the native 384×272.
         // Growing it to the CSS box (Tom #46 experiment) was solid black.
+        // Do not lock CSS to 384px here — that is the #50 stamp / #52 strip
+        // (layout). Restored ee0b445 presentation: CSS 100% of the
+        // aspect-ratio .g64-screen glass. Backing stays 384×272.
         if (this.width !== 384 || this.height !== 272) {
           this.width = 384;
           this.height = 272;
         }
-        // Native CSS box *before* getContext so WebKit allocates 384×272
-        // without a clientWidth lie (#7) or a CSS 100% box (#8).
-        this.style.setProperty("width", "384px", "important");
-        this.style.setProperty("height", "272px", "important");
       }
       // iOS WebKit needs preserveDrawingBuffer for CRT compositing; Android tablets do not
       // and pay a large fill-rate cost when it is forced on every WebGL context.
@@ -1164,7 +1147,7 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       let bh = Math.max(272, Math.round(ch * dpr));
       if (tablet || iosPhone) {
         // VICE framebuffer is 384×272. Growing the backing store is solid
-        // black. iOS: native CSS box + centered zoom slot. Tablet: CSS transform.
+        // black. Presentation CSS is restored ee0b445 (screen is the glass).
         bw = 384;
         bh = 272;
       } else if (touchMobile) {
@@ -1178,7 +1161,7 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       }
       const backingOk = canvas.width === bw && canvas.height === bh && canvas.width >= 64;
       // Reassigning canvas.width wipes the WebGL context on CriOS. Never
-      // resize after VICE has a context — iOS keeps a native 384×272 CSS box.
+      // resize after VICE has a context — backing stays 384×272.
       const canResizeBacking = !iosPhone || !glLive || canvas.width < 64 || canvas.height < 64;
       if (
         canResizeBacking &&
@@ -1193,12 +1176,13 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       }
       canvas.style.display = "block";
       canvas.style.visibility = "visible";
-      if (tablet || iosPhone) {
-        // VICE paints 384×272. WebGL on some Android GPUs ignores object-fit.
-        // Tablet: CSS-pixel transform on the canvas. iOS: native 384×272
-        // CSS + centered zoom slot. CSS 100% + clientWidth is #7/#8.
-        if (isIos()) applyIosCrtStyle(canvas, el, parent);
-        else applyTabletCrtStyle(canvas, el, parent);
+      if (tablet) {
+        // Android tablet: CSS-pixel transform on the canvas. Phone / CriOS
+        // must not call this (#43/#44). Restored ee0b445: CSS 100% of the
+        // aspect-ratio .g64-screen glass.
+        applyTabletCrtStyle(canvas, el, parent);
+      } else if (isIosPhone()) {
+        applyIosCrtStyle(canvas, el, parent);
       } else {
         clearNativeFbCrtStyle(canvas);
         canvas.style.width = "100%";
@@ -1207,15 +1191,9 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
     }
     const parent = el.querySelector(".ejs_canvas_parent") as HTMLElement | null;
     if (parent) {
-      if (isIos()) {
-        // Do not stretch the parent back to 100% — that is the #7/#8 family.
-        letterboxNativeCss(parent);
-        parent.style.display = "block";
-      } else {
-        parent.style.width = "100%";
-        parent.style.height = "100%";
-        parent.style.display = "block";
-      }
+      parent.style.width = "100%";
+      parent.style.height = "100%";
+      parent.style.display = "block";
     }
   } catch {
     /* ignore */
@@ -1253,15 +1231,6 @@ function crtBoxSize(box: HTMLElement, fallback: HTMLElement) {
   };
 }
 
-/** Bezel / `.g64-screen` only — do not floor to the 384×272 player box. */
-function crtScreenSize(box: HTMLElement) {
-  const br = box.getBoundingClientRect();
-  return {
-    sw: Math.max(box.clientWidth || 0, Math.round(br.width) || 0, 1),
-    sh: Math.max(box.clientHeight || 0, Math.round(br.height) || 0, 1),
-  };
-}
-
 function applyNativeFbCrtStyle(
   canvas: HTMLCanvasElement,
   el: HTMLElement,
@@ -1273,16 +1242,16 @@ function applyNativeFbCrtStyle(
   const box = (el.closest(".g64-screen") as HTMLElement | null) ?? parent;
   const { sw, sh } = crtBoxSize(box, el);
   // Android tablets blit 1:1 in CSS pixels — never multiply by DPR.
-  const sx = sw / NATIVE_FB_W;
-  const sy = sh / NATIVE_FB_H;
+  const sx = sw / 384;
+  const sy = sh / 272;
   canvas.style.setProperty("position", "absolute", "important");
   canvas.style.setProperty("inset", "auto", "important");
   canvas.style.setProperty("left", "0", "important");
   canvas.style.setProperty("top", "0", "important");
   canvas.style.setProperty("right", "auto", "important");
   canvas.style.setProperty("bottom", "auto", "important");
-  canvas.style.setProperty("width", `${NATIVE_FB_W}px`, "important");
-  canvas.style.setProperty("height", `${NATIVE_FB_H}px`, "important");
+  canvas.style.setProperty("width", "384px", "important");
+  canvas.style.setProperty("height", "272px", "important");
   canvas.style.setProperty("max-width", "none", "important");
   canvas.style.setProperty("max-height", "none", "important");
   canvas.style.setProperty("transform-origin", "0 0", "important");
@@ -1300,168 +1269,31 @@ export function applyTabletCrtStyle(
   applyNativeFbCrtStyle(canvas, el, parent, "g64-tablet-fb");
 }
 
-let iosCrtRo: ResizeObserver | null = null;
-let iosCrtBox: HTMLElement | null = null;
-let iosCrtApply: (() => void) | null = null;
-let iosCrtFitting = false;
-
-function watchIosCrtBox(box: HTMLElement, apply: () => void) {
-  iosCrtApply = apply;
-  if (typeof ResizeObserver === "undefined") return;
-  if (!iosCrtRo) {
-    iosCrtRo = new ResizeObserver(() => {
-      if (iosCrtFitting) return;
-      iosCrtFitting = true;
-      try {
-        iosCrtApply?.();
-      } finally {
-        iosCrtFitting = false;
-      }
-    });
-  }
-  if (iosCrtBox !== box) {
-    if (iosCrtBox) iosCrtRo.unobserve(iosCrtBox);
-    iosCrtBox = box;
-    iosCrtRo.observe(box);
+/**
+ * Flatten leftover #51/#52 zoom/slot wrappers from cached markup.
+ * display:contents in CSS also makes them layout-transparent.
+ */
+function unwrapIosZoomChrome(player: HTMLElement) {
+  let node = player.parentElement;
+  while (
+    node &&
+    (node.classList.contains("g64-ios-zoom") || node.classList.contains("g64-ios-slot"))
+  ) {
+    const parent = node.parentElement;
+    if (!parent) break;
+    parent.insertBefore(player, node);
+    node.remove();
+    node = player.parentElement;
   }
 }
 
 /**
- * Native 384×272 CSS box on the GL canvas / player — VICE blit size.
- * Do not put CSS zoom or a CSS transform on these nodes.
- */
-function letterboxNativeCss(el: HTMLElement) {
-  el.style.removeProperty("zoom");
-  el.style.setProperty("position", "relative", "important");
-  el.style.setProperty("inset", "auto", "important");
-  el.style.setProperty("left", "auto", "important");
-  el.style.setProperty("top", "auto", "important");
-  el.style.setProperty("right", "auto", "important");
-  el.style.setProperty("bottom", "auto", "important");
-  el.style.setProperty("margin", "0", "important");
-  el.style.setProperty("width", "384px", "important");
-  el.style.setProperty("height", "272px", "important");
-  el.style.setProperty("min-width", "0", "important");
-  el.style.setProperty("min-height", "0", "important");
-  el.style.setProperty("max-width", "none", "important");
-  el.style.setProperty("max-height", "none", "important");
-  el.style.setProperty("flex", "0 0 384px", "important");
-  el.style.setProperty("transform", "none", "important");
-  el.style.setProperty("-webkit-transform", "none", "important");
-  el.style.setProperty("transform-origin", "0 0", "important");
-}
-
-function ensureIosZoomHost(player: HTMLElement, box: HTMLElement): HTMLElement {
-  const existing = player.closest(`.${IOS_ZOOM_CLASS}`) as HTMLElement | null;
-  if (existing) return existing;
-  const host = document.createElement("div");
-  host.className = IOS_ZOOM_CLASS;
-  host.setAttribute("data-g64-ios-zoom", "");
-  const parent = player.parentElement ?? box;
-  parent.insertBefore(host, player);
-  host.appendChild(player);
-  return host;
-}
-
-function ensureIosZoomSlot(host: HTMLElement, box: HTMLElement): HTMLElement {
-  const existing = host.closest(`.${IOS_SLOT_CLASS}`) as HTMLElement | null;
-  if (existing) return existing;
-  const slot = document.createElement("div");
-  slot.className = IOS_SLOT_CLASS;
-  slot.setAttribute("data-g64-ios-slot", "");
-  const parent = host.parentElement ?? box;
-  parent.insertBefore(slot, host);
-  slot.appendChild(host);
-  return slot;
-}
-
-/**
- * Non-zoomed slot sized to the post-zoom used box, absolutely placed at
- * the centering offset. Not `transform:scale`. Not zoom-from-default-origin
- * without a recenter (#51 / #10).
- */
-function applyIosZoomSlot(slot: HTMLElement, layout: { left: number; top: number; usedW: number; usedH: number }) {
-  slot.classList.add(IOS_SLOT_CLASS);
-  slot.style.setProperty("display", "block", "important");
-  slot.style.setProperty("position", "absolute", "important");
-  slot.style.setProperty("inset", "auto", "important");
-  slot.style.setProperty("left", `${layout.left}px`, "important");
-  slot.style.setProperty("top", `${layout.top}px`, "important");
-  slot.style.setProperty("right", "auto", "important");
-  slot.style.setProperty("bottom", "auto", "important");
-  slot.style.setProperty("margin", "0", "important");
-  slot.style.setProperty("width", `${layout.usedW}px`, "important");
-  slot.style.setProperty("height", `${layout.usedH}px`, "important");
-  slot.style.setProperty("min-width", "0", "important");
-  slot.style.setProperty("min-height", "0", "important");
-  slot.style.setProperty("max-width", "none", "important");
-  slot.style.setProperty("max-height", "none", "important");
-  slot.style.setProperty("overflow", "hidden", "important");
-  slot.style.setProperty("flex", "0 0 auto", "important");
-  slot.style.setProperty("transform", "none", "important");
-  slot.style.setProperty("-webkit-transform", "none", "important");
-  slot.style.setProperty("zoom", "1");
-}
-
-/** CSS zoom on the non-GL host only. Never a transform on the GL canvas. */
-function applyIosZoomHost(host: HTMLElement, z: number) {
-  host.classList.add(IOS_ZOOM_CLASS);
-  host.style.setProperty("display", "block", "important");
-  host.style.setProperty("position", "absolute", "important");
-  host.style.setProperty("inset", "auto", "important");
-  host.style.setProperty("left", "0", "important");
-  host.style.setProperty("top", "0", "important");
-  host.style.setProperty("right", "auto", "important");
-  host.style.setProperty("bottom", "auto", "important");
-  host.style.setProperty("margin", "0", "important");
-  host.style.setProperty("width", `${NATIVE_FB_W}px`, "important");
-  host.style.setProperty("height", `${NATIVE_FB_H}px`, "important");
-  host.style.setProperty("min-width", "0", "important");
-  host.style.setProperty("min-height", "0", "important");
-  host.style.setProperty("max-width", "none", "important");
-  host.style.setProperty("max-height", "none", "important");
-  host.style.setProperty("flex", "0 0 auto", "important");
-  host.style.setProperty("transform", "none", "important");
-  host.style.setProperty("-webkit-transform", "none", "important");
-  host.style.setProperty("transform-origin", "0 0", "important");
-  host.style.setProperty("zoom", String(z));
-}
-
-/**
- * Size and center the zoom slot from the bezel. Safe with no canvas / no
- * emu — used on power so first phosphor is not a #51 top-left zoom.
- */
-export function layoutIosCrtHost(root?: HTMLElement | null) {
-  if (typeof document === "undefined" || !isIos()) return null;
-  const player =
-    (root?.id === "grok64-player"
-      ? root
-      : ((root?.closest("#grok64-player") as HTMLElement | null) ??
-        (document.getElementById("grok64-player") as HTMLElement | null)));
-  if (!player) return null;
-  const box = (player.closest(".g64-screen") as HTMLElement | null) ?? player.parentElement;
-  if (!box) return null;
-  const host = ensureIosZoomHost(player, box);
-  const slot = ensureIosZoomSlot(host, box);
-  const { sw, sh } = crtScreenSize(box);
-  const dpr =
-    isIosPhone() && typeof window !== "undefined" ? Math.max(1, window.devicePixelRatio || 1) : 1;
-  const layout = iosZoomLayout(sw, sh, dpr);
-  applyIosZoomSlot(slot, layout);
-  applyIosZoomHost(host, layout.z);
-  letterboxNativeCss(player);
-  return { player, box, host, slot, layout };
-}
-
-/**
- * CriOS CRT after #51 un-centered zoom.
+ * CriOS CRT presentation — restored ee0b445 layout (pre-#42 rewrite).
  *
- * Read `docs/IOS_CRT_KNOWN_FAILURES.md` first. This is not 1–10:
- * live WebGL stays native 384×272 CSS + backing (the #39/#50/#51 paint
- * path). CSS `zoom` on the non-GL `.g64-ios-zoom` host; a non-zoomed
- * `.g64-ios-slot` is absolutely placed at the post-zoom centering offset.
- * No wrapper CSS transform, no CSS 100% on GL, no clientWidth lie/unlock,
- * no 2D present, no PNG, no bare zoom-from-default-origin.
+ * Read `docs/IOS_CRT_KNOWN_FAILURES.md` first. This is not 1–11:
+ * `.g64-screen` is the 384:272 glass; live WebGL CSS is 100% of that
+ * glass (not the tall bezel). Backing stays 384×272. No zoom, no slot,
+ * no wrapper transform on GL, no clientWidth lie, no 2D present, no PNG.
  */
 export function applyIosCrtStyle(
   canvas: HTMLCanvasElement,
@@ -1469,38 +1301,28 @@ export function applyIosCrtStyle(
   parent: HTMLElement,
 ) {
   canvas.classList.remove("g64-tablet-fb");
+  clearNativeFbCrtStyle(canvas);
   canvas.classList.add("g64-ios-fb");
   const player =
     (el.id === "grok64-player" ? el : (el.closest("#grok64-player") as HTMLElement | null)) ?? el;
   const box = (player.closest(".g64-screen") as HTMLElement | null) ?? parent;
-
-  const apply = () => {
-    unlockIosClientBox(canvas);
-    layoutIosCrtHost(player);
-    const canvasParent = canvas.parentElement;
-    if (
-      canvasParent &&
-      canvasParent !== player &&
-      !canvasParent.classList.contains(IOS_ZOOM_CLASS) &&
-      !canvasParent.classList.contains(IOS_SLOT_CLASS)
-    ) {
-      letterboxNativeCss(canvasParent);
-    }
-    letterboxNativeCss(canvas);
-    canvas.style.setProperty("position", "absolute", "important");
-    canvas.style.setProperty("left", "0", "important");
-    canvas.style.setProperty("top", "0", "important");
-    canvas.style.setProperty("object-fit", "contain", "important");
-    canvas.style.setProperty("object-position", "center", "important");
-    canvas.style.setProperty("display", "block", "important");
-    canvas.style.setProperty("visibility", "visible", "important");
-    canvas.style.setProperty("opacity", "1", "important");
-    stripIosPresent(box);
-    void box.getBoundingClientRect();
-  };
-
-  apply();
-  watchIosCrtBox(box, apply);
+  unwrapIosZoomChrome(player);
+  unlockIosClientBox(canvas);
+  canvas.style.removeProperty("zoom");
+  canvas.style.width = "100%";
+  canvas.style.height = "100%";
+  canvas.style.setProperty("display", "block", "important");
+  canvas.style.setProperty("visibility", "visible", "important");
+  canvas.style.setProperty("opacity", "1", "important");
+  const canvasParent = canvas.parentElement;
+  if (canvasParent && canvasParent !== player) {
+    canvasParent.style.width = "100%";
+    canvasParent.style.height = "100%";
+  }
+  player.style.width = "100%";
+  player.style.height = "100%";
+  player.style.removeProperty("zoom");
+  stripIosPresent(box);
 }
 
 export async function recycleCore(emu: EjsInstance | null, el: HTMLElement | null) {

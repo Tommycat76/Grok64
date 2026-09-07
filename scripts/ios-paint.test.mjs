@@ -73,37 +73,32 @@ test("CSS never hides live WebGL behind a 2D overlay", () => {
   );
 });
 
-test("iOS GL canvas stays native 384×272; leftover 2D present is hidden", () => {
+test("iOS GL fills the restored 384:272 glass; leftover 2D present is hidden", () => {
   const iosCanvas = css.slice(css.indexOf("html[data-g64os=\"ios\"] #grok64-player canvas"));
-  assert.match(iosCanvas, /width: 384px !important/);
-  assert.match(iosCanvas, /height: 272px !important/);
-  assert.match(iosCanvas, /transform: none !important/);
-  assert.match(iosCanvas, /object-fit: contain !important/);
-  assert.doesNotMatch(iosCanvas.slice(0, 900), /width: 100% !important/);
+  assert.doesNotMatch(iosCanvas.slice(0, 900), /width: 384px !important/);
+  assert.doesNotMatch(iosCanvas.slice(0, 900), /height: 272px !important/);
   assert.match(css, /canvas\.g64-ios-present/);
-  assert.match(css, /g64-ios-zoom/);
-  assert.match(css, /g64-ios-slot/);
+  assert.match(css, /display: contents/);
   assert.match(paintSrc, /applyIosCrtStyle/);
-  assert.match(paintSrc, /layoutIosCrtHost/);
-  assert.match(paintSrc, /zoom/);
+  assert.doesNotMatch(paintSrc, /layoutIosCrtHost/);
+  assert.match(paintSrc, /ee0b445/);
   assert.match(paintSrc, /IOS_CRT_KNOWN_FAILURES/);
 });
 
-test("iOS phone CRT screen fills the bezel without cqh self-size", () => {
+test("iOS phone CRT screen is the 384:272 glass, not a tall inset", () => {
   const idx = css.indexOf('html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-screen');
   assert.ok(idx >= 0);
   const phoneScreen = css.slice(idx, idx + 500);
-  assert.match(phoneScreen, /inset: 8px/);
+  assert.match(phoneScreen, /aspect-ratio: 384 \/ 272/);
+  assert.doesNotMatch(phoneScreen, /inset: 8px/);
   assert.doesNotMatch(phoneScreen, /100cqh/);
   assert.doesNotMatch(phoneScreen, /container-type/);
   assert.match(css, /\.g64-boot \{[\s\S]*?height: 100%/);
 });
 
-test("PlayerMount sits inside the non-GL zoom host and centering slot", () => {
-  assert.match(app, /className="g64-ios-slot"/);
-  assert.match(app, /data-g64-ios-slot/);
-  assert.match(app, /className="g64-ios-zoom"/);
-  assert.match(app, /data-g64-ios-zoom/);
+test("PlayerMount sits directly in .g64-screen (no zoom/slot wrap)", () => {
+  assert.doesNotMatch(app, /className="g64-ios-slot"/);
+  assert.doesNotMatch(app, /className="g64-ios-zoom"/);
   assert.match(app, /<PlayerMount \/>/);
 });
 

@@ -14,11 +14,11 @@
  *   node scripts/crt-fill-gate.mjs http://127.0.0.1:8091/
  *
  * HARD: asserts the *painted* live-GL picture is not solid black.
- * After #51, CSS zoom lives on the non-GL `.g64-ios-zoom` host; a
- * non-zoomed `.g64-ios-slot` is centered on the post-zoom used box. The
- * GL canvas stays native 384×272 CSS. Tom #44 / #51 top-right and
- * GL-origin bottom-left still fail. DOM wrapper fill of 1.0 is never a
- * pass. Plex paint-count ≠ Tom geometry. Plex `zoom:3` ≠ Tom geometry.
+ * After #52, presentation is the restored ee0b445 layout: `.g64-screen`
+ * is the 384:272 glass; live GL CSS fills that glass. No CSS zoom, no
+ * centering slot. Tom #44 / #51 top-right, GL-origin bottom-left, and
+ * #52 bottom-strip still fail. DOM wrapper fill of 1.0 is never a pass.
+ * Plex paint-count ≠ Tom geometry.
  *
  * Also holds after first READY paint and fails if the session remounts
  * to the power splash, __g64 is torn down, the page reloads, or the CRT
@@ -44,22 +44,13 @@ import {
   cssPx,
   decodePng,
   fillsBox,
+  bottomStripFails,
+  isC64Aspect,
   isNativeFbCssBox,
+  isTallBezelBox,
   letterboxPaintFails,
-  oldStampLayoutFails,
   paintedContent,
 } from "./crt-fill-paint.mjs";
-
-function slotSharesCenter(slot, bezel, slop = 28) {
-  if (!slot || !bezel || !(slot.w >= 8) || !(slot.h >= 8) || !(bezel.w >= 8) || !(bezel.h >= 8)) {
-    return false;
-  }
-  const sx = slot.x + slot.w / 2;
-  const sy = slot.y + slot.h / 2;
-  const bx = bezel.x + bezel.w / 2;
-  const by = bezel.y + bezel.h / 2;
-  return Math.abs(sx - bx) <= slop && Math.abs(sy - by) <= slop;
-}
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const url = process.argv[2] || process.env.G64_GATE_URL || "https://grok64.tomsprojects.cc/";
@@ -144,7 +135,7 @@ const measureSrc = () => {
     const pr = Number.parseFloat(st.paddingRight) || 0;
     const pb = Number.parseFloat(st.paddingBottom) || 0;
     const pl = Number.parseFloat(st.paddingLeft) || 0;
-    // iPhone CSS uses inset:8px on the screen (padding may be 0).
+    // Restored layout: screen is the 384:272 glass inside bezel padding.
     const inset = screen && ss ? Number.parseFloat(ss.top) || 0 : 0;
     const padX = pl + pr || (inset > 0 ? inset * 2 : 0);
     const padY = pt + pb || (inset > 0 ? inset * 2 : 0);
@@ -326,7 +317,15 @@ if (bootGeom) {
     boot: bootGeom.boot,
     bootCss: bootGeom.bootCss,
   });
-  assertCssFill("screen vs bezel (boot, untransformed CSS)", bootGeom.screenCss?.w, bootGeom.screenCss?.h, bootGeom.bezelInner);
+  {
+    const sw = cssPx(bootGeom.screenCss?.w);
+    const sh = cssPx(bootGeom.screenCss?.h);
+    note(
+      isC64Aspect(sw, sh),
+      "boot .g64-screen is 384:272 glass (not a tall absolute-inset bezel)",
+      { screenCss: { w: sw, h: sh }, bezelInner: bootGeom.bezelInner },
+    );
+  }
   if (bootGeom.boot && bootGeom.bezelInner) {
     const dom = boxFill(bootGeom.boot.w, bootGeom.boot.h, bootGeom.bezelInner.w, bootGeom.bezelInner.h);
     console.log("INFO boot chip DOM-rect (must not be a full-bezel black cover)", JSON.stringify(dom));
@@ -397,11 +396,6 @@ note(!ready?.booting, "cold-start overlay dismissed after READY (must not stay a
   boot: ready?.boot,
 });
 note(ready?.buf?.w === 384 && ready?.buf?.h === 272, "VICE backing 384x272", ready?.buf);
-note(
-  isNativeFbCssBox(ready?.canvasClient?.w, ready?.canvasClient?.h),
-  "GL clientWidth is native 384x272 (real CSS box, not a #7 lie on CSS 100%)",
-  ready?.canvasClient,
-);
 
 // #44 stamp path: wrapper CSS transform + 384×272 CSS. CriOS ignores that on GL.
 note(!hasCssScale(ready?.playerXf), "player wrapper has no CSS transform (CriOS ignores it on the GL layer)", {
@@ -412,35 +406,16 @@ note(
   "canvas transform is identity",
   { canvasXf: ready?.canvasCss?.xf },
 );
-note(Boolean(ready?.zoomHost), "non-GL .g64-ios-zoom host is in the tree", {
+note(!ready?.zoomHost, "no .g64-ios-zoom host (#51/#52 zoom path is gone)", {
   zoomHost: ready?.zoomHost,
   zoomCss: ready?.zoomCss,
 });
-note(Boolean(ready?.zoomSlot), "non-zoomed .g64-ios-slot is in the tree (centers #51 zoom)", {
+note(!ready?.zoomSlot, "no .g64-ios-slot (#52 centered-zoom path is gone)", {
   zoomSlot: ready?.zoomSlot,
   slotCss: ready?.slotCss,
   slotBox: ready?.slotBox,
 });
 {
-  const slotZoom = Number.parseFloat(String(ready?.slotCss?.zoom ?? "1"));
-  note(
-    !Number.isFinite(slotZoom) || Math.abs(slotZoom - 1) < 0.02,
-    "centering slot itself is not zoomed (zoom stays on .g64-ios-zoom)",
-    { slotZoom: ready?.slotCss?.zoom },
-  );
-  note(
-    !hasCssScale(ready?.slotCss?.xf),
-    "centering slot has no CSS transform (not a #2 scale path)",
-    { slotXf: ready?.slotCss?.xf },
-  );
-}
-{
-  const z = Number.parseFloat(String(ready?.zoomCss?.zoom ?? ""));
-  note(
-    Number.isFinite(z) && z > 0.2 && z <= 8,
-    "non-GL zoom host has CSS zoom (not a transform on GL)",
-    { zoom: ready?.zoomCss?.zoom, playerZoom: ready?.playerCss?.zoom, canvasZoom: ready?.canvasCss?.zoom },
-  );
   const canvasZoom = Number.parseFloat(String(ready?.canvasCss?.zoom ?? "1"));
   const playerZoom = Number.parseFloat(String(ready?.playerCss?.zoom ?? "1"));
   note(
@@ -456,44 +431,53 @@ note(Boolean(ready?.zoomSlot), "non-zoomed .g64-ios-slot is in the tree (centers
 }
 
 const bezelInner = ready?.bezelInner;
-if (ready?.canvasCss && bezelInner) {
+const screenCssW = cssPx(ready?.screenCss?.w);
+const screenCssH = cssPx(ready?.screenCss?.h);
+note(
+  isC64Aspect(screenCssW, screenCssH),
+  ".g64-screen is 384:272 glass (restored ee0b445, not tall inset bezel)",
+  { screenCss: { w: screenCssW, h: screenCssH }, bezelInner },
+);
+note(
+  !isTallBezelBox(screenCssW, screenCssH),
+  ".g64-screen is not a tall-bezel CSS box (#48/#49)",
+  { screenCss: { w: screenCssW, h: screenCssH } },
+);
+if (ready?.screen && bezelInner) {
+  note(
+    !bottomStripFails(ready.screen, bezelInner),
+    "CRT glass is not a thin strip along the bezel bottom (#52)",
+    { screen: ready.screen, bezelInner },
+  );
+}
+if (ready?.canvasCss && ready?.screenCss) {
   const cssW = cssPx(ready.canvasCss.w);
   const cssH = cssPx(ready.canvasCss.h);
   note(
-    isNativeFbCssBox(cssW, cssH),
-    "live GL canvas CSS is native 384x272 (zoom is on the non-GL host)",
-    { bezelInner, glCss: { w: cssW, h: cssH } },
+    isC64Aspect(cssW, cssH) && !isTallBezelBox(cssW, cssH),
+    "live GL CSS fills the 384:272 glass (not tall-bezel 100%, not a 384 stamp lock)",
+    { glCss: { w: cssW, h: cssH }, screenCss: { w: screenCssW, h: screenCssH } },
   );
   note(
-    oldStampLayoutFails(cssW || 384, cssH || 272, bezelInner.w, bezelInner.h),
-    "384x272 GL CSS does not by itself fill the tall bezel (host zoom is the fill)",
-    { bezelInner, glCss: { w: cssW, h: cssH } },
+    !isNativeFbCssBox(cssW, cssH) || isC64Aspect(screenCssW, screenCssH),
+    "GL is not a 384×272 stamp inside a non-glass screen (#50)",
+    { glCss: { w: cssW, h: cssH }, screenCss: { w: screenCssW, h: screenCssH } },
   );
-  if (ready.canvas) {
+  if (ready.canvas && bezelInner) {
     const dom = boxFill(ready.canvas.w, ready.canvas.h, bezelInner.w, bezelInner.h);
     console.log(
       "INFO canvas DOM-rect vs bezel (Plex paint-count ≠ Tom geometry)",
-      JSON.stringify({ dom, css: { w: cssW, h: cssH }, zoom: ready.zoomCss }),
+      JSON.stringify({ dom, css: { w: cssW, h: cssH }, screen: ready.screen }),
     );
   }
 }
-if (ready?.playerCss && bezelInner) {
+if (ready?.playerCss) {
   const pw = cssPx(ready.playerCss.w);
   const ph = cssPx(ready.playerCss.h);
   note(
-    isNativeFbCssBox(pw, ph),
-    "player CSS is native 384x272 (no CSS 100%, no transform)",
+    isC64Aspect(pw, ph) && !isTallBezelBox(pw, ph),
+    "player CSS matches the 384:272 glass (no zoom slot, no tall 100%)",
     { playerCss: { w: pw, h: ph } },
-  );
-}
-if (ready?.screenCss && bezelInner) {
-  assertCssFill("screen CSS px vs bezel (untransformed)", ready.screenCss.w, ready.screenCss.h, bezelInner);
-}
-if (ready?.slotBox && bezelInner) {
-  note(
-    slotSharesCenter(ready.slotBox, bezelInner),
-    "zoom slot shares a center with the bezel (not a #51 top-right / L-border)",
-    { slotBox: ready.slotBox, bezelInner, slotCss: ready.slotCss },
   );
 }
 
