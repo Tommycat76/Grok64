@@ -16,6 +16,7 @@ import { cmdDriveMap, cmdSwapUnits, sd2iecSwapUnit } from "./hw-buttons";
 import type { DriveMode, IecDrive, IecMap, IecUnit, JoyPort, ReuSize, ScpuSimm, SidEngine, SidModel } from "./types";
 import { RETRO_BTN } from "./types";
 import { glog } from "./debug";
+import { startIosPresent, stopIosPresent } from "./ios-present";
 
 const DATA = "https://cdn.emulatorjs.org/stable/data/";
 
@@ -127,7 +128,82 @@ let restartArmed = false;
 let webglPatched = false;
 let userJoyPort: JoyPort = 2;
 
+/**
+ * If WebKit sizes the drawing buffer to CSS×DPR while VICE keeps a 384×272
+ * viewport, the picture stamps at the GL origin (bottom-left). Expand that
+ * native-FB viewport to the default framebuffer.
+ */
+export function remapViceViewport(
+  drawingW: number,
+  drawingH: number,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  fboBound: boolean,
+): { x: number; y: number; w: number; h: number } {
+  if (fboBound || drawingW < 8 || drawingH < 8 || w < 8 || h < 8) {
+    return { x, y, w, h };
+  }
+  const stamp = (w + 8 < drawingW || h + 8 < drawingH) && w <= 400 && h <= 300 && (w * h) / (drawingW * drawingH) < 0.85;
+  if (stamp) return { x: 0, y: 0, w: drawingW, h: drawingH };
+  return { x, y, w, h };
+}
+
+function patchGlViewportFill(gl: WebGLRenderingContext | WebGL2RenderingContext) {
+  const tagged = gl as WebGLRenderingContext & { __g64vp?: boolean };
+  if (tagged.__g64vp) return;
+  tagged.__g64vp = true;
+  const origVp = gl.viewport.bind(gl);
+  const origSc = gl.scissor.bind(gl);
+  const remap = (x: number, y: number, w: number, h: number) => {
+    let fbo = false;
+    try {
+      fbo = Boolean(gl.getParameter(gl.FRAMEBUFFER_BINDING));
+    } catch {
+      fbo = false;
+    }
+    return remapViceViewport(gl.drawingBufferWidth, gl.drawingBufferHeight, x, y, w, h, fbo);
+  };
+  gl.viewport = (x: number, y: number, w: number, h: number) => {
+    const r = remap(x, y, w, h);
+    origVp(r.x, r.y, r.w, r.h);
+  };
+  gl.scissor = (x: number, y: number, w: number, h: number) => {
+    const r = remap(x, y, w, h);
+    origSc(r.x, r.y, r.w, r.h);
+  };
+}
+
+/**
+ * RetroArch sizes video from clientWidth. CSS 100% would report the tall
+ * bezel and the core stops blitting (solid black). Lie about the JS box
+ * so VICE keeps a 384×272 blit while CSS stretches the bitmap.
+ */
+function lockIosClientBox(canvas: HTMLCanvasElement, w: number, h: number) {
+  const tagged = canvas as HTMLCanvasElement & { __g64client?: boolean };
+  if (tagged.__g64client) return;
+  tagged.__g64client = true;
+  try {
+    for (const [prop, val] of [
+      ["clientWidth", w],
+      ["clientHeight", h],
+      ["offsetWidth", w],
+      ["offsetHeight", h],
+    ] as const) {
+      Object.defineProperty(canvas, prop, {
+        configurable: true,
+        enumerable: true,
+        get: () => val,
+      });
+    }
+  } catch {
+    /* engine refused redefine */
+  }
+}
+
 function lockIosBacking(canvas: HTMLCanvasElement, w: number, h: number) {
+  lockIosClientBox(canvas, w, h);
   const tagged = canvas as HTMLCanvasElement & { __g64lock?: boolean };
   if (tagged.__g64lock) return;
   tagged.__g64lock = true;
@@ -167,9 +243,16 @@ function preserveWebglBuffer() {
     if (type === "webgl" || type === "webgl2" || type === "experimental-webgl") {
       // Size the VICE framebuffer before the first context. Assigning width
       // after GL exists wipes CriOS. CSS fills the CRT around 384×272.
-      if (ios && (this.width !== 384 || this.height !== 272)) {
-        this.width = 384;
-        this.height = 272;
+      if (ios) {
+        // VICE only paints when the drawing buffer is the native 384×272.
+        // Growing it to the CSS box (Tom #46 experiment) was solid black.
+        if (this.width !== 384 || this.height !== 272) {
+          this.width = 384;
+          this.height = 272;
+        }
+        // Lie about clientWidth *before* getContext so WebKit does not
+        // allocate CSS×DPR (a tall stamp: photo was top-right in the bezel).
+        lockIosClientBox(this, 384, 272);
       }
       // iOS WebKit needs preserveDrawingBuffer for CRT compositing; Android tablets do not
       // and pay a large fill-rate cost when it is forced on every WebGL context.
@@ -181,7 +264,19 @@ function preserveWebglBuffer() {
       // canvas (solid black CRT).
       if (ctx) {
         (this as HTMLCanvasElement & { __g64gl?: unknown }).__g64gl = ctx;
-        if (ios) lockIosBacking(this, 384, 272);
+        if (ios) {
+          lockIosBacking(this, 384, 272);
+          // Viewport remap is only needed if drawingBuffer ≫ 384×272.
+          // Wrapping viewport/scissor on a native 384×272 buffer made VICE
+          // paint solid black in Playwright. Call only when the buffer is tall.
+          if (
+            ctx &&
+            ((ctx as WebGLRenderingContext).drawingBufferWidth > 400 ||
+              (ctx as WebGLRenderingContext).drawingBufferHeight > 300)
+          ) {
+            patchGlViewportFill(ctx as WebGLRenderingContext);
+          }
+        }
       }
       return ctx;
     }
@@ -416,6 +511,17 @@ function loadCss(href: string) {
     l.onerror = () => resolve();
     document.head.appendChild(l);
   });
+}
+
+/** Warm the VICE WASM payload so power-on is not a ~39s blank on first paint. */
+export function prefetchViceCores() {
+  if (typeof fetch === "undefined") return;
+  const names = isIosPhone() ? ["vice_x64sc"] : ["vice_x64sc", "vice_x64"];
+  for (const n of names) {
+    for (const ext of ["-wasm.js", "-wasm.data"] as const) {
+      void fetch(`${DATA}cores/${n}${ext}`, { mode: "cors", credentials: "omit" }).catch(() => undefined);
+    }
+  }
 }
 
 export function ensureRuntime(): Promise<void> {
@@ -953,6 +1059,7 @@ export function setWarp(emu: EjsInstance | null, on: boolean) {
 export function destroyEmu(emu: EjsInstance | null, el: HTMLElement | null) {
   resetFitCache();
   lastJiffy = false;
+  stopIosPresent();
   keyboardArmed = false;
   try {
     emu?.gameManager?.toggleMainLoop(0);
@@ -999,7 +1106,7 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
   fitting = true;
   const canvas =
     (emu?.Module?.canvas as HTMLCanvasElement | undefined) ||
-    (el.querySelector("canvas:not(.g64-ios-mirror)") as HTMLCanvasElement | null);
+    (el.querySelector("canvas:not(.g64-ios-mirror):not(.g64-ios-present)") as HTMLCanvasElement | null);
   try {
     if (canvas) {
       const parent = canvas.parentElement ?? el;
@@ -1016,11 +1123,12 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
         lastFitBox.bh >= 272;
       // Touch mobile: DPR 1 keeps fill-rate sane on Onn tablets and iPhone alike.
       const dpr = touchMobile ? 1 : Math.min(window.devicePixelRatio || 1, 2);
+      const glLive = Boolean((canvas as HTMLCanvasElement & { __g64gl?: unknown }).__g64gl);
       let bw = Math.max(384, Math.round(cw * dpr));
       let bh = Math.max(272, Math.round(ch * dpr));
       if (tablet || iosPhone) {
-        // VICE framebuffer is 384×272. Stretching the backing store past that
-        // leaves a black gap. CriOS CSS fills the CRT; do not grow the buffer.
+        // VICE framebuffer is 384×272. Growing the backing store is solid
+        // black. CSS width/height 100% (not transform) fills the CRT.
         bw = 384;
         bh = 272;
       } else if (touchMobile) {
@@ -1033,7 +1141,6 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
         }
       }
       const backingOk = canvas.width === bw && canvas.height === bh && canvas.width >= 64;
-      const glLive = Boolean((canvas as HTMLCanvasElement & { __g64gl?: unknown }).__g64gl);
       // Reassigning canvas.width wipes the WebGL context on CriOS. Never
       // resize after VICE has a context — CSS scales 384×272.
       const canResizeBacking = !iosPhone || !glLive || canvas.width < 64 || canvas.height < 64;
@@ -1052,8 +1159,8 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       canvas.style.visibility = "visible";
       if (tablet || iosPhone) {
         // VICE paints 384×272. WebGL on some Android GPUs ignores object-fit.
-        // Tablet: scale the canvas in CSS pixels. iOS: scale #grok64-player
-        // (CriOS ignores transform on the canvas itself — #43 stamp).
+        // Tablet: scale the canvas in CSS pixels. iOS: CSS 100% fill —
+        // CriOS ignores transform on the canvas (#43) and the player wrapper (#44).
         if (isIos()) applyIosCrtStyle(canvas, el, parent);
         else applyTabletCrtStyle(canvas, el, parent);
       } else {
@@ -1170,11 +1277,33 @@ function watchIosCrtBox(box: HTMLElement, apply: () => void) {
   }
 }
 
+/** VICE only blits when the WebGL canvas CSS box is the native 384×272. */
+function lockNativeFbCss(el: HTMLElement) {
+  el.style.setProperty("position", "absolute", "important");
+  el.style.setProperty("inset", "auto", "important");
+  el.style.setProperty("left", "0", "important");
+  el.style.setProperty("top", "0", "important");
+  el.style.setProperty("right", "auto", "important");
+  el.style.setProperty("bottom", "auto", "important");
+  el.style.setProperty("margin", "0", "important");
+  el.style.setProperty("width", "384px", "important");
+  el.style.setProperty("height", "272px", "important");
+  el.style.setProperty("min-width", "0", "important");
+  el.style.setProperty("min-height", "0", "important");
+  el.style.setProperty("max-width", "none", "important");
+  el.style.setProperty("max-height", "none", "important");
+  el.style.setProperty("transform", "none", "important");
+  el.style.setProperty("-webkit-transform", "none", "important");
+  el.style.setProperty("transform-origin", "0 0", "important");
+}
+
 /**
- * CriOS CRT fill. Scale #grok64-player in CSS pixels (no devicePixelRatio).
- * Transforming the canvas is ignored on real iPhone WebGL; transforming the
- * wrapper is a compositor scale of the whole layer. Canvas CSS stays 384×272
- * so RetroArch clientWidth matches the locked framebuffer.
+ * CriOS CRT fill. VICE blits only when the WebGL canvas CSS is 384×272.
+ * CSS 100% on that canvas is solid black. Wrapper scale() is ignored on the
+ * GL layer (#43 / #44) — Tom's photo is a top-right stamp with DOM fill 1.0.
+ *
+ * Keep the GL canvas at 384×272 (no transform). A 2D present canvas copies
+ * the live framebuffer into .g64-screen (see ios-present.ts).
  */
 export function applyIosCrtStyle(
   canvas: HTMLCanvasElement,
@@ -1188,47 +1317,15 @@ export function applyIosCrtStyle(
   const box = (player.closest(".g64-screen") as HTMLElement | null) ?? parent;
 
   const apply = () => {
-    const { sw, sh } = crtBoxSize(box, player);
-    const sx = sw >= 32 ? sw / NATIVE_FB_W : 1;
-    const sy = sh >= 32 ? sh / NATIVE_FB_H : 1;
-    const xf = `translate3d(0,0,0) scale(${sx}, ${sy})`;
-    player.style.setProperty("position", "absolute", "important");
-    player.style.setProperty("inset", "auto", "important");
-    player.style.setProperty("left", "0", "important");
-    player.style.setProperty("top", "0", "important");
-    player.style.setProperty("right", "auto", "important");
-    player.style.setProperty("bottom", "auto", "important");
-    player.style.setProperty("width", `${NATIVE_FB_W}px`, "important");
-    player.style.setProperty("height", `${NATIVE_FB_H}px`, "important");
-    player.style.setProperty("max-width", "none", "important");
-    player.style.setProperty("max-height", "none", "important");
-    player.style.setProperty("transform-origin", "0 0", "important");
-    player.style.setProperty("transform", xf, "important");
-    player.style.setProperty("-webkit-transform", xf, "important");
-
+    lockIosClientBox(canvas, 384, 272);
+    lockNativeFbCss(player);
     const canvasParent = canvas.parentElement;
-    if (canvasParent && canvasParent !== player) {
-      canvasParent.style.setProperty("position", "absolute", "important");
-      canvasParent.style.setProperty("inset", "0", "important");
-      canvasParent.style.setProperty("width", "100%", "important");
-      canvasParent.style.setProperty("height", "100%", "important");
-      canvasParent.style.setProperty("transform", "none", "important");
-    }
-
-    canvas.style.setProperty("position", "absolute", "important");
-    canvas.style.setProperty("inset", "auto", "important");
-    canvas.style.setProperty("left", "0", "important");
-    canvas.style.setProperty("top", "0", "important");
-    canvas.style.setProperty("right", "auto", "important");
-    canvas.style.setProperty("bottom", "auto", "important");
-    canvas.style.setProperty("width", `${NATIVE_FB_W}px`, "important");
-    canvas.style.setProperty("height", `${NATIVE_FB_H}px`, "important");
-    canvas.style.setProperty("max-width", "none", "important");
-    canvas.style.setProperty("max-height", "none", "important");
-    canvas.style.setProperty("transform-origin", "0 0", "important");
-    canvas.style.setProperty("transform", "none", "important");
+    if (canvasParent && canvasParent !== player) lockNativeFbCss(canvasParent);
+    lockNativeFbCss(canvas);
     canvas.style.setProperty("object-fit", "fill", "important");
     canvas.style.setProperty("object-position", "0 0", "important");
+    startIosPresent(canvas, box);
+    void box.getBoundingClientRect();
   };
 
   apply();

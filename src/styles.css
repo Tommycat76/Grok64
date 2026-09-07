@@ -1910,39 +1910,58 @@ html[data-g64os="ios"] .g64-log {
   margin-top: 0;
 }
 /*
- * iPhone CRT (#44): .g64-screen fills the bezel end-to-end. Boot overlay
- * (.g64-boot) is inset:0 on that box — same fill rules as the player.
+ * iPhone CRT: .g64-screen absolutely fills the bezel (no flex % / cqh).
+ * Boot overlay is a bezel child with the same inset so a collapsed screen
+ * cannot hide “Loading…” for ~39s.
  *
- * #43 sized .g64-screen with width:auto + 100cqh while the screen itself
- * was a size container. On real iPhone that collapsed to min-width (~200px),
- * so Cold start + READY both stamped inside a large empty bezel.
+ * #43: width:auto + 100cqh collapsed the screen to min-width (stamp).
+ * #43: scale(dpr) on the canvas — CriOS ignores canvas CSS transform.
+ * #44: 384×272 CSS + scale() on #grok64-player — DOM rect fill 1.0, but
+ *      CriOS still paints the unscaled GL layer. Tom's #44 photo: dark CRT
+ *      flush top-right of the light-purple bezel (L-shaped purple left+bottom).
+ *      A GL-origin stamp in a tall buffer would be bottom-left — fail both.
  *
- * Do not size .g64-screen with its own cqh. Do not scale(dpr) on the canvas —
- * CriOS ignores canvas CSS transform; #43's 384px box × DPR was the stamp.
- * Scale #grok64-player (wrapper) in CSS pixels so the compositor scales the
- * WebGL layer. Canvas CSS stays 384×272 so RetroArch's viewport matches the
- * locked framebuffer.
+ * WebGL canvas stays 384×272 (VICE blit). A .g64-ios-present canvas
+ * drawImages that live buffer into the bezel. No wrapper scale.
  */
 html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-bezel {
-  display: flex;
-  align-items: stretch;
-  justify-content: stretch;
-  padding: 8px;
+  position: relative;
+  display: block;
+  padding: 0;
 }
 html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-screen {
-  flex: 1 1 auto !important;
-  width: 100% !important;
-  height: 100% !important;
-  max-width: 100% !important;
-  max-height: 100% !important;
+  position: absolute !important;
+  inset: 8px !important;
+  flex: none !important;
+  width: auto !important;
+  height: auto !important;
+  max-width: none !important;
+  max-height: none !important;
   min-width: 0 !important;
   min-height: 0 !important;
   aspect-ratio: auto;
 }
 html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-boot {
+  position: absolute;
+  inset: 8px;
+  width: auto;
+  height: auto;
+}
+html[data-g64os="ios"] .g64-screen > canvas.g64-ios-present {
+  position: absolute;
   inset: 0;
-  width: 100%;
-  height: 100%;
+  left: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: none !important;
+  max-height: none !important;
+  z-index: 2;
+  pointer-events: none;
+  display: block;
+  transform: none !important;
 }
 html[data-g64os="ios"] #grok64-player {
   position: absolute;
@@ -1951,23 +1970,29 @@ html[data-g64os="ios"] #grok64-player {
   top: 0;
   right: auto;
   bottom: auto;
+  margin: 0 !important;
+  width: 384px !important;
+  height: 272px !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  transform: none !important;
+  -webkit-transform: none !important;
+  transform-origin: 0 0 !important;
+  z-index: 1;
+}
+html[data-g64os="ios"] #grok64-player .ejs_canvas_parent {
+  position: absolute;
+  inset: auto;
+  left: 0;
+  top: 0;
   width: 384px !important;
   height: 272px !important;
   max-width: none !important;
   max-height: none !important;
-  transform-origin: 0 0 !important;
-  transform: translate3d(0, 0, 0);
-  -webkit-transform: translate3d(0, 0, 0);
-}
-html[data-g64os="ios"] #grok64-player .ejs_canvas_parent {
-  position: absolute;
-  inset: 0;
-  width: 100% !important;
-  height: 100% !important;
-  max-width: none !important;
-  max-height: none !important;
-  transform: none;
-  -webkit-transform: none;
+  transform: none !important;
+  -webkit-transform: none !important;
 }
 html[data-g64os="ios"] #grok64-player canvas,
 html[data-g64os="ios"] #grok64-player canvas.g64-ios-fb {
@@ -1980,15 +2005,17 @@ html[data-g64os="ios"] #grok64-player canvas.g64-ios-fb {
   top: 0 !important;
   right: auto !important;
   bottom: auto !important;
+  margin: 0 !important;
   width: 384px !important;
   height: 272px !important;
-  max-width: none !important;
-  max-height: none !important;
   min-width: 0;
   min-height: 0;
+  max-width: none !important;
+  max-height: none !important;
   object-fit: fill !important;
   object-position: 0 0 !important;
   transform: none !important;
+  -webkit-transform: none !important;
   transform-origin: 0 0 !important;
   background: #000 !important;
 }

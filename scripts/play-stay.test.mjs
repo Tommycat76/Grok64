@@ -65,19 +65,27 @@ test("iOS CRT path does not recycle or Autostart", () => {
 test("iOS WebGL backing is locked to 384x272 before the first context", () => {
   assert.match(host, /this\.width = 384/);
   assert.match(host, /this\.height = 272/);
+  assert.match(host, /lockIosClientBox\(this, 384, 272\)/);
   assert.match(host, /lockIosBacking/);
+  assert.match(host, /remapViceViewport/);
+  const patched = host.slice(host.indexOf("function preserveWebglBuffer"), host.indexOf("type GuardedGm"));
+  assert.ok(
+    patched.indexOf("lockIosClientBox(this, 384, 272)") < patched.indexOf("orig.call(this, type, merged)"),
+    "clientWidth must be locked before getContext",
+  );
 });
 
-test("iPhone CRT scales the player wrapper in CSS pixels, not canvas DPR", () => {
+test("iPhone CRT fills with a live-GL present canvas, not wrapper scale", () => {
   assert.match(host, /applyIosCrtStyle/);
   assert.match(host, /g64-ios-fb/);
   assert.match(host, /if \(isIos\(\)\) applyIosCrtStyle/);
-  assert.match(host, /translate3d\(0,0,0\) scale\(/);
+  assert.match(host, /lockNativeFbCss/);
+  assert.match(host, /startIosPresent/);
   assert.match(host, /#grok64-player/);
-  assert.match(host, /\$\{NATIVE_FB_W\}px/);
+  assert.match(host, /remapViceViewport/);
+  assert.doesNotMatch(host, /translate3d\(0,0,0\) scale\(/);
   assert.doesNotMatch(host, /klass === "g64-ios-fb" \? Math.max\(1, window.devicePixelRatio/);
   assert.doesNotMatch(host, /sw \* dpr/);
-  assert.doesNotMatch(paint, /setProperty\("width", "100%"/);
 });
 
 test("iPhone floppy Play still recycles — never hot-swap (locked)", () => {
