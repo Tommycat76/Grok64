@@ -1,5 +1,5 @@
 /**
- * CriOS CRT presentation — live 384×272 WebGL + restored ee0b445 layout.
+ * CriOS CRT presentation — live WebGL + #14/#18/#39 host wiring.
  *
  * Read `docs/IOS_CRT_KNOWN_FAILURES.md` first. Desktop Chromium / Plex
  * Playwright cannot PASS this. Plex paint-count is not Tom geometry.
@@ -7,12 +7,15 @@
  * Architecture
  * ------------
  * 1. Show the live VICE WebGL canvas. `.g64-screen` is the 384:272 CRT
- *    glass (pre-#42 / `ee0b445`). Canvas CSS is 100% of **that** glass —
- *    not a tall bezel stretch (#7/#8), not a 384 stamp in a tall screen
- *    (#9), not CSS zoom / a centering slot (#10/#11).
- * 2. Backing store stays 384×272. No clientWidth lie.
- * 3. Never call getContext on that canvas.
+ *    glass (same glass as `ee0b445` / #14–#18). Canvas CSS is 100% of
+ *    **that** glass — not a tall bezel stretch (#7/#8), not a 384 stamp
+ *    in a tall screen (#9), not CSS zoom / a centering slot (#10/#11).
+ * 2. Host wiring is the #14/#18/#39 path: preserveDrawingBuffer on iOS,
+ *    VICE owns backing size (no #42 lockIosBacking / pre-size 384).
+ *    #53 restored this glass on top of the #42 lock → Tom solid black.
+ * 3. Never call getContext on that canvas (#39).
  * 4. Never PNG / toDataURL poll / readPixels present loop / drawImage(GL).
+ *    #18's mirror painted READY but is known-failure #1 after play-recycle.
  * 5. Strip leftover 2D present/mirror nodes and leftover zoom/slot wraps
  *    from cached builds.
  * 6. After power-on, play-recycle (unit 8), Reset, or Jiffy apply: unpause

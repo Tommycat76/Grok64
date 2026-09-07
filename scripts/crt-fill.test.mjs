@@ -67,7 +67,7 @@ test("Plex CRT fill gate script exists and documents iPhone viewport fill", () =
   assert.match(gate, /Chromium-on-Plex still is not CriOS PASS|#47/);
   assert.match(gate, /function hasCssScale/);
   assert.match(gate, /IOS_CRT_KNOWN_FAILURES/);
-  assert.match(gate, /VICE backing 384x272/);
+  assert.match(gate, /VICE backing is native-sized/);
   assert.doesNotMatch(gate, /note\(\/scale\\\(\/i\.test\(String\(ready\?\.playerXf/);
   assert.doesNotMatch(gate, /GATE PASS/);
   assert.doesNotMatch(gate, /live GL CSS px vs bezel/);
@@ -182,28 +182,27 @@ test("hosting docs tell the coordinator how to run the fill gate", () => {
   assert.match(docs, /Chromium-on-Plex/);
 });
 
-test("remapViceViewport expands a 384×272 stamp in a larger drawing buffer", () => {
-  assert.match(host, /export function remapViceViewport/);
-  assert.match(host, /drawingW \* drawingH\) < 0\.85/);
-  assert.match(host, /w: drawingW, h: drawingH/);
-});
-
-test("iOS CRT is restored ee0b445 glass, never wrapper transform or 2D present", () => {
+test("iOS CRT host is #14/#18/#39 wiring, never wrapper transform or 2D present", () => {
   const iosFn = host.slice(host.indexOf("function unwrapIosZoomChrome"), host.indexOf("export async function recycleCore"));
   assert.match(iosFn, /stripIosPresent/);
   assert.match(iosFn, /unwrapIosZoomChrome/);
   assert.match(iosFn, /style\.width = "100%"/);
   assert.doesNotMatch(iosFn, /fillBezelCss/);
-  assert.doesNotMatch(iosFn, /(?<!un)lockIosClientBox\(canvas/);
+  assert.doesNotMatch(iosFn, /lockIosClientBox/);
   assert.doesNotMatch(iosFn, /startIosPresent/);
   assert.doesNotMatch(iosFn, /ensureIosZoomHost/);
   assert.doesNotMatch(iosFn, /layoutIosCrtHost/);
   assert.doesNotMatch(iosFn, /letterboxNativeCss/);
   assert.doesNotMatch(iosFn, /translate3d\(0,0,0\) scale\(/);
-  assert.match(host, /remapViceViewport/);
+  const hostCode = host.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  assert.doesNotMatch(hostCode, /remapViceViewport/);
+  assert.doesNotMatch(hostCode, /lockIosBacking/);
   assert.match(host, /prefetchViceCores/);
-  assert.match(host, /this\.width = 384/);
-  assert.doesNotMatch(host, /lockIosClientBox\(this, 384, 272\)/);
+  assert.match(host, /preserveDrawingBuffer/);
+  const patched = host.slice(host.indexOf("function preserveWebglBuffer"), host.indexOf("type GuardedGm"));
+  const patchedCode = patched.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/.*$/gm, "");
+  assert.doesNotMatch(patchedCode, /this\.width = 384/);
+  assert.doesNotMatch(hostCode, /lockIosClientBox/);
   assert.equal(existsSync(join(root, "src/lib/emu/ios-zoom.ts")), false);
 });
 

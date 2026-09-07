@@ -129,134 +129,20 @@ let webglPatched = false;
 let userJoyPort: JoyPort = 2;
 
 /**
- * If WebKit sizes the drawing buffer to CSS×DPR while VICE keeps a 384×272
- * viewport, the picture stamps at the GL origin (bottom-left). Expand that
- * native-FB viewport to the default framebuffer.
+ * CriOS WebGL — restored #14 / #18 / #39 host wiring.
+ *
+ * Read `docs/IOS_CRT_KNOWN_FAILURES.md` first.
+ *
+ * PR #14: iOS WebKit will not composite the C64 framebuffer without
+ * preserveDrawingBuffer (VICE screenshot succeeds while the CRT stays
+ * black). #42 later pre-sized the canvas to 384×272 and froze
+ * width/height (`lockIosBacking`). #53 put CSS 100% of the ee0b445
+ * glass back on top of that lock → Tom CriOS solid black (`3dc22be`).
+ *
+ * Restore the simple patch: merge preserveDrawingBuffer on iOS, stash
+ * VICE's context so ios-paint never getContext()s, and leave backing
+ * size to VICE. No lockIosBacking, no clientWidth lie, no viewport remap.
  */
-export function remapViceViewport(
-  drawingW: number,
-  drawingH: number,
-  x: number,
-  y: number,
-  w: number,
-  h: number,
-  fboBound: boolean,
-): { x: number; y: number; w: number; h: number } {
-  if (fboBound || drawingW < 8 || drawingH < 8 || w < 8 || h < 8) {
-    return { x, y, w, h };
-  }
-  const stamp = (w + 8 < drawingW || h + 8 < drawingH) && w <= 400 && h <= 300 && (w * h) / (drawingW * drawingH) < 0.85;
-  if (stamp) return { x: 0, y: 0, w: drawingW, h: drawingH };
-  return { x, y, w, h };
-}
-
-function patchGlViewportFill(gl: WebGLRenderingContext | WebGL2RenderingContext) {
-  const tagged = gl as WebGLRenderingContext & { __g64vp?: boolean };
-  if (tagged.__g64vp) return;
-  tagged.__g64vp = true;
-  const origVp = gl.viewport.bind(gl);
-  const origSc = gl.scissor.bind(gl);
-  const remap = (x: number, y: number, w: number, h: number) => {
-    let fbo = false;
-    try {
-      fbo = Boolean(gl.getParameter(gl.FRAMEBUFFER_BINDING));
-    } catch {
-      fbo = false;
-    }
-    return remapViceViewport(gl.drawingBufferWidth, gl.drawingBufferHeight, x, y, w, h, fbo);
-  };
-  gl.viewport = (x: number, y: number, w: number, h: number) => {
-    const r = remap(x, y, w, h);
-    origVp(r.x, r.y, r.w, r.h);
-  };
-  gl.scissor = (x: number, y: number, w: number, h: number) => {
-    const r = remap(x, y, w, h);
-    origSc(r.x, r.y, r.w, r.h);
-  };
-}
-
-/**
- * #7 leftover: do not call. A 384 clientWidth lie plus CSS 100% painted
- * empty black on Plex. Unlock still strips a cached lie from older builds.
- */
-function lockIosClientBox(canvas: HTMLCanvasElement, w: number, h: number) {
-  const tagged = canvas as HTMLCanvasElement & { __g64client?: boolean };
-  if (tagged.__g64client) return;
-  tagged.__g64client = true;
-  try {
-    for (const [prop, val] of [
-      ["clientWidth", w],
-      ["clientHeight", h],
-      ["offsetWidth", w],
-      ["offsetHeight", h],
-    ] as const) {
-      Object.defineProperty(canvas, prop, {
-        configurable: true,
-        enumerable: true,
-        get: () => val,
-      });
-    }
-  } catch {
-    /* engine refused redefine */
-  }
-}
-
-/** Strip a leftover #7 client-box lie. */
-function unlockIosClientBox(canvas: HTMLCanvasElement) {
-  const tagged = canvas as HTMLCanvasElement & { __g64client?: boolean };
-  if (!tagged.__g64client) return;
-  try {
-    delete (canvas as unknown as { clientWidth?: number }).clientWidth;
-    delete (canvas as unknown as { clientHeight?: number }).clientHeight;
-    delete (canvas as unknown as { offsetWidth?: number }).offsetWidth;
-    delete (canvas as unknown as { offsetHeight?: number }).offsetHeight;
-  } catch {
-    /* keep lie if delete failed */
-    return;
-  }
-  tagged.__g64client = false;
-}
-
-function lockIosBacking(canvas: HTMLCanvasElement, w: number, h: number) {
-  const tagged = canvas as HTMLCanvasElement & { __g64lock?: boolean };
-  if (tagged.__g64lock) return;
-  tagged.__g64lock = true;
-  try {
-    Object.defineProperty(canvas, "width", {
-      configurable: true,
-      enumerable: true,
-      get: () => w,
-      set: () => {
-        /* RetroArch resize would wipe the CriOS WebGL context. */
-      },
-    });
-    Object.defineProperty(canvas, "height", {
-      configurable: true,
-      enumerable: true,
-      get: () => h,
-      set: () => {
-        /* ignore */
-      },
-    });
-  } catch {
-    /* engine refused redefine */
-  }
-}
-
-function ensureViceViewportFill(canvas: HTMLCanvasElement) {
-  const gl = (canvas as HTMLCanvasElement & { __g64gl?: WebGLRenderingContext | WebGL2RenderingContext })
-    .__g64gl;
-  if (!gl) return;
-  try {
-    if (gl.isContextLost()) return;
-  } catch {
-    return;
-  }
-  if (gl.drawingBufferWidth > 400 || gl.drawingBufferHeight > 300) {
-    patchGlViewportFill(gl);
-  }
-}
-
 function preserveWebglBuffer() {
   if (webglPatched || typeof HTMLCanvasElement === "undefined") return;
   webglPatched = true;
@@ -269,33 +155,16 @@ function preserveWebglBuffer() {
     attrs?: Record<string, unknown>,
   ) {
     if (type === "webgl" || type === "webgl2" || type === "experimental-webgl") {
-      // Size the VICE framebuffer before the first context. Assigning width
-      // after GL exists wipes CriOS. CSS fills the CRT around 384×272.
-      if (ios) {
-        // VICE only paints when the drawing buffer is the native 384×272.
-        // Growing it to the CSS box (Tom #46 experiment) was solid black.
-        // Do not lock CSS to 384px here — that is the #50 stamp / #52 strip
-        // (layout). Restored ee0b445 presentation: CSS 100% of the
-        // aspect-ratio .g64-screen glass. Backing stays 384×272.
-        if (this.width !== 384 || this.height !== 272) {
-          this.width = 384;
-          this.height = 272;
-        }
-      }
-      // iOS WebKit needs preserveDrawingBuffer for CRT compositing; Android tablets do not
-      // and pay a large fill-rate cost when it is forced on every WebGL context.
+      // #14: iOS compositor needs preserveDrawingBuffer. Android tablets
+      // do not and pay a large fill-rate cost when it is forced on.
       const merged: Record<string, unknown> = { ...attrs, antialias: false, alpha: false };
       if (ios) merged.preserveDrawingBuffer = true;
       const ctx = orig.call(this, type, merged);
-      // Remember VICE's context. The iOS CRT path must never getContext()
-      // itself — a second WebGL context on WebKit returns null or steals the
-      // canvas (solid black CRT).
+      // Remember VICE's context. ios-paint must never getContext() itself —
+      // a second getContext with different attrs returns null on WebKit, and a
+      // first getContext before RetroArch steals the canvas (black CRT).
       if (ctx) {
         (this as HTMLCanvasElement & { __g64gl?: unknown }).__g64gl = ctx;
-        if (ios) {
-          lockIosBacking(this, 384, 272);
-          unlockIosClientBox(this);
-        }
       }
       return ctx;
     }
@@ -1142,12 +1011,11 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
         lastFitBox.bh >= 272;
       // Touch mobile: DPR 1 keeps fill-rate sane on Onn tablets and iPhone alike.
       const dpr = touchMobile ? 1 : Math.min(window.devicePixelRatio || 1, 2);
-      const glLive = Boolean((canvas as HTMLCanvasElement & { __g64gl?: unknown }).__g64gl);
       let bw = Math.max(384, Math.round(cw * dpr));
       let bh = Math.max(272, Math.round(ch * dpr));
-      if (tablet || iosPhone) {
-        // VICE framebuffer is 384×272. Growing the backing store is solid
-        // black. Presentation CSS is restored ee0b445 (screen is the glass).
+      if (tablet) {
+        // Android tablet #40: VICE framebuffer is 384×272. Phone / CriOS
+        // must not take this lock — #42/#53 pre-size + CSS 100% was black.
         bw = 384;
         bh = 272;
       } else if (touchMobile) {
@@ -1160,9 +1028,9 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
         }
       }
       const backingOk = canvas.width === bw && canvas.height === bh && canvas.width >= 64;
-      // Reassigning canvas.width wipes the WebGL context on CriOS. Never
-      // resize after VICE has a context — backing stays 384×272.
-      const canResizeBacking = !iosPhone || !glLive || canvas.width < 64 || canvas.height < 64;
+      // #14/#18/#39: reassigning canvas.width wipes CriOS. Never resize a
+      // live iPhone backing store — VICE owns the size; CSS scales it.
+      const canResizeBacking = !iosPhone || canvas.width < 64 || canvas.height < 64;
       if (
         canResizeBacking &&
         !backingOk &&
@@ -1181,7 +1049,7 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
         // must not call this (#43/#44). Restored ee0b445: CSS 100% of the
         // aspect-ratio .g64-screen glass.
         applyTabletCrtStyle(canvas, el, parent);
-      } else if (isIosPhone()) {
+      } else if (iosPhone) {
         applyIosCrtStyle(canvas, el, parent);
       } else {
         clearNativeFbCrtStyle(canvas);
@@ -1288,12 +1156,12 @@ function unwrapIosZoomChrome(player: HTMLElement) {
 }
 
 /**
- * CriOS CRT presentation — restored ee0b445 layout (pre-#42 rewrite).
+ * CriOS CRT presentation — #14/#18 fit (CSS 100% of the 384:272 glass).
  *
- * Read `docs/IOS_CRT_KNOWN_FAILURES.md` first. This is not 1–11:
- * `.g64-screen` is the 384:272 glass; live WebGL CSS is 100% of that
- * glass (not the tall bezel). Backing stays 384×272. No zoom, no slot,
- * no wrapper transform on GL, no clientWidth lie, no 2D present, no PNG.
+ * Read `docs/IOS_CRT_KNOWN_FAILURES.md` first. This is the original
+ * simple path: show the live canvas, fill the aspect-ratio screen.
+ * Not 1–12: no zoom, no slot, no wrapper transform on GL, no
+ * clientWidth lie, no 2D present, no PNG, no #42 backing lock.
  */
 export function applyIosCrtStyle(
   canvas: HTMLCanvasElement,
@@ -1307,7 +1175,6 @@ export function applyIosCrtStyle(
     (el.id === "grok64-player" ? el : (el.closest("#grok64-player") as HTMLElement | null)) ?? el;
   const box = (player.closest(".g64-screen") as HTMLElement | null) ?? parent;
   unwrapIosZoomChrome(player);
-  unlockIosClientBox(canvas);
   canvas.style.removeProperty("zoom");
   canvas.style.width = "100%";
   canvas.style.height = "100%";

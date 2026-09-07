@@ -1910,13 +1910,15 @@ html[data-g64os="ios"] .g64-log {
   margin-top: 0;
 }
 /*
- * iPhone CRT — restored ee0b445 presentation (pre-#42 rewrite).
+ * iPhone CRT — #14/#18 glass (same 384:272 aspect-ratio as ee0b445).
  * Read docs/IOS_CRT_KNOWN_FAILURES.md first.
  *
  * .g64-screen is the 384:272 CRT glass. Canvas / #grok64-player fill that
- * glass (generic inset:0 100% rules). Do not make the screen a tall
- * absolute-inset bezel (#50 stamp / #52 bottom strip). Do not CSS-zoom
- * or slot-center a 384×272 box (#51/#52). Compact boot chip stays.
+ * glass (generic inset:0 100% rules). Host JS must not lock backing to
+ * 384×272 before getContext (#42/#53 = Tom solid black). Do not make the
+ * screen a tall absolute-inset bezel (#50 stamp / #52 bottom strip). Do
+ * not CSS-zoom or slot-center a 384×272 box (#51/#52). Compact boot chip
+ * stays.
  *
  * Leftover .g64-ios-slot / .g64-ios-zoom from cached markup are
  * display:contents so they cannot recreate the #52 bottom strip.
