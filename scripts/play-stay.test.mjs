@@ -62,6 +62,12 @@ test("iOS CRT path does not recycle or Autostart", () => {
   assert.doesNotMatch(paint, /ios-paint-poll/);
 });
 
+test("iOS WebGL backing is locked to 384x272 before the first context", () => {
+  assert.match(host, /this\.width = 384/);
+  assert.match(host, /this\.height = 272/);
+  assert.match(host, /lockIosBacking/);
+});
+
 test("iPhone floppy Play still recycles — never hot-swap (locked)", () => {
   const session = readFileSync(join(root, "src/lib/emu/play-session.ts"), "utf8");
   assert.match(session, /if \(extra\?\.iosPhone\) return true/);
