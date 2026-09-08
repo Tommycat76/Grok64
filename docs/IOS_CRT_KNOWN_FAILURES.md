@@ -1,7 +1,29 @@
 # iOS CRT — known failures (read this first)
 
+## KNOWN GOOD (locked — do not thrash)
+
+**Read `docs/IOS_CRT_LOCKED_GOOD.md` first** before any CRT experiment.
+
+Tom **SUCCESS** on CriOS at **`3f80fc8`** (PR **#54**, live
+`routes-DlWAL8fJ.js`): READY paints, Jiffy good, Boulder Dash briefly
+played.
+
+Sacred (must not change without Tom): `preserveDrawingBuffer` on iOS
+WebGL; VICE owns backing size (no `lockIosBacking` / pre-size
+`this.width = 384` before `getContext` / `remapViceViewport`); #14/#18/#39
+host path in `src/lib/emu/host.ts` (`preserveWebglBuffer`,
+`applyIosCrtStyle`); `ios-paint.ts` / `ios-present.ts` live-WebGL
+presentation (no PNG mirror, no `drawImage`-GL, no `readPixels` present);
+`.g64-screen` 384:272 glass CSS.
+
+A follow-up may add a docs lock comment only. If those paint/host files
+change beyond that, stop and revert.
+
+---
+
 **Mandatory first step for every CRT / CriOS / iPhone-bezel agent and every
-follow-up prompt:** read this file before proposing or shipping a paint path.
+follow-up prompt:** read `docs/IOS_CRT_LOCKED_GOOD.md`, then this file,
+before proposing or shipping a paint path.
 
 PR bodies and CRT prompts must say: **Read `docs/IOS_CRT_KNOWN_FAILURES.md` first.**
 

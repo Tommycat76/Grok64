@@ -178,6 +178,39 @@ export const FIRE_KEY_CODE = "ControlRight";
 export const C64_SPACE_KEYCODE = 32;
 export const KEY_BROADCAST_WINDOW = false;
 
+/** While Autostart is still armed, Space is swallowed so VICE cannot READY-yank. */
+let c64SpaceMuted = false;
+let beforeC64Space: (() => void) | null = null;
+
+export function muteC64Space(on: boolean) {
+  c64SpaceMuted = on;
+}
+
+export function isC64SpaceMuted(): boolean {
+  return c64SpaceMuted;
+}
+
+/** Host hook — disarm Autostart before a C64 Space is delivered. */
+export function onBeforeC64Space(fn: (() => void) | null) {
+  beforeC64Space = fn;
+}
+
+function isC64Space(code: string, key: string): boolean {
+  return code === "Space" || key === " " || keyCodeOf(code, key) === C64_SPACE_KEYCODE;
+}
+
+/** Space on a focused <button> is a click. Blur host chrome first. */
+export function blurHostButtons() {
+  const ae = typeof document === "undefined" ? null : document.activeElement;
+  if (ae instanceof HTMLElement && ae.closest("button, [role='button']")) {
+    try {
+      ae.blur();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
 export function isJoyFireKey(code: string): boolean {
   return code === FIRE_KEY_CODE;
 }
@@ -188,6 +221,15 @@ export function dispatchC64Key(
   down: boolean,
   mods: { shift?: boolean } = {},
 ) {
+  if (isC64Space(code, key)) {
+    if (c64SpaceMuted) return;
+    blurHostButtons();
+    try {
+      beforeC64Space?.();
+    } catch {
+      /* host disarm is best-effort */
+    }
+  }
   const keyCode = keyCodeOf(code, key);
   const type = down ? "keydown" : "keyup";
   const make = () => {
@@ -210,10 +252,14 @@ export function dispatchC64Key(
     return ev;
   };
   const parent =
-    (document.querySelector("#grok64-player [tabindex]") as HTMLElement | null) ??
+    (document.querySelector("#grok64-player [tabindex]:not(button)") as HTMLElement | null) ??
     document.getElementById("grok64-player");
   try {
-    parent?.focus?.();
+    if (parent && parent.closest("button, [role='button']")) {
+      /* never focus host chrome — Space would click Reset */
+    } else {
+      parent?.focus?.();
+    }
   } catch {
     /* ignore */
   }

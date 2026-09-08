@@ -74,6 +74,7 @@ test("known-failures doc exists and lists Tom phone failures 1–13", () => {
 });
 
 test("project agents and CRT follow-ups point at the known-failures doc", () => {
+  assert.match(agents, /docs\/IOS_CRT_LOCKED_GOOD\.md/);
   assert.match(agents, /docs\/IOS_CRT_KNOWN_FAILURES\.md/);
   assert.match(agents, /1–13|1-13|1–12|1-12/);
   assert.match(agents, /ee0b445|restore/);
