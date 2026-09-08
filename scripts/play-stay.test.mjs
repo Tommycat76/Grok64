@@ -130,13 +130,36 @@ test("Space is muted until Autostart is disarmed; cracktro nudge is after unlock
   assert.match(app, /muteC64Space\(true\)/);
   assert.match(app, /disarmAutostart\(emuRef\.current\)/);
   assert.match(app, /muteC64Space\(false\)/);
-  assert.match(app, /scheduleCracktroNudge\(useEmu\.getState\(\)\.currentTitle\)/);
+  assert.match(app, /scheduleCracktroNudge\(unlockedTitle\)/);
   const lock = app.slice(app.indexOf("const beginPlayLock"), app.indexOf("const syncJiffy"));
   assert.match(lock, /disarmAutostart/);
   assert.match(lock, /scheduleCracktroNudge/);
   const idxDisarm = lock.indexOf("disarmAutostart");
   const idxNudge = lock.indexOf("scheduleCracktroNudge");
   assert.ok(idxDisarm >= 0 && idxNudge > idxDisarm, "cracktro Space must follow disarm");
+});
+
+test("top rail uses horizontal space (CSS only — not CRT glass)", () => {
+  const css = readFileSync(join(root, "src/styles.css"), "utf8");
+  const top = css.slice(css.indexOf(".g64-top {"), css.indexOf(".g64-top h1"));
+  const icons = css.slice(css.indexOf(".g64-top-icons {"), css.indexOf(".g64-chip-gate {"));
+  assert.match(top, /width: calc\(100% - 16px\)/);
+  assert.match(top, /justify-content: space-between/);
+  assert.match(icons, /margin-left: auto/);
+  assert.match(icons, /justify-content: flex-end/);
+});
+
+test("iOS mid-play persist and start-recycle stay locked to live play", () => {
+  const session = readFileSync(join(root, "src/lib/emu/play-session.ts"), "utf8");
+  assert.match(session, /shouldSkipPlayPersist/);
+  assert.match(session, /shouldRefuseStartRecycle/);
+  assert.match(session, /markLivePlay/);
+  assert.match(session, /g64-live-play/);
+  assert.match(app, /shouldSkipPlayPersist/);
+  assert.match(app, /shouldRefuseStartRecycle/);
+  assert.match(app, /markLivePlay/);
+  assert.match(app, /clearLivePlay/);
+  assert.match(app, /applyEmuVolume\(emuRef\.current/);
 });
 
 test("please-hold overlay is a DOM chip, not a CRT host change", () => {

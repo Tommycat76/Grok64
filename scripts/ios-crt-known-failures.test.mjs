@@ -71,6 +71,10 @@ test("known-failures doc exists and lists Tom phone failures 1–13", () => {
   assert.match(doc, /unit-8|unit 8/i);
   assert.match(doc, /#41/);
   assert.match(doc, /Tom.s phone is the only PASS/);
+  assert.match(doc, /### 14\.|#14/);
+  assert.match(doc, /circuit \/ transfer|transfer mini-game/i);
+  assert.match(doc, /66d4874/);
+  assert.match(doc, /captureState|persistNow/);
 });
 
 test("project agents and CRT follow-ups point at the known-failures doc", () => {

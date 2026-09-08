@@ -66,12 +66,17 @@ import { listPartitions, partitionsForMount, setIecDevice } from "@/lib/emu/sd2i
 import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor } from "@/lib/emu/vice-extras";
 import { HwHoldChip } from "@/components/emu/HwHoldChip";
 import {
+  clearLivePlay,
   iosMustKeepLiveCore,
   iosPlayKeepsLiveCrt,
+  livePlayTitle,
   mapHasDrive,
+  markLivePlay,
   planPlay,
   shouldDropToSplash,
   shouldRecoverBoot,
+  shouldRefuseStartRecycle,
+  shouldSkipPlayPersist,
   unitOfDrive,
   userAttachFromMap,
 } from "@/lib/emu/play-session";
@@ -166,6 +171,7 @@ export function Grok64App() {
   const playModeRef = useRef("basic");
   const persistGateRef = useRef(true);
   const inGameplayRef = useRef(false);
+  const cracktroOnceRef = useRef("");
   const bootTimersRef = useRef([]);
   const pendingKickRef = useRef(false);
   const bootPathRef = useRef(null);
@@ -633,6 +639,7 @@ export function Grok64App() {
       }
       if (isIosPhone() && emuRef.current && useEmu.getState().running && !useEmu.getState().muted) {
         if (audioLocked(emuRef.current)) unlockAudio(emuRef.current);
+        applyEmuVolume(emuRef.current, false, useEmu.getState().volume);
       }
       if (!pendingKickRef.current) setAwaitingStart(false);
     }, 350);
@@ -640,6 +647,17 @@ export function Grok64App() {
   }, [s.powered]);
   const persistNow = useCallback(async () => {
     if (!persistGateRef.current) return;
+    if (
+      shouldSkipPlayPersist({
+        iosPhone: isIosPhone(),
+        playMode: playModeRef.current,
+        inGameplay: inGameplayRef.current,
+        title: useEmu.getState().currentTitle,
+        livePlay: Boolean(livePlayTitle()),
+      })
+    ) {
+      return;
+    }
     const id = libIdRef.current;
     const emu = emuRef.current;
     if (!id || !emu) return;
@@ -684,7 +702,10 @@ export function Grok64App() {
   }, []);
   const scheduleCracktroNudge = useCallback((title) => {
     if (!wantsCracktroNudge(title || "")) return;
+    if (cracktroOnceRef.current === title) return;
+    cracktroOnceRef.current = title || "";
     // After Autostart is disarmed — Space is a C64 key only (#32 / #41).
+    // Once per title so a later play-unlock cannot Space the transfer UI.
     bootTimersRef.current.push(
       window.setTimeout(() => {
         glog("cracktro-nudge", { title, disarmed: true });
@@ -732,9 +753,14 @@ export function Grok64App() {
           plugJoysticks(emuRef.current, useEmu.getState().joyPort);
           inGameplayRef.current = true;
           clearMenuJoyInput();
-          glog("play-unlock", { title: useEmu.getState().currentTitle, disarmed: true });
+          const unlockedTitle = useEmu.getState().currentTitle;
+          markLivePlay(unlockedTitle);
+          glog("play-unlock", { title: unlockedTitle, disarmed: true });
           persistGateRef.current = true;
-          scheduleCracktroNudge(useEmu.getState().currentTitle);
+          const vol = useEmu.getState();
+          applyEmuVolume(emuRef.current, vol.muted, vol.volume);
+          gestureUnlockAudio(emuRef.current);
+          scheduleCracktroNudge(unlockedTitle);
           if (isIosPhone()) {
             const playerEl = document.getElementById("grok64-player");
             presentIosCrt(emuRef.current, playerEl, "play-unlock");
@@ -767,6 +793,8 @@ export function Grok64App() {
     const emu = emuRef.current;
     glog("user-reset-ready", { prev: playModeRef.current, title: useEmu.getState().currentTitle });
     playModeRef.current = "basic";
+    clearLivePlay();
+    cracktroOnceRef.current = "";
     cartLiveRef.current = false;
     setCartLive(false);
     persistGateRef.current = false;
@@ -884,6 +912,9 @@ export function Grok64App() {
       const playerEl = document.getElementById("grok64-player");
       fitEmu(playerEl, emu);
       s.setCurrentTitle(spec.title);
+      if (spec.autostartAfterReady) markLivePlay(spec.title);
+      applyEmuVolume(emu, useEmu.getState().muted, useEmu.getState().volume);
+      gestureUnlockAudio(emu);
       pendingKickRef.current = false;
       setAwaitingStart(false);
       spec.onStarted?.(emu);
@@ -992,7 +1023,16 @@ export function Grok64App() {
         sh: el.parentElement?.clientHeight ?? 0,
       });
       if (emuRef.current) {
-        if (isIosPhone() && useEmu.getState().powered && playModeRef.current !== "basic") {
+        if (
+          shouldRefuseStartRecycle({
+            iosPhone: isIosPhone(),
+            powered: useEmu.getState().powered,
+            playMode: playModeRef.current,
+            inGameplay: inGameplayRef.current,
+            title: opts.title ?? useEmu.getState().currentTitle,
+            livePlay: Boolean(livePlayTitle()),
+          })
+        ) {
           glog("start-recycle-refused", { mode: playModeRef.current, title: opts.title ?? gameName });
           persistGateRef.current = true;
           throw new Error("Stay on the live CRT — Play must not remount the splash.");
@@ -1358,6 +1398,7 @@ export function Grok64App() {
           // #13: never reset paint / wipe the live canvas on in-place Play.
           if (isIosPhone() && !keepLiveCrt && !mustKeep) resetIosPaintState();
           s.setCurrentTitle(title);
+          if (!work) markLivePlay(title);
           s.setRunning(true);
           if (work) {
             hardReset(emuRef.current);
@@ -1482,6 +1523,8 @@ export function Grok64App() {
       return;
     }
     bootKickRef.current = true;
+    clearLivePlay();
+    cracktroOnceRef.current = "";
     pokeAudioUnlock();
     gestureUnlockAudio(emuRef.current);
     if (isIosPhone()) {
@@ -1538,9 +1581,11 @@ export function Grok64App() {
         inGameplay: inGameplayRef.current,
         powered: st.powered,
         hasFs: Boolean(emuRef.current && coreHasFs(emuRef.current)),
+        title: st.currentTitle,
+        livePlay: Boolean(livePlayTitle()),
       })
     ) {
-      if (st.powered && playModeRef.current !== "basic") {
+      if (st.powered && (playModeRef.current !== "basic" || livePlayTitle() || inGameplayRef.current)) {
         glog("boot-recover-skipped", { mode: playModeRef.current, lock: playLockRef.current });
       }
       return;
@@ -1580,11 +1625,13 @@ export function Grok64App() {
           powered: useEmu.getState().powered,
           hasFs: Boolean(emuRef.current && coreHasFs(emuRef.current)),
           title: useEmu.getState().currentTitle,
+          livePlay: Boolean(livePlayTitle()),
         })
       ) {
         glog("boot-recover-fail-kept", { mode: playModeRef.current });
         return;
       }
+      clearLivePlay();
       useEmu.setState({ powered: false, booting: false, running: false });
       toast.error("The C64 didn’t start. Tap power to try again.");
     });
@@ -1631,7 +1678,7 @@ export function Grok64App() {
         useEmu.getState().setRunning(true);
         return;
       }
-      if (playModeRef.current !== "basic" || inGameplayRef.current) {
+      if (playModeRef.current !== "basic" || inGameplayRef.current || livePlayTitle()) {
         glog("boot-stuck-skipped", { mode: playModeRef.current });
         useEmu.getState().setBooting(false);
         return;
@@ -1651,6 +1698,7 @@ export function Grok64App() {
           powered: useEmu.getState().powered,
           hasFs: Boolean(emuRef.current && coreHasFs(emuRef.current)),
           title: useEmu.getState().currentTitle,
+          livePlay: Boolean(livePlayTitle()),
         })
       ) {
         useEmu.getState().setBooting(false);
@@ -1660,6 +1708,7 @@ export function Grok64App() {
         glog("boot-stuck-kept", { mode: playModeRef.current });
         return;
       }
+      clearLivePlay();
       useEmu.setState({ powered: false, booting: false, running: false, bootProgress: 0 });
       toast.error("The C64 didn’t start. Tap power to try again.");
     }, isIosPhone() ? 45000 : 20000);
@@ -1720,7 +1769,11 @@ export function Grok64App() {
       if (document.visibilityState === "visible") {
         if (audioLocked(emuRef.current)) unlockAudio(emuRef.current);
         pokeAudioUnlock();
-      } else {
+        gestureUnlockAudio(emuRef.current);
+        applyEmuVolume(emuRef.current, useEmu.getState().muted, useEmu.getState().volume);
+      } else if (!(isIosPhone() && (inGameplayRef.current || livePlayTitle() || playModeRef.current !== "basic"))) {
+        // CriOS: a brief hide (control center) + suspend leaves AL stuck —
+        // resume() after visible is not a user gesture.
         suspendAudio(emuRef.current);
       }
     };
@@ -1728,6 +1781,7 @@ export function Grok64App() {
     const unlock = () => {
       if (audioLocked(emuRef.current)) unlockAudio(emuRef.current);
       gestureUnlockAudio(emuRef.current);
+      applyEmuVolume(emuRef.current, useEmu.getState().muted, useEmu.getState().volume);
     };
     window.addEventListener("g64-unlock", unlock);
     const gesture = () => {
@@ -1774,6 +1828,8 @@ export function Grok64App() {
   }, [resolved.standard]);
   const onVector = useCallback((x: number, y: number, centerHold?: boolean) => {
     unlockAudio(emuRef.current);
+    gestureUnlockAudio(emuRef.current);
+    applyEmuVolume(emuRef.current, useEmu.getState().muted, useEmu.getState().volume);
     if (playLockRef.current || useEmu.getState().booting) return;
     if (typeof centerHold === "boolean") stickCenterHoldRef.current = centerHold;
     setPaused(emuRef.current, false);
@@ -1788,6 +1844,8 @@ export function Grok64App() {
   const onFire = useCallback((down, clearStick = false) => {
     const st = useEmu.getState();
     unlockAudio(emuRef.current);
+    gestureUnlockAudio(emuRef.current);
+    applyEmuVolume(emuRef.current, st.muted, st.volume);
     if (playLockRef.current || st.booting || !st.running) {
       if (down) glog("fire-blocked", { booting: st.booting, lock: playLockRef.current, running: st.running, title: st.currentTitle });
       return;

@@ -13,9 +13,15 @@ test("iOS audio unlock is a gesture resume, not a CRT path", () => {
   assert.match(unlock, /playSilentTick/);
   assert.match(unlock, /webkitAudioContext/);
   assert.match(unlock, /applyEmuVolume/);
+  assert.match(unlock, /playHtmlUnlock/);
+  assert.match(unlock, /SILENT_WAV|audio\/wav/);
+  assert.match(unlock, /interrupted/);
+  assert.match(unlock, /gameManager/);
   assert.doesNotMatch(unlock, /getContext/);
   assert.doesNotMatch(unlock, /preserveDrawingBuffer/);
   assert.doesNotMatch(unlock, /lockIosBacking/);
   assert.match(app, /gestureUnlockAudio/);
   assert.match(app, /pointerdown.*gesture|gesture.*pointerdown/);
+  assert.match(app, /play-unlock/);
+  assert.match(app, /applyEmuVolume\(emuRef\.current/);
 });
