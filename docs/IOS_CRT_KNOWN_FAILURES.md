@@ -317,6 +317,46 @@ only). Keep #54 host / #55 in-place Play / PETSCII #32 / #41.
 itself (VICE/raster), reload still shows the power splash. Not a PASS
 until Tom plays through transfer.
 
+### 15. #62 unified session — Paradroid remount, buried keyboard, cold READY needs folder
+
+`main@9714101` / PR **#62** (live `routes-BoP6lREr.js`): one boot/Play
+session so READY paints and Folder Play stays live.
+
+**Tom FAIL (live, same build):**
+
+- Paradroid played fine, then crashed to the power button (full
+  remount/splash). In-session `powered: false` paths are all
+  live-play-guarded, so the crash class is a CriOS tab reload
+  (OOM/discard) mid-play: `powered` is not persisted, while
+  `sessionStorage` live-play survives with nothing acting on it.
+- Keyboard and primary controls buried behind the phone ⋯ More menu.
+- Cold power still paints only after a Software/folder tap: progress
+  fills, then black limbo until the folder gesture. #62's 80ms
+  "settle" present storm (~50 window resizes in 4s) did not fix it.
+
+**Not a CRT paint theory.** Do not touch `preserveDrawingBuffer`, VICE
+backing, ios-paint/present, or 384:272 glass.
+
+This tree (no paint-host change):
+
+- Refused mid-play `startWithUrl` must not damage the live session:
+  the refuse-check runs before the `loadGen` bump / timer clear.
+- Crash-play marker (`g64-crash-play` in sessionStorage, saved only
+  on attach success) + one-shot mount auto-recover: a mid-play reload
+  rehydrates the title from library/bundle and restores play instead
+  of stranding Tom on the splash. Cleared on Reset / cold / drop, so
+  a dead boot cannot recover-loop.
+- Phone rail leads with Keyboard / Pause / Mute (44px, no menu);
+  More keeps Reset / Settings / About. Software/Disk pin untouched.
+- Cold BASIC drives layout + resize-free presents to an observably
+  sized READY (sync layout reads, invisible invalidation nudge,
+  periodic gesture-path present, single final kick) instead of the
+  #62 storm. Bounded: at cap the boot proceeds exactly as before.
+
+**Residual:** the CriOS cold-0-box mechanism is unconfirmed from the
+sandbox (desktop Chromium paints cold READY without the folder). Not
+a PASS until Tom's phone paints READY on cold power with no tap.
+
 ---
 
 ## Briefly WORKED (do not regress these unrelated wins)

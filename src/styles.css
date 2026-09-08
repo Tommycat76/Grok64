@@ -372,6 +372,22 @@ html, body, #app {
 .g64-app[data-device="phone"] .g64-top-overflow {
   z-index: 81;
 }
+/* Phone: keyboard + pause + mute lead the rail strip — visible 44px targets
+ * without opening More. Their twins in the More menu hide on phone only;
+ * desktop/tablet keep the shared .g64-top-icons row untouched. */
+.g64-app[data-device="phone"] .g64-top-rail {
+  min-height: 44px;
+}
+.g64-app[data-device="phone"] .g64-top-rail .g64-rail-act {
+  flex: 0 0 44px;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+}
+.g64-app[data-device="phone"] .g64-top-icons .g64-rail-dup {
+  display: none !important;
+}
 .g64-app[data-device="phone"] .g64-rail-more {
   display: grid;
 }
