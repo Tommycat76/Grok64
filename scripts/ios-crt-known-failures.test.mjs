@@ -13,7 +13,7 @@ const present = readFileSync(join(root, "src/lib/emu/ios-present.ts"), "utf8");
 const gate = readFileSync(join(root, "scripts/crt-fill-gate.mjs"), "utf8");
 const docs = readFileSync(join(root, "docs/STATIC-HOSTING.md"), "utf8");
 
-test("known-failures doc exists and lists Tom phone failures 1–12", () => {
+test("known-failures doc exists and lists Tom phone failures 1–13", () => {
   assert.equal(existsSync(docPath), true);
   const doc = readFileSync(docPath, "utf8");
   assert.match(doc, /Read `docs\/IOS_CRT_KNOWN_FAILURES\.md` first/);
@@ -57,6 +57,13 @@ test("known-failures doc exists and lists Tom phone failures 1–12", () => {
   assert.match(doc, /#14|#18|preserveDrawingBuffer/);
   assert.match(doc, /prefer restore|original simple CRT/i);
   assert.match(doc, /ee0b445/);
+  assert.match(doc, /### 13\.|#13|#54 Play/);
+  assert.match(doc, /3f80fc8/);
+  assert.match(doc, /DlWAL8fJ/);
+  assert.match(doc, /paradroid|Paradroid/);
+  assert.match(doc, /black stamp|remount|power splash/i);
+  assert.match(doc, /800b6e6|#18/);
+  assert.match(doc, /in-place|keep.*canvas|same.*canvas/i);
   assert.match(doc, /JiffyDOS/);
   assert.match(doc, /#39/);
   assert.match(doc, /build-id|build id/i);
@@ -68,7 +75,7 @@ test("known-failures doc exists and lists Tom phone failures 1–12", () => {
 
 test("project agents and CRT follow-ups point at the known-failures doc", () => {
   assert.match(agents, /docs\/IOS_CRT_KNOWN_FAILURES\.md/);
-  assert.match(agents, /1–12|1-12/);
+  assert.match(agents, /1–13|1-13|1–12|1-12/);
   assert.match(agents, /ee0b445|restore/);
   assert.match(agents, /Prefer restore|prefer restore/i);
   assert.match(agents, /#14|#18|3dc22be/);
@@ -79,7 +86,7 @@ test("project agents and CRT follow-ups point at the known-failures doc", () => 
   assert.match(docs, /docs\/IOS_CRT_KNOWN_FAILURES\.md/);
 });
 
-test("new CRT path is #14/#18/#39 host wiring, not failed approaches 1–12", () => {
+test("new CRT path is #14/#18/#39 host wiring, not failed approaches 1–13", () => {
   const iosFn = host.slice(host.indexOf("function unwrapIosZoomChrome"), host.indexOf("export async function recycleCore"));
   assert.match(iosFn, /unwrapIosZoomChrome/);
   assert.match(iosFn, /applyIosCrtStyle/);

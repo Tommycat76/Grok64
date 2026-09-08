@@ -23,6 +23,7 @@ const {
   PLAY_UNLOCK_VICE_OPTS,
   userResetKind,
   shouldRecoverBoot,
+  iosPlayKeepsLiveCrt,
 } = await server.ssrLoadModule("/src/lib/emu/play-session.ts");
 const {
   classifyPress,
@@ -277,6 +278,13 @@ test("iPhone + Jiffy wanted but not live recycles even when 1541 is already up",
   assert.equal(plan.recycle, true);
   assert.deepEqual(plan.live, { iec: "1541", unit: 8 });
   assert.deepEqual(plan.user, { iec: "cmdhd", unit: 11 });
+});
+
+test("iPhone Play keeps the live CRT after READY — no WASM recycle", () => {
+  assert.equal(iosPlayKeepsLiveCrt({ iosPhone: true, hasLiveFs: true, kind: "floppy" }), true);
+  assert.equal(iosPlayKeepsLiveCrt({ iosPhone: true, hasLiveFs: false, kind: "floppy" }), false);
+  assert.equal(iosPlayKeepsLiveCrt({ iosPhone: true, hasLiveFs: true, kind: "basic" }), false);
+  assert.equal(iosPlayKeepsLiveCrt({ iosPhone: false, hasLiveFs: true, kind: "floppy" }), false);
 });
 
 test("iPhone floppy Play never hot-swaps — even CMD@11 + live 1541 + Jiffy live", () => {

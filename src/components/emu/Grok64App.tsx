@@ -65,7 +65,14 @@ import { hasCmdRom, hasJiffyPair, prefetchBundledRoms } from "@/lib/emu/roms";
 import { listPartitions, partitionsForMount, setIecDevice } from "@/lib/emu/sd2iec";
 import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor } from "@/lib/emu/vice-extras";
 import { HwHoldChip } from "@/components/emu/HwHoldChip";
-import { mapHasDrive, planPlay, shouldRecoverBoot, unitOfDrive, userAttachFromMap } from "@/lib/emu/play-session";
+import {
+  iosPlayKeepsLiveCrt,
+  mapHasDrive,
+  planPlay,
+  shouldRecoverBoot,
+  unitOfDrive,
+  userAttachFromMap,
+} from "@/lib/emu/play-session";
 import {
   actionForPress,
   hwButtonById,
@@ -1149,8 +1156,9 @@ export function Grok64App() {
       sessionIecRef.current = plan.live.iec;
       sessionUnitRef.current = plan.live.unit;
       const attach = plan.attach;
-      // Hard lock: CriOS never enters the hot-swap branch, even if the plan
-      // is stale. Tom's #35 log is always hot-swap → DEVICE NOT PRESENT.
+      // Hard lock: CriOS never logs `hot-swap` (Tom #35 / #37 → DNP).
+      // After READY, recycle is in-place on the live canvas (#18/#30).
+      // WASM destroyEmu after READY is known-failure #13.
       const canHotSwap = !plan.recycle && !isIosPhone();
       if (plan.recycle || isIosPhone()) {
         const reason = isIosPhone()
@@ -1188,6 +1196,11 @@ export function Grok64App() {
         jiffyWant,
         jiffyLive,
         ios: isIosPhone(),
+        keepLiveCrt: iosPlayKeepsLiveCrt({
+          iosPhone: isIosPhone(),
+          hasLiveFs: Boolean(emuRef.current && coreHasFs(emuRef.current)),
+          kind: plan.kind,
+        }),
       });
       if (work) workDiskBytesRef.current = new Uint8Array(safe);
       if (!work && opts.libraryId) {
@@ -1213,12 +1226,17 @@ export function Grok64App() {
         plugJoysticks(emuRef.current, assigned);
       }
       const live = Boolean(emuRef.current && coreHasFs(emuRef.current));
+      const keepLiveCrt = iosPlayKeepsLiveCrt({
+        iosPhone: isIosPhone(),
+        hasLiveFs: live,
+        kind: plan.kind,
+      });
       let media = new Uint8Array(safe);
       if (origKind === "d64") {
         media = prepareAutostartDisk(media, bootName, title);
       }
       const wrapped = wrapForDiskSwap(origKind, media, bootName);
-      if (live && canHotSwap && emuRef.current && (wrapped || origKind === "d64")) {
+      if (live && (canHotSwap || keepLiveCrt) && emuRef.current && (wrapped || origKind === "d64")) {
         const payloadDisk = wrapped ?? media;
         const playIec = attach?.iec ?? plan.live.iec;
         const playAttachUnit = attach?.unit ?? plan.live.unit;
@@ -1227,14 +1245,26 @@ export function Grok64App() {
           ? attachAutostartDisk(emuRef.current, payloadDisk, bootName, playIec, playAttachUnit)
           : swapBootDisk(emuRef.current, payloadDisk, bootName);
         if (wrote) {
-          glog("hot-swap", {
-            filename,
-            title,
-            kind: origKind,
-            iec: sessionIecRef.current,
-            unit: sessionUnitRef.current,
-            workDisk: workDiskFor(sessionIecRef.current, sessionUnitRef.current),
-          });
+          if (canHotSwap) {
+            glog("hot-swap", {
+              filename,
+              title,
+              kind: origKind,
+              iec: sessionIecRef.current,
+              unit: sessionUnitRef.current,
+              workDisk: workDiskFor(sessionIecRef.current, sessionUnitRef.current),
+            });
+          } else {
+            glog("play-recycle-inplace", {
+              filename,
+              title,
+              kind: origKind,
+              iec: sessionIecRef.current,
+              unit: sessionUnitRef.current,
+              workDisk: workDiskFor(sessionIecRef.current, sessionUnitRef.current),
+              keepLiveCrt: true,
+            });
+          }
           persistGateRef.current = false;
           inGameplayRef.current = false;
           pendingKickRef.current = false;
@@ -1289,7 +1319,8 @@ export function Grok64App() {
           });
           applyIecUnit(emuRef.current, playIec, playAttachUnit);
           plugJoysticks(emuRef.current, useEmu.getState().joyPort);
-          if (isIosPhone()) resetIosPaintState();
+          // #13: never reset paint / wipe the live canvas on in-place Play.
+          if (isIosPhone() && !keepLiveCrt) resetIosPaintState();
           s.setCurrentTitle(title);
           s.setRunning(true);
           if (work) {
@@ -1307,10 +1338,16 @@ export function Grok64App() {
           } else {
             autostartAfterReady(emuRef.current, true, { autoloadWarp: false });
             applyIecUnit(emuRef.current, playIec, playAttachUnit);
-            if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, "hot-swap");
+            if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, keepLiveCrt ? "play-recycle" : "hot-swap");
             beginPlayLock(playLockDuration(playModeRef.current), `Loading ${title}…`);
             scheduleCracktroNudge(title);
           }
+          return;
+        }
+        if (keepLiveCrt) {
+          glog("play-inplace-failed", { filename, title, kind: origKind });
+          useEmu.getState().setBooting(false);
+          toast.error("Could not mount that disk on the live 1541.");
           return;
         }
       }
@@ -1492,6 +1529,10 @@ export function Grok64App() {
         glog("boot-recover-fail-kept");
         return;
       }
+      if (playModeRef.current !== "basic" || playLockRef.current || inGameplayRef.current) {
+        glog("boot-recover-fail-kept", { mode: playModeRef.current });
+        return;
+      }
       useEmu.setState({ powered: false, booting: false, running: false });
       toast.error("The C64 didn’t start. Tap power to try again.");
     });
@@ -1554,6 +1595,11 @@ export function Grok64App() {
         useEmu.getState().setBooting(false);
         useEmu.getState().setRunning(true);
         glog("boot-stuck-kept");
+        return;
+      }
+      if (playModeRef.current !== "basic" || playLockRef.current || inGameplayRef.current) {
+        glog("boot-stuck-kept", { mode: playModeRef.current });
+        useEmu.getState().setBooting(false);
         return;
       }
       useEmu.setState({ powered: false, booting: false, running: false, bootProgress: 0 });

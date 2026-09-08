@@ -5,7 +5,7 @@
 **Read `docs/IOS_CRT_KNOWN_FAILURES.md` first** before any iPhone CRT,
 CriOS paint, bezel-fill, or “READY is black” work.
 
-Do not retry the failed approaches listed there (1–12) without new evidence
+Do not retry the failed approaches listed there (1–13) without new evidence
 from Tom’s real iPhone. Plex / Playwright / iPhone-UA Chromium green is
 **not** a PASS. Tom’s phone is the only CRT PASS.
 
@@ -30,12 +30,16 @@ era is entangled. Do **not** iterate #50–#53.
 
 Current ship: that restored **host** path + live WebGL presentation
 (ios-paint never `getContext`; no `#18` mirror / PNG poll). Keep the
-384:272 `.g64-screen` glass. Do not retry PNG poll, wrapper CSS
-transform on GL, `drawImage` tall present, `readPixels` present, CSS
-100% of a **tall bezel** + clientWidth lie/unlock, unzoomed 384
-letterbox in a tall screen, bare zoom, centered zoom slot, or
-layout-only-on-#42-lock. Do not print `PASS` from the Plex gate.
+384:272 `.g64-screen` glass. After READY, Play recycles **unit 8
+in-place** on the live canvas (`#18`/`#30`) — never WASM
+`destroyEmu` / splash remount (`#13`). Do not retry PNG poll, wrapper
+CSS transform on GL, `drawImage` tall present, `readPixels` present,
+CSS 100% of a **tall bezel** + clientWidth lie/unlock, unzoomed 384
+letterbox in a tall screen, bare zoom, centered zoom slot,
+layout-only-on-#42-lock, or Play-path core destroy after READY. Do not
+print `PASS` from the Plex gate.
 
-Keep: PETSCII #32, unit-8 Play recycle, #41 no mid-play yank, tablet
-#40 (Android only), build-id chip, debug log off by default, Jiffy
-apply honesty — unless a lock fights paint; then prefer paint.
+Keep: PETSCII #32, unit-8 Play recycle (**in-place** on a live READY
+core), #41 no mid-play yank, tablet #40 (Android only), build-id chip,
+debug log off by default, Jiffy apply honesty — unless a lock fights
+paint; then prefer paint.

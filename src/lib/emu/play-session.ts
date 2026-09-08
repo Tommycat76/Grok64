@@ -71,12 +71,30 @@ export function unit8IsRealFloppy(live: DriveAttach, liveWorkDisk?: string | nul
 }
 
 export type RecycleExtra = {
-  /** CriOS floppy Autostart must never hot-swap — Tom's logs are always hot-swap → DNP. */
+  /**
+   * CriOS floppy Autostart must never take the stale-session `hot-swap`
+   * log → DNP. plan.recycle stays true so Play always attaches a real
+   * 1541 #8. After READY, that recycle is in-place on the live canvas
+   * (#18/#30). WASM destroyEmu after READY is known-failure #13.
+   */
   iosPhone?: boolean;
   jiffyWant?: boolean;
   /** True only after ROMs landed in VICE FS and vice_jiffydos was enabled. */
   jiffyLive?: boolean;
 };
+
+/**
+ * After Tom's #54 READY paints, Play must keep that WebGL canvas.
+ * `#37` WASM-recycle (destroyEmu + second VICE) is black CRT → splash.
+ * `#18`/`#30` attached the disk on the live core and games ran.
+ */
+export function iosPlayKeepsLiveCrt(input: {
+  iosPhone?: boolean;
+  hasLiveFs: boolean;
+  kind: PlayKind;
+}): boolean {
+  return Boolean(input.iosPhone && input.hasLiveFs && input.kind === "floppy");
+}
 
 export function floppyNeedsRecycle(
   liveIec: IecDrive,
@@ -84,9 +102,9 @@ export function floppyNeedsRecycle(
   user?: DriveAttach,
   extra?: RecycleExtra,
 ): boolean {
-  // iPhone: every floppy Play rebuilds a 1541 #8. Session/cache often says
-  // 1541 + 8_d64 while the WASM still has no device 8 (SD2IEC chip on, CMD
-  // on, then ios-frame-ok hot-swap → LOAD"*",8,1 → DEVICE NOT PRESENT).
+  // iPhone: every floppy Play *plans* a 1541 #8 recycle (never the
+  // stale-session hot-swap → DNP). Grok64App applies that in-place when
+  // VICE FS is already live — it must not destroy the GL canvas (#13).
   if (extra?.iosPhone) return true;
   if (isFsWorkDisk(liveWorkDisk)) return true;
   if (liveIec === "sd2iec") return true;

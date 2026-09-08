@@ -51,9 +51,12 @@ geometry**. `#52` (`main@156a07f` / `routes-D2Yf0JqE.js`, #11) centered
 the zoom slot — Tom got a **thin purple strip along the BOTTOM**. `#53`
 (`main@3dc22be` / `routes-BD6gfM9s.js`, #12) restored that `ee0b445`
 **layout** on top of the #42 384-lock paint stack — Tom’s CriOS was
-**solid black**. Current ship **restores the #14/#18/#39 host wiring**
-(`preserveDrawingBuffer`, VICE owns backing, no `lockIosBacking`) on
-the 384:272 glass. No zoom/slot. Zero PASS without Tom.
+**solid black**. `#54` (`main@3f80fc8` / `routes-DlWAL8fJ.js`) painted
+READY on Tom’s phone, then Play Paradroid/BD went **black CRT → splash
+remount** (`#13`) because unit-8 Play WASM-recycled the live canvas.
+Current ship **keeps that #14/#18/#39 host wiring** and restores the
+**#18/#30 in-place Play path** (same GL canvas, real 1541 #8). No
+zoom/slot. Zero PASS without Tom.
 
 ### CRT fill gate (required after deploy)
 

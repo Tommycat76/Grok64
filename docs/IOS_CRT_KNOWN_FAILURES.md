@@ -224,6 +224,48 @@ Forward thrash #42–#53 failed.
   ios-paint, VICE owns backing size. Tom: Jiffy + screen works.
 - Do **not** iterate #50–#53 zoom / slot / letterbox / CSS-100%-of-lock.
 
+### 13. #54 Play path — Paradroid / Boulder Dash → Loading → black CRT → remount splash
+
+`main@3f80fc8` / `routes-DlWAL8fJ.js` (live HEAD Tom photographed).
+
+Cold boot on CriOS is **slow** but **eventually paints**: JiffyDOS V6.01
++ C-64 BASIC + READY, full-ish purple/blue CRT (Tom shot 2). **Do not
+thrash that #54 host wiring** (`preserveDrawingBuffer`, VICE owns
+backing, no `lockIosBacking`).
+
+**Tom FAIL (Play, same build):** after READY, Play Paradroid (and
+Boulder Dash) shows `Loading paradroidalldrives.d64…` → **black
+stamp/CRT** (shot 3) → **whole app remounts to the power splash**.
+No game. Unit-8 recycle / play-session is the killer. Cold-boot paint
+speed is a separate secondary.
+
+Archaeology (commits consulted):
+
+- `#18` `800b6e6`: Tom said CRT good enough; Boulder Dash **loaded and
+  ran**. Play after READY was **in-place** (`writeBootFile` /
+  `swapBootDisk` + `resetEmu`) on the **same** WebGL canvas. Then
+  crash/audio (#19), not a Play CRT death.
+- `#19` `d5a20e7`: OOM after the #18 mirror — do **not** restore that
+  2D mirror (known-failure #1).
+- `#30` `ebd6332` / `c96aaa7`: Paradroid Play still used that in-place
+  attach. Games ran.
+- `#34` `b6f10e5` / `3eb5ea8`: WASM `recycleCore` only when SD2IEC
+  owned unit 8 (DNP). After BASIC READY on a real 1541, Play still
+  kept the canvas.
+- `#37` `9038a00` / `f223f04`: **never hot-swap on CriOS** — every
+  floppy Play calls `recycleCore` → `destroyEmu` → `el.innerHTML = ""`
+  → **second VICE WASM**. That is the black CRT + splash remount
+  (second core OOMs / React loses `powered`, which is not persisted).
+- `#39` `79cb60b`: live-WebGL READY paint. Keep it.
+- `#41` `ee0b445`: no mid-play yank back to BASIC READY. Keep it.
+
+**Do not** “fix” Play by inventing another CRT compositor. Restore the
+**#18 / #30 Play survival path**: after a live READY core exists,
+recycle **unit 8 in-place** (real 1541 + disk + Autostart) on the
+existing GL canvas. `plan.recycle` stays true on iPhone (never the
+stale-session `hot-swap` log → DNP). WASM `destroyEmu` is only for a
+cold core with no FS.
+
 ---
 
 ## Briefly WORKED (do not regress these unrelated wins)
@@ -240,7 +282,9 @@ These are not CRT-fill proofs. Do not break them while chasing the bezel.
 Locked, unrelated:
 
 - PETSCII **#32** (Space) stays a C64 key — never host Reset / Start.
-- Unit-8 floppy **Play recycles** on iPhone (never hot-swap → DNP).
+- Unit-8 floppy **Play recycles** on iPhone (never the `hot-swap` log →
+  DNP). Recycle is **in-place** on a live READY core — must not destroy
+  GL or remount the splash (#13).
 - **#41** no mid-play yank back to BASIC READY.
 - Debug log **off** by default (opt-in / `?debug=`).
 
@@ -248,7 +292,8 @@ Locked, unrelated:
 
 ## What a NEW approach must not be
 
-Not 1, not 2, not 3, not 6, not 7, not 8, not 9, not 10, not 11, not 12.
+Not 1, not 2, not 3, not 6, not 7, not 8, not 9, not 10, not 11, not 12,
+not 13.
 
 In particular:
 
@@ -271,14 +316,17 @@ In particular:
 - No zoom-v3 / slot-v2 / another contain-fit theory.
 - No layout-only restore of `ee0b445` glass **on top of** the #42
   384-lock / `lockIosBacking` / `remapViceViewport` stack (#12 / #53).
+- No Play-path **WASM recycle** after READY (`recycleCore` /
+  `destroyEmu` / wipe `#grok64-player` / second VICE) — that is #13.
+  Unit-8 1541 attach stays required; the **canvas/GL context** stays.
 
-Current attempt after #53/#12 (this tree): **restore the original
-simple CRT host wiring** from PR **#14–#18** (`preserveDrawingBuffer`,
-VICE owns backing, CSS 100% of the 384:272 glass, auto kick/watchdog)
-with the **#39** rule that ios-paint never `getContext()`s. That is
-the era Tom said CRT painted READY immediately (good enough after
-`#18` ~`800b6e6`; screen works at `#39` ~`79cb60b`). `#53` already
-proved the glass CSS without that host path is solid black.
+Current attempt after #54/#13 (this tree): keep the restored **#14/#18/#39
+host wiring** that finally painted READY on `3f80fc8`. Play after READY
+restores the **#18/#30 in-place floppy path** (same live WebGL canvas,
+`attachAutostartDisk` + `prepareCore` + `autostartAfterReady`) so unit 8
+is a real 1541 without destroying GL or remounting the splash. iPhone
+`plan.recycle` stays true (never the `#37` `hot-swap` log → DNP). WASM
+`recycleCore` only when there is no live VICE FS.
 
 Why this and not 1–12:
 
@@ -298,6 +346,10 @@ Why this and not 1–12:
 - **Not 12 / #53.** Not a layout-only restore. The #42 pre-size /
   `lockIosBacking` / viewport-remap family is **removed**. VICE owns
   the backing store again (`#14`/`#18`/`#39` `preserveWebglBuffer`).
+- **Not 13 / #54 Play.** Not another destroy-and-reboot after READY.
+  Archaeology: `#18`/`#30` kept the canvas and games ran; `#37`
+  WASM-recycle is the black CRT + splash remount. In-place unit-8
+  attach is the restore, not a new paint theory.
 
 No 2D present. Compact cold-start chip. Build-id chip stays visible.
 Debug log off by default.

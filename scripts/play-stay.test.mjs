@@ -106,3 +106,16 @@ test("iPhone floppy Play still recycles — never hot-swap (locked)", () => {
   const session = readFileSync(join(root, "src/lib/emu/play-session.ts"), "utf8");
   assert.match(session, /if \(extra\?\.iosPhone\) return true/);
 });
+
+test("iOS Play after READY keeps the live canvas (#18/#30, not #37 WASM recycle)", () => {
+  const session = readFileSync(join(root, "src/lib/emu/play-session.ts"), "utf8");
+  assert.match(session, /iosPlayKeepsLiveCrt/);
+  assert.match(app, /keepLiveCrt/);
+  assert.match(app, /play-recycle-inplace/);
+  const start = app.indexOf("const playBuffer");
+  const play = app.slice(start, app.indexOf("playBufferRef.current = playBuffer"));
+  assert.match(play, /canHotSwap \|\| keepLiveCrt/);
+  assert.match(play, /play-inplace-failed/);
+  assert.match(play, /if \(canHotSwap\) \{/);
+  assert.match(play, /play-recycle-inplace/);
+});

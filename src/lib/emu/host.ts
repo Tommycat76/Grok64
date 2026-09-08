@@ -1192,6 +1192,11 @@ export function applyIosCrtStyle(
   stripIosPresent(box);
 }
 
+/**
+ * Tear down WASM for a *cold* core only. After READY, iPhone Play must
+ * recycle unit 8 in-place (#18/#30). Calling this after a painted CRT
+ * is known-failure #13 (black canvas → splash remount).
+ */
 export async function recycleCore(emu: EjsInstance | null, el: HTMLElement | null) {
   destroyEmu(emu, el);
   await new Promise((r) => setTimeout(r, isIosPhone() ? 700 : 250));
@@ -1783,8 +1788,9 @@ export function swapBootDisk(emu: EjsInstance | null, data: Uint8Array, fallback
 /**
  * Attach a floppy for VICE autostart: force 1541/1581 on the given unit
  * (unit 8 for LOAD"*",8,1), then overwrite the current boot file.
- * Only safe when the live core already has a 1541/1581 — SD2IEC 8_fs
- * needs a full core recycle (see floppyPlayCanHotSwap).
+ * iPhone Play after READY uses this in-place (#18/#30) so the live GL
+ * canvas survives. Desktop still WASM-recycles a live SD2IEC 8_fs core
+ * (see floppyPlayCanHotSwap). destroyEmu after READY is #13.
  */
 export function attachAutostartDisk(
   emu: EjsInstance | null,
