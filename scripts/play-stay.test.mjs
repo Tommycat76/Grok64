@@ -130,7 +130,7 @@ test("Space is muted until Autostart is disarmed; cracktro nudge is after unlock
   assert.match(app, /muteC64Space\(true\)/);
   assert.match(app, /disarmAutostart\(emuRef\.current\)/);
   assert.match(app, /muteC64Space\(false\)/);
-  assert.match(app, /scheduleCracktroNudge\(useEmu\.getState\(\)\.currentTitle\)/);
+  assert.match(app, /scheduleCracktroNudge\(unlockedTitle\)/);
   const lock = app.slice(app.indexOf("const beginPlayLock"), app.indexOf("const syncJiffy"));
   assert.match(lock, /disarmAutostart/);
   assert.match(lock, /scheduleCracktroNudge/);
