@@ -110,12 +110,37 @@ test("iPhone floppy Play still recycles — never hot-swap (locked)", () => {
 test("iOS Play after READY keeps the live canvas (#18/#30, not #37 WASM recycle)", () => {
   const session = readFileSync(join(root, "src/lib/emu/play-session.ts"), "utf8");
   assert.match(session, /iosPlayKeepsLiveCrt/);
+  assert.match(session, /iosMustKeepLiveCore/);
+  assert.match(session, /shouldDropToSplash/);
   assert.match(app, /keepLiveCrt/);
+  assert.match(app, /mustKeep/);
   assert.match(app, /play-recycle-inplace/);
+  assert.match(app, /start-recycle-refused/);
+  assert.match(app, /play-inplace-no-fs/);
   const start = app.indexOf("const playBuffer");
   const play = app.slice(start, app.indexOf("playBufferRef.current = playBuffer"));
-  assert.match(play, /canHotSwap \|\| keepLiveCrt/);
+  assert.match(play, /keepLiveCrt/);
+  assert.match(play, /mustKeep/);
   assert.match(play, /play-inplace-failed/);
   assert.match(play, /if \(canHotSwap\) \{/);
   assert.match(play, /play-recycle-inplace/);
+});
+
+test("Space is muted until Autostart is disarmed; cracktro nudge is after unlock", () => {
+  assert.match(app, /muteC64Space\(true\)/);
+  assert.match(app, /disarmAutostart\(emuRef\.current\)/);
+  assert.match(app, /muteC64Space\(false\)/);
+  assert.match(app, /scheduleCracktroNudge\(useEmu\.getState\(\)\.currentTitle\)/);
+  const lock = app.slice(app.indexOf("const beginPlayLock"), app.indexOf("const syncJiffy"));
+  assert.match(lock, /disarmAutostart/);
+  assert.match(lock, /scheduleCracktroNudge/);
+  const idxDisarm = lock.indexOf("disarmAutostart");
+  const idxNudge = lock.indexOf("scheduleCracktroNudge");
+  assert.ok(idxDisarm >= 0 && idxNudge > idxDisarm, "cracktro Space must follow disarm");
+});
+
+test("please-hold overlay is a DOM chip, not a CRT host change", () => {
+  assert.match(app, /Please hold — picture is coming/);
+  assert.match(app, /data-hold=/);
+  assert.match(app, /setPictureHold/);
 });

@@ -36,7 +36,7 @@ node scripts/flatten-dist.mjs dist
 # confirm the on-screen build id matches the git short SHA
 ```
 
-**Read `docs/IOS_CRT_KNOWN_FAILURES.md` first.**
+**Read `docs/IOS_CRT_LOCKED_GOOD.md` first**, then `docs/IOS_CRT_KNOWN_FAILURES.md`.
 
 Do not claim an iPhone CRT PASS from this box. Tom’s real CriOS is the only PASS.
 **Chromium-on-Plex still is not CriOS PASS.** #46/#47 went green while Tom’s

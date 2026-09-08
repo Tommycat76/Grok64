@@ -96,6 +96,40 @@ export function iosPlayKeepsLiveCrt(input: {
   return Boolean(input.iosPhone && input.hasLiveFs && input.kind === "floppy");
 }
 
+/**
+ * After power-on, iPhone floppy Play must stay on the live VICE instance.
+ * WASM recycle / startWithUrl after READY is known-failure #13 (splash remount).
+ */
+export function iosMustKeepLiveCore(input: {
+  iosPhone?: boolean;
+  powered: boolean;
+  hasEmu: boolean;
+  kind: PlayKind;
+}): boolean {
+  return Boolean(input.iosPhone && input.powered && input.hasEmu && input.kind === "floppy");
+}
+
+/**
+ * Mid-play / live-session must never drop `powered` back to the splash.
+ * Only a failed *cold* BASIC start with no FS may remount the power button.
+ */
+export function shouldDropToSplash(input: {
+  playMode: string;
+  playLock: boolean;
+  inGameplay: boolean;
+  powered: boolean;
+  hasFs: boolean;
+  title?: string | null;
+}): boolean {
+  if (!input.powered) return false;
+  if (input.playLock || input.inGameplay) return false;
+  if (input.playMode !== "basic") return false;
+  if (input.hasFs) return false;
+  const title = (input.title || "").trim();
+  if (title && title !== "BASIC" && title !== "BASIC READY") return false;
+  return true;
+}
+
 export function floppyNeedsRecycle(
   liveIec: IecDrive,
   liveWorkDisk?: string | null,

@@ -23,7 +23,9 @@ const {
   PLAY_UNLOCK_VICE_OPTS,
   userResetKind,
   shouldRecoverBoot,
+  shouldDropToSplash,
   iosPlayKeepsLiveCrt,
+  iosMustKeepLiveCore,
 } = await server.ssrLoadModule("/src/lib/emu/play-session.ts");
 const {
   classifyPress,
@@ -386,6 +388,61 @@ test("toolbar Reset is always a cold boot — never Autostart re-fire", () => {
   assert.equal(userResetKind("disk"), "hard");
   assert.equal(userResetKind("basic"), "hard");
   assert.equal(userResetKind("auto"), "hard");
+});
+
+test("iPhone powered floppy Play must keep the live core", () => {
+  assert.equal(iosMustKeepLiveCore({ iosPhone: true, powered: true, hasEmu: true, kind: "floppy" }), true);
+  assert.equal(iosMustKeepLiveCore({ iosPhone: true, powered: true, hasEmu: false, kind: "floppy" }), false);
+  assert.equal(iosMustKeepLiveCore({ iosPhone: true, powered: false, hasEmu: true, kind: "floppy" }), false);
+  assert.equal(iosMustKeepLiveCore({ iosPhone: false, powered: true, hasEmu: true, kind: "floppy" }), false);
+  assert.equal(iosMustKeepLiveCore({ iosPhone: true, powered: true, hasEmu: true, kind: "basic" }), false);
+});
+
+test("splash remount is only for a failed cold BASIC start", () => {
+  assert.equal(
+    shouldDropToSplash({
+      playMode: "disk",
+      playLock: false,
+      inGameplay: true,
+      powered: true,
+      hasFs: true,
+      title: "Boulder Dash",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldDropToSplash({
+      playMode: "basic",
+      playLock: false,
+      inGameplay: true,
+      powered: true,
+      hasFs: false,
+      title: "BASIC",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldDropToSplash({
+      playMode: "basic",
+      playLock: false,
+      inGameplay: false,
+      powered: true,
+      hasFs: false,
+      title: "Paradroid",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldDropToSplash({
+      playMode: "basic",
+      playLock: false,
+      inGameplay: false,
+      powered: true,
+      hasFs: false,
+      title: "BASIC",
+    }),
+    true,
+  );
 });
 
 test("boot recover must not replace a live floppy session with BASIC", () => {

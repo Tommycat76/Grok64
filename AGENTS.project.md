@@ -2,8 +2,15 @@
 
 ## iOS CRT (P0)
 
-**Read `docs/IOS_CRT_KNOWN_FAILURES.md` first** before any iPhone CRT,
-CriOS paint, bezel-fill, or “READY is black” work.
+**KNOWN GOOD is locked.** Read `docs/IOS_CRT_LOCKED_GOOD.md` first
+(`3f80fc8` / PR #54 — Tom SUCCESS: READY paints on CriOS, Jiffy, BD
+briefly played). Then read `docs/IOS_CRT_KNOWN_FAILURES.md` before any
+iPhone CRT, CriOS paint, bezel-fill, or “READY is black” work.
+
+Do **not** change sacred CRT wiring (`preserveDrawingBuffer`, VICE owns
+backing, #14/#18/#39 `host.ts` path, live-WebGL `ios-paint` /
+`ios-present`, `.g64-screen` 384:272 glass) without Tom. Docs lock
+comment only. If those files change beyond that, stop and revert.
 
 Do not retry the failed approaches listed there (1–13) without new evidence
 from Tom’s real iPhone. Plex / Playwright / iPhone-UA Chromium green is
