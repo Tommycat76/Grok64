@@ -121,9 +121,14 @@ test("iOS Play after READY keeps the live canvas (#18/#30, not #37 WASM recycle)
   assert.match(app, /start-recycle-refused/);
   assert.match(app, /play-inplace-no-fs/);
   assert.match(app, /writeBootFile/);
+  assert.match(app, /attachAutostartDisk/);
+  assert.match(app, /swapBootDisk/);
   assert.match(app, /iosInPlaceMediaKind/);
   assert.match(app, /shouldWaitForLiveCore/);
+  assert.match(app, /liveCoreReadyToAttach/);
+  assert.match(app, /inPlaceAutostartTarget/);
   assert.match(app, /play-wait-core/);
+  assert.match(app, /play-wait-timeout/);
   assert.match(app, /play-start-refused/);
   assert.match(app, /isColdBasicStart/);
   assert.match(app, /coldBasic:/);
@@ -137,7 +142,10 @@ test("iOS Play after READY keeps the live canvas (#18/#30, not #37 WASM recycle)
   assert.match(play, /play-inplace-failed/);
   assert.match(play, /if \(canHotSwap\) \{/);
   assert.match(play, /play-recycle-inplace/);
-  assert.match(play, /fileName = bootName/);
+  assert.match(play, /attachAutostartDisk/);
+  assert.match(play, /swapBootDisk/);
+  assert.match(play, /inPlaceAutostartTarget/);
+  assert.doesNotMatch(play, /writeBootFile\(emuRef\.current, payloadDisk, bootName\)/);
   assert.match(play, /isDiskKind\(origKind\)/);
   const stayIdx = play.indexOf("if (waitLive || mustKeep)");
   const startUrlIdx = play.indexOf("await startWithUrl");
