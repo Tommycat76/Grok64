@@ -103,17 +103,41 @@ export function iosInPlaceMediaKind(kind: PlayKind): boolean {
 }
 
 /**
- * After power-on, iPhone Play of a live title must stay on the VICE instance.
+ * After power-on, iOS Play of a live title must stay on the VICE instance.
  * Floppy stays unit-8 in-place. Cart/disk/PRG must not drop to the power splash.
  * WASM recycle / startWithUrl after READY is known-failure #13.
  */
 export function iosMustKeepLiveCore(input: {
   iosPhone?: boolean;
+  /** iPad — same splash remount as iPhone if Play WASM-recycles. */
+  ios?: boolean;
   powered: boolean;
   hasEmu: boolean;
   kind: PlayKind;
 }): boolean {
-  return Boolean(input.iosPhone && input.powered && input.hasEmu && input.kind !== "basic");
+  return Boolean((input.iosPhone || input.ios) && input.powered && input.hasEmu && input.kind !== "basic");
+}
+
+/**
+ * Catalog / folder Play while the C64 is already powered must wait for the
+ * live core and attach in-place. A second startWithUrl aborts cold BASIC
+ * (loadGen) and WASM-recycles to the power splash (#13).
+ */
+export function shouldWaitForLiveCore(input: {
+  iosPhone?: boolean;
+  ios?: boolean;
+  powered: boolean;
+  kind: PlayKind;
+  work?: boolean;
+}): boolean {
+  if (input.work || input.kind === "basic") return false;
+  if (!input.powered) return false;
+  return Boolean(input.iosPhone || input.ios);
+}
+
+/** Explicit power / Reset / recover BASIC boot — never blocked by leftover play locks. */
+export function isColdBasicStart(opts: { autostart?: boolean; title?: string | null }): boolean {
+  return opts.autostart === false && isBasicTitle(opts.title);
 }
 
 /**
@@ -204,6 +228,7 @@ export function shouldDropToSplash(input: {
 /**
  * iPhone startWithUrl must not recycle WASM after READY — including after a
  * remount that reset playModeRef to "basic" while a game title is still live.
+ * Explicit cold BASIC (power / recover) must still be allowed to boot READY.
  */
 export function shouldRefuseStartRecycle(input: {
   iosPhone?: boolean;
@@ -212,8 +237,10 @@ export function shouldRefuseStartRecycle(input: {
   inGameplay: boolean;
   title?: string | null;
   livePlay?: boolean;
+  coldBasic?: boolean;
 }): boolean {
   if (!input.iosPhone || !input.powered) return false;
+  if (input.coldBasic) return false;
   if (input.playMode !== "basic" || input.inGameplay) return true;
   if (input.livePlay || livePlayTitle()) return true;
   return !isBasicTitle(input.title);

@@ -32,14 +32,12 @@ import {
   listRealGamepads,
   mountDiskOnUnit,
   applyIecUnit,
-  attachAutostartDisk,
   cartFreeze,
   cartReset,
   cmdHdSwap,
   flushEmuFs,
   lastAppliedJiffy,
   lastAppliedWorkDisk,
-  swapBootDisk,
   writeBootFile,
   sd2iecFreeze,
   sd2iecSwapDevice,
@@ -71,6 +69,7 @@ import {
   iosInPlaceMediaKind,
   iosMustKeepLiveCore,
   iosPlayKeepsLiveCrt,
+  isColdBasicStart,
   livePlayTitle,
   mapHasDrive,
   markLivePlay,
@@ -80,6 +79,7 @@ import {
   shouldRefuseStartRecycle,
   shouldDismissPictureHold,
   shouldSkipPlayPersist,
+  shouldWaitForLiveCore,
   unitOfDrive,
   userAttachFromMap,
 } from "@/lib/emu/play-session";
@@ -1056,6 +1056,7 @@ export function Grok64App() {
             inGameplay: inGameplayRef.current,
             title: opts.title ?? useEmu.getState().currentTitle,
             livePlay: Boolean(livePlayTitle()),
+            coldBasic: isColdBasicStart({ autostart: opts.autostart, title: opts.title }),
           })
         ) {
           glog("start-recycle-refused", { mode: playModeRef.current, title: opts.title ?? gameName });
@@ -1231,11 +1232,6 @@ export function Grok64App() {
         jiffyWant,
         jiffyLive,
       });
-      playModeRef.current = plan.kind === "floppy" ? "disk" : plan.kind === "basic" ? "basic" : "auto";
-      cartLiveRef.current = plan.kind === "cart";
-      setCartLive(plan.kind === "cart");
-      sessionIecRef.current = plan.live.iec;
-      sessionUnitRef.current = plan.live.unit;
       const attach = plan.attach;
       // Hard lock: CriOS never logs `hot-swap` (Tom #35 / #37 → DNP).
       // After READY, recycle is in-place on the live canvas (#18/#30).
@@ -1266,8 +1262,8 @@ export function Grok64App() {
         diskLoad,
         work,
         bytes: safe.byteLength,
-        iec: sessionIecRef.current,
-        unit: sessionUnitRef.current,
+        iec: plan.live.iec,
+        unit: plan.live.unit,
         userIec,
         userUnit,
         fromIec: liveIec,
@@ -1284,6 +1280,7 @@ export function Grok64App() {
         }),
         mustKeep: iosMustKeepLiveCore({
           iosPhone: isIosPhone(),
+          ios: isIos(),
           powered: useEmu.getState().powered,
           hasEmu: Boolean(emuRef.current),
           kind: plan.kind,
@@ -1293,13 +1290,36 @@ export function Grok64App() {
       if (!work && opts.libraryId) {
         await deleteSaveState(opts.libraryId);
       }
-      if (emuRef.current && !coreHasFs(emuRef.current)) {
+      const waitLive = shouldWaitForLiveCore({
+        iosPhone: isIosPhone(),
+        ios: isIos(),
+        powered: useEmu.getState().powered,
+        kind: plan.kind,
+        work,
+      });
+      if (waitLive || (emuRef.current && !coreHasFs(emuRef.current))) {
         s.setBooting(true, "Waiting for VICE…");
         const t0 = Date.now();
-        while (Date.now() - t0 < 8e3 && !coreHasFs(emuRef.current)) {
+        const budget = waitLive ? (isIosPhone() ? 28000 : 16000) : 8000;
+        while (Date.now() - t0 < budget) {
+          const fs = Boolean(emuRef.current && coreHasFs(emuRef.current));
+          // bootHold is the cold BASIC settle — do not attach until READY.
+          if (fs && !bootHoldRef.current) break;
           await new Promise((r) => setTimeout(r, 80));
         }
+        glog("play-wait-core", {
+          emu: Boolean(emuRef.current),
+          fs: Boolean(emuRef.current && coreHasFs(emuRef.current)),
+          hold: bootHoldRef.current,
+          ms: Date.now() - t0,
+          waitLive,
+        });
       }
+      playModeRef.current = plan.kind === "floppy" ? "disk" : plan.kind === "basic" ? "basic" : "auto";
+      cartLiveRef.current = plan.kind === "cart";
+      setCartLive(plan.kind === "cart");
+      sessionIecRef.current = plan.live.iec;
+      sessionUnitRef.current = plan.live.unit;
       setPictureHold(false);
       const title = opts.title ?? filename;
       if (!work) markLivePlay(title);
@@ -1316,17 +1336,11 @@ export function Grok64App() {
       }
       const mustKeep = iosMustKeepLiveCore({
         iosPhone: isIosPhone(),
+        ios: isIos(),
         powered: useEmu.getState().powered,
         hasEmu: Boolean(emuRef.current),
         kind: plan.kind,
       });
-      if (mustKeep && emuRef.current && !coreHasFs(emuRef.current)) {
-        s.setBooting(true, "Waiting for VICE…");
-        const t1 = Date.now();
-        while (Date.now() - t1 < 12e3 && !coreHasFs(emuRef.current)) {
-          await new Promise((r) => setTimeout(r, 80));
-        }
-      }
       const live = Boolean(emuRef.current && coreHasFs(emuRef.current));
       const keepLiveCrt = iosPlayKeepsLiveCrt({
         iosPhone: isIosPhone(),
@@ -1339,15 +1353,16 @@ export function Grok64App() {
         media = prepareAutostartDisk(media, bootName, title);
       }
       const wrapped = wrapForDiskSwap(origKind, media, bootName);
-      if ((((live && (canHotSwap || keepLiveCrt)) || floppyKeep) && emuRef.current && (wrapped || origKind === "d64"))) {
-        const payloadDisk = wrapped ?? media;
+      const diskBytes = wrapped ?? (isDiskKind(origKind) ? media : null);
+      if ((((live && (canHotSwap || keepLiveCrt)) || floppyKeep) && emuRef.current && diskBytes)) {
+        const payloadDisk = diskBytes;
         const playIec = attach?.iec ?? plan.live.iec;
         const playAttachUnit = attach?.unit ?? plan.live.unit;
         s.setBooting(true, plan.status, 35);
-        const wrote = attach
-          ? attachAutostartDisk(emuRef.current, payloadDisk, bootName, playIec, playAttachUnit)
-          : swapBootDisk(emuRef.current, payloadDisk, bootName);
+        if (attach) applyIecUnit(emuRef.current, playIec, playAttachUnit);
+        const wrote = writeBootFile(emuRef.current, payloadDisk, bootName);
         if (wrote) {
+          emuRef.current.fileName = bootName.replace(/^\//, "");
           if (canHotSwap) {
             glog("hot-swap", {
               filename,
@@ -1497,6 +1512,12 @@ export function Grok64App() {
         toast.error("Play stayed on the live CRT — cartridge did not attach.");
         return;
       }
+      if (waitLive || mustKeep) {
+        glog("play-start-refused", { filename, title, kind: origKind, waitLive, mustKeep, live });
+        useEmu.getState().setBooting(false);
+        toast.error("Play stayed on the live CRT — did not remount the splash.");
+        return;
+      }
       const blob = new Blob([toArrayBuffer(media)]);
       const url = URL.createObjectURL(blob);
       blobRef.current = url;
@@ -1587,6 +1608,10 @@ export function Grok64App() {
       return;
     }
     bootKickRef.current = true;
+    inGameplayRef.current = false;
+    playLockRef.current = false;
+    cartLiveRef.current = false;
+    setCartLive(false);
     clearLivePlay();
     cracktroOnceRef.current = "";
     pokeAudioUnlock();
