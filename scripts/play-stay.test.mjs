@@ -158,6 +158,7 @@ test("phone pins Software/folder; lesser icons overflow into More", () => {
   assert.match(css, /grid-area: pin/);
   assert.match(css, /grid-area: rail/);
   assert.match(css, /\.g64-app\[data-device="phone"\] \.g64-software/);
+  assert.match(css, /\.g64-iconbtn\.g64-rail-more \{[\s\S]*?display: none/);
   assert.match(css, /\.g64-app\[data-device="phone"\] \.g64-rail-more \{[\s\S]*?display: grid/);
   assert.doesNotMatch(css, /\.g64-screen[\s\S]{0,80}grid-area: pin/);
 });

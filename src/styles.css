@@ -248,7 +248,7 @@ html, body, #app {
   align-items: center;
   position: relative;
 }
-.g64-rail-more {
+.g64-iconbtn.g64-rail-more {
   display: none;
 }
 .g64-rail-more-dismiss {
