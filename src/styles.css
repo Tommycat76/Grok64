@@ -1664,6 +1664,10 @@ div[class*="ejs_virtual"] {
     justify-content: flex-start;
     padding-top: 6px;
   }
+  .g64-app[data-device="tablet"] .g64-bezel {
+    align-items: center;
+    justify-content: center;
+  }
   .g64-screen {
     flex: 0 0 auto;
     max-height: calc(100% - 12px);
@@ -1745,25 +1749,46 @@ div[class*="ejs_virtual"] {
   display: flex;
   align-items: center;
   justify-content: center;
+  width: 100%;
+  min-height: 0;
 }
-/* Largest 384/272 CRT that fits under the log / above the locked keyboard.
+/* Largest 384/272 CRT that fits the bezel (#40 framing / #59 contain-fit).
  * Do not put container-type on .g64-screen — 100cqh must query the bezel.
  * flex 0 keeps contain-fit (flex-grow was a wide squash after cart/F5).
- * Floor the cqh width so a 0-height layout pass cannot collapse to a stamp. */
+ *
+ * Cold launch: size-containment + flex often reports 100cqh = 0. The old
+ * min(100%, max(320px, 100cqh*…)) then became a 320px postage stamp (purple
+ * L, off-center). Fallback is bezel-width / viewport contain — never 320px
+ * as the winning size. scheduleFit writes --g64-tablet-crt-w from the
+ * measured bezel so keyboard / landscape stay height-limited.
+ *
+ * iPhone .g64-screen 384:272 glass is a different selector — do not touch. */
 .g64-app[data-device="tablet"] .g64-screen {
   flex: 0 0 auto;
   align-self: center;
-  width: min(100%, max(320px, calc(100cqh * 384 / 272)));
+  width: min(
+    100%,
+    var(--g64-tablet-crt-w, calc((var(--app-h, 100dvh) - 13rem) * 384 / 272))
+  );
   height: auto;
   max-width: 100%;
   max-height: 100%;
-  min-width: min(100%, 320px);
+  min-width: min(100%, 200px);
   min-height: 0;
   aspect-ratio: 384 / 272;
 }
 @supports (width: 1cqh) {
   .g64-app[data-device="tablet"] .g64-screen {
-    width: min(100%, max(320px, calc(100cqh * 384 / 272)));
+    width: min(
+      100%,
+      var(
+        --g64-tablet-crt-w,
+        max(
+          calc((var(--app-h, 100dvh) - 13rem) * 384 / 272),
+          calc(100cqh * 384 / 272)
+        )
+      )
+    );
   }
 }
 .g64-app[data-device="tablet"] .g64-screen #grok64-player,
@@ -1981,9 +2006,12 @@ div[class*="ejs_virtual"] {
 .g64-app[data-orient="landscape"][data-kb="true"][data-device="tablet"] .g64-screen {
   flex: 0 0 auto;
   align-self: center;
-  width: min(100%, max(320px, calc(100cqh * 384 / 272)));
+  width: min(
+    100%,
+    var(--g64-tablet-crt-w, calc((var(--app-h, 100dvh) - 13rem) * 384 / 272))
+  );
   height: auto;
-  min-width: min(100%, 320px);
+  min-width: min(100%, 200px);
   min-height: 0;
   max-width: 100%;
   max-height: 100%;
