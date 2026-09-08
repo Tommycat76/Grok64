@@ -126,12 +126,17 @@ test("iOS Play after READY keeps the live canvas (#18/#30, not #37 WASM recycle)
   assert.match(app, /iosInPlaceMediaKind/);
   assert.match(app, /shouldWaitForLiveCore/);
   assert.match(app, /liveCoreReadyToAttach/);
+  assert.match(app, /sessionCanAttach/);
+  assert.match(app, /beginColdSession/);
+  assert.match(app, /markSessionReady/);
   assert.match(app, /inPlaceAutostartTarget/);
   assert.match(app, /play-wait-core/);
   assert.match(app, /play-wait-timeout/);
   assert.match(app, /play-start-refused/);
   assert.match(app, /isColdBasicStart/);
   assert.match(app, /coldBasic:/);
+  assert.match(app, /stayLive/);
+  assert.match(app, /playerCanvasReady/);
   const start = app.indexOf("const playBuffer");
   const play = app.slice(start, app.indexOf("playBufferRef.current = playBuffer"));
   assert.match(play, /keepLiveCrt/);
@@ -139,6 +144,7 @@ test("iOS Play after READY keeps the live canvas (#18/#30, not #37 WASM recycle)
   assert.match(play, /floppyKeep/);
   assert.match(play, /waitLive/);
   assert.match(play, /bootHoldRef/);
+  assert.match(play, /sessionCanAttach/);
   assert.match(play, /play-inplace-failed/);
   assert.match(play, /if \(canHotSwap\) \{/);
   assert.match(play, /play-recycle-inplace/);
@@ -147,7 +153,7 @@ test("iOS Play after READY keeps the live canvas (#18/#30, not #37 WASM recycle)
   assert.match(play, /inPlaceAutostartTarget/);
   assert.doesNotMatch(play, /writeBootFile\(emuRef\.current, payloadDisk, bootName\)/);
   assert.match(play, /isDiskKind\(origKind\)/);
-  const stayIdx = play.indexOf("if (waitLive || mustKeep)");
+  const stayIdx = play.indexOf("if (stayLive)");
   const startUrlIdx = play.indexOf("await startWithUrl");
   assert.ok(stayIdx >= 0 && startUrlIdx > stayIdx, "folder Play must refuse startWithUrl before any remount");
   const afterStay = play.slice(stayIdx);
@@ -186,6 +192,8 @@ test("phone pins Software/folder; lesser icons overflow into More", () => {
   assert.match(css, /grid-area: pin/);
   assert.match(css, /grid-area: rail/);
   assert.match(css, /\.g64-app\[data-device="phone"\] \.g64-software/);
+  assert.match(css, /\.g64-app\[data-device="phone"\] \.g64-software,[\s\S]*?min-width: 44px/);
+  assert.match(css, /\.g64-top-pin \{[\s\S]*?gap: 8px/);
   assert.match(css, /\.g64-iconbtn\.g64-rail-more \{[\s\S]*?display: none/);
   assert.match(css, /\.g64-app\[data-device="phone"\] \.g64-rail-more \{[\s\S]*?display: grid/);
   assert.doesNotMatch(css, /\.g64-screen[\s\S]{0,80}grid-area: pin/);

@@ -31,6 +31,13 @@ const {
   liveCoreReadyToAttach,
   inPlaceAutostartTarget,
   isColdBasicStart,
+  sessionCanAttach,
+  beginColdSession,
+  markSessionReady,
+  markSessionPlay,
+  clearSession,
+  sessionPhase,
+  canvasLooksReady,
   iosPlayKeepsLiveCrt,
   iosMustKeepLiveCore,
   iosInPlaceMediaKind,
@@ -456,10 +463,43 @@ test("folder Play waits for the live core — never a second startWithUrl", () =
     liveCoreReadyToAttach({ hasFs: false, bootHold: false, running: true }),
     false,
   );
+  assert.equal(
+    liveCoreReadyToAttach({
+      hasFs: true,
+      bootHold: false,
+      running: true,
+      bootFile: "",
+    }),
+    false,
+  );
+  assert.equal(
+    liveCoreReadyToAttach({
+      hasFs: true,
+      bootHold: false,
+      running: true,
+      bootFile: "WORK DISK.D64",
+      canvasReady: false,
+      iosPhone: true,
+    }),
+    false,
+  );
+  assert.equal(
+    liveCoreReadyToAttach({
+      hasFs: true,
+      bootHold: false,
+      running: true,
+      bootFile: "WORK DISK.D64",
+      canvasReady: true,
+      iosPhone: true,
+    }),
+    true,
+  );
+  assert.equal(canvasLooksReady({ clientWidth: 8, width: 0 }), false);
+  assert.equal(canvasLooksReady({ clientWidth: 320, width: 384 }), true);
   assert.equal(inPlaceAutostartTarget("WORK DISK.D64", "Paradroid.d64"), "WORK DISK.D64");
   assert.equal(inPlaceAutostartTarget("/WORK DISK.D64", "Burger_Time.d64"), "WORK DISK.D64");
-  assert.equal(inPlaceAutostartTarget(null, "Paradroid.d64"), "Paradroid.d64");
-  assert.equal(inPlaceAutostartTarget("", "/game.d64"), "game.d64");
+  assert.equal(inPlaceAutostartTarget(null, "Paradroid.d64"), "");
+  assert.equal(inPlaceAutostartTarget("", "/game.d64"), "");
   clearLivePlay();
   markLivePlay("Impossible Mission");
   assert.equal(
@@ -485,6 +525,85 @@ test("folder Play waits for the live core — never a second startWithUrl", () =
     true,
   );
   clearLivePlay();
+});
+
+test("unified session: cold → ready → play; attach only after READY", () => {
+  clearSession();
+  assert.equal(sessionPhase(), "off");
+  beginColdSession();
+  assert.equal(sessionPhase(), "cold");
+  assert.equal(
+    sessionCanAttach({
+      hasFs: true,
+      bootHold: false,
+      running: true,
+      bootFile: "WORK DISK.D64",
+      canvasReady: true,
+      iosPhone: true,
+    }),
+    false,
+  );
+  markSessionReady();
+  assert.equal(sessionPhase(), "ready");
+  assert.equal(
+    sessionCanAttach({
+      hasFs: true,
+      bootHold: false,
+      running: true,
+      bootFile: "WORK DISK.D64",
+      canvasReady: true,
+      iosPhone: true,
+    }),
+    true,
+  );
+  assert.equal(
+    sessionCanAttach({
+      hasFs: true,
+      bootHold: false,
+      running: true,
+      bootFile: "",
+      canvasReady: true,
+      iosPhone: true,
+    }),
+    false,
+  );
+  markSessionPlay("Paradroid");
+  assert.equal(sessionPhase(), "play");
+  assert.equal(
+    shouldDropToSplash({
+      playMode: "basic",
+      playLock: false,
+      inGameplay: false,
+      powered: true,
+      hasFs: false,
+      title: "BASIC",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldRefuseStartRecycle({
+      iosPhone: true,
+      powered: true,
+      playMode: "basic",
+      inGameplay: false,
+      title: "BASIC",
+      coldBasic: false,
+    }),
+    true,
+  );
+  assert.equal(
+    shouldRefuseStartRecycle({
+      iosPhone: true,
+      powered: true,
+      playMode: "basic",
+      inGameplay: false,
+      title: "BASIC",
+      coldBasic: true,
+    }),
+    false,
+  );
+  clearSession();
+  assert.equal(sessionPhase(), "off");
 });
 
 test("please-hold dismisses when READY/paint is live — not a 16s timer", () => {
