@@ -67,7 +67,10 @@ import { listPartitions, partitionsForMount, setIecDevice } from "@/lib/emu/sd2i
 import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor } from "@/lib/emu/vice-extras";
 import { HwHoldChip } from "@/components/emu/HwHoldChip";
 import {
+  beginColdSession,
+  canvasLooksReady,
   clearLivePlay,
+  clearSession,
   iosInPlaceMediaKind,
   iosMustKeepLiveCore,
   iosPlayKeepsLiveCrt,
@@ -77,7 +80,11 @@ import {
   livePlayTitle,
   mapHasDrive,
   markLivePlay,
+  markSessionPlay,
+  markSessionReady,
   planPlay,
+  sessionCanAttach,
+  sessionPhase,
   shouldDropToSplash,
   shouldRecoverBoot,
   shouldRefuseStartRecycle,
@@ -142,6 +149,12 @@ function playLockDuration(mode: string): number {
 function gameplayReadyDelay(lockMs: number): number {
   if (isTouchMobile()) return lockMs + 300;
   return Math.max(lockMs + 4000, 20_000);
+}
+
+function playerCanvasReady(root?: HTMLElement | null) {
+  const el = root ?? (typeof document !== "undefined" ? document.getElementById("grok64-player") : null);
+  const canvas = el?.querySelector("canvas:not(.g64-ios-present)") as HTMLCanvasElement | null;
+  return canvasLooksReady(canvas);
 }
 
 const PlayerMount = memo(function PlayerMount() {
@@ -415,6 +428,9 @@ export function Grok64App() {
       running: () => useEmu.getState().running,
       booting: () => useEmu.getState().booting,
       playLock: () => playLockRef.current,
+      bootHold: () => bootHoldRef.current,
+      session: () => sessionPhase(),
+      bootFile: () => bootFileOf(emuRef.current),
       paintSettled: () => isIosPaintSettled(),
       paintPath: () => iosCrtPath(),
       mirrorPainted: () => isIosMirrorPainted(),
@@ -641,9 +657,19 @@ export function Grok64App() {
       const root = document.getElementById("grok64-player");
       if (!root) return;
       dismissEjsPrompts(root, useEmu.getState().booting ? "boot" : "play");
-      const canvas = root.querySelector("canvas");
+      const canvas = root.querySelector("canvas:not(.g64-ios-present)") as HTMLCanvasElement | null;
+      const cold = sessionPhase() === "cold" || bootHoldRef.current;
       if (canvas && canvas.clientWidth > 16 && !bootHoldRef.current && !playLockRef.current && emuRef.current) {
         useEmu.getState().setRunning(true);
+      }
+      if (
+        sessionPhase() === "cold" &&
+        !bootHoldRef.current &&
+        emuRef.current &&
+        coreHasFs(emuRef.current) &&
+        playerCanvasReady(root)
+      ) {
+        markSessionReady();
       }
       if (canvas && (canvas.width < 64 || canvas.height < 64)) {
         fitEmu(root, emuRef.current);
@@ -656,14 +682,22 @@ export function Grok64App() {
           hold: true,
           booting: useEmu.getState().booting,
           running: useEmu.getState().running,
-          paintSettled: isIosPaintSettled(),
+          paintSettled: isIosPaintSettled() && playerCanvasReady(root),
         })
       ) {
         setPictureHold(false);
         if (pictureHoldTimer.current) window.clearTimeout(pictureHoldTimer.current);
       }
-      if (isIosPhone() && emuRef.current && (useEmu.getState().running || useEmu.getState().booting) && !isIosPaintSettled()) {
-        presentIosCrt(emuRef.current, root, useEmu.getState().booting ? "booting" : "running");
+      // Cold BASIC must keep presenting even if an early presentIosCrt marked
+      // paintSettled on a 0-size canvas — that was black-until-folder-tap.
+      if (
+        isIosPhone() &&
+        emuRef.current &&
+        (useEmu.getState().running || useEmu.getState().booting || cold)
+      ) {
+        if (cold || !isIosPaintSettled() || !playerCanvasReady(root)) {
+          presentIosCrt(emuRef.current, root, useEmu.getState().booting || cold ? "booting" : "running");
+        }
       }
       if (isIosPhone() && emuRef.current && useEmu.getState().running && !useEmu.getState().muted) {
         if (audioLocked(emuRef.current)) unlockAudio(emuRef.current);
@@ -783,7 +817,7 @@ export function Grok64App() {
           inGameplayRef.current = true;
           clearMenuJoyInput();
           const unlockedTitle = useEmu.getState().currentTitle;
-          markLivePlay(unlockedTitle);
+          markSessionPlay(unlockedTitle);
           glog("play-unlock", { title: unlockedTitle, disarmed: true });
           persistGateRef.current = true;
           const vol = useEmu.getState();
@@ -823,6 +857,7 @@ export function Grok64App() {
     glog("user-reset-ready", { prev: playModeRef.current, title: useEmu.getState().currentTitle });
     playModeRef.current = "basic";
     clearLivePlay();
+    markSessionReady();
     cracktroOnceRef.current = "";
     cartLiveRef.current = false;
     setCartLive(false);
@@ -882,6 +917,7 @@ export function Grok64App() {
     startIosAutoPaint(() => {
       if (gen != null && loadGenRef.current !== gen) return;
       if (playLockRef.current || bootHoldRef.current) return;
+      if (sessionPhase() === "cold" && !playerCanvasReady(playerEl)) return;
       useEmu.getState().setBooting(false);
       glog("ios-frame-ok", { tag });
     });
@@ -941,7 +977,7 @@ export function Grok64App() {
       const playerEl = document.getElementById("grok64-player");
       fitEmu(playerEl, emu);
       s.setCurrentTitle(spec.title);
-      if (spec.autostartAfterReady) markLivePlay(spec.title);
+      if (spec.autostartAfterReady) markSessionPlay(spec.title);
       applyEmuVolume(emu, useEmu.getState().muted, useEmu.getState().volume);
       gestureUnlockAudio(emu);
       pendingKickRef.current = false;
@@ -961,13 +997,25 @@ export function Grok64App() {
         if (prep.jiffy) setBusy("Applying JiffyDOS…", 72);
         hardReset(emu);
         applyIecUnit(emu, spec.live.iec, spec.live.unit);
-        bootHoldRef.current = false;
         s.setRunning(true);
-        // #59: dismiss please-hold as soon as READY is running — do not sit
-        // on a 16s timer while the CRT is already live.
+        // Keep bootHold until the READY canvas is actually sized so Folder
+        // Play cannot Autostart-reset before the #54 present lands.
+        if (isIosPhone()) {
+          const playerEl = document.getElementById("grok64-player");
+          const t0 = Date.now();
+          while (Date.now() - t0 < 4000) {
+            if (loadGenRef.current !== gen) return;
+            presentIosCrt(emu, playerEl, "settle");
+            if (playerCanvasReady(playerEl)) break;
+            await new Promise((r) => setTimeout(r, 80));
+          }
+          kickIosAfterEmuAction(emu, "settle", gen);
+        }
+        bootHoldRef.current = false;
+        markSessionReady();
         setPictureHold(false);
         if (pictureHoldTimer.current) window.clearTimeout(pictureHoldTimer.current);
-        if (isIosPhone()) kickIosAfterEmuAction(emu, "settle", gen);
+        if (isIosPhone()) kickIosAfterEmuAction(emu, "ready", gen);
         bootTimersRef.current.push(
           window.setTimeout(() => {
             if (loadGenRef.current !== gen) return;
@@ -1308,49 +1356,48 @@ export function Grok64App() {
       if (waitLive || (emuRef.current && !coreHasFs(emuRef.current))) {
         s.setBooting(true, "Waiting for VICE…");
         const t0 = Date.now();
-        const budget = waitLive ? (isIosPhone() ? 28000 : 16000) : 8000;
+        const budget = waitLive ? (isIosPhone() ? 45000 : 16000) : 8000;
         while (Date.now() - t0 < budget) {
           const fs = Boolean(emuRef.current && coreHasFs(emuRef.current));
-          // Cold BASIC settle + first READY present — do not attach (or
-          // Autostart-reset) until the live core is running.
+          const bootFile = bootFileOf(emuRef.current);
+          const canvasReady = !isIosPhone() || playerCanvasReady();
+          // One session gate: READY/play + mounted #8 name. Do not attach
+          // (or Autostart-reset) during cold bootHold or on a nameless disk.
           if (
-            liveCoreReadyToAttach({
+            sessionCanAttach({
               hasFs: fs,
               bootHold: bootHoldRef.current,
               running: useEmu.getState().running,
+              bootFile,
+              canvasReady,
+              iosPhone: isIosPhone(),
             })
           ) {
             break;
           }
           await new Promise((r) => setTimeout(r, 80));
         }
-        // #54: READY present lands on the settle/ready kicks. Give that a
-        // beat before Play Autostart resets the CRT again.
-        if (
-          isIosPhone() &&
-          liveCoreReadyToAttach({
-            hasFs: Boolean(emuRef.current && coreHasFs(emuRef.current)),
-            bootHold: bootHoldRef.current,
-            running: useEmu.getState().running,
-          })
-        ) {
-          await new Promise((r) => setTimeout(r, 180));
-        }
         glog("play-wait-core", {
           emu: Boolean(emuRef.current),
           fs: Boolean(emuRef.current && coreHasFs(emuRef.current)),
           hold: bootHoldRef.current,
           running: useEmu.getState().running,
+          bootFile: bootFileOf(emuRef.current),
+          canvas: playerCanvasReady(),
+          phase: sessionPhase(),
           ms: Date.now() - t0,
           waitLive,
         });
       }
       if (
         waitLive &&
-        !liveCoreReadyToAttach({
+        !sessionCanAttach({
           hasFs: Boolean(emuRef.current && coreHasFs(emuRef.current)),
           bootHold: bootHoldRef.current,
           running: useEmu.getState().running,
+          bootFile: bootFileOf(emuRef.current),
+          canvasReady: !isIosPhone() || playerCanvasReady(),
+          iosPhone: isIosPhone(),
         })
       ) {
         glog("play-wait-timeout", {
@@ -1358,6 +1405,8 @@ export function Grok64App() {
           fs: Boolean(emuRef.current && coreHasFs(emuRef.current)),
           hold: bootHoldRef.current,
           running: useEmu.getState().running,
+          bootFile: bootFileOf(emuRef.current),
+          phase: sessionPhase(),
         });
         useEmu.getState().setBooting(false);
         toast.error("Play stayed on the live CRT — C64 is still starting.");
@@ -1370,7 +1419,7 @@ export function Grok64App() {
       sessionUnitRef.current = plan.live.unit;
       setPictureHold(false);
       const title = opts.title ?? filename;
-      if (!work) markLivePlay(title);
+      if (!work) markSessionPlay(title);
       const assigned = detectJoyPort({ names: [filename, title] });
       const prevPort = useEmu.getState().joyPort;
       if (prevPort !== assigned) {
@@ -1407,13 +1456,16 @@ export function Grok64App() {
         const playIec = attach?.iec ?? plan.live.iec;
         const playAttachUnit = attach?.unit ?? plan.live.unit;
         s.setBooting(true, plan.status, 35);
-        // Overwrite the mounted unit-8 image (WORK DISK.D64). A new
-        // filename leaves the blank work disk attached → FILE NOT FOUND.
-        const wrote = attach
-          ? attachAutostartDisk(emuRef.current, payloadDisk, bootName, playIec, playAttachUnit)
-          : swapBootDisk(emuRef.current, payloadDisk, bootName);
+        // Overwrite the mounted unit-8 image only. A new filename leaves
+        // the blank work disk attached → FILE NOT FOUND (#60/#61).
+        const mounted = inPlaceAutostartTarget(bootFileOf(emuRef.current), bootName);
+        const wrote = mounted
+          ? attach
+            ? attachAutostartDisk(emuRef.current, payloadDisk, mounted, playIec, playAttachUnit)
+            : swapBootDisk(emuRef.current, payloadDisk, mounted)
+          : false;
         if (wrote) {
-          emuRef.current.fileName = inPlaceAutostartTarget(bootFileOf(emuRef.current), bootName);
+          emuRef.current.fileName = mounted;
           if (canHotSwap) {
             glog("hot-swap", {
               filename,
@@ -1491,7 +1543,7 @@ export function Grok64App() {
           // #13: never reset paint / wipe the live canvas on in-place Play.
           if (isIosPhone() && !keepLiveCrt && !mustKeep) resetIosPaintState();
           s.setCurrentTitle(title);
-          if (!work) markLivePlay(title);
+          if (!work) markSessionPlay(title);
           s.setRunning(true);
           if (work) {
             hardReset(emuRef.current);
@@ -1544,7 +1596,7 @@ export function Grok64App() {
           setAwaitingStart(false);
           clearBootTimers();
           s.setCurrentTitle(title);
-          markLivePlay(title);
+          markSessionPlay(title);
           s.setRunning(true);
           autostartAfterReady(emuRef.current, true, { autoloadWarp: false });
           if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, "play-recycle");
@@ -1563,8 +1615,20 @@ export function Grok64App() {
         toast.error("Play stayed on the live CRT — cartridge did not attach.");
         return;
       }
-      if (waitLive || mustKeep) {
-        glog("play-start-refused", { filename, title, kind: origKind, waitLive, mustKeep, live });
+      const stayLive =
+        waitLive ||
+        mustKeep ||
+        (isIos() && useEmu.getState().powered && !work && sessionPhase() !== "off");
+      if (stayLive) {
+        glog("play-start-refused", {
+          filename,
+          title,
+          kind: origKind,
+          waitLive,
+          mustKeep,
+          live,
+          phase: sessionPhase(),
+        });
         useEmu.getState().setBooting(false);
         toast.error("Play stayed on the live CRT — did not remount the splash.");
         return;
@@ -1663,7 +1727,7 @@ export function Grok64App() {
     playLockRef.current = false;
     cartLiveRef.current = false;
     setCartLive(false);
-    clearLivePlay();
+    beginColdSession();
     cracktroOnceRef.current = "";
     pokeAudioUnlock();
     gestureUnlockAudio(emuRef.current);
@@ -1744,6 +1808,7 @@ export function Grok64App() {
     playModeRef.current = "basic";
     sessionIecRef.current = plan.live.iec;
     sessionUnitRef.current = plan.live.unit;
+    beginColdSession();
     st.setRunning(false);
     st.setBooting(true, "Starting Commodore 64…", 8);
     bootKickRef.current = true;
@@ -1771,7 +1836,7 @@ export function Grok64App() {
         glog("boot-recover-fail-kept", { mode: playModeRef.current });
         return;
       }
-      clearLivePlay();
+      clearSession();
       useEmu.setState({ powered: false, booting: false, running: false });
       toast.error("The C64 didn’t start. Tap power to try again.");
     });
@@ -1848,7 +1913,7 @@ export function Grok64App() {
         glog("boot-stuck-kept", { mode: playModeRef.current });
         return;
       }
-      clearLivePlay();
+      clearSession();
       useEmu.setState({ powered: false, booting: false, running: false, bootProgress: 0 });
       toast.error("The C64 didn’t start. Tap power to try again.");
     }, isIosPhone() ? 45000 : 20000);
@@ -1859,13 +1924,15 @@ export function Grok64App() {
   }, [s.powered, s.booting, recoverBoot]);
   useEffect(() => {
     if (!s.powered || !isIosPhone()) return;
-    if (isIosPaintSettled()) return;
+    const cold = sessionPhase() === "cold" || bootHoldRef.current;
+    if (isIosPaintSettled() && playerCanvasReady() && !cold) return;
     const playerEl = document.getElementById("grok64-player");
-    if (!s.booting && !s.running) return;
-    if (s.booting || (s.running && !isIosPaintSettled())) {
-      presentIosCrt(emuRef.current, playerEl, s.booting ? "booting" : "running");
+    if (!s.booting && !s.running && !cold) return;
+    if (s.booting || cold || (s.running && (!isIosPaintSettled() || !playerCanvasReady()))) {
+      presentIosCrt(emuRef.current, playerEl, s.booting || cold ? "booting" : "running");
       startIosAutoPaint(() => {
         if (bootHoldRef.current || playLockRef.current) return;
+        if (sessionPhase() === "cold" && !playerCanvasReady()) return;
         useEmu.getState().setBooting(false);
       });
     }
@@ -1889,7 +1956,7 @@ export function Grok64App() {
         hold: pictureHold,
         booting: s.booting,
         running: s.running,
-        paintSettled: isIosPaintSettled(),
+        paintSettled: isIosPaintSettled() && (!isIosPhone() || playerCanvasReady()),
       })
     ) {
       return;

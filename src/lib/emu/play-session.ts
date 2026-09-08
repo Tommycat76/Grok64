@@ -140,33 +140,95 @@ export function isColdBasicStart(opts: { autostart?: boolean; title?: string | n
   return opts.autostart === false && isBasicTitle(opts.title);
 }
 
+export type SessionPhase = "off" | "cold" | "ready" | "play";
+
+let sessionMem: SessionPhase = "off";
+
+export function sessionPhase(): SessionPhase {
+  if (sessionMem === "play" || livePlayTitle()) return "play";
+  return sessionMem;
+}
+
+/** Power / recover — one cold BASIC session. Clears leftover play locks. */
+export function beginColdSession() {
+  sessionMem = "cold";
+  clearLivePlay();
+}
+
+/** BASIC settle + READY present landed. Play may attach after this. */
+export function markSessionReady() {
+  if (sessionMem === "play") return;
+  sessionMem = "ready";
+}
+
+export function markSessionPlay(title?: string | null) {
+  sessionMem = "play";
+  markLivePlay(title);
+}
+
+export function clearSession() {
+  sessionMem = "off";
+  clearLivePlay();
+}
+
+export function canvasLooksReady(canvas: { clientWidth: number; width?: number } | null | undefined): boolean {
+  if (!canvas) return false;
+  const backing = canvas.width ?? 0;
+  return canvas.clientWidth > 16 && (backing >= 8 || canvas.clientWidth >= 8);
+}
+
 /**
- * Folder / Play may attach only after the live core has FS and cold
- * `bootHold` has lifted. On iOS also wait until `running` so the #54
- * READY present can land before Autostart resets the CRT.
+ * One attach gate for Folder Play. #59/#60/#61 stacked bootHold / running /
+ * write-new-name and raced: attach before a mounted #8 name, or Autostart
+ * before READY present. Wait until the cold session is ready *and* the
+ * live boot file exists — never invent a new unit-8 filename.
+ */
+export function sessionCanAttach(input: {
+  hasFs: boolean;
+  bootHold: boolean;
+  running?: boolean;
+  bootFile?: string | null;
+  canvasReady?: boolean;
+  iosPhone?: boolean;
+}): boolean {
+  const phase = sessionPhase();
+  if (phase !== "ready" && phase !== "play") return false;
+  return liveCoreReadyToAttach(input);
+}
+
+/**
+ * Folder / Play may attach only after the live core has FS, cold
+ * `bootHold` has lifted, and (when provided) a mounted boot file exists.
+ * On iOS also wait until `running` and the canvas is actually sized so
+ * the #54 READY present can land before Autostart resets the CRT.
  */
 export function liveCoreReadyToAttach(input: {
   hasFs: boolean;
   bootHold: boolean;
   running?: boolean;
+  bootFile?: string | null;
+  canvasReady?: boolean;
+  iosPhone?: boolean;
 }): boolean {
   if (!input.hasFs || input.bootHold) return false;
   if (input.running === false) return false;
+  if (input.bootFile !== undefined && !String(input.bootFile).replace(/^\//, "").trim()) return false;
+  if (input.iosPhone && input.canvasReady === false) return false;
   return true;
 }
 
 /**
  * In-place floppy Play must overwrite the *mounted* boot image (usually
  * WORK DISK.D64). Writing a new filename leaves unit 8 as the blank work
- * disk — LOAD"*",8,1 then FILE NOT FOUND (#60). Cart/CRT never uses this.
+ * disk — LOAD"*",8,1 then FILE NOT FOUND (#60). If nothing is mounted yet,
+ * return empty so Play waits — never invent a game name on #8.
+ * Cart/CRT never uses this.
  */
 export function inPlaceAutostartTarget(
   currentBoot: string | null | undefined,
-  preferred: string,
+  _preferred?: string,
 ): string {
-  const live = (currentBoot || "").replace(/^\//, "").trim();
-  if (live) return live;
-  return preferred.replace(/^\//, "").trim() || preferred;
+  return (currentBoot || "").replace(/^\//, "").trim();
 }
 
 /**
@@ -247,7 +309,7 @@ export function shouldDropToSplash(input: {
 }): boolean {
   if (!input.powered) return false;
   if (input.playLock || input.inGameplay) return false;
-  if (input.livePlay || livePlayTitle()) return false;
+  if (sessionPhase() === "play" || input.livePlay || livePlayTitle()) return false;
   if (!isBasicTitle(input.title)) return false;
   if (input.playMode !== "basic") return false;
   if (input.hasFs) return false;
@@ -270,6 +332,7 @@ export function shouldRefuseStartRecycle(input: {
 }): boolean {
   if (!input.iosPhone || !input.powered) return false;
   if (input.coldBasic) return false;
+  if (sessionPhase() === "play") return true;
   if (input.playMode !== "basic" || input.inGameplay) return true;
   if (input.livePlay || livePlayTitle()) return true;
   return !isBasicTitle(input.title);
@@ -606,7 +669,7 @@ export function shouldRecoverBoot(input: {
 }): boolean {
   if (!input.powered) return false;
   if (input.playLock || input.inGameplay) return false;
-  if (input.livePlay || livePlayTitle()) return false;
+  if (sessionPhase() === "play" || input.livePlay || livePlayTitle()) return false;
   if (!isBasicTitle(input.title)) return false;
   if (input.playMode !== "basic") return false;
   if (input.hasFs) return false;

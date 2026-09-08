@@ -1808,15 +1808,19 @@ export function swapBootDisk(emu: EjsInstance | null, data: Uint8Array, fallback
 export function attachAutostartDisk(
   emu: EjsInstance | null,
   data: Uint8Array,
-  fallbackName?: string | null,
+  _fallbackName?: string | null,
   iec: IecDrive = "1541",
   unit: IecUnit = 8,
 ): boolean {
   applyIecUnit(emu, iec, unit);
-  const wrote = swapBootDisk(emu, data, fallbackName);
+  // Only overwrite the mounted boot image. A new filename leaves unit 8
+  // as the blank work disk — LOAD"*",8,1 then FILE NOT FOUND (#60/#61).
+  const mounted = bootFileOf(emu);
+  if (!mounted) return false;
+  const wrote = writeBootFile(emu, data, mounted);
   if (wrote) {
-    const boot = bootFileOf(emu) ?? fallbackName?.replace(/^\//, "") ?? null;
-    if (boot) unitMounts.set(unit, boot);
+    unitMounts.set(unit, mounted);
+    if (emu) emu.fileName = mounted;
     applyIecUnit(emu, iec, unit);
   }
   return wrote;

@@ -238,7 +238,7 @@ html, body, #app {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
   position: relative;
   z-index: 2;
   pointer-events: auto;
@@ -331,8 +331,10 @@ html, body, #app {
     "brand pin"
     "rail rail";
   align-items: center;
-  column-gap: 6px;
-  row-gap: 4px;
+  column-gap: 10px;
+  row-gap: 6px;
+  padding-left: max(10px, env(safe-area-inset-left, 0px));
+  padding-right: max(10px, env(safe-area-inset-right, 0px));
   overflow: visible;
 }
 .g64-app[data-device="phone"] .g64-top-brand {
@@ -342,6 +344,8 @@ html, body, #app {
 .g64-app[data-device="phone"] .g64-top-pin {
   grid-area: pin;
   flex: 0 0 auto;
+  flex-shrink: 0;
+  gap: 8px;
   z-index: 3;
 }
 .g64-app[data-device="phone"] .g64-top-rail {
@@ -357,6 +361,10 @@ html, body, #app {
 .g64-app[data-device="phone"] .g64-disk,
 .g64-app[data-device="phone"] .g64-rail-more {
   flex: 0 0 44px;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
   pointer-events: auto;
   position: relative;
   z-index: 82;
@@ -1586,6 +1594,16 @@ div[class*="ejs_virtual"] {
     width: 40px;
     height: 40px;
     flex-basis: 40px;
+  }
+  .g64-app[data-device="phone"] .g64-top-pin .g64-iconbtn,
+  .g64-app[data-device="phone"] .g64-software,
+  .g64-app[data-device="phone"] .g64-disk,
+  .g64-app[data-device="phone"] .g64-rail-more {
+    width: 44px;
+    height: 44px;
+    flex-basis: 44px;
+    min-width: 44px;
+    min-height: 44px;
   }
   .g64-sheet {
     max-height: min(92dvh, calc(100dvh - env(safe-area-inset-top, 0px)));
