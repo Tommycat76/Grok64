@@ -122,14 +122,28 @@ test("iOS Play after READY keeps the live canvas (#18/#30, not #37 WASM recycle)
   assert.match(app, /play-inplace-no-fs/);
   assert.match(app, /writeBootFile/);
   assert.match(app, /iosInPlaceMediaKind/);
+  assert.match(app, /shouldWaitForLiveCore/);
+  assert.match(app, /play-wait-core/);
+  assert.match(app, /play-start-refused/);
+  assert.match(app, /isColdBasicStart/);
+  assert.match(app, /coldBasic:/);
   const start = app.indexOf("const playBuffer");
   const play = app.slice(start, app.indexOf("playBufferRef.current = playBuffer"));
   assert.match(play, /keepLiveCrt/);
   assert.match(play, /mustKeep/);
   assert.match(play, /floppyKeep/);
+  assert.match(play, /waitLive/);
+  assert.match(play, /bootHoldRef/);
   assert.match(play, /play-inplace-failed/);
   assert.match(play, /if \(canHotSwap\) \{/);
   assert.match(play, /play-recycle-inplace/);
+  assert.match(play, /fileName = bootName/);
+  assert.match(play, /isDiskKind\(origKind\)/);
+  const stayIdx = play.indexOf("if (waitLive || mustKeep)");
+  const startUrlIdx = play.indexOf("await startWithUrl");
+  assert.ok(stayIdx >= 0 && startUrlIdx > stayIdx, "folder Play must refuse startWithUrl before any remount");
+  const afterStay = play.slice(stayIdx);
+  assert.match(afterStay, /play-start-refused/);
 });
 
 test("Space is muted until Autostart is disarmed; cracktro nudge is after unlock", () => {
@@ -173,6 +187,10 @@ test("iOS mid-play persist and start-recycle stay locked to live play", () => {
   const session = readFileSync(join(root, "src/lib/emu/play-session.ts"), "utf8");
   assert.match(session, /shouldSkipPlayPersist/);
   assert.match(session, /shouldRefuseStartRecycle/);
+  assert.match(session, /shouldWaitForLiveCore/);
+  assert.match(session, /isColdBasicStart/);
+  assert.match(app, /shouldWaitForLiveCore/);
+  assert.match(app, /isColdBasicStart/);
   assert.match(session, /markLivePlay/);
   assert.match(session, /g64-live-play/);
   assert.match(app, /shouldSkipPlayPersist/);

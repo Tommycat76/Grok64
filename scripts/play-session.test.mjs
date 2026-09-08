@@ -27,6 +27,8 @@ const {
   shouldRefuseStartRecycle,
   shouldSkipPlayPersist,
   shouldDismissPictureHold,
+  shouldWaitForLiveCore,
+  isColdBasicStart,
   iosPlayKeepsLiveCrt,
   iosMustKeepLiveCore,
   iosInPlaceMediaKind,
@@ -405,9 +407,62 @@ test("iPhone powered floppy Play must keep the live core", () => {
   assert.equal(iosMustKeepLiveCore({ iosPhone: true, powered: true, hasEmu: true, kind: "basic" }), false);
   assert.equal(iosMustKeepLiveCore({ iosPhone: true, powered: true, hasEmu: true, kind: "cart" }), true);
   assert.equal(iosMustKeepLiveCore({ iosPhone: true, powered: true, hasEmu: true, kind: "tape" }), true);
+  assert.equal(iosMustKeepLiveCore({ ios: true, powered: true, hasEmu: true, kind: "cart" }), true);
+  assert.equal(iosMustKeepLiveCore({ ios: true, powered: true, hasEmu: true, kind: "floppy" }), true);
   assert.equal(iosPlayKeepsLiveCrt({ iosPhone: true, hasLiveFs: true, kind: "floppy" }), true);
   assert.equal(iosPlayKeepsLiveCrt({ iosPhone: true, hasLiveFs: true, kind: "prg" }), true);
   assert.equal(iosPlayKeepsLiveCrt({ iosPhone: true, hasLiveFs: true, kind: "cart" }), false);
+});
+
+test("folder Play waits for the live core — never a second startWithUrl", () => {
+  assert.equal(
+    shouldWaitForLiveCore({ iosPhone: true, powered: true, kind: "floppy" }),
+    true,
+  );
+  assert.equal(
+    shouldWaitForLiveCore({ ios: true, powered: true, kind: "cart" }),
+    true,
+  );
+  assert.equal(
+    shouldWaitForLiveCore({ iosPhone: true, powered: true, kind: "basic", work: true }),
+    false,
+  );
+  assert.equal(
+    shouldWaitForLiveCore({ iosPhone: true, powered: false, kind: "floppy" }),
+    false,
+  );
+  assert.equal(
+    shouldWaitForLiveCore({ iosPhone: false, powered: true, kind: "floppy" }),
+    false,
+  );
+  assert.equal(isColdBasicStart({ autostart: false, title: "BASIC" }), true);
+  assert.equal(isColdBasicStart({ autostart: true, title: "BASIC" }), false);
+  assert.equal(isColdBasicStart({ autostart: false, title: "Impossible Mission" }), false);
+  clearLivePlay();
+  markLivePlay("Impossible Mission");
+  assert.equal(
+    shouldRefuseStartRecycle({
+      iosPhone: true,
+      powered: true,
+      playMode: "basic",
+      inGameplay: true,
+      title: "BASIC",
+      coldBasic: true,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldRefuseStartRecycle({
+      iosPhone: true,
+      powered: true,
+      playMode: "disk",
+      inGameplay: false,
+      title: "Boulder Dash",
+      coldBasic: false,
+    }),
+    true,
+  );
+  clearLivePlay();
 });
 
 test("please-hold dismisses when READY/paint is live — not a 16s timer", () => {
