@@ -57,7 +57,9 @@ Host/play/audio/UI work that **cannot** touch the list above:
 - Autostart disarm / Space-as-C64-only / Reset ignore Space (#41 / #32).
 - In-place unit-8 Play recycle (never WASM `destroyEmu` after READY) (#13).
 - Splash remount guards (`powered` must not drop mid-play).
+- Live-play session lock + skip iOS `captureState`/FS persist during floppy play (#14 remount).
 - CriOS `AudioContext` unlock / unmute (no paint-path change).
+- Top-rail CSS only (header width / icon spread — not CRT glass).
 - A please-hold **DOM overlay** outside the canvas / WebGL host path
   (existing `.g64-boot` chip is the model — `pointer-events: none`, does
   not steal context or remount).

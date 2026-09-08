@@ -24,8 +24,13 @@ const {
   userResetKind,
   shouldRecoverBoot,
   shouldDropToSplash,
+  shouldRefuseStartRecycle,
+  shouldSkipPlayPersist,
   iosPlayKeepsLiveCrt,
   iosMustKeepLiveCore,
+  markLivePlay,
+  clearLivePlay,
+  livePlayTitle,
 } = await server.ssrLoadModule("/src/lib/emu/play-session.ts");
 const {
   classifyPress,
@@ -398,7 +403,75 @@ test("iPhone powered floppy Play must keep the live core", () => {
   assert.equal(iosMustKeepLiveCore({ iosPhone: true, powered: true, hasEmu: true, kind: "basic" }), false);
 });
 
+test("live-play lock survives a remount that reset refs to basic", () => {
+  clearLivePlay();
+  markLivePlay("Paradroid");
+  assert.equal(livePlayTitle(), "Paradroid");
+  assert.equal(
+    shouldDropToSplash({
+      playMode: "basic",
+      playLock: false,
+      inGameplay: false,
+      powered: true,
+      hasFs: false,
+      title: "BASIC",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldRecoverBoot({
+      playMode: "basic",
+      playLock: false,
+      inGameplay: false,
+      powered: true,
+      hasFs: false,
+      title: "BASIC",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldRefuseStartRecycle({
+      iosPhone: true,
+      powered: true,
+      playMode: "basic",
+      inGameplay: false,
+      title: "BASIC",
+    }),
+    true,
+  );
+  assert.equal(
+    shouldSkipPlayPersist({
+      iosPhone: true,
+      playMode: "disk",
+      inGameplay: true,
+      title: "Paradroid",
+    }),
+    true,
+  );
+  assert.equal(
+    shouldSkipPlayPersist({
+      iosPhone: false,
+      playMode: "disk",
+      inGameplay: true,
+      title: "Paradroid",
+    }),
+    false,
+  );
+  clearLivePlay();
+  assert.equal(
+    shouldRefuseStartRecycle({
+      iosPhone: true,
+      powered: true,
+      playMode: "basic",
+      inGameplay: false,
+      title: "BASIC",
+    }),
+    false,
+  );
+});
+
 test("splash remount is only for a failed cold BASIC start", () => {
+  clearLivePlay();
   assert.equal(
     shouldDropToSplash({
       playMode: "disk",
@@ -446,6 +519,7 @@ test("splash remount is only for a failed cold BASIC start", () => {
 });
 
 test("boot recover must not replace a live floppy session with BASIC", () => {
+  clearLivePlay();
   assert.equal(
     shouldRecoverBoot({
       playMode: "disk",

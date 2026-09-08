@@ -190,10 +190,15 @@ html, body, #app {
 .g64-top {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 6px;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 10px;
   min-height: 44px;
   flex: 0 0 auto;
+  align-self: stretch;
+  width: calc(100% - 16px);
+  max-width: calc(100% - 16px);
+  box-sizing: border-box;
   position: relative;
   z-index: 50;
   margin: 4px 8px 8px;
@@ -213,10 +218,10 @@ html, body, #app {
 }
 .g64-top-rail {
   display: flex;
-  flex: 1 1 auto;
-  flex-wrap: wrap;
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
   min-width: 0;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
@@ -230,8 +235,12 @@ html, body, #app {
 }
 .g64-top-icons {
   display: flex;
-  flex: none;
+  flex: 1 1 auto;
   align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  min-width: 0;
+  margin-left: auto;
 }
 .g64-chip-gate {
   letter-spacing: 0.08em;
@@ -1429,12 +1438,17 @@ div[class*="ejs_virtual"] {
     white-space: nowrap;
   }
   .g64-top-rail {
-    flex: 1 1 auto;
+    flex: 0 1 auto;
     flex-wrap: nowrap;
     overflow-x: auto;
     min-width: 0;
     -webkit-overflow-scrolling: touch;
     scroll-snap-type: x proximity;
+  }
+  .g64-top-icons {
+    flex: 1 1 auto;
+    justify-content: flex-end;
+    gap: 10px;
   }
   .g64-chip {
     flex-shrink: 0;

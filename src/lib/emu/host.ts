@@ -660,12 +660,23 @@ export async function bootEmulator(el: HTMLElement, cfg: BootConfig): Promise<Ej
   return emu;
 }
 
+function audioCtxLocked(ctx: { state?: string } | null | undefined): boolean {
+  return ctx?.state === "suspended" || ctx?.state === "interrupted";
+}
+
+function resumeAudioCtx(ctx: { state?: string; resume?: () => Promise<void> } | null | undefined) {
+  if (!ctx || typeof ctx.resume !== "function") return;
+  if (audioCtxLocked(ctx)) void ctx.resume().catch(() => undefined);
+}
+
 export function audioLocked(emu: EjsInstance | null): boolean {
   try {
-    const sources = emu?.Module?.AL?.currentCtx?.sources;
+    const al = emu?.Module?.AL?.currentCtx;
+    if (audioCtxLocked(al as { state?: string } | undefined)) return true;
+    const sources = al?.sources;
     if (sources) {
       for (const src of sources) {
-        if (src?.gain?.context?.state === "suspended") return true;
+        if (audioCtxLocked(src?.gain?.context)) return true;
       }
     }
   } catch {
@@ -676,13 +687,12 @@ export function audioLocked(emu: EjsInstance | null): boolean {
 
 export function unlockAudio(emu: EjsInstance | null) {
   try {
-    const sources = emu?.Module?.AL?.currentCtx?.sources;
+    const al = emu?.Module?.AL?.currentCtx;
+    resumeAudioCtx(al as { state?: string; resume?: () => Promise<void> } | undefined);
+    const sources = al?.sources;
     if (sources) {
       for (const src of sources) {
-        const ctx = src?.gain?.context;
-        if (ctx && ctx.state === "suspended") {
-          void ctx.resume().catch(() => undefined);
-        }
+        resumeAudioCtx(src?.gain?.context);
       }
     }
   } catch {

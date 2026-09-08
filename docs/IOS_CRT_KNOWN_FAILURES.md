@@ -288,6 +288,35 @@ existing GL canvas. `plan.recycle` stays true on iPhone (never the
 stale-session `hot-swap` log → DNP). WASM `destroyEmu` is only for a
 cold core with no FS.
 
+### 14. #56 Play win, then Paradroid transfer remounts splash
+
+`main@66d4874` / PR **#56** (on #55): Tom played Paradroid — CRT painted,
+Briefing shown, Play worked pretty good. Shortly after the **first
+circuit / transfer mini-game** started → remount to the power button.
+No SID. Top rail cramped left.
+
+**Not a CRT paint theory.** Do not touch `preserveDrawingBuffer`, VICE
+backing, ios-paint/present, or 384:272 glass. Archaeology after #56:
+
+- `shouldDropToSplash` / `boot-stuck` / `recoverBoot` already refuse a
+  live floppy title **if refs survive**. A React remount resets
+  `playModeRef` to `basic` and `inGameplayRef` to false; `currentTitle`
+  is not persisted. Then mount-`recoverBoot` calls `startWithUrl` (old
+  refuse only checked `playMode !== "basic"`) → second VICE / fail →
+  `powered: false`.
+- Periodic `persistNow` (`captureState` + VICE FS walk every 20s) during
+  floppy play can kill the CriOS tab. Reload starts at `powered: false`
+  (splash). Transfer I/O + savestate is the likely coincidence.
+
+This tree: skip iOS persist during live floppy play; session live-play
+lock so recover / splash / start-recycle refuse even if refs reset;
+apply volume + AL unlock after Play unlock; widen the top rail (CSS
+only). Keep #54 host / #55 in-place Play / PETSCII #32 / #41.
+
+**Residual:** if CriOS still discards the tab from the transfer game
+itself (VICE/raster), reload still shows the power splash. Not a PASS
+until Tom plays through transfer.
+
 ---
 
 ## Briefly WORKED (do not regress these unrelated wins)

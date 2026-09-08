@@ -39,7 +39,9 @@ Current ship: that restored **host** path + live WebGL presentation
 (ios-paint never `getContext`; no `#18` mirror / PNG poll). Keep the
 384:272 `.g64-screen` glass. After READY, Play recycles **unit 8
 in-place** on the live canvas (`#18`/`#30`) — never WASM
-`destroyEmu` / splash remount (`#13`). Do not retry PNG poll, wrapper
+`destroyEmu` / splash remount (`#13`). After #56, also keep the
+**live-play lock** and skip iOS mid-play `captureState`/FS persist
+(Paradroid transfer remount / known-fail note #14). Do not retry PNG poll, wrapper
 CSS transform on GL, `drawImage` tall present, `readPixels` present,
 CSS 100% of a **tall bezel** + clientWidth lie/unlock, unzoomed 384
 letterbox in a tall screen, bare zoom, centered zoom slot,

@@ -109,9 +109,55 @@ export function iosMustKeepLiveCore(input: {
   return Boolean(input.iosPhone && input.powered && input.hasEmu && input.kind === "floppy");
 }
 
+const LIVE_PLAY_KEY = "g64-live-play";
+let livePlayMem: string | null = null;
+
+function isBasicTitle(title?: string | null): boolean {
+  const t = (title || "").trim();
+  return !t || t === "BASIC" || t === "BASIC READY";
+}
+
+/** Sticky across a React remount (sessionStorage + module). Cleared on Reset / power. */
+export function markLivePlay(title?: string | null) {
+  if (isBasicTitle(title)) return;
+  const t = (title || "").trim();
+  livePlayMem = t;
+  try {
+    sessionStorage.setItem(LIVE_PLAY_KEY, t);
+  } catch {
+    /* private mode */
+  }
+}
+
+export function clearLivePlay() {
+  livePlayMem = null;
+  try {
+    sessionStorage.removeItem(LIVE_PLAY_KEY);
+  } catch {
+    /* private mode */
+  }
+}
+
+export function livePlayTitle(): string | null {
+  if (livePlayMem) return livePlayMem;
+  try {
+    const stored = sessionStorage.getItem(LIVE_PLAY_KEY);
+    if (stored) livePlayMem = stored;
+    return stored;
+  } catch {
+    return null;
+  }
+}
+
+export function hasLivePlay(title?: string | null): boolean {
+  if (livePlayTitle()) return true;
+  return !isBasicTitle(title);
+}
+
 /**
  * Mid-play / live-session must never drop `powered` back to the splash.
  * Only a failed *cold* BASIC start with no FS may remount the power button.
+ * Refs reset to basic/!inGameplay on remount — live-play + title still refuse.
  */
 export function shouldDropToSplash(input: {
   playMode: string;
@@ -120,14 +166,50 @@ export function shouldDropToSplash(input: {
   powered: boolean;
   hasFs: boolean;
   title?: string | null;
+  livePlay?: boolean;
 }): boolean {
   if (!input.powered) return false;
   if (input.playLock || input.inGameplay) return false;
+  if (input.livePlay || livePlayTitle()) return false;
+  if (!isBasicTitle(input.title)) return false;
   if (input.playMode !== "basic") return false;
   if (input.hasFs) return false;
-  const title = (input.title || "").trim();
-  if (title && title !== "BASIC" && title !== "BASIC READY") return false;
   return true;
+}
+
+/**
+ * iPhone startWithUrl must not recycle WASM after READY — including after a
+ * remount that reset playModeRef to "basic" while a game title is still live.
+ */
+export function shouldRefuseStartRecycle(input: {
+  iosPhone?: boolean;
+  powered: boolean;
+  playMode: string;
+  inGameplay: boolean;
+  title?: string | null;
+  livePlay?: boolean;
+}): boolean {
+  if (!input.iosPhone || !input.powered) return false;
+  if (input.playMode !== "basic" || input.inGameplay) return true;
+  if (input.livePlay || livePlayTitle()) return true;
+  return !isBasicTitle(input.title);
+}
+
+/**
+ * Periodic savestate + VICE FS walk on CriOS during floppy play can kill the
+ * tab (Paradroid transfer). Skip that persist — not a CRT path.
+ */
+export function shouldSkipPlayPersist(input: {
+  iosPhone?: boolean;
+  playMode: string;
+  inGameplay: boolean;
+  title?: string | null;
+  livePlay?: boolean;
+}): boolean {
+  if (!input.iosPhone) return false;
+  if (input.inGameplay || input.playMode !== "basic") return true;
+  if (input.livePlay || livePlayTitle()) return true;
+  return !isBasicTitle(input.title);
 }
 
 export function floppyNeedsRecycle(
@@ -437,9 +519,13 @@ export function shouldRecoverBoot(input: {
   inGameplay: boolean;
   powered: boolean;
   hasFs: boolean;
+  title?: string | null;
+  livePlay?: boolean;
 }): boolean {
   if (!input.powered) return false;
   if (input.playLock || input.inGameplay) return false;
+  if (input.livePlay || livePlayTitle()) return false;
+  if (!isBasicTitle(input.title)) return false;
   if (input.playMode !== "basic") return false;
   if (input.hasFs) return false;
   return true;
