@@ -122,6 +122,13 @@ export function C64Keyboard() {
       if (k.modifier) return;
       if (k.forceShift && !shift) dispatchC64Key("ShiftLeft", "Shift", true);
       dispatchC64Key(k.code, k.key, true, { shift: shift || !!k.forceShift });
+      if (k.code === "F5" || k.id === "f5") {
+        try {
+          window.dispatchEvent(new Event("g64-fit"));
+        } catch {
+          /* ignore */
+        }
+      }
     },
     [shift],
   );

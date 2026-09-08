@@ -26,8 +26,10 @@ const {
   shouldDropToSplash,
   shouldRefuseStartRecycle,
   shouldSkipPlayPersist,
+  shouldDismissPictureHold,
   iosPlayKeepsLiveCrt,
   iosMustKeepLiveCore,
+  iosInPlaceMediaKind,
   markLivePlay,
   clearLivePlay,
   livePlayTitle,
@@ -401,6 +403,30 @@ test("iPhone powered floppy Play must keep the live core", () => {
   assert.equal(iosMustKeepLiveCore({ iosPhone: true, powered: false, hasEmu: true, kind: "floppy" }), false);
   assert.equal(iosMustKeepLiveCore({ iosPhone: false, powered: true, hasEmu: true, kind: "floppy" }), false);
   assert.equal(iosMustKeepLiveCore({ iosPhone: true, powered: true, hasEmu: true, kind: "basic" }), false);
+  assert.equal(iosMustKeepLiveCore({ iosPhone: true, powered: true, hasEmu: true, kind: "cart" }), true);
+  assert.equal(iosMustKeepLiveCore({ iosPhone: true, powered: true, hasEmu: true, kind: "tape" }), true);
+  assert.equal(iosPlayKeepsLiveCrt({ iosPhone: true, hasLiveFs: true, kind: "floppy" }), true);
+  assert.equal(iosPlayKeepsLiveCrt({ iosPhone: true, hasLiveFs: true, kind: "prg" }), true);
+  assert.equal(iosPlayKeepsLiveCrt({ iosPhone: true, hasLiveFs: true, kind: "cart" }), false);
+});
+
+test("please-hold dismisses when READY/paint is live — not a 16s timer", () => {
+  assert.equal(
+    shouldDismissPictureHold({ hold: true, booting: false, running: true, paintSettled: false }),
+    true,
+  );
+  assert.equal(
+    shouldDismissPictureHold({ hold: true, booting: true, running: false, paintSettled: true }),
+    true,
+  );
+  assert.equal(
+    shouldDismissPictureHold({ hold: true, booting: true, running: false, paintSettled: false }),
+    false,
+  );
+  assert.equal(
+    shouldDismissPictureHold({ hold: false, booting: false, running: true, paintSettled: true }),
+    false,
+  );
 });
 
 test("live-play lock survives a remount that reset refs to basic", () => {
@@ -454,6 +480,37 @@ test("live-play lock survives a remount that reset refs to basic", () => {
       playMode: "disk",
       inGameplay: true,
       title: "Paradroid",
+    }),
+    false,
+  );
+  assert.equal(
+    shouldSkipPlayPersist({
+      ios: true,
+      playMode: "auto",
+      inGameplay: true,
+      title: "Impossible Mission",
+    }),
+    true,
+  );
+  assert.equal(
+    shouldSkipPlayPersist({
+      iosPhone: true,
+      playMode: "auto",
+      inGameplay: true,
+      title: "Impossible Mission",
+    }),
+    true,
+  );
+  assert.equal(iosInPlaceMediaKind("cart"), true);
+  assert.equal(iosInPlaceMediaKind("floppy"), false);
+  assert.equal(
+    shouldDropToSplash({
+      playMode: "auto",
+      playLock: false,
+      inGameplay: true,
+      powered: true,
+      hasFs: true,
+      title: "Impossible Mission",
     }),
     false,
   );
