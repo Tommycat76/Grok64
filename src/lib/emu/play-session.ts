@@ -153,6 +153,7 @@ export function sessionPhase(): SessionPhase {
 export function beginColdSession() {
   sessionMem = "cold";
   clearLivePlay();
+  clearPlayMarker();
 }
 
 /** BASIC settle + READY present landed. Play may attach after this. */
@@ -169,6 +170,7 @@ export function markSessionPlay(title?: string | null) {
 export function clearSession() {
   sessionMem = "off";
   clearLivePlay();
+  clearPlayMarker();
 }
 
 export function canvasLooksReady(canvas: { clientWidth: number; width?: number } | null | undefined): boolean {
@@ -291,6 +293,79 @@ export function livePlayTitle(): string | null {
 export function hasLivePlay(title?: string | null): boolean {
   if (livePlayTitle()) return true;
   return !isBasicTitle(title);
+}
+
+export interface CrashPlayMarker {
+  title: string;
+  filename: string;
+  libraryId?: string | null;
+  bundlePath?: string | null;
+  iecUnit?: number | null;
+  savedAt: number;
+}
+
+const CRASH_PLAY_KEY = "g64-crash-play";
+let crashPlayMem: CrashPlayMarker | null = null;
+
+function asCrashMarker(raw: unknown): CrashPlayMarker | null {
+  if (!raw || typeof raw !== "object") return null;
+  const m = raw as Record<string, unknown>;
+  const title = typeof m.title === "string" ? m.title.trim() : "";
+  const filename = typeof m.filename === "string" ? m.filename.trim() : "";
+  if (!title || isBasicTitle(title) || !filename) return null;
+  return {
+    title,
+    filename,
+    libraryId: typeof m.libraryId === "string" ? m.libraryId : null,
+    bundlePath: typeof m.bundlePath === "string" ? m.bundlePath : null,
+    iecUnit: typeof m.iecUnit === "number" ? m.iecUnit : null,
+    savedAt: typeof m.savedAt === "number" ? m.savedAt : 0,
+  };
+}
+
+/**
+ * Last successfully attached title + how to rehydrate it after a CriOS tab
+ * reload mid-play (tab OOM/crash resets powered to the splash while
+ * sessionStorage survives). Saved only on attach success — never at Play
+ * tap, never for BASIC/work. Cleared on Reset, cold power, and drop.
+ */
+export function savePlayMarker(input: {
+  title: string;
+  filename: string;
+  libraryId?: string | null;
+  bundlePath?: string | null;
+  iecUnit?: number | null;
+}) {
+  const marker = asCrashMarker({ ...input, savedAt: Date.now() });
+  if (!marker) return;
+  crashPlayMem = marker;
+  try {
+    sessionStorage.setItem(CRASH_PLAY_KEY, JSON.stringify(marker));
+  } catch {
+    /* private mode */
+  }
+}
+
+export function clearPlayMarker() {
+  crashPlayMem = null;
+  try {
+    sessionStorage.removeItem(CRASH_PLAY_KEY);
+  } catch {
+    /* private mode */
+  }
+}
+
+export function readPlayMarker(): CrashPlayMarker | null {
+  if (crashPlayMem) return crashPlayMem;
+  try {
+    const raw = sessionStorage.getItem(CRASH_PLAY_KEY);
+    if (!raw) return null;
+    const marker = asCrashMarker(JSON.parse(raw));
+    if (marker) crashPlayMem = marker;
+    return marker;
+  } catch {
+    return crashPlayMem;
+  }
 }
 
 /**

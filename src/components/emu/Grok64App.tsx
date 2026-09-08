@@ -70,6 +70,7 @@ import {
   beginColdSession,
   canvasLooksReady,
   clearLivePlay,
+  clearPlayMarker,
   clearSession,
   iosInPlaceMediaKind,
   iosMustKeepLiveCore,
@@ -83,6 +84,8 @@ import {
   markSessionPlay,
   markSessionReady,
   planPlay,
+  readPlayMarker,
+  savePlayMarker,
   sessionCanAttach,
   sessionPhase,
   shouldDropToSplash,
@@ -162,6 +165,7 @@ const PlayerMount = memo(function PlayerMount() {
 });
 
 let fitTimers: number[] = [];
+let crashRecoverStarted = false;
 function scheduleFit(force = false) {
   for (const id of fitTimers) window.clearTimeout(id);
   const run = () => {
@@ -857,6 +861,7 @@ export function Grok64App() {
     glog("user-reset-ready", { prev: playModeRef.current, title: useEmu.getState().currentTitle });
     playModeRef.current = "basic";
     clearLivePlay();
+    clearPlayMarker();
     markSessionReady();
     cracktroOnceRef.current = "";
     cartLiveRef.current = false;
@@ -998,18 +1003,45 @@ export function Grok64App() {
         hardReset(emu);
         applyIecUnit(emu, spec.live.iec, spec.live.unit);
         s.setRunning(true);
-        // Keep bootHold until the READY canvas is actually sized so Folder
-        // Play cannot Autostart-reset before the #54 present lands.
+        // Drive cold BASIC to an observably sized + presented READY.
+        // #62's 80ms "settle" storm dispatched ~50 window resizes in 4s and
+        // still needed a folder tap on CriOS: rewriting canvas 100%→100% is
+        // a no-op that never invalidates a stale 0-box, while the folder
+        // sheet's body scroll-lock forced a full relayout. Drive with
+        // resize-free presents + sync layout reads + a periodic invisible
+        // invalidation nudge (player min-height toggle), with an occasional
+        // gesture-path present (canvas focus — the tap-to-show-READY path),
+        // until the canvas is observably sized or the budget runs out.
+        // Bounded: at cap the boot proceeds exactly as before.
         if (isIosPhone()) {
           const playerEl = document.getElementById("grok64-player");
+          const screen = playerEl?.closest?.(".g64-screen") as HTMLElement | null;
           const t0 = Date.now();
-          while (Date.now() - t0 < 4000) {
+          let nudge = false;
+          let gesturedAt = 0;
+          while (Date.now() - t0 < 12000) {
             if (loadGenRef.current !== gen) return;
-            presentIosCrt(emu, playerEl, "settle");
-            if (playerCanvasReady(playerEl)) break;
-            await new Promise((r) => setTimeout(r, 80));
+            void playerEl?.offsetWidth;
+            if (screen) void screen.offsetWidth;
+            fitEmu(playerEl, emu);
+            const now = Date.now();
+            if (now - gesturedAt > 2000) {
+              gesturedAt = now;
+              presentIosCrt(emu, playerEl, { tag: "cold-gesture", fromUserGesture: true });
+            } else {
+              presentIosCrt(emu, playerEl, "booting");
+            }
+            nudge = !nudge;
+            if (playerEl) playerEl.style.minHeight = nudge ? "0px" : "";
+            if (playerCanvasReady(playerEl) && useEmu.getState().running && coreHasFs(emu)) break;
+            await new Promise((r) => setTimeout(r, 150));
           }
-          kickIosAfterEmuAction(emu, "settle", gen);
+          if (playerEl) playerEl.style.minHeight = "";
+          glog("cold-drive", {
+            ms: Date.now() - t0,
+            canvas: playerCanvasReady(playerEl),
+            running: useEmu.getState().running,
+          });
         }
         bootHoldRef.current = false;
         markSessionReady();
@@ -1050,6 +1082,25 @@ export function Grok64App() {
   };
   const startWithUrl = useCallback(
     async (gameUrl, gameName, opts = {}) => {
+      // Refuse BEFORE touching loadGen / timers / gameplay refs: a refused
+      // mid-play start must not abort the live session's generation or clear
+      // its boot timers on the way out (#62 Paradroid remount class).
+      if (
+        emuRef.current &&
+        shouldRefuseStartRecycle({
+          iosPhone: isIosPhone(),
+          powered: useEmu.getState().powered,
+          playMode: playModeRef.current,
+          inGameplay: inGameplayRef.current,
+          title: opts.title ?? useEmu.getState().currentTitle,
+          livePlay: Boolean(livePlayTitle()),
+          coldBasic: isColdBasicStart({ autostart: opts.autostart, title: opts.title }),
+        })
+      ) {
+        glog("start-recycle-refused", { mode: playModeRef.current, title: opts.title ?? gameName });
+        persistGateRef.current = true;
+        throw new Error("Stay on the live CRT — Play must not remount the splash.");
+      }
       loadGenRef.current += 1;
       const gen = loadGenRef.current;
       persistGateRef.current = false;
@@ -1076,6 +1127,27 @@ export function Grok64App() {
           await new Promise((r) => requestAnimationFrame(r));
           if (el.clientWidth >= 32 && el.clientHeight >= 32) break;
         }
+      }
+      if (isIosPhone()) {
+        // EJS sizes its canvas from this box at construct. A 0-box here
+        // (URL bar / dvh settling on CriOS) sticks until something forces
+        // layout — the folder sheet did (#62 black-until-folder). Wait for a
+        // real box before constructing VICE; bounded, never bricks boot.
+        const screen = el.closest?.(".g64-screen") as HTMLElement | null;
+        for (let i = 0; i < 30; i++) {
+          void el.offsetWidth;
+          if (screen) void screen.offsetWidth;
+          const w = el.clientWidth;
+          const sw = screen?.clientWidth ?? w;
+          if (w >= 100 && sw >= 100) break;
+          await new Promise((r) => requestAnimationFrame(r));
+        }
+        glog("boot-layout", {
+          pw: el.clientWidth,
+          ph: el.clientHeight,
+          sw: screen?.clientWidth ?? 0,
+          sh: screen?.clientHeight ?? 0,
+        });
       }
       const st = useEmu.getState();
       const res = resolveMachine(
@@ -1104,21 +1176,9 @@ export function Grok64App() {
         sh: el.parentElement?.clientHeight ?? 0,
       });
       if (emuRef.current) {
-        if (
-          shouldRefuseStartRecycle({
-            iosPhone: isIosPhone(),
-            powered: useEmu.getState().powered,
-            playMode: playModeRef.current,
-            inGameplay: inGameplayRef.current,
-            title: opts.title ?? useEmu.getState().currentTitle,
-            livePlay: Boolean(livePlayTitle()),
-            coldBasic: isColdBasicStart({ autostart: opts.autostart, title: opts.title }),
-          })
-        ) {
-          glog("start-recycle-refused", { mode: playModeRef.current, title: opts.title ?? gameName });
-          persistGateRef.current = true;
-          throw new Error("Stay on the live CRT — Play must not remount the splash.");
-        }
+        // Refuse-check already ran at entry (before loadGen). Reaching here
+        // means recycle is allowed: cold BASIC over a dead core, or a
+        // desktop media switch. Never mid-play on iOS (#13).
         stopIosPaintWatchdog();
         stopIosCrt();
         resetIosPaintState();
@@ -1420,6 +1480,22 @@ export function Grok64App() {
       setPictureHold(false);
       const title = opts.title ?? filename;
       if (!work) markSessionPlay(title);
+      // Mid-play reload recovery: remember the last successfully attached
+      // title + how to rehydrate it. Saved ONLY on attach success (below) —
+      // never here at tap time, never for BASIC/work.
+      const notePlayMarker = () => {
+        if (work) {
+          clearPlayMarker();
+          return;
+        }
+        savePlayMarker({
+          title,
+          filename,
+          libraryId: opts.libraryId ?? null,
+          bundlePath: opts.bundlePath ?? null,
+          iecUnit: playUnit,
+        });
+      };
       const assigned = detectJoyPort({ names: [filename, title] });
       const prevPort = useEmu.getState().joyPort;
       if (prevPort !== assigned) {
@@ -1544,6 +1620,7 @@ export function Grok64App() {
           if (isIosPhone() && !keepLiveCrt && !mustKeep) resetIosPaintState();
           s.setCurrentTitle(title);
           if (!work) markSessionPlay(title);
+          notePlayMarker();
           s.setRunning(true);
           if (work) {
             hardReset(emuRef.current);
@@ -1597,6 +1674,7 @@ export function Grok64App() {
           clearBootTimers();
           s.setCurrentTitle(title);
           markSessionPlay(title);
+          notePlayMarker();
           s.setRunning(true);
           autostartAfterReady(emuRef.current, true, { autoloadWarp: false });
           if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, "play-recycle");
@@ -1645,6 +1723,7 @@ export function Grok64App() {
         userIec: plan.user.iec,
         userUnit: plan.user.unit,
       });
+      notePlayMarker();
     },
     [s, persistNow, startWithUrl, beginPlayLock, syncJiffy],
   );
@@ -1657,7 +1736,7 @@ export function Grok64App() {
         if (!res.ok) throw new Error("Could not load bundled software");
         const buf = await res.arrayBuffer();
         const name = title.path.split("/").pop() || title.name;
-        await playBuffer(name, buf, { autostart: true, title: title.name });
+        await playBuffer(name, buf, { autostart: true, title: title.name, bundlePath: title.path });
       } catch (err) {
         toast.error(err instanceof Error ? err.message : "Load failed");
       }
@@ -1844,6 +1923,66 @@ export function Grok64App() {
   useEffect(() => {
     const t = window.setTimeout(() => recoverBoot(), 80);
     return () => window.clearTimeout(t);
+  }, []);
+  useEffect(() => {
+    // Mid-play reload (CriOS tab OOM/crash, SW update): powered resets to
+    // the splash while sessionStorage survives. Restore the live session
+    // instead of stranding Tom on the power button. One-shot per load; the
+    // 80ms recoverBoot above refuses while live-play is set, so this effect
+    // owns the reboot. If rehydrate fails the splash stays, honest.
+    if (crashRecoverStarted) return;
+    if (useEmu.getState().powered) return;
+    const live = livePlayTitle();
+    const marker = readPlayMarker();
+    if (!live || !marker) return;
+    if (!marker.libraryId && !marker.bundlePath) {
+      clearPlayMarker();
+      return;
+    }
+    crashRecoverStarted = true;
+    void (async () => {
+      try {
+        let payload: { name: string; data: ArrayBuffer } | null = null;
+        if (marker.libraryId) {
+          const file = await getFile(marker.libraryId);
+          if (file) payload = { name: file.name, data: file.data };
+        }
+        if (!payload && marker.bundlePath) {
+          const res = await fetch(publicUrl(marker.bundlePath));
+          if (res.ok) {
+            payload = {
+              name: marker.bundlePath.split("/").pop() || marker.filename,
+              data: await res.arrayBuffer(),
+            };
+          }
+        }
+        if (!payload) {
+          clearPlayMarker();
+          clearSession();
+          return;
+        }
+        glog("crash-recover", { title: marker.title, filename: marker.filename });
+        powerOnRef.current();
+        await playBufferRef.current(payload.name, payload.data, {
+          autostart: true,
+          title: marker.title,
+          libraryId: marker.libraryId ?? undefined,
+          bundlePath: marker.bundlePath ?? undefined,
+          iecUnit: marker.iecUnit ?? undefined,
+        });
+        // Attach success re-saves the marker (powerOn cleared it). If the
+        // attach failed, say so honestly instead of claiming a restore.
+        if (readPlayMarker()) {
+          toast.message(`Restored ${marker.title} — tap for sound`);
+        } else {
+          clearLivePlay();
+          markSessionReady();
+          toast.error(`Could not restore ${marker.title} — tap Software to replay.`);
+        }
+      } catch {
+        clearPlayMarker();
+      }
+    })();
   }, []);
   useEffect(() => {
     if (s.powered) return;
@@ -2511,6 +2650,29 @@ export function Grok64App() {
           <BuildId />
         </div>
         <div className="g64-top-rail">
+          {resolved.device === "phone" ? (
+          <>
+          <button type="button" className="g64-iconbtn g64-rail-act g64-rail-kb" data-on={s.showKeyboard} aria-label="Keyboard" title="Keyboard" onClick={() => s.setShowKeyboard(!s.showKeyboard)}>
+            <KeyboardIcon className="size-5" />
+          </button>
+          <button
+            type="button"
+            className="g64-iconbtn g64-rail-act g64-rail-pause"
+            aria-label={s.paused ? "Resume" : "Pause"}
+            title={s.paused ? "Resume" : "Pause"}
+            onClick={() => {
+              const next = !s.paused;
+              s.setPaused(next);
+              setPaused(emuRef.current, next);
+            }}
+          >
+            {s.paused ? <Play className="size-5" /> : <Pause className="size-5" />}
+          </button>
+          <button type="button" className="g64-iconbtn g64-rail-act g64-rail-mute" data-on={s.muted} aria-label={s.muted ? "Unmute" : "Mute"} title={s.muted ? "Unmute" : "Mute"} onClick={() => s.setMuted(!s.muted)}>
+            {s.muted ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
+          </button>
+          </>
+          ) : null}
           <button type="button" className="g64-chip" onClick={() => s.setSettingsOpen(true)} title={detectLine(resolved)}>
             {resolved.chip}
           </button>
@@ -2677,12 +2839,12 @@ export function Grok64App() {
           <MoreHorizontal className="size-5" />
         </button>
         <div className="g64-top-icons">
-        <button type="button" className="g64-iconbtn" data-on={s.showKeyboard} aria-label="Keyboard" onClick={() => { setRailMoreOpen(false); s.setShowKeyboard(!s.showKeyboard); }}>
+        <button type="button" className="g64-iconbtn g64-rail-dup" data-on={s.showKeyboard} aria-label="Keyboard" onClick={() => { setRailMoreOpen(false); s.setShowKeyboard(!s.showKeyboard); }}>
           <KeyboardIcon className="size-5" />
         </button>
         <button
           type="button"
-          className="g64-iconbtn extra"
+          className="g64-iconbtn extra g64-rail-dup"
           aria-label={s.paused ? "Resume" : "Pause"}
           onClick={() => {
             setRailMoreOpen(false);
@@ -2717,7 +2879,7 @@ export function Grok64App() {
         >
           <RotateCcw className="size-5" />
         </button>
-        <button type="button" className="g64-iconbtn extra" data-on={s.muted} aria-label={s.muted ? "Unmute" : "Mute"} onClick={() => { setRailMoreOpen(false); s.setMuted(!s.muted); }}>
+        <button type="button" className="g64-iconbtn extra g64-rail-dup" data-on={s.muted} aria-label={s.muted ? "Unmute" : "Mute"} onClick={() => { setRailMoreOpen(false); s.setMuted(!s.muted); }}>
           {s.muted ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
         </button>
         <button type="button" className="g64-iconbtn" aria-label="Settings" onClick={() => { setRailMoreOpen(false); s.setSettingsOpen(true); }}>

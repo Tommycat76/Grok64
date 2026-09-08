@@ -255,3 +255,48 @@ test("tablet CRT refits after cart attach / F5 without touching the iPhone glass
   assert.match(phoneScreen, /aspect-ratio: 384 \/ 272/);
   assert.doesNotMatch(phoneScreen, /100cqh/);
 });
+
+test("refused mid-play start cannot damage the live session (refuse before loadGen)", () => {
+  const start = app.indexOf("const startWithUrl = useCallback");
+  const body = app.slice(start, app.indexOf("const playBuffer = useCallback"));
+  const refuse = body.indexOf("shouldRefuseStartRecycle({");
+  const bump = body.indexOf("loadGenRef.current += 1");
+  assert.ok(refuse >= 0 && bump > refuse, "refuse-check must precede the loadGen bump");
+  assert.match(body, /start-recycle-refused/);
+});
+
+test("mid-play reload auto-restores the live title (crash marker)", () => {
+  assert.match(app, /readPlayMarker\(\)/);
+  assert.match(app, /savePlayMarker\(/);
+  assert.match(app, /clearPlayMarker\(\)/);
+  assert.match(app, /notePlayMarker\(\)/);
+  assert.match(app, /glog\("crash-recover"/);
+  assert.match(app, /crashRecoverStarted/);
+  assert.match(app, /bundlePath: title\.path/);
+  assert.match(app, /tap for sound/);
+  const session = readFileSync(join(root, "src/lib/emu/play-session.ts"), "utf8");
+  assert.match(session, /g64-crash-play/);
+  assert.match(session, /savePlayMarker/);
+});
+
+test("phone rail leads with keyboard/pause/mute; More keeps lesser items", () => {
+  const css = readFileSync(join(root, "src/styles.css"), "utf8");
+  assert.match(app, /g64-rail-kb/);
+  assert.match(app, /g64-rail-pause/);
+  assert.match(app, /g64-rail-mute/);
+  assert.match(app, /g64-rail-dup/);
+  assert.match(app, /resolved\.device === "phone"/);
+  assert.match(css, /\.g64-app\[data-device="phone"\] \.g64-top-rail \.g64-rail-act \{[\s\S]*?min-width: 44px/);
+  assert.match(css, /\.g64-app\[data-device="phone"\] \.g64-top-icons \.g64-rail-dup \{[\s\S]*?display: none/);
+});
+
+test("cold BASIC drives layout+present to READY without a resize storm", () => {
+  assert.match(app, /glog\("boot-layout"/);
+  assert.match(app, /glog\("cold-drive"/);
+  assert.match(app, /cold-gesture/);
+  assert.match(app, /minHeight = nudge/);
+  const drive = app.slice(app.indexOf("Drive cold BASIC"), app.indexOf("bootHoldRef.current = false;\n        markSessionReady();"));
+  assert.ok(drive.length > 200, "cold drive loop must exist");
+  assert.match(drive, /presentIosCrt\(emu, playerEl, "booting"\)/);
+  assert.doesNotMatch(drive, /presentIosCrt\(emu, playerEl, "settle"\)/);
+});

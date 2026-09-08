@@ -44,6 +44,9 @@ const {
   markLivePlay,
   clearLivePlay,
   livePlayTitle,
+  savePlayMarker,
+  readPlayMarker,
+  clearPlayMarker,
 } = await server.ssrLoadModule("/src/lib/emu/play-session.ts");
 const {
   classifyPress,
@@ -603,6 +606,38 @@ test("unified session: cold → ready → play; attach only after READY", () => 
     false,
   );
   clearSession();
+  assert.equal(sessionPhase(), "off");
+});
+
+test("crash-play marker: last attached title rehydrates after a mid-play reload", () => {
+  clearPlayMarker();
+  clearSession();
+  assert.equal(readPlayMarker(), null);
+  savePlayMarker({
+    title: "Paradroid",
+    filename: "paradroidalldrives.d64",
+    libraryId: "lib-1",
+    iecUnit: 8,
+  });
+  const marker = readPlayMarker();
+  assert.equal(marker.title, "Paradroid");
+  assert.equal(marker.filename, "paradroidalldrives.d64");
+  assert.equal(marker.libraryId, "lib-1");
+  assert.equal(marker.bundlePath, null);
+  assert.equal(marker.iecUnit, 8);
+  // BASIC/work titles never mark — a reload on READY stays on the splash.
+  savePlayMarker({ title: "BASIC", filename: "WORK DISK.D64" });
+  assert.equal(readPlayMarker().title, "Paradroid");
+  savePlayMarker({ title: "", filename: "x.d64" });
+  assert.equal(readPlayMarker().title, "Paradroid");
+  // Cold power clears the marker: no surprise autoplay after a manual boot.
+  beginColdSession();
+  assert.equal(readPlayMarker(), null);
+  savePlayMarker({ title: "Boulder Dash", filename: "bd.d64", bundlePath: "/software/bd.d64" });
+  assert.equal(readPlayMarker().bundlePath, "/software/bd.d64");
+  // A genuine drop-to-splash clears it too: no recover loop on a dead boot.
+  clearSession();
+  assert.equal(readPlayMarker(), null);
   assert.equal(sessionPhase(), "off");
 });
 
