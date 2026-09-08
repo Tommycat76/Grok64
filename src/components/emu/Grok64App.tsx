@@ -107,6 +107,7 @@ import {
 } from "@/lib/emu/hw-buttons";
 import { detectLine, resolveMachine, videoStandardOptions } from "@/lib/emu/machines";
 import { snapshotDevice, readViewport, applyViewport, detectDevice, isIos, isIosPhone, isTouchMobile } from "@/lib/emu/detect";
+import { applyTabletContainFit } from "@/lib/emu/tablet-fit";
 import { detectJoyPort, detectSoftwareStandard } from "@/lib/emu/region";
 import { RETRO_BTN } from "@/lib/emu/types";
 import { dispatchC64Key, isJoyFireKey, muteC64Space, onBeforeC64Space } from "@/lib/emu/keys";
@@ -169,6 +170,7 @@ let crashRecoverStarted = false;
 function scheduleFit(force = false) {
   for (const id of fitTimers) window.clearTimeout(id);
   const run = () => {
+    applyTabletContainFit();
     const el = document.getElementById("grok64-player");
     const emu = (window as unknown as { __ejs?: Parameters<typeof fitEmu>[1] }).__ejs ?? null;
     const tabletForce = force || detectDevice() === "tablet";
@@ -678,8 +680,9 @@ export function Grok64App() {
       if (canvas && (canvas.width < 64 || canvas.height < 64)) {
         fitEmu(root, emuRef.current);
       }
-      if (detectDevice() === "tablet" && emuRef.current) {
-        fitEmu(root, emuRef.current, true);
+      if (detectDevice() === "tablet") {
+        applyTabletContainFit();
+        if (emuRef.current) fitEmu(root, emuRef.current, true);
       }
       if (
         shouldDismissPictureHold({
@@ -1147,6 +1150,28 @@ export function Grok64App() {
           ph: el.clientHeight,
           sw: screen?.clientWidth ?? 0,
           sh: screen?.clientHeight ?? 0,
+        });
+      } else if (detectDevice() === "tablet") {
+        // Size the 384:272 glass from the bezel before EJS reads the box.
+        // A 320px cqh=0 stamp here becomes the cold-launch postage stamp.
+        const screen = el.closest?.(".g64-screen") as HTMLElement | null;
+        const bezel = el.closest?.(".g64-bezel") as HTMLElement | null;
+        for (let i = 0; i < 30; i++) {
+          applyTabletContainFit();
+          void el.offsetWidth;
+          if (screen) void screen.offsetWidth;
+          const sw = screen?.clientWidth ?? el.clientWidth;
+          const bw = bezel?.clientWidth ?? 0;
+          if (sw >= 280 && (bw < 80 || sw >= bw * 0.7)) break;
+          await new Promise((r) => requestAnimationFrame(r));
+        }
+        glog("boot-layout-tablet", {
+          pw: el.clientWidth,
+          ph: el.clientHeight,
+          sw: screen?.clientWidth ?? 0,
+          sh: screen?.clientHeight ?? 0,
+          bw: bezel?.clientWidth ?? 0,
+          bh: bezel?.clientHeight ?? 0,
         });
       }
       const st = useEmu.getState();
@@ -2079,6 +2104,7 @@ export function Grok64App() {
   useEffect(() => {
     if (!s.running) return;
     const kick = () => {
+      applyTabletContainFit();
       const el = document.getElementById("grok64-player");
       fitEmu(el, emuRef.current, detectDevice() === "tablet");
     };
