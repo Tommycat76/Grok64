@@ -1714,9 +1714,10 @@ div[class*="ejs_virtual"] {
 }
 /* Largest 384/272 CRT that fits under the log / above the locked keyboard.
  * Do not put container-type on .g64-screen — 100cqh must query the bezel.
+ * flex 0 keeps contain-fit (flex-grow was a wide squash after cart/F5).
  * Floor the cqh width so a 0-height layout pass cannot collapse to a stamp. */
 .g64-app[data-device="tablet"] .g64-screen {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   align-self: center;
   width: min(100%, max(320px, calc(100cqh * 384 / 272)));
   height: auto;
@@ -1944,7 +1945,7 @@ div[class*="ejs_virtual"] {
   flex: 0 1 auto;
 }
 .g64-app[data-orient="landscape"][data-kb="true"][data-device="tablet"] .g64-screen {
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   align-self: center;
   width: min(100%, max(320px, calc(100cqh * 384 / 272)));
   height: auto;

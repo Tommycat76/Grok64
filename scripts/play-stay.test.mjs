@@ -213,6 +213,7 @@ test("tablet CRT refits after cart attach / F5 without touching the iPhone glass
   assert.ok(tab >= 0);
   const tabletScreen = css.slice(tab, tab + 420);
   assert.doesNotMatch(tabletScreen, /container-type: size/);
+  assert.match(tabletScreen, /flex: 0 0 auto/);
   assert.match(tabletScreen, /max\(320px/);
   assert.match(tabletScreen, /aspect-ratio: 384 \/ 272/);
   const phoneIdx = css.indexOf('html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-screen {');
