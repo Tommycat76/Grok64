@@ -218,7 +218,7 @@ html, body, #app {
 }
 .g64-top-rail {
   display: flex;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   flex-wrap: nowrap;
   align-items: center;
   gap: 6px;
@@ -226,6 +226,33 @@ html, body, #app {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   scrollbar-width: none;
+}
+.g64-top-brand {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.g64-top-pin {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  position: relative;
+  z-index: 2;
+  pointer-events: auto;
+}
+.g64-top-overflow {
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+.g64-rail-more {
+  display: none;
+}
+.g64-rail-more-dismiss {
+  display: none;
 }
 .g64-app[data-device="tablet"] .g64-top-rail {
   flex-wrap: nowrap;
@@ -235,7 +262,7 @@ html, body, #app {
 }
 .g64-top-icons {
   display: flex;
-  flex: 1 1 auto;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
@@ -296,6 +323,90 @@ html, body, #app {
 .g64-app[data-device="desktop"] .g64-iconbtn.extra {
   display: grid;
 }
+/* Phone: pin Software/disk; chips on a second row; lesser icons in More. */
+.g64-app[data-device="phone"] .g64-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "brand pin"
+    "rail rail";
+  align-items: center;
+  column-gap: 6px;
+  row-gap: 4px;
+  overflow: visible;
+}
+.g64-app[data-device="phone"] .g64-top-brand {
+  grid-area: brand;
+  min-width: 0;
+}
+.g64-app[data-device="phone"] .g64-top-pin {
+  grid-area: pin;
+  flex: 0 0 auto;
+  z-index: 3;
+}
+.g64-app[data-device="phone"] .g64-top-rail {
+  grid-area: rail;
+  flex: none;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.g64-app[data-device="phone"] .g64-software,
+.g64-app[data-device="phone"] .g64-disk,
+.g64-app[data-device="phone"] .g64-rail-more {
+  flex: 0 0 44px;
+  pointer-events: auto;
+  position: relative;
+  z-index: 82;
+}
+.g64-app[data-device="phone"] .g64-top-overflow {
+  z-index: 81;
+}
+.g64-app[data-device="phone"] .g64-rail-more {
+  display: grid;
+}
+.g64-app[data-device="phone"] .g64-top-icons {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  margin-left: 0;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 168px;
+  padding: 6px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-elevated);
+  border: 1px solid color-mix(in oklab, var(--color-fg) 16%, transparent);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 0.45);
+  z-index: 80;
+  pointer-events: auto;
+}
+.g64-app[data-device="phone"] .g64-top-overflow[data-open="true"] .g64-top-icons {
+  display: flex;
+}
+.g64-app[data-device="phone"] .g64-top-overflow[data-open="true"] .g64-iconbtn.extra {
+  display: grid;
+}
+.g64-app[data-device="phone"] .g64-top-icons .g64-iconbtn {
+  width: 100%;
+  flex: 0 0 auto;
+  justify-content: flex-start;
+  padding: 0 10px;
+  gap: 8px;
+}
+.g64-app[data-device="phone"] .g64-rail-more-dismiss {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  border: 0;
+  background: transparent;
+  pointer-events: auto;
+}
 @media (min-width: 720px) {
   .g64-iconbtn.extra {
     display: grid;
@@ -342,6 +453,11 @@ html, body, #app {
   white-space: nowrap;
   pointer-events: none;
   opacity: 0.9;
+}
+.g64-app[data-device="phone"] .g64-buildid {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: min(46vw, 11rem);
 }
 .g64-splash .g64-buildid {
   margin-top: 12px;
@@ -454,7 +570,7 @@ html, body, #app {
   font-family: var(--font-mono);
   font-size: 13px;
   letter-spacing: 0.04em;
-  z-index: 30;
+  z-index: 45;
   border: 0;
   width: 100%;
   height: 100%;
@@ -1062,8 +1178,11 @@ div[class*="ejs_virtual"] {
 .g64-app[data-device="tablet"]:not([data-kb="true"]) .g64-stage {
   max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 188px);
 }
-.g64-app[data-booting="true"] .g64-controls {
-  opacity: 0.72;
+.g64-app[data-booting="true"] .g64-controls,
+.g64-app[data-hold="true"] .g64-controls {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 .g64-app[data-device="tablet"]:not([data-kb="true"]) .g64-controls {
   padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
@@ -1960,17 +2079,19 @@ html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-screen {
   min-height: 160px;
   aspect-ratio: 384 / 272;
 }
+/* Please-hold chip: top of bezel, above the stick dock. pointer-events none. */
+.g64-app[data-device="phone"] .g64-boot,
 html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-boot {
   position: absolute;
   inset: auto;
-  left: 16px;
-  right: 16px;
-  bottom: 16px;
-  top: auto;
+  left: 12px;
+  right: 12px;
+  top: 10px;
+  bottom: auto;
   width: auto;
   height: auto;
-  z-index: 4;
-  background: rgb(0 0 0 / 0.42);
+  z-index: 45;
+  background: rgb(0 0 0 / 0.78);
   padding: 10px 14px;
   border-radius: var(--radius-md);
   pointer-events: none;

@@ -149,6 +149,19 @@ test("top rail uses horizontal space (CSS only — not CRT glass)", () => {
   assert.match(icons, /justify-content: flex-end/);
 });
 
+test("phone pins Software/folder; lesser icons overflow into More", () => {
+  const css = readFileSync(join(root, "src/styles.css"), "utf8");
+  assert.match(app, /g64-top-pin/);
+  assert.match(app, /g64-software/);
+  assert.match(app, /g64-rail-more/);
+  assert.match(app, /aria-label="Software"/);
+  assert.match(css, /grid-area: pin/);
+  assert.match(css, /grid-area: rail/);
+  assert.match(css, /\.g64-app\[data-device="phone"\] \.g64-software/);
+  assert.match(css, /\.g64-app\[data-device="phone"\] \.g64-rail-more \{[\s\S]*?display: grid/);
+  assert.doesNotMatch(css, /\.g64-screen[\s\S]{0,80}grid-area: pin/);
+});
+
 test("iOS mid-play persist and start-recycle stay locked to live play", () => {
   const session = readFileSync(join(root, "src/lib/emu/play-session.ts"), "utf8");
   assert.match(session, /shouldSkipPlayPersist/);
@@ -163,7 +176,19 @@ test("iOS mid-play persist and start-recycle stay locked to live play", () => {
 });
 
 test("please-hold overlay is a DOM chip, not a CRT host change", () => {
+  const css = readFileSync(join(root, "src/styles.css"), "utf8");
   assert.match(app, /Please hold — picture is coming/);
   assert.match(app, /data-hold=/);
   assert.match(app, /setPictureHold/);
+  assert.match(app, /"data-hold": pictureHold/);
+  assert.match(css, /data-hold="true"\] \.g64-controls/);
+  assert.match(css, /data-booting="true"\] \.g64-controls[\s\S]*?visibility: hidden/);
+  const bootIdx = css.indexOf(".g64-app[data-device=\"phone\"] .g64-boot");
+  assert.ok(bootIdx >= 0);
+  const phoneBoot = css.slice(bootIdx, bootIdx + 420);
+  assert.match(phoneBoot, /top: 10px/);
+  assert.match(phoneBoot, /bottom: auto/);
+  assert.match(phoneBoot, /z-index: 45/);
+  assert.match(phoneBoot, /pointer-events: none/);
+  assert.doesNotMatch(phoneBoot, /bottom: 16px/);
 });

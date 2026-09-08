@@ -1,6 +1,6 @@
 // @ts-nocheck — large loosely-typed emulator shell; runtime is covered by Playwright QA.
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Disc3, FolderOpen, Gamepad2, Info, Keyboard as KeyboardIcon, Pause, Play, Power, RotateCcw, Settings, Volume2, VolumeX } from "lucide-react";
+import { Disc3, FolderOpen, Gamepad2, Info, Keyboard as KeyboardIcon, MoreHorizontal, Pause, Play, Power, RotateCcw, Settings, Volume2, VolumeX } from "lucide-react";
 import { toast } from "sonner";
 import { C64Keyboard } from "@/components/emu/Keyboard";
 import { TouchControls } from "@/components/emu/Joystick";
@@ -200,6 +200,7 @@ export function Grok64App() {
   const [pictureHold, setPictureHold] = useState(false);
   const pictureHoldTimer = useRef(0);
   const [diskOpen, setDiskOpen] = useState(false);
+  const [railMoreOpen, setRailMoreOpen] = useState(false);
   const [logLines, setLogLines] = useState([]);
   const [cartLive, setCartLive] = useState(false);
   const cartLiveRef = useRef(false);
@@ -2207,6 +2208,9 @@ export function Grok64App() {
   useEffect(() => {
     setWarp(emuRef.current, s.warped);
   }, [s.warped]);
+  useEffect(() => {
+    if (s.libraryOpen || s.settingsOpen || s.aboutOpen || diskOpen) setRailMoreOpen(false);
+  }, [s.libraryOpen, s.settingsOpen, s.aboutOpen, diskOpen]);
   const tapPower = useCallback((e) => {
     if (e && typeof e.preventDefault === "function") e.preventDefault();
     glog("power-tap", { t: e?.type ?? "ui" });
@@ -2226,6 +2230,7 @@ export function Grok64App() {
     "data-layout-edit": s.layoutEdit ? "true" : "false",
     "data-running": s.running ? "true" : "false",
     "data-booting": s.booting ? "true" : "false",
+    "data-hold": pictureHold ? "true" : "false",
     style: { ["--app-h"]: `${view.height}px` },
     suppressHydrationWarning: true,
   };
@@ -2273,8 +2278,10 @@ export function Grok64App() {
         </div>
       ) : null}
       <header className="g64-top" hidden={!s.powered}>
-        <h1>Grok64</h1>
-        <BuildId />
+        <div className="g64-top-brand">
+          <h1>Grok64</h1>
+          <BuildId />
+        </div>
         <div className="g64-top-rail">
           <button type="button" className="g64-chip" onClick={() => s.setSettingsOpen(true)} title={detectLine(resolved)}>
             {resolved.chip}
@@ -2414,14 +2421,35 @@ export function Grok64App() {
             </button>
           ) : null}
         </div>
-        <div className="g64-top-icons">
-        <button type="button" className="g64-iconbtn" data-on={s.libraryOpen} aria-label="Software" onClick={() => s.setLibraryOpen(true)}>
+        <div className="g64-top-pin">
+        <button type="button" className="g64-iconbtn g64-software" data-on={s.libraryOpen} aria-label="Software" title="Software" onClick={() => s.setLibraryOpen(true)}>
           <FolderOpen className="size-5" />
         </button>
-        <button type="button" className="g64-iconbtn" data-on={diskOpen} aria-label="Insert disk" onClick={() => setDiskOpen(true)}>
+        <button type="button" className="g64-iconbtn g64-disk" data-on={diskOpen} aria-label="Insert disk" title="Load disk" onClick={() => setDiskOpen(true)}>
           <Disc3 className="size-5" />
         </button>
-        <button type="button" className="g64-iconbtn" data-on={s.showKeyboard} aria-label="Keyboard" onClick={() => s.setShowKeyboard(!s.showKeyboard)}>
+        {railMoreOpen ? (
+          <button
+            type="button"
+            className="g64-rail-more-dismiss"
+            aria-label="Close menu"
+            onClick={() => setRailMoreOpen(false)}
+          />
+        ) : null}
+        <div className="g64-top-overflow" data-open={railMoreOpen ? "true" : "false"}>
+        <button
+          type="button"
+          className="g64-iconbtn g64-rail-more"
+          aria-label="More"
+          aria-expanded={railMoreOpen}
+          aria-haspopup="true"
+          data-on={railMoreOpen ? "true" : "false"}
+          onClick={() => setRailMoreOpen((open) => !open)}
+        >
+          <MoreHorizontal className="size-5" />
+        </button>
+        <div className="g64-top-icons">
+        <button type="button" className="g64-iconbtn" data-on={s.showKeyboard} aria-label="Keyboard" onClick={() => { setRailMoreOpen(false); s.setShowKeyboard(!s.showKeyboard); }}>
           <KeyboardIcon className="size-5" />
         </button>
         <button
@@ -2429,6 +2457,7 @@ export function Grok64App() {
           className="g64-iconbtn extra"
           aria-label={s.paused ? "Resume" : "Pause"}
           onClick={() => {
+            setRailMoreOpen(false);
             const next = !s.paused;
             s.setPaused(next);
             setPaused(emuRef.current, next);
@@ -2453,19 +2482,24 @@ export function Grok64App() {
               e.stopPropagation();
             }
           }}
-          onClick={() => resetReady()}
+          onClick={() => {
+            setRailMoreOpen(false);
+            resetReady();
+          }}
         >
           <RotateCcw className="size-5" />
         </button>
-        <button type="button" className="g64-iconbtn extra" data-on={s.muted} aria-label={s.muted ? "Unmute" : "Mute"} onClick={() => s.setMuted(!s.muted)}>
+        <button type="button" className="g64-iconbtn extra" data-on={s.muted} aria-label={s.muted ? "Unmute" : "Mute"} onClick={() => { setRailMoreOpen(false); s.setMuted(!s.muted); }}>
           {s.muted ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
         </button>
-        <button type="button" className="g64-iconbtn" aria-label="Settings" onClick={() => s.setSettingsOpen(true)}>
+        <button type="button" className="g64-iconbtn" aria-label="Settings" onClick={() => { setRailMoreOpen(false); s.setSettingsOpen(true); }}>
           <Settings className="size-5" />
         </button>
-        <button type="button" className="g64-iconbtn extra" aria-label="About" onClick={() => s.setAboutOpen(true)}>
+        <button type="button" className="g64-iconbtn extra" aria-label="About" onClick={() => { setRailMoreOpen(false); s.setAboutOpen(true); }}>
           <Info className="size-5" />
         </button>
+        </div>
+        </div>
         </div>
       </header>
       {s.powered && (s.debugLog || debugQueryOn()) ? (
