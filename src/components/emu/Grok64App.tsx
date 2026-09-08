@@ -40,6 +40,7 @@ import {
   lastAppliedJiffy,
   lastAppliedWorkDisk,
   swapBootDisk,
+  writeBootFile,
   sd2iecFreeze,
   sd2iecSwapDevice,
   scpuReset,
@@ -67,6 +68,7 @@ import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor }
 import { HwHoldChip } from "@/components/emu/HwHoldChip";
 import {
   clearLivePlay,
+  iosInPlaceMediaKind,
   iosMustKeepLiveCore,
   iosPlayKeepsLiveCrt,
   livePlayTitle,
@@ -76,6 +78,7 @@ import {
   shouldDropToSplash,
   shouldRecoverBoot,
   shouldRefuseStartRecycle,
+  shouldDismissPictureHold,
   shouldSkipPlayPersist,
   unitOfDrive,
   userAttachFromMap,
@@ -89,7 +92,7 @@ import {
   type HwPress,
 } from "@/lib/emu/hw-buttons";
 import { detectLine, resolveMachine, videoStandardOptions } from "@/lib/emu/machines";
-import { snapshotDevice, readViewport, applyViewport, isIosPhone, isTouchMobile } from "@/lib/emu/detect";
+import { snapshotDevice, readViewport, applyViewport, detectDevice, isIos, isIosPhone, isTouchMobile } from "@/lib/emu/detect";
 import { detectJoyPort, detectSoftwareStandard } from "@/lib/emu/region";
 import { RETRO_BTN } from "@/lib/emu/types";
 import { dispatchC64Key, isJoyFireKey, muteC64Space, onBeforeC64Space } from "@/lib/emu/keys";
@@ -142,12 +145,13 @@ const PlayerMount = memo(function PlayerMount() {
 });
 
 let fitTimers: number[] = [];
-function scheduleFit() {
+function scheduleFit(force = false) {
   for (const id of fitTimers) window.clearTimeout(id);
   const run = () => {
     const el = document.getElementById("grok64-player");
     const emu = (window as unknown as { __ejs?: Parameters<typeof fitEmu>[1] }).__ejs ?? null;
-    fitEmu(el, emu);
+    const tabletForce = force || detectDevice() === "tablet";
+    fitEmu(el, emu, tabletForce);
   };
   run();
   fitTimers = [50, 160, 400, 800].map((ms) => window.setTimeout(run, ms));
@@ -358,9 +362,14 @@ export function Grok64App() {
     };
   }, []);
   useEffect(() => {
-    const timers = scheduleFit();
+    const timers = scheduleFit(true);
     return () => timers.forEach((id) => window.clearTimeout(id));
-  }, [s.showKeyboard, view.orient]);
+  }, [s.showKeyboard, view.orient, cartLive]);
+  useEffect(() => {
+    const onFit = () => scheduleFit(true);
+    window.addEventListener("g64-fit", onFit);
+    return () => window.removeEventListener("g64-fit", onFit);
+  }, []);
   useEffect(() => {
     void ensureRuntime().catch(() => undefined);
     prefetchViceCores();
@@ -635,6 +644,20 @@ export function Grok64App() {
       if (canvas && (canvas.width < 64 || canvas.height < 64)) {
         fitEmu(root, emuRef.current);
       }
+      if (detectDevice() === "tablet" && emuRef.current) {
+        fitEmu(root, emuRef.current, true);
+      }
+      if (
+        shouldDismissPictureHold({
+          hold: true,
+          booting: useEmu.getState().booting,
+          running: useEmu.getState().running,
+          paintSettled: isIosPaintSettled(),
+        })
+      ) {
+        setPictureHold(false);
+        if (pictureHoldTimer.current) window.clearTimeout(pictureHoldTimer.current);
+      }
       if (isIosPhone() && emuRef.current && (useEmu.getState().running || useEmu.getState().booting) && !isIosPaintSettled()) {
         presentIosCrt(emuRef.current, root, useEmu.getState().booting ? "booting" : "running");
       }
@@ -651,6 +674,7 @@ export function Grok64App() {
     if (
       shouldSkipPlayPersist({
         iosPhone: isIosPhone(),
+        ios: isIos(),
         playMode: playModeRef.current,
         inGameplay: inGameplayRef.current,
         title: useEmu.getState().currentTitle,
@@ -1278,6 +1302,7 @@ export function Grok64App() {
       }
       setPictureHold(false);
       const title = opts.title ?? filename;
+      if (!work) markLivePlay(title);
       const assigned = detectJoyPort({ names: [filename, title] });
       const prevPort = useEmu.getState().joyPort;
       if (prevPort !== assigned) {
@@ -1308,12 +1333,13 @@ export function Grok64App() {
         hasLiveFs: live,
         kind: plan.kind,
       });
+      const floppyKeep = mustKeep && plan.kind === "floppy";
       let media = new Uint8Array(safe);
       if (origKind === "d64") {
         media = prepareAutostartDisk(media, bootName, title);
       }
       const wrapped = wrapForDiskSwap(origKind, media, bootName);
-      if ((((live && (canHotSwap || keepLiveCrt)) || mustKeep) && emuRef.current && (wrapped || origKind === "d64"))) {
+      if ((((live && (canHotSwap || keepLiveCrt)) || floppyKeep) && emuRef.current && (wrapped || origKind === "d64"))) {
         const payloadDisk = wrapped ?? media;
         const playIec = attach?.iec ?? plan.live.iec;
         const playAttachUnit = attach?.unit ?? plan.live.unit;
@@ -1416,22 +1442,59 @@ export function Grok64App() {
           } else {
             autostartAfterReady(emuRef.current, true, { autoloadWarp: false });
             applyIecUnit(emuRef.current, playIec, playAttachUnit);
-            if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, keepLiveCrt || mustKeep ? "play-recycle" : "hot-swap");
+            if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, keepLiveCrt || floppyKeep ? "play-recycle" : "hot-swap");
             beginPlayLock(playLockDuration(playModeRef.current), `Loading ${title}…`);
           }
           return;
         }
-        if (keepLiveCrt || mustKeep) {
+        if (keepLiveCrt || floppyKeep) {
           glog("play-inplace-failed", { filename, title, kind: origKind, mustKeep });
           useEmu.getState().setBooting(false);
           toast.error("Could not mount that disk on the live 1541.");
           return;
         }
       }
-      if (mustKeep) {
+      if (floppyKeep) {
         glog("play-inplace-no-fs", { filename, title, kind: origKind });
         useEmu.getState().setBooting(false);
         toast.error("Play stayed on the live CRT — disk did not attach.");
+        return;
+      }
+      if (mustKeep && live && iosInPlaceMediaKind(plan.kind) && emuRef.current) {
+        s.setBooting(true, plan.status, 35);
+        const wrote = writeBootFile(emuRef.current, media, bootName);
+        if (wrote) {
+          emuRef.current.fileName = bootName.replace(/^\//, "");
+          glog("play-recycle-inplace", {
+            filename,
+            title,
+            kind: origKind,
+            media: plan.kind,
+            keepLiveCrt: true,
+          });
+          persistGateRef.current = false;
+          inGameplayRef.current = false;
+          pendingKickRef.current = false;
+          setAwaitingStart(false);
+          clearBootTimers();
+          s.setCurrentTitle(title);
+          markLivePlay(title);
+          s.setRunning(true);
+          autostartAfterReady(emuRef.current, true, { autoloadWarp: false });
+          if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, "play-recycle");
+          scheduleFit(true);
+          beginPlayLock(playLockDuration(playModeRef.current), `Loading ${title}…`);
+          return;
+        }
+        glog("play-inplace-failed", { filename, title, kind: origKind, mustKeep, media: plan.kind });
+        useEmu.getState().setBooting(false);
+        toast.error("Play stayed on the live CRT — cartridge did not attach.");
+        return;
+      }
+      if (mustKeep && iosInPlaceMediaKind(plan.kind)) {
+        glog("play-inplace-no-fs", { filename, title, kind: origKind, media: plan.kind });
+        useEmu.getState().setBooting(false);
+        toast.error("Play stayed on the live CRT — cartridge did not attach.");
         return;
       }
       const blob = new Blob([toArrayBuffer(media)]);
@@ -1734,13 +1797,30 @@ export function Grok64App() {
   useEffect(() => {
     if (!s.running) return;
     const kick = () => {
-      fitEmu(document.getElementById("grok64-player"), emuRef.current);
+      const el = document.getElementById("grok64-player");
+      fitEmu(el, emuRef.current, detectDevice() === "tablet");
     };
     const a = window.setTimeout(kick, 80);
+    const b = window.setTimeout(kick, 400);
     return () => {
       window.clearTimeout(a);
+      window.clearTimeout(b);
     };
-  }, [s.running]);
+  }, [s.running, cartLive]);
+  useEffect(() => {
+    if (
+      !shouldDismissPictureHold({
+        hold: pictureHold,
+        booting: s.booting,
+        running: s.running,
+        paintSettled: isIosPaintSettled(),
+      })
+    ) {
+      return;
+    }
+    setPictureHold(false);
+    if (pictureHoldTimer.current) window.clearTimeout(pictureHoldTimer.current);
+  }, [pictureHold, s.booting, s.running]);
   useEffect(() => {
     if (s.paused) void persistNow();
   }, [s.paused, persistNow]);
@@ -1793,6 +1873,10 @@ export function Grok64App() {
     window.addEventListener("pointerdown", gesture, { capture: true });
     window.addEventListener("touchstart", gesture, { capture: true, passive: true });
     window.addEventListener("keydown", gesture, { capture: true });
+    const onKeyFit = (ev: KeyboardEvent) => {
+      if (ev.code === "F5" || ev.key === "F5") scheduleFit(true);
+    };
+    window.addEventListener("keydown", onKeyFit);
     onBeforeC64Space(() => disarmAutostart(emuRef.current));
     return () => {
       document.removeEventListener("visibilitychange", vis);
@@ -1800,6 +1884,7 @@ export function Grok64App() {
       window.removeEventListener("pointerdown", gesture, true);
       window.removeEventListener("touchstart", gesture, true);
       window.removeEventListener("keydown", gesture, true);
+      window.removeEventListener("keydown", onKeyFit);
       onBeforeC64Space(null);
     };
   }, []);

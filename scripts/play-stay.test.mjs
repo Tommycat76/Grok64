@@ -111,16 +111,22 @@ test("iOS Play after READY keeps the live canvas (#18/#30, not #37 WASM recycle)
   const session = readFileSync(join(root, "src/lib/emu/play-session.ts"), "utf8");
   assert.match(session, /iosPlayKeepsLiveCrt/);
   assert.match(session, /iosMustKeepLiveCore/);
+  assert.match(session, /iosInPlaceMediaKind/);
   assert.match(session, /shouldDropToSplash/);
+  assert.match(session, /shouldDismissPictureHold/);
   assert.match(app, /keepLiveCrt/);
   assert.match(app, /mustKeep/);
+  assert.match(app, /floppyKeep/);
   assert.match(app, /play-recycle-inplace/);
   assert.match(app, /start-recycle-refused/);
   assert.match(app, /play-inplace-no-fs/);
+  assert.match(app, /writeBootFile/);
+  assert.match(app, /iosInPlaceMediaKind/);
   const start = app.indexOf("const playBuffer");
   const play = app.slice(start, app.indexOf("playBufferRef.current = playBuffer"));
   assert.match(play, /keepLiveCrt/);
   assert.match(play, /mustKeep/);
+  assert.match(play, /floppyKeep/);
   assert.match(play, /play-inplace-failed/);
   assert.match(play, /if \(canHotSwap\) \{/);
   assert.match(play, /play-recycle-inplace/);
@@ -182,6 +188,7 @@ test("please-hold overlay is a DOM chip, not a CRT host change", () => {
   assert.match(app, /data-hold=/);
   assert.match(app, /setPictureHold/);
   assert.match(app, /"data-hold": pictureHold/);
+  assert.match(app, /shouldDismissPictureHold/);
   assert.match(css, /data-hold="true"\] \.g64-controls/);
   assert.match(css, /data-booting="true"\] \.g64-controls[\s\S]*?visibility: hidden/);
   const bootIdx = css.indexOf(".g64-app[data-device=\"phone\"] .g64-boot");
@@ -192,4 +199,25 @@ test("please-hold overlay is a DOM chip, not a CRT host change", () => {
   assert.match(phoneBoot, /z-index: 45/);
   assert.match(phoneBoot, /pointer-events: none/);
   assert.doesNotMatch(phoneBoot, /bottom: 16px/);
+});
+
+test("tablet CRT refits after cart attach / F5 without touching the iPhone glass", () => {
+  const css = readFileSync(join(root, "src/styles.css"), "utf8");
+  const keys = readFileSync(join(root, "src/components/emu/Keyboard.tsx"), "utf8");
+  assert.match(app, /scheduleFit\(true\)/);
+  assert.match(app, /g64-fit/);
+  assert.match(app, /cartLive/);
+  assert.match(keys, /g64-fit/);
+  assert.match(keys, /F5/);
+  const tab = css.indexOf('.g64-app[data-device="tablet"] .g64-screen {');
+  assert.ok(tab >= 0);
+  const tabletScreen = css.slice(tab, tab + 420);
+  assert.doesNotMatch(tabletScreen, /container-type: size/);
+  assert.match(tabletScreen, /flex: 0 0 auto/);
+  assert.match(tabletScreen, /max\(320px/);
+  assert.match(tabletScreen, /aspect-ratio: 384 \/ 272/);
+  const phoneIdx = css.indexOf('html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-screen {');
+  const phoneScreen = css.slice(phoneIdx, css.indexOf("}", phoneIdx) + 1);
+  assert.match(phoneScreen, /aspect-ratio: 384 \/ 272/);
+  assert.doesNotMatch(phoneScreen, /100cqh/);
 });

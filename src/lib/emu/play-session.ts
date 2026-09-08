@@ -93,12 +93,19 @@ export function iosPlayKeepsLiveCrt(input: {
   hasLiveFs: boolean;
   kind: PlayKind;
 }): boolean {
-  return Boolean(input.iosPhone && input.hasLiveFs && input.kind === "floppy");
+  if (!input.iosPhone || !input.hasLiveFs) return false;
+  return input.kind === "floppy" || input.kind === "prg" || input.kind === "tape" || input.kind === "sid";
+}
+
+/** Cart / PRG / tape / SID must not WASM-recycle after READY (#13 / IM remount). */
+export function iosInPlaceMediaKind(kind: PlayKind): boolean {
+  return kind === "cart" || kind === "prg" || kind === "tape" || kind === "sid";
 }
 
 /**
- * After power-on, iPhone floppy Play must stay on the live VICE instance.
- * WASM recycle / startWithUrl after READY is known-failure #13 (splash remount).
+ * After power-on, iPhone Play of a live title must stay on the VICE instance.
+ * Floppy stays unit-8 in-place. Cart/disk/PRG must not drop to the power splash.
+ * WASM recycle / startWithUrl after READY is known-failure #13.
  */
 export function iosMustKeepLiveCore(input: {
   iosPhone?: boolean;
@@ -106,7 +113,24 @@ export function iosMustKeepLiveCore(input: {
   hasEmu: boolean;
   kind: PlayKind;
 }): boolean {
-  return Boolean(input.iosPhone && input.powered && input.hasEmu && input.kind === "floppy");
+  return Boolean(input.iosPhone && input.powered && input.hasEmu && input.kind !== "basic");
+}
+
+/**
+ * Please-hold is a DOM chip over a live CRT — dismiss as soon as boot has
+ * settled, READY is running, or the live WebGL present has happened.
+ * Do not wait on a timer that outlives READY.
+ */
+export function shouldDismissPictureHold(input: {
+  hold: boolean;
+  booting: boolean;
+  running: boolean;
+  paintSettled: boolean;
+}): boolean {
+  if (!input.hold) return false;
+  if (input.paintSettled) return true;
+  if (input.running && !input.booting) return true;
+  return false;
 }
 
 const LIVE_PLAY_KEY = "g64-live-play";
@@ -201,12 +225,14 @@ export function shouldRefuseStartRecycle(input: {
  */
 export function shouldSkipPlayPersist(input: {
   iosPhone?: boolean;
+  /** iPad / any iOS — captureState during cart/disk play remounts splash. */
+  ios?: boolean;
   playMode: string;
   inGameplay: boolean;
   title?: string | null;
   livePlay?: boolean;
 }): boolean {
-  if (!input.iosPhone) return false;
+  if (!input.iosPhone && !input.ios) return false;
   if (input.inGameplay || input.playMode !== "basic") return true;
   if (input.livePlay || livePlayTitle()) return true;
   return !isBasicTitle(input.title);

@@ -1712,20 +1712,24 @@ div[class*="ejs_virtual"] {
   align-items: center;
   justify-content: center;
 }
-/* Largest 384/272 CRT that fits under the log / above the locked keyboard. */
+/* Largest 384/272 CRT that fits under the log / above the locked keyboard.
+ * Do not put container-type on .g64-screen — 100cqh must query the bezel.
+ * flex 0 keeps contain-fit (flex-grow was a wide squash after cart/F5).
+ * Floor the cqh width so a 0-height layout pass cannot collapse to a stamp. */
 .g64-app[data-device="tablet"] .g64-screen {
-  container-type: size;
   flex: 0 0 auto;
-  width: auto;
+  align-self: center;
+  width: min(100%, max(320px, calc(100cqh * 384 / 272)));
   height: auto;
   max-width: 100%;
   max-height: 100%;
-  min-width: 200px;
+  min-width: min(100%, 320px);
+  min-height: 0;
   aspect-ratio: 384 / 272;
 }
 @supports (width: 1cqh) {
   .g64-app[data-device="tablet"] .g64-screen {
-    width: min(100%, calc(100cqh * 384 / 272));
+    width: min(100%, max(320px, calc(100cqh * 384 / 272)));
   }
 }
 .g64-app[data-device="tablet"] .g64-screen #grok64-player,
@@ -1942,9 +1946,11 @@ div[class*="ejs_virtual"] {
 }
 .g64-app[data-orient="landscape"][data-kb="true"][data-device="tablet"] .g64-screen {
   flex: 0 0 auto;
-  width: min(100%, calc(100cqh * 384 / 272));
+  align-self: center;
+  width: min(100%, max(320px, calc(100cqh * 384 / 272)));
   height: auto;
-  min-width: 200px;
+  min-width: min(100%, 320px);
+  min-height: 0;
   max-width: 100%;
   max-height: 100%;
   aspect-ratio: 384 / 272;
