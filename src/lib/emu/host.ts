@@ -1801,6 +1801,9 @@ export function swapBootDisk(emu: EjsInstance | null, data: Uint8Array, fallback
  * iPhone Play after READY uses this in-place (#18/#30) so the live GL
  * canvas survives. Desktop still WASM-recycles a live SD2IEC 8_fs core
  * (see floppyPlayCanHotSwap). destroyEmu after READY is #13.
+ *
+ * #60 wrote a *new* filename instead of this overwrite — unit 8 stayed
+ * the blank work disk and Autostart typed FILE NOT FOUND (not DNP).
  */
 export function attachAutostartDisk(
   emu: EjsInstance | null,

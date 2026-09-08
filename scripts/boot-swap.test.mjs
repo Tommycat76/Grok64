@@ -46,6 +46,17 @@ test("swapBootDisk overwrites current boot file for autostart", () => {
   assert.equal(files.has("Paradroid.d64"), false);
 });
 
+test("in-place Play overwrites WORK DISK — not a new filename (#60 FILE NOT FOUND)", () => {
+  clearUnitMounts();
+  const files = new Map([["WORK DISK.D64", new Uint8Array([1])]]);
+  const emu = mockEmu("WORK DISK.D64", files);
+  const game = new Uint8Array(174848).fill(0x7a);
+  assert.equal(attachAutostartDisk(emu, game, "Paradroid.d64", "1541", 8), true);
+  assert.equal(bootFileOf(emu), "WORK DISK.D64");
+  assert.equal(files.get("WORK DISK.D64")?.[0], 0x7a);
+  assert.equal(files.has("Paradroid.d64"), false);
+});
+
 test("attachAutostartDisk forces 1541 unit 8 even after SD2IEC 8_fs", () => {
   clearUnitMounts();
   const vars = new Map([["vice_work_disk", "8_fs"]]);

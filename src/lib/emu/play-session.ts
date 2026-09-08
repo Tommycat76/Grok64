@@ -141,6 +141,35 @@ export function isColdBasicStart(opts: { autostart?: boolean; title?: string | n
 }
 
 /**
+ * Folder / Play may attach only after the live core has FS and cold
+ * `bootHold` has lifted. On iOS also wait until `running` so the #54
+ * READY present can land before Autostart resets the CRT.
+ */
+export function liveCoreReadyToAttach(input: {
+  hasFs: boolean;
+  bootHold: boolean;
+  running?: boolean;
+}): boolean {
+  if (!input.hasFs || input.bootHold) return false;
+  if (input.running === false) return false;
+  return true;
+}
+
+/**
+ * In-place floppy Play must overwrite the *mounted* boot image (usually
+ * WORK DISK.D64). Writing a new filename leaves unit 8 as the blank work
+ * disk — LOAD"*",8,1 then FILE NOT FOUND (#60). Cart/CRT never uses this.
+ */
+export function inPlaceAutostartTarget(
+  currentBoot: string | null | undefined,
+  preferred: string,
+): string {
+  const live = (currentBoot || "").replace(/^\//, "").trim();
+  if (live) return live;
+  return preferred.replace(/^\//, "").trim() || preferred;
+}
+
+/**
  * Please-hold is a DOM chip over a live CRT — dismiss as soon as boot has
  * settled, READY is running, or the live WebGL present has happened.
  * Do not wait on a timer that outlives READY.

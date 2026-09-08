@@ -28,6 +28,8 @@ const {
   shouldSkipPlayPersist,
   shouldDismissPictureHold,
   shouldWaitForLiveCore,
+  liveCoreReadyToAttach,
+  inPlaceAutostartTarget,
   isColdBasicStart,
   iosPlayKeepsLiveCrt,
   iosMustKeepLiveCore,
@@ -438,6 +440,26 @@ test("folder Play waits for the live core — never a second startWithUrl", () =
   assert.equal(isColdBasicStart({ autostart: false, title: "BASIC" }), true);
   assert.equal(isColdBasicStart({ autostart: true, title: "BASIC" }), false);
   assert.equal(isColdBasicStart({ autostart: false, title: "Impossible Mission" }), false);
+  assert.equal(
+    liveCoreReadyToAttach({ hasFs: true, bootHold: false, running: true }),
+    true,
+  );
+  assert.equal(
+    liveCoreReadyToAttach({ hasFs: true, bootHold: true, running: false }),
+    false,
+  );
+  assert.equal(
+    liveCoreReadyToAttach({ hasFs: true, bootHold: false, running: false }),
+    false,
+  );
+  assert.equal(
+    liveCoreReadyToAttach({ hasFs: false, bootHold: false, running: true }),
+    false,
+  );
+  assert.equal(inPlaceAutostartTarget("WORK DISK.D64", "Paradroid.d64"), "WORK DISK.D64");
+  assert.equal(inPlaceAutostartTarget("/WORK DISK.D64", "Burger_Time.d64"), "WORK DISK.D64");
+  assert.equal(inPlaceAutostartTarget(null, "Paradroid.d64"), "Paradroid.d64");
+  assert.equal(inPlaceAutostartTarget("", "/game.d64"), "game.d64");
   clearLivePlay();
   markLivePlay("Impossible Mission");
   assert.equal(

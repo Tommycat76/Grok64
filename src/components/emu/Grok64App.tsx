@@ -32,12 +32,14 @@ import {
   listRealGamepads,
   mountDiskOnUnit,
   applyIecUnit,
+  attachAutostartDisk,
   cartFreeze,
   cartReset,
   cmdHdSwap,
   flushEmuFs,
   lastAppliedJiffy,
   lastAppliedWorkDisk,
+  swapBootDisk,
   writeBootFile,
   sd2iecFreeze,
   sd2iecSwapDevice,
@@ -69,7 +71,9 @@ import {
   iosInPlaceMediaKind,
   iosMustKeepLiveCore,
   iosPlayKeepsLiveCrt,
+  inPlaceAutostartTarget,
   isColdBasicStart,
+  liveCoreReadyToAttach,
   livePlayTitle,
   mapHasDrive,
   markLivePlay,
@@ -959,6 +963,10 @@ export function Grok64App() {
         applyIecUnit(emu, spec.live.iec, spec.live.unit);
         bootHoldRef.current = false;
         s.setRunning(true);
+        // #59: dismiss please-hold as soon as READY is running — do not sit
+        // on a 16s timer while the CRT is already live.
+        setPictureHold(false);
+        if (pictureHoldTimer.current) window.clearTimeout(pictureHoldTimer.current);
         if (isIosPhone()) kickIosAfterEmuAction(emu, "settle", gen);
         bootTimersRef.current.push(
           window.setTimeout(() => {
@@ -1303,17 +1311,57 @@ export function Grok64App() {
         const budget = waitLive ? (isIosPhone() ? 28000 : 16000) : 8000;
         while (Date.now() - t0 < budget) {
           const fs = Boolean(emuRef.current && coreHasFs(emuRef.current));
-          // bootHold is the cold BASIC settle — do not attach until READY.
-          if (fs && !bootHoldRef.current) break;
+          // Cold BASIC settle + first READY present — do not attach (or
+          // Autostart-reset) until the live core is running.
+          if (
+            liveCoreReadyToAttach({
+              hasFs: fs,
+              bootHold: bootHoldRef.current,
+              running: useEmu.getState().running,
+            })
+          ) {
+            break;
+          }
           await new Promise((r) => setTimeout(r, 80));
+        }
+        // #54: READY present lands on the settle/ready kicks. Give that a
+        // beat before Play Autostart resets the CRT again.
+        if (
+          isIosPhone() &&
+          liveCoreReadyToAttach({
+            hasFs: Boolean(emuRef.current && coreHasFs(emuRef.current)),
+            bootHold: bootHoldRef.current,
+            running: useEmu.getState().running,
+          })
+        ) {
+          await new Promise((r) => setTimeout(r, 180));
         }
         glog("play-wait-core", {
           emu: Boolean(emuRef.current),
           fs: Boolean(emuRef.current && coreHasFs(emuRef.current)),
           hold: bootHoldRef.current,
+          running: useEmu.getState().running,
           ms: Date.now() - t0,
           waitLive,
         });
+      }
+      if (
+        waitLive &&
+        !liveCoreReadyToAttach({
+          hasFs: Boolean(emuRef.current && coreHasFs(emuRef.current)),
+          bootHold: bootHoldRef.current,
+          running: useEmu.getState().running,
+        })
+      ) {
+        glog("play-wait-timeout", {
+          emu: Boolean(emuRef.current),
+          fs: Boolean(emuRef.current && coreHasFs(emuRef.current)),
+          hold: bootHoldRef.current,
+          running: useEmu.getState().running,
+        });
+        useEmu.getState().setBooting(false);
+        toast.error("Play stayed on the live CRT — C64 is still starting.");
+        return;
       }
       playModeRef.current = plan.kind === "floppy" ? "disk" : plan.kind === "basic" ? "basic" : "auto";
       cartLiveRef.current = plan.kind === "cart";
@@ -1359,10 +1407,13 @@ export function Grok64App() {
         const playIec = attach?.iec ?? plan.live.iec;
         const playAttachUnit = attach?.unit ?? plan.live.unit;
         s.setBooting(true, plan.status, 35);
-        if (attach) applyIecUnit(emuRef.current, playIec, playAttachUnit);
-        const wrote = writeBootFile(emuRef.current, payloadDisk, bootName);
+        // Overwrite the mounted unit-8 image (WORK DISK.D64). A new
+        // filename leaves the blank work disk attached → FILE NOT FOUND.
+        const wrote = attach
+          ? attachAutostartDisk(emuRef.current, payloadDisk, bootName, playIec, playAttachUnit)
+          : swapBootDisk(emuRef.current, payloadDisk, bootName);
         if (wrote) {
-          emuRef.current.fileName = bootName.replace(/^\//, "");
+          emuRef.current.fileName = inPlaceAutostartTarget(bootFileOf(emuRef.current), bootName);
           if (canHotSwap) {
             glog("hot-swap", {
               filename,
