@@ -1665,8 +1665,8 @@ div[class*="ejs_virtual"] {
     padding-top: 6px;
   }
   .g64-app[data-device="tablet"] .g64-bezel {
-    align-items: center;
-    justify-content: center;
+    align-items: stretch;
+    justify-content: stretch;
   }
   .g64-screen {
     flex: 0 0 auto;
@@ -1743,53 +1743,49 @@ div[class*="ejs_virtual"] {
   padding: 0 16px 8px;
 }
 .g64-app[data-device="tablet"] .g64-bezel {
-  padding: 14px;
+  /* #65: bezel is a definite flex slot. The CRT is out of flow so a
+   * collapsed first measure cannot lock a postage-stamp width (#64).
+   * No container-type:size — that + flex reported 0/tiny height on Onn. */
+  padding: 0;
   border-radius: var(--radius-2xl);
-  container-type: size;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  position: relative;
+  display: block;
   width: 100%;
   min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
 }
-/* Largest 384/272 CRT that fits the bezel (#40 framing / #59 contain-fit).
- * Do not put container-type on .g64-screen — 100cqh must query the bezel.
- * flex 0 keeps contain-fit (flex-grow was a wide squash after cart/F5).
+/* Tablet CRT: contain-fit 384:272 in the real bezel box.
  *
- * Cold launch: size-containment + flex often reports 100cqh = 0. The old
- * min(100%, max(320px, 100cqh*…)) then became a 320px postage stamp (purple
- * L, off-center). Fallback is bezel-width / viewport contain — never 320px
- * as the winning size. scheduleFit writes --g64-tablet-crt-w from the
- * measured bezel so keyboard / landscape stay height-limited.
+ * Not #64 (`--g64-tablet-crt-w` / 100cqh / 320px / viewport-13rem). Those
+ * sized the glass from a flex bezel whose height still depended on the
+ * glass — Onn cold launch wrote a stamp and kept it.
+ *
+ * left+right stretch the width; height comes from 384:272; no `bottom`
+ * (that would stretch height and squash the glass). #40 canvas transform
+ * contain-fills this glass.
  *
  * iPhone .g64-screen 384:272 glass is a different selector — do not touch. */
 .g64-app[data-device="tablet"] .g64-screen {
-  flex: 0 0 auto;
-  align-self: center;
-  width: min(
-    100%,
-    var(--g64-tablet-crt-w, calc((var(--app-h, 100dvh) - 13rem) * 384 / 272))
-  );
+  /* Out of flow: left+right stretch width, height from aspect-ratio.
+   * Do not set bottom (that stretches height and kills 384:272).
+   * translateY is on the glass DIV — not the WebGL canvas (#43). */
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 50%;
+  bottom: auto;
+  transform: translateY(-50%);
+  margin: 0;
+  flex: none;
+  align-self: auto;
+  width: auto;
   height: auto;
-  max-width: 100%;
-  max-height: 100%;
-  min-width: min(100%, 200px);
+  max-width: none;
+  max-height: calc(100% - 24px);
+  min-width: 0;
   min-height: 0;
   aspect-ratio: 384 / 272;
-}
-@supports (width: 1cqh) {
-  .g64-app[data-device="tablet"] .g64-screen {
-    width: min(
-      100%,
-      var(
-        --g64-tablet-crt-w,
-        max(
-          calc((var(--app-h, 100dvh) - 13rem) * 384 / 272),
-          calc(100cqh * 384 / 272)
-        )
-      )
-    );
-  }
 }
 .g64-app[data-device="tablet"] .g64-screen #grok64-player,
 .g64-app[data-device="tablet"] .g64-screen #grok64-player > div,
@@ -1802,8 +1798,8 @@ div[class*="ejs_virtual"] {
   max-height: 100% !important;
 }
 .g64-app[data-device="tablet"] .g64-screen canvas {
-  object-fit: fill !important;
-  object-position: 0 0 !important;
+  object-fit: contain !important;
+  object-position: center !important;
 }
 .g64-app[data-device="tablet"] .g64-screen canvas.g64-tablet-fb {
   position: absolute !important;
@@ -1817,8 +1813,8 @@ div[class*="ejs_virtual"] {
   max-width: none !important;
   max-height: none !important;
   transform-origin: 0 0 !important;
-  object-fit: fill !important;
-  object-position: 0 0 !important;
+  object-fit: contain !important;
+  object-position: center !important;
 }
 .g64-app[data-device="tablet"][data-kb="true"] .g64-log {
   max-height: 3.4em;
@@ -2004,17 +2000,20 @@ div[class*="ejs_virtual"] {
   flex: 0 1 auto;
 }
 .g64-app[data-orient="landscape"][data-kb="true"][data-device="tablet"] .g64-screen {
-  flex: 0 0 auto;
-  align-self: center;
-  width: min(
-    100%,
-    var(--g64-tablet-crt-w, calc((var(--app-h, 100dvh) - 13rem) * 384 / 272))
-  );
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  top: 50%;
+  bottom: auto;
+  transform: translateY(-50%);
+  margin: 0;
+  flex: none;
+  width: auto;
   height: auto;
-  min-width: min(100%, 200px);
+  min-width: 0;
   min-height: 0;
-  max-width: 100%;
-  max-height: 100%;
+  max-width: none;
+  max-height: calc(100% - 24px);
   aspect-ratio: 384 / 272;
 }
 .g64-app[data-orient="landscape"][data-kb="true"] .g64-controls {

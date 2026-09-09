@@ -357,6 +357,33 @@ This tree (no paint-host change):
 sandbox (desktop Chromium paints cold READY without the folder). Not
 a PASS until Tom's phone paints READY on cold power with no tap.
 
+### 16. #64 tablet measured-width — Onn postage stamp (not a CriOS paint theory)
+
+`main@a3eaee1` / `routes-sxBB3Vol.js` (PR **#64**, live Onn tablet).
+
+- Sized tablet `.g64-screen` with `--g64-tablet-crt-w` from
+  `bezel.clientWidth/Height` (guard only `>= 8px`) plus a
+  `100cqh` / `(app-h − 13rem)` viewport contain fallback.
+- Phone rail (#63) and iPhone 384:272 glass were untouched.
+
+**Tom FAIL (Onn tablet photos #63 and #64, same geometry):** cold
+launch is still a **postage-stamp** CRT — small purple picture, left
+black bar, purple L left+bottom, large empty bezel. Chip `a3eaee1`.
+
+Why it failed: size-containment + flex on the bezel reports a tiny
+(or 0) height on the first Onn layout pass. A height `>= 8` still
+wrote a stamp `--g64-tablet-crt-w`. That width kept the flex bezel
+short, so later `scheduleFit` measures re-confirmed the stamp. The
+viewport fallback never won once the var was set.
+
+Do **not** ship another 320px / `100cqh` / measured-`--g64-tablet-crt-w`
+tweak. Tablet fill is a **different** strategy: take `.g64-screen` out
+of flow so the bezel can flex to a real slot, CSS contain-fit 384:272
+in that slot, #40 canvas transform contain-fills the glass.
+
+Not a CRT paint-host change. Do not touch `preserveDrawingBuffer`,
+VICE backing, ios-paint/present, or iPhone 384:272 glass.
+
 ---
 
 ## Briefly WORKED (do not regress these unrelated wins)
@@ -410,6 +437,9 @@ In particular:
 - No Play-path **WASM recycle** after READY (`recycleCore` /
   `destroyEmu` / wipe `#grok64-player` / second VICE) — that is #13.
   Unit-8 1541 attach stays required; the **canvas/GL context** stays.
+- No tablet `--g64-tablet-crt-w` / `100cqh` / 320px measured-width
+  lock (#16 / #64). That stamped the Onn. Tablet glass is out-of-flow
+  contain-fit in the flexed bezel.
 
 Current attempt after #54/#13 (this tree): keep the restored **#14/#18/#39
 host wiring** that finally painted READY on `3f80fc8`. Play after READY

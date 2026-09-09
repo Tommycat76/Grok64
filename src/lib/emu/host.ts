@@ -1120,12 +1120,15 @@ function applyNativeFbCrtStyle(
   const box = (el.closest(".g64-screen") as HTMLElement | null) ?? parent;
   const { sw, sh } = crtBoxSize(box, el);
   // Android tablets blit 1:1 in CSS pixels — never multiply by DPR.
-  const sx = sw / 384;
-  const sy = sh / 272;
+  // Uniform contain so a tall filled bezel letterboxes instead of stretching
+  // (independent sx/sy was the purple L when the glass was not 384:272).
+  const s = Math.min(sw / 384, sh / 272);
+  const ox = Math.round((sw - 384 * s) / 2);
+  const oy = Math.round((sh - 272 * s) / 2);
   canvas.style.setProperty("position", "absolute", "important");
   canvas.style.setProperty("inset", "auto", "important");
-  canvas.style.setProperty("left", "0", "important");
-  canvas.style.setProperty("top", "0", "important");
+  canvas.style.setProperty("left", `${ox}px`, "important");
+  canvas.style.setProperty("top", `${oy}px`, "important");
   canvas.style.setProperty("right", "auto", "important");
   canvas.style.setProperty("bottom", "auto", "important");
   canvas.style.setProperty("width", "384px", "important");
@@ -1133,12 +1136,12 @@ function applyNativeFbCrtStyle(
   canvas.style.setProperty("max-width", "none", "important");
   canvas.style.setProperty("max-height", "none", "important");
   canvas.style.setProperty("transform-origin", "0 0", "important");
-  canvas.style.setProperty("transform", `scale(${sx}, ${sy})`, "important");
-  canvas.style.setProperty("object-fit", "fill", "important");
-  canvas.style.setProperty("object-position", "0 0", "important");
+  canvas.style.setProperty("transform", `scale(${s}, ${s})`, "important");
+  canvas.style.setProperty("object-fit", "contain", "important");
+  canvas.style.setProperty("object-position", "center", "important");
 }
 
-/** Android tablet CRT fill — CSS-pixel 1:1 blit, no DPR multiply. */
+/** Android tablet CRT fill — CSS-pixel 1:1 blit, uniform contain, no DPR. */
 export function applyTabletCrtStyle(
   canvas: HTMLCanvasElement,
   el: HTMLElement,

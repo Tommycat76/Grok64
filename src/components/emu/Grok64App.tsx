@@ -1152,8 +1152,8 @@ export function Grok64App() {
           sh: screen?.clientHeight ?? 0,
         });
       } else if (detectDevice() === "tablet") {
-        // Size the 384:272 glass from the bezel before EJS reads the box.
-        // A 320px cqh=0 stamp here becomes the cold-launch postage stamp.
+        // #65: glass is out-of-flow contain-fit. Wait until the flexed
+        // bezel has a real box and the CRT is using most of its width.
         const screen = el.closest?.(".g64-screen") as HTMLElement | null;
         const bezel = el.closest?.(".g64-bezel") as HTMLElement | null;
         for (let i = 0; i < 30; i++) {
