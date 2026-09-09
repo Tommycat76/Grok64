@@ -1742,38 +1742,24 @@ div[class*="ejs_virtual"] {
   gap: 0;
   padding: 0 16px 8px;
 }
+.g64-app[data-device="tablet"] .g64-stage {
+  position: relative;
+}
 .g64-app[data-device="tablet"] .g64-bezel {
   /* #65: bezel is a definite flex slot. The CRT is out of flow so a
    * collapsed first measure cannot lock a postage-stamp width (#64).
    * No container-type:size — that + flex reported 0/tiny height on Onn. */
   padding: 0;
   border-radius: var(--radius-2xl);
-  display: grid;
-  place-items: center;
-  width: 100%;
-  /* Definite flex height. Size containment on a flex item is what
-   * zeroed 100cqh / clientHeight on Onn Chrome, then #64 measured that
-   * shrink-wrap and locked a postage-stamp CRT width. */
-  flex: 1 1 0;
-  height: 0;
-  min-height: 0;
-  position: relative;
-}
-/* Largest 384:272 CRT that fits the bezel.
- *
- * #64 measured the bezel and wrote --g64-tablet-crt-w. On real Onn cold
- * launch that box is still the first-pass stamp (size-containment 0-height
- * or shrink-wrap around the 384 canvas), so JS locked the stamp. Do not
- * size the glass from a measured pixel width, 100cqh, or a 320px floor.
- *
- * Absolute contain-fit: inset matches bezel padding so the 14px frame
- * stays; max + aspect-ratio + margin:auto is the largest 384:272 that
- * fits. No transform / zoom / tall-bezel CSS 100%.
- *
- * iPhone .g64-screen 384:272 glass is a different selector — do not touch. */
-.g64-app[data-device="tablet"] .g64-screen {
+  display: flex;
+  align-items: stretch;
+  justify-content: stretch;
+  /* Contain-fit the bezel in the stage, then fill it. A full-stage plate
+   * with a smaller glass is the "empty bezel" Tom still saw after #64.
+   * Size containment / measured --g64-tablet-crt-w / 320px / 100cqh are
+   * gone — those locked the Onn stamp. */
   position: absolute;
-  inset: 14px;
+  inset: 0;
   flex: none;
   width: auto;
   height: auto;
@@ -1783,6 +1769,21 @@ div[class*="ejs_virtual"] {
   min-height: 0;
   margin: auto;
   aspect-ratio: 384 / 272;
+}
+/* Screen fills that already-384:272 bezel. Not a tall-bezel CSS 100%
+ * (#48/#49). iPhone .g64-screen glass is a different selector. */
+.g64-app[data-device="tablet"] .g64-screen {
+  position: relative;
+  inset: auto;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  aspect-ratio: auto;
 }
 .g64-app[data-device="tablet"] .g64-screen #grok64-player,
 .g64-app[data-device="tablet"] .g64-screen #grok64-player > div,
@@ -1938,16 +1939,19 @@ div[class*="ejs_virtual"] {
   max-height: 100%;
   margin-inline: auto;
 }
-/* Tablet landscape: fill the stage. A 4:3 shrink-wrap around a 384 canvas
- * is a second postage stamp (empty stage read as "empty bezel"). */
+/* Tablet landscape: keep the 384:272 contain-fit bezel (not a 4:3
+ * shrink-wrap around a 384 canvas — that was a second stamp). */
 .g64-app[data-orient="landscape"][data-device="tablet"] .g64-bezel {
-  flex: 1 1 0;
-  width: 100%;
-  height: 0;
+  position: absolute;
+  inset: 0;
+  flex: none;
+  width: auto;
+  height: auto;
   min-height: 0;
-  aspect-ratio: auto;
+  aspect-ratio: 384 / 272;
+  max-width: 100%;
   max-height: 100%;
-  margin-inline: 0;
+  margin: auto;
 }
 .g64-app[data-orient="landscape"][data-device="tablet"]:not([data-kb="true"]) .g64-controls {
   position: absolute;
@@ -2000,6 +2004,17 @@ div[class*="ejs_virtual"] {
   aspect-ratio: auto;
   margin-inline: auto;
 }
+.g64-app[data-orient="landscape"][data-kb="true"][data-device="tablet"] .g64-bezel {
+  position: absolute;
+  inset: 0;
+  flex: none;
+  width: auto;
+  height: auto;
+  aspect-ratio: 384 / 272;
+  max-width: 100%;
+  max-height: 100%;
+  margin: auto;
+}
 .g64-app[data-orient="landscape"][data-kb="true"]:not([data-device="tablet"]) .g64-screen {
   min-height: 0;
   min-width: 0;
@@ -2011,17 +2026,17 @@ div[class*="ejs_virtual"] {
   flex: 0 1 auto;
 }
 .g64-app[data-orient="landscape"][data-kb="true"][data-device="tablet"] .g64-screen {
-  position: absolute;
-  inset: 14px;
-  flex: none;
-  width: auto;
-  height: auto;
+  position: relative;
+  inset: auto;
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
   min-width: 0;
   min-height: 0;
-  max-width: 100%;
-  max-height: 100%;
-  margin: auto;
-  aspect-ratio: 384 / 272;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  aspect-ratio: auto;
 }
 .g64-app[data-orient="landscape"][data-kb="true"] .g64-controls {
   position: relative;

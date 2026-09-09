@@ -61,7 +61,12 @@ for (const c of cases) {
   const targetW = containW(geo.avail.w, geo.avail.h);
   const targetH = Math.round((targetW * 272) / 384);
   const cover = targetW > 0 ? geo.screen.w / targetW : 0;
-  const ok = geo.screen.w >= targetW * 0.85 && geo.screen.h >= targetH * 0.85 && geo.screen.w >= 400;
+  const bezelFill = Math.min(geo.screen.w / geo.bezel.w, geo.screen.h / geo.bezel.h);
+  const ok =
+    geo.screen.w >= targetW * 0.85 &&
+    geo.screen.h >= targetH * 0.85 &&
+    bezelFill >= 0.85 &&
+    geo.screen.w >= 400;
   await page.screenshot({ path: `/workspace/screenshots/tablet-bezel-${c.name}.png` });
   results.push({ name: c.name, ok, cover: Number(cover.toFixed(3)), targetW, targetH, ...geo });
   if (!ok) failed += 1;
