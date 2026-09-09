@@ -107,7 +107,7 @@ import {
 } from "@/lib/emu/hw-buttons";
 import { detectLine, resolveMachine, videoStandardOptions } from "@/lib/emu/machines";
 import { snapshotDevice, readViewport, applyViewport, detectDevice, isIos, isIosPhone, isTouchMobile } from "@/lib/emu/detect";
-import { applyTabletContainFit } from "@/lib/emu/tablet-fit";
+import { applyTabletContainFit, tabletBezelAvail, tabletGlassFillsBezel } from "@/lib/emu/tablet-fit";
 import { detectJoyPort, detectSoftwareStandard } from "@/lib/emu/region";
 import { RETRO_BTN } from "@/lib/emu/types";
 import { dispatchC64Key, isJoyFireKey, muteC64Space, onBeforeC64Space } from "@/lib/emu/keys";
@@ -1152,8 +1152,8 @@ export function Grok64App() {
           sh: screen?.clientHeight ?? 0,
         });
       } else if (detectDevice() === "tablet") {
-        // #65: glass is out-of-flow contain-fit. Wait until the flexed
-        // bezel has a real box and the CRT is using most of its width.
+        // Wait for the 384:272 glass to contain-fit the bezel. #64 treated
+        // sw>=280 as done — that is still a postage stamp on Onn.
         const screen = el.closest?.(".g64-screen") as HTMLElement | null;
         const bezel = el.closest?.(".g64-bezel") as HTMLElement | null;
         for (let i = 0; i < 30; i++) {
@@ -1161,8 +1161,9 @@ export function Grok64App() {
           void el.offsetWidth;
           if (screen) void screen.offsetWidth;
           const sw = screen?.clientWidth ?? el.clientWidth;
-          const bw = bezel?.clientWidth ?? 0;
-          if (sw >= 280 && (bw < 80 || sw >= bw * 0.7)) break;
+          const sh = screen?.clientHeight ?? el.clientHeight;
+          const avail = bezel ? tabletBezelAvail(bezel) : { w: 0, h: 0 };
+          if (tabletGlassFillsBezel(sw, sh, avail.w, avail.h)) break;
           await new Promise((r) => requestAnimationFrame(r));
         }
         glog("boot-layout-tablet", {

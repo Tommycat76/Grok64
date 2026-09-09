@@ -1748,43 +1748,40 @@ div[class*="ejs_virtual"] {
    * No container-type:size — that + flex reported 0/tiny height on Onn. */
   padding: 0;
   border-radius: var(--radius-2xl);
-  position: relative;
-  display: block;
+  display: grid;
+  place-items: center;
   width: 100%;
+  /* Definite flex height. Size containment on a flex item is what
+   * zeroed 100cqh / clientHeight on Onn Chrome, then #64 measured that
+   * shrink-wrap and locked a postage-stamp CRT width. */
+  flex: 1 1 0;
+  height: 0;
   min-height: 0;
-  flex: 1 1 auto;
-  overflow: hidden;
+  position: relative;
 }
-/* Tablet CRT: contain-fit 384:272 in the real bezel box.
+/* Largest 384:272 CRT that fits the bezel.
  *
- * Not #64 (`--g64-tablet-crt-w` / 100cqh / 320px / viewport-13rem). Those
- * sized the glass from a flex bezel whose height still depended on the
- * glass — Onn cold launch wrote a stamp and kept it.
+ * #64 measured the bezel and wrote --g64-tablet-crt-w. On real Onn cold
+ * launch that box is still the first-pass stamp (size-containment 0-height
+ * or shrink-wrap around the 384 canvas), so JS locked the stamp. Do not
+ * size the glass from a measured pixel width, 100cqh, or a 320px floor.
  *
- * left+right stretch the width; height comes from 384:272; no `bottom`
- * (that would stretch height and squash the glass). #40 canvas transform
- * contain-fills this glass.
+ * Absolute contain-fit: inset matches bezel padding so the 14px frame
+ * stays; max + aspect-ratio + margin:auto is the largest 384:272 that
+ * fits. No transform / zoom / tall-bezel CSS 100%.
  *
  * iPhone .g64-screen 384:272 glass is a different selector — do not touch. */
 .g64-app[data-device="tablet"] .g64-screen {
-  /* Out of flow: left+right stretch width, height from aspect-ratio.
-   * Do not set bottom (that stretches height and kills 384:272).
-   * translateY is on the glass DIV — not the WebGL canvas (#43). */
   position: absolute;
-  left: 12px;
-  right: 12px;
-  top: 50%;
-  bottom: auto;
-  transform: translateY(-50%);
-  margin: 0;
+  inset: 14px;
   flex: none;
-  align-self: auto;
   width: auto;
   height: auto;
-  max-width: none;
-  max-height: calc(100% - 24px);
+  max-width: 100%;
+  max-height: 100%;
   min-width: 0;
   min-height: 0;
+  margin: auto;
   aspect-ratio: 384 / 272;
 }
 .g64-app[data-device="tablet"] .g64-screen #grok64-player,
@@ -1801,17 +1798,21 @@ div[class*="ejs_virtual"] {
   object-fit: contain !important;
   object-position: center !important;
 }
+/* Fill the 384:272 glass. Do not pin 384×272 CSS + scale() — Onn Chrome
+ * can leave that as a postage stamp (same class as iOS #43). Backing
+ * stays 384×272 in host.ts; this is CSS of the glass only. */
 .g64-app[data-device="tablet"] .g64-screen canvas.g64-tablet-fb {
   position: absolute !important;
-  inset: auto !important;
+  inset: 0 !important;
   left: 0 !important;
   top: 0 !important;
-  right: auto !important;
-  bottom: auto !important;
-  width: 384px !important;
-  height: 272px !important;
-  max-width: none !important;
-  max-height: none !important;
+  right: 0 !important;
+  bottom: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+  transform: none !important;
   transform-origin: 0 0 !important;
   object-fit: contain !important;
   object-position: center !important;
@@ -1930,13 +1931,23 @@ div[class*="ejs_virtual"] {
   align-items: stretch;
   gap: 0;
 }
-.g64-app[data-orient="landscape"][data-device="tablet"] .g64-bezel,
 .g64-app[data-orient="landscape"][data-device="desktop"] .g64-bezel {
   flex: 1 1 auto;
   width: auto;
   aspect-ratio: 4 / 3;
   max-height: 100%;
   margin-inline: auto;
+}
+/* Tablet landscape: fill the stage. A 4:3 shrink-wrap around a 384 canvas
+ * is a second postage stamp (empty stage read as "empty bezel"). */
+.g64-app[data-orient="landscape"][data-device="tablet"] .g64-bezel {
+  flex: 1 1 0;
+  width: 100%;
+  height: 0;
+  min-height: 0;
+  aspect-ratio: auto;
+  max-height: 100%;
+  margin-inline: 0;
 }
 .g64-app[data-orient="landscape"][data-device="tablet"]:not([data-kb="true"]) .g64-controls {
   position: absolute;
@@ -2001,19 +2012,15 @@ div[class*="ejs_virtual"] {
 }
 .g64-app[data-orient="landscape"][data-kb="true"][data-device="tablet"] .g64-screen {
   position: absolute;
-  left: 12px;
-  right: 12px;
-  top: 50%;
-  bottom: auto;
-  transform: translateY(-50%);
-  margin: 0;
+  inset: 14px;
   flex: none;
   width: auto;
   height: auto;
   min-width: 0;
   min-height: 0;
-  max-width: none;
-  max-height: calc(100% - 24px);
+  max-width: 100%;
+  max-height: 100%;
+  margin: auto;
   aspect-ratio: 384 / 272;
 }
 .g64-app[data-orient="landscape"][data-kb="true"] .g64-controls {

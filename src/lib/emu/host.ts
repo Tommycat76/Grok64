@@ -1055,9 +1055,8 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       canvas.style.display = "block";
       canvas.style.visibility = "visible";
       if (tablet) {
-        // Android tablet: CSS-pixel transform on the canvas. Phone / CriOS
-        // must not call this (#43/#44). Restored ee0b445: CSS 100% of the
-        // aspect-ratio .g64-screen glass.
+        // Android tablet: CSS 100% of the 384:272 glass. Phone / CriOS
+        // must not call this (#43/#44). No GL transform (Onn stamp / #43).
         applyTabletCrtStyle(canvas, el, parent);
       } else if (iosPhone) {
         applyIosCrtStyle(canvas, el, parent);
@@ -1101,53 +1100,47 @@ function clearNativeFbCrtStyle(canvas: HTMLCanvasElement) {
   canvas.classList.remove("g64-tablet-fb", "g64-ios-fb");
 }
 
-function crtBoxSize(box: HTMLElement, fallback: HTMLElement) {
-  const br = box.getBoundingClientRect();
-  return {
-    sw: Math.max(box.clientWidth || 0, Math.round(br.width) || 0, fallback.clientWidth || 0, 1),
-    sh: Math.max(box.clientHeight || 0, Math.round(br.height) || 0, fallback.clientHeight || 0, 1),
-  };
-}
-
-function applyNativeFbCrtStyle(
-  canvas: HTMLCanvasElement,
-  el: HTMLElement,
-  parent: HTMLElement,
-  klass: "g64-tablet-fb",
-) {
-  canvas.classList.remove("g64-ios-fb");
-  canvas.classList.add(klass);
-  const box = (el.closest(".g64-screen") as HTMLElement | null) ?? parent;
-  const { sw, sh } = crtBoxSize(box, el);
-  // Android tablets blit 1:1 in CSS pixels — never multiply by DPR.
-  // Uniform contain so a tall filled bezel letterboxes instead of stretching
-  // (independent sx/sy was the purple L when the glass was not 384:272).
-  const s = Math.min(sw / 384, sh / 272);
-  const ox = Math.round((sw - 384 * s) / 2);
-  const oy = Math.round((sh - 272 * s) / 2);
-  canvas.style.setProperty("position", "absolute", "important");
-  canvas.style.setProperty("inset", "auto", "important");
-  canvas.style.setProperty("left", `${ox}px`, "important");
-  canvas.style.setProperty("top", `${oy}px`, "important");
-  canvas.style.setProperty("right", "auto", "important");
-  canvas.style.setProperty("bottom", "auto", "important");
-  canvas.style.setProperty("width", "384px", "important");
-  canvas.style.setProperty("height", "272px", "important");
-  canvas.style.setProperty("max-width", "none", "important");
-  canvas.style.setProperty("max-height", "none", "important");
-  canvas.style.setProperty("transform-origin", "0 0", "important");
-  canvas.style.setProperty("transform", `scale(${s}, ${s})`, "important");
-  canvas.style.setProperty("object-fit", "contain", "important");
-  canvas.style.setProperty("object-position", "center", "important");
-}
-
-/** Android tablet CRT fill — CSS-pixel 1:1 blit, uniform contain, no DPR. */
+/**
+ * Android tablet CRT fill — CSS 100% of the 384:272 glass.
+ *
+ * #40 used 384×272 CSS + transform:scale to the box. Onn Chrome can leave
+ * that as a postage stamp (same class as iOS #43: GL ignores / drops
+ * transform). The glass is already contain-fitted in the bezel, so filling
+ * **that** glass is not tall-bezel CSS 100% (#48/#49). Backing stays 384×272.
+ * Phone / CriOS must not call this.
+ */
 export function applyTabletCrtStyle(
   canvas: HTMLCanvasElement,
   el: HTMLElement,
   parent: HTMLElement,
 ) {
-  applyNativeFbCrtStyle(canvas, el, parent, "g64-tablet-fb");
+  canvas.classList.remove("g64-ios-fb");
+  canvas.classList.add("g64-tablet-fb");
+  const player =
+    (el.id === "grok64-player" ? el : (el.closest("#grok64-player") as HTMLElement | null)) ?? el;
+  const box = (player.closest(".g64-screen") as HTMLElement | null) ?? parent;
+  void box.offsetWidth;
+  canvas.style.setProperty("position", "absolute", "important");
+  canvas.style.setProperty("inset", "0", "important");
+  canvas.style.setProperty("left", "0", "important");
+  canvas.style.setProperty("top", "0", "important");
+  canvas.style.setProperty("right", "0", "important");
+  canvas.style.setProperty("bottom", "0", "important");
+  canvas.style.setProperty("width", "100%", "important");
+  canvas.style.setProperty("height", "100%", "important");
+  canvas.style.setProperty("max-width", "100%", "important");
+  canvas.style.setProperty("max-height", "100%", "important");
+  canvas.style.setProperty("transform", "none", "important");
+  canvas.style.setProperty("transform-origin", "0 0", "important");
+  canvas.style.setProperty("object-fit", "fill", "important");
+  canvas.style.setProperty("object-position", "0 0", "important");
+  const canvasParent = canvas.parentElement;
+  if (canvasParent && canvasParent !== player) {
+    canvasParent.style.width = "100%";
+    canvasParent.style.height = "100%";
+  }
+  player.style.width = "100%";
+  player.style.height = "100%";
 }
 
 /**
