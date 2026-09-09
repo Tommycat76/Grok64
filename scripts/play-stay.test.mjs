@@ -247,13 +247,13 @@ test("tablet CRT refits after cart attach / F5 without touching the iPhone glass
   assert.match(keys, /F5/);
   const tab = css.indexOf('.g64-app[data-device="tablet"] .g64-screen {');
   assert.ok(tab >= 0);
-  const tabletScreen = css.slice(tab, tab + 720);
+  const tabletScreen = css.slice(tab, css.indexOf("}", tab) + 1);
   assert.doesNotMatch(tabletScreen, /container-type: size/);
-  assert.match(tabletScreen, /flex: 0 0 auto/);
-  assert.match(tabletScreen, /--g64-tablet-crt-w/);
-  assert.match(tabletScreen, /--app-h/);
+  assert.match(tabletScreen, /position: absolute/);
   assert.match(tabletScreen, /aspect-ratio: 384 \/ 272/);
-  // #63 cold-launch trap: 320px winning when 100cqh is 0.
+  assert.doesNotMatch(tabletScreen, /--g64-tablet-crt-w/);
+  assert.doesNotMatch(tabletScreen, /100cqh/);
+  // #64 measured-width / #63 320px floor — known Onn stamp.
   assert.doesNotMatch(tabletScreen, /max\(320px,\s*calc\(100cqh/);
   const phoneIdx = css.indexOf('html[data-g64os="ios"] .g64-app[data-device="phone"] .g64-screen {');
   const phoneScreen = css.slice(phoneIdx, css.indexOf("}", phoneIdx) + 1);

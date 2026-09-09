@@ -92,6 +92,11 @@ const failures = [];
   if (layout.screen && layout.bezel && layout.screen.w < 200) {
     failures.push(`CRT too narrow ${layout.screen.w}`);
   }
+  if (layout.screen && layout.bezel && layout.bezel.w >= 400 && layout.screen.w < layout.bezel.w * 0.7) {
+    failures.push(
+      `tablet postage stamp screen ${layout.screen.w} in bezel ${layout.bezel.w} (need ≥70% width)`,
+    );
+  }
   if (layout.canvasCss && layout.screen && layout.screen.w > 0) {
     const fillW = layout.canvasCss.w / layout.screen.w;
     const fillH = layout.canvasCss.h / layout.screen.h;

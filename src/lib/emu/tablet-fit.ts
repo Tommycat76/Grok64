@@ -5,38 +5,36 @@ export const TABLET_CRT_W = 384;
 export const TABLET_CRT_H = 272;
 
 /**
- * Largest 384:272 width that fits `availW` × `availH` (bezel padding already
- * subtracted). Null when the box is not laid out yet — caller must keep the
- * CSS fallback (100% / viewport) instead of writing a stamp width.
+ * Largest 384:272 that fits `availW` × `availH`.
+ * Tablet layout is CSS contain-fit in the bezel — this is the math check only.
  */
-export function measureTabletContainWidth(availW: number, availH: number): number | null {
+export function measureTabletContainSize(
+  availW: number,
+  availH: number,
+): { w: number; h: number } | null {
   if (!(availW >= 8) || !(availH >= 8)) return null;
-  return Math.round(Math.min(availW, (availH * TABLET_CRT_W) / TABLET_CRT_H));
+  const w = Math.round(Math.min(availW, (availH * TABLET_CRT_W) / TABLET_CRT_H));
+  const h = Math.round((w * TABLET_CRT_H) / TABLET_CRT_W);
+  return { w, h };
 }
 
-function paddingBox(el: HTMLElement) {
-  const cs = getComputedStyle(el);
-  return {
-    x: (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0),
-    y: (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0),
-  };
+/** @deprecated #64 measured-width. Kept for the known-fail contract tests. */
+export function measureTabletContainWidth(availW: number, availH: number): number | null {
+  return measureTabletContainSize(availW, availH)?.w ?? null;
 }
 
 /**
- * Write `--g64-tablet-crt-w` on the bezel from its real box.
- * Phone / desktop: clear the var so it cannot leak onto CriOS glass.
+ * Tablet #65: CSS contain-fits `.g64-screen` in an out-of-flow bezel slot.
+ * Drop `--g64-tablet-crt-w` so a collapsed #64 measure cannot pin a stamp.
+ * Phone / desktop: clear leftovers so the var cannot leak onto CriOS glass.
  */
 export function applyTabletContainFit(root: ParentNode | Document = document): number | null {
   if (typeof document === "undefined") return null;
   const bezel = root.querySelector(".g64-bezel") as HTMLElement | null;
-  if (detectDevice() !== "tablet") {
-    bezel?.style.removeProperty("--g64-tablet-crt-w");
-    return null;
-  }
-  if (!bezel) return null;
-  const pad = paddingBox(bezel);
-  const w = measureTabletContainWidth(bezel.clientWidth - pad.x, bezel.clientHeight - pad.y);
-  if (w == null) return null;
-  bezel.style.setProperty("--g64-tablet-crt-w", `${w}px`);
-  return w;
+  const screen = root.querySelector(".g64-screen") as HTMLElement | null;
+  bezel?.style.removeProperty("--g64-tablet-crt-w");
+  screen?.style.removeProperty("width");
+  screen?.style.removeProperty("height");
+  if (detectDevice() !== "tablet") return null;
+  return null;
 }
