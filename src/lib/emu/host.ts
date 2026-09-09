@@ -1023,12 +1023,7 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       const dpr = touchMobile ? 1 : Math.min(window.devicePixelRatio || 1, 2);
       let bw = Math.max(384, Math.round(cw * dpr));
       let bh = Math.max(272, Math.round(ch * dpr));
-      if (tablet) {
-        // Android tablet #40: VICE framebuffer is 384×272. Phone / CriOS
-        // must not take this lock — #42/#53 pre-size + CSS 100% was black.
-        bw = 384;
-        bh = 272;
-      } else if (touchMobile) {
+      if (touchMobile) {
         const maxW = 960;
         const maxH = 600;
         if (bw > maxW || bh > maxH) {
@@ -1038,9 +1033,17 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
         }
       }
       const backingOk = canvas.width === bw && canvas.height === bh && canvas.width >= 64;
-      // #14/#18/#39: reassigning canvas.width wipes CriOS. Never resize a
-      // live iPhone backing store — VICE owns the size; CSS scales it.
-      const canResizeBacking = !iosPhone || canvas.width < 64 || canvas.height < 64;
+      // VICE owns a live backing store. #14/#18/#39: reassigning
+      // canvas.width wipes CriOS. On the Onn tablet the same assignment is
+      // the postage stamp: EJS sizes the backing to the glass and
+      // RetroArch sets its GL viewport to match, then the old #40 384×272
+      // lock shrank the drawing buffer under that viewport (measured:
+      // buffer 384×272 vs viewport 772×584). The picture then stays a
+      // 384×272 stamp no matter how large the bezel is, which is why the
+      // #64 measured width and the #66 384:272 frame both left it
+      // unchanged. Only size a degenerate (cold / 0-box) canvas.
+      const backingLive = canvas.width >= 64 && canvas.height >= 64;
+      const canResizeBacking = !(iosPhone || tablet) || !backingLive;
       if (
         canResizeBacking &&
         !backingOk &&
@@ -1055,8 +1058,9 @@ export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = 
       canvas.style.display = "block";
       canvas.style.visibility = "visible";
       if (tablet) {
-        // Android tablet: CSS 100% of the 384:272 glass. Phone / CriOS
-        // must not call this (#43/#44). No GL transform (Onn stamp / #43).
+        // Android tablet: CSS 100% of the glass, same as desktop (which
+        // fills). No 384px CSS + transform:scale (#40) — Onn can drop that
+        // on the GL layer, and it fought RetroArch's viewport.
         applyTabletCrtStyle(canvas, el, parent);
       } else if (iosPhone) {
         applyIosCrtStyle(canvas, el, parent);
@@ -1101,12 +1105,14 @@ function clearNativeFbCrtStyle(canvas: HTMLCanvasElement) {
 }
 
 /**
- * Android tablet CRT fill — CSS 100% of the 384:272 glass.
+ * Android tablet CRT fill — CSS owns the display box, VICE owns the buffer.
  *
- * #40 used 384×272 CSS + transform:scale to the box. Onn Chrome can leave
- * that as a postage stamp (same class as iOS #43: GL ignores / drops
- * transform). The glass is already contain-fitted in the bezel, so filling
- * **that** glass is not tall-bezel CSS 100% (#48/#49). Backing stays 384×272.
+ * The glass is already the 384:272 CRT frame, so the canvas just fills it
+ * (`.g64-screen canvas` is `inset:0; width/height:100% !important`). This
+ * function only strips the legacy #40 geometry (384px CSS + `transform:
+ * scale()`), which Onn Chrome could drop on the GL layer and which fought
+ * RetroArch's own viewport. It must never set a pixel size or a transform:
+ * a canvas box that disagrees with the drawing buffer is the stamp.
  * Phone / CriOS must not call this.
  */
 export function applyTabletCrtStyle(
@@ -1114,27 +1120,12 @@ export function applyTabletCrtStyle(
   el: HTMLElement,
   parent: HTMLElement,
 ) {
-  canvas.classList.remove("g64-ios-fb");
-  canvas.classList.add("g64-tablet-fb");
+  clearNativeFbCrtStyle(canvas);
   const player =
     (el.id === "grok64-player" ? el : (el.closest("#grok64-player") as HTMLElement | null)) ?? el;
-  const box = (player.closest(".g64-screen") as HTMLElement | null) ?? parent;
-  void box.offsetWidth;
-  canvas.style.setProperty("position", "absolute", "important");
-  canvas.style.setProperty("inset", "0", "important");
-  canvas.style.setProperty("left", "0", "important");
-  canvas.style.setProperty("top", "0", "important");
-  canvas.style.setProperty("right", "0", "important");
-  canvas.style.setProperty("bottom", "0", "important");
-  canvas.style.setProperty("width", "100%", "important");
-  canvas.style.setProperty("height", "100%", "important");
-  canvas.style.setProperty("max-width", "100%", "important");
-  canvas.style.setProperty("max-height", "100%", "important");
-  canvas.style.setProperty("transform", "none", "important");
-  canvas.style.setProperty("transform-origin", "0 0", "important");
-  canvas.style.setProperty("object-fit", "fill", "important");
-  canvas.style.setProperty("object-position", "0 0", "important");
-  const canvasParent = canvas.parentElement;
+  canvas.style.width = "100%";
+  canvas.style.height = "100%";
+  const canvasParent = canvas.parentElement ?? parent;
   if (canvasParent && canvasParent !== player) {
     canvasParent.style.width = "100%";
     canvasParent.style.height = "100%";

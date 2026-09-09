@@ -17,8 +17,9 @@ const cases = [
   { name: "onn-kb", viewport: { width: 1280, height: 800 } },
 ];
 
+/** Bezel frames the core's own 4:3 viewport (same as desktop). */
 function containW(availW, availH) {
-  return Math.round(Math.min(availW, (availH * 384) / 272));
+  return Math.round(Math.min(availW, (availH * 4) / 3));
 }
 
 const browser = await chromium.launch({

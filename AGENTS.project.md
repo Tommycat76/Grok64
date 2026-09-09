@@ -52,3 +52,12 @@ Keep: PETSCII #32, unit-8 Play recycle (**in-place** on a live READY
 core), #41 no mid-play yank, tablet #40 (Android only), build-id chip,
 debug log off by default, Jiffy apply honesty — unless a lock fights
 paint; then prefer paint.
+
+Tablet exception (a lock that fought paint): #40's **384×272 backing
+lock** and its `transform: scale()` on the tablet GL canvas are
+**removed**. Measured on the Onn path: EJS sizes the backing to the glass
+and RetroArch's GL viewport follows, so reassigning `canvas.width` to 384
+left viewport 772×584 over a 384×272 buffer — the postage stamp that
+survived #59/#64/#66. **VICE owns the tablet buffer** (same rule as
+iPhone); CSS owns the display box. Everything else in #40 stays. See the
+Android tablet section of `docs/IOS_CRT_KNOWN_FAILURES.md`.

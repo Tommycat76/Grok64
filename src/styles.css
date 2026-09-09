@@ -1746,18 +1746,17 @@ div[class*="ejs_virtual"] {
   position: relative;
 }
 .g64-app[data-device="tablet"] .g64-bezel {
-  /* #65: bezel is a definite flex slot. The CRT is out of flow so a
-   * collapsed first measure cannot lock a postage-stamp width (#64).
-   * No container-type:size — that + flex reported 0/tiny height on Onn. */
-  padding: 0;
+  padding: 14px;
   border-radius: var(--radius-2xl);
   display: flex;
   align-items: stretch;
   justify-content: stretch;
-  /* Contain-fit the bezel in the stage, then fill it. A full-stage plate
-   * with a smaller glass is the "empty bezel" Tom still saw after #64.
-   * Size containment / measured --g64-tablet-crt-w / 320px / 100cqh are
-   * gone — those locked the Onn stamp. */
+  /* Same framing as the desktop bezel (the known-good filling case):
+   * 4:3, which is the aspect the VICE core letterboxes its GL viewport to.
+   * Contain-fit in the stage so the rounded frame hugs the CRT instead of
+   * being a full-stage plate with a smaller glass inside it (that is the
+   * "empty bezel" Tom saw). No size containment, no measured
+   * --g64-tablet-crt-w, no 320px floor, no 100cqh — those locked the stamp. */
   position: absolute;
   inset: 0;
   flex: none;
@@ -1768,7 +1767,7 @@ div[class*="ejs_virtual"] {
   min-width: 0;
   min-height: 0;
   margin: auto;
-  aspect-ratio: 384 / 272;
+  aspect-ratio: 4 / 3;
 }
 /* Screen fills that already-384:272 bezel. Not a tall-bezel CSS 100%
  * (#48/#49). iPhone .g64-screen glass is a different selector. */
@@ -1795,13 +1794,10 @@ div[class*="ejs_virtual"] {
   max-width: 100% !important;
   max-height: 100% !important;
 }
-.g64-app[data-device="tablet"] .g64-screen canvas {
-  object-fit: contain !important;
-  object-position: center !important;
-}
-/* Fill the 384:272 glass. Do not pin 384×272 CSS + scale() — Onn Chrome
- * can leave that as a postage stamp (same class as iOS #43). Backing
- * stays 384×272 in host.ts; this is CSS of the glass only. */
+/* Legacy #40 stamp geometry (384px CSS + transform:scale) must not come
+ * back from a cached bundle: neutralize the class instead of styling it.
+ * The canvas fills the glass; VICE owns the drawing buffer. */
+.g64-app[data-device="tablet"] .g64-screen canvas,
 .g64-app[data-device="tablet"] .g64-screen canvas.g64-tablet-fb {
   position: absolute !important;
   inset: 0 !important;
@@ -1815,8 +1811,8 @@ div[class*="ejs_virtual"] {
   max-height: 100% !important;
   transform: none !important;
   transform-origin: 0 0 !important;
-  object-fit: contain !important;
-  object-position: center !important;
+  object-fit: fill !important;
+  object-position: 0 0 !important;
 }
 .g64-app[data-device="tablet"][data-kb="true"] .g64-log {
   max-height: 3.4em;
@@ -1939,8 +1935,8 @@ div[class*="ejs_virtual"] {
   max-height: 100%;
   margin-inline: auto;
 }
-/* Tablet landscape: keep the 384:272 contain-fit bezel (not a 4:3
- * shrink-wrap around a 384 canvas — that was a second stamp). */
+/* Tablet landscape: same contain-fit 4:3 frame (not a flex shrink-wrap
+ * around the canvas — that was a second stamp). */
 .g64-app[data-orient="landscape"][data-device="tablet"] .g64-bezel {
   position: absolute;
   inset: 0;
@@ -1948,7 +1944,7 @@ div[class*="ejs_virtual"] {
   width: auto;
   height: auto;
   min-height: 0;
-  aspect-ratio: 384 / 272;
+  aspect-ratio: 4 / 3;
   max-width: 100%;
   max-height: 100%;
   margin: auto;
@@ -2010,7 +2006,7 @@ div[class*="ejs_virtual"] {
   flex: none;
   width: auto;
   height: auto;
-  aspect-ratio: 384 / 272;
+  aspect-ratio: 4 / 3;
   max-width: 100%;
   max-height: 100%;
   margin: auto;

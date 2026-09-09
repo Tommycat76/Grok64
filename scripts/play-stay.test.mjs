@@ -254,7 +254,7 @@ test("tablet CRT refits after cart attach / F5 without touching the iPhone glass
   assert.doesNotMatch(tabletBezelCode, /container-type:\s*size/);
   assert.match(tabletScreen, /width: 100%/);
   assert.match(tabletScreen, /height: 100%/);
-  assert.match(tabletBezel, /aspect-ratio: 384 \/ 272/);
+  assert.match(tabletBezel, /aspect-ratio: 4 \/ 3/);
   assert.match(tabletBezel, /position: absolute/);
   // #64 measured-width + #59 320px/cqh floors — those locked the Onn stamp.
   assert.doesNotMatch(tabletScreen, /--g64-tablet-crt-w/);
