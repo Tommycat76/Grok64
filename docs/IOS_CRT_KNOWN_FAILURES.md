@@ -386,6 +386,48 @@ VICE backing, ios-paint/present, or iPhone 384:272 glass.
 
 ---
 
+## Android tablet (Onn) — the stamp was a backing/viewport mismatch
+
+Not an iOS entry, but the same family, and it burned three PRs. Recorded so
+nobody restores the lock.
+
+`#59` floored the tablet glass at `max(320px, 100cqh*384/272)`; `#64`
+replaced that with a JS-measured `--g64-tablet-crt-w`; `#66` made the bezel
+the largest 384:272 frame. **Tom's Onn showed the same postage stamp after
+all three** — the stamp never changed size, which was the clue: none of them
+were the cause.
+
+Measured in-sandbox with the real VICE core under Onn UA
+(`scripts/tablet-crt-probe.mjs`, reading the context VICE stashes as
+`__g64gl`):
+
+| t | canvas backing | GL viewport | drawing buffer |
+| --- | --- | --- | --- |
+| 2.3s | 836×584 (EJS sized it to the glass) | `[3,0,793,600]` | 836×584 |
+| 3.3s | **384×272** (`fitEmu` #40 lock) | **`[32,0,772,584]`** | **384×272** |
+
+EJS sizes the backing to the glass CSS box and RetroArch sets its GL
+viewport to match. The `#40` tablet lock then reassigned
+`canvas.width/height = 384×272` **after** that, leaving the viewport
+permanently larger than the drawing buffer. The picture is pinned at
+384×272 while the glass grows — a stamp whose size is invariant to the
+bezel, exactly what Tom kept photographing.
+
+Fix: **VICE owns the tablet drawing buffer**, the same rule already locked
+for iPhone (`#14`/`#18`/`#39`) and already true on desktop (which fills).
+`fitEmu` only sizes a degenerate (`<64`) cold canvas; CSS owns the display
+box. Also removed `#40`'s 384px CSS + `transform: scale()` on the GL canvas
+(Onn can drop a transform on the GL layer — the Android twin of `#43`).
+
+Do **not** reintroduce: a tablet 384×272 backing assignment, a
+`transform: scale()` on the tablet GL canvas, `--g64-tablet-crt-w`, a
+`100cqh`/320px glass floor, or `container-type: size` on the bezel.
+
+The rest of `#40` (Reset→READY, Paradroid promote, IEC map, clean rail)
+is untouched.
+
+---
+
 ## Briefly WORKED (do not regress these unrelated wins)
 
 These are not CRT-fill proofs. Do not break them while chasing the bezel.

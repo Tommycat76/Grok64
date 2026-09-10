@@ -1,40 +1,64 @@
 import { detectDevice } from "./detect";
 
-/** Native VICE framebuffer used by the Android tablet #40 blit. */
-export const TABLET_CRT_W = 384;
-export const TABLET_CRT_H = 272;
+/**
+ * Tablet CRT layout ownership (Onn stamp fix):
+ *
+ * - `.g64-stage`   — positioning context only.
+ * - `.g64-bezel`   — the CRT frame: absolute contain-fit 4:3 in the stage.
+ * - `.g64-screen`  — fills the bezel (CSS 100%).
+ * - `canvas`       — fills the glass (CSS 100%); **VICE owns the drawing
+ *                    buffer**. Nothing here may set a pixel size.
+ *
+ * There is deliberately no measured CRT width. #64 wrote
+ * `--g64-tablet-crt-w` from a bezel that was still the first-pass stamp,
+ * and the real defect was a 384x272 backing under a glass-sized GL
+ * viewport (see `fitEmu`). Do not reintroduce a measured-width race.
+ */
+
+function paddingBox(el: HTMLElement) {
+  const cs = getComputedStyle(el);
+  return {
+    x: (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0),
+    y: (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0),
+  };
+}
+
+/** Content box of the bezel — the box the glass must fill. */
+export function tabletBezelAvail(bezel: HTMLElement): { w: number; h: number } {
+  const pad = paddingBox(bezel);
+  return {
+    w: bezel.clientWidth - pad.x,
+    h: bezel.clientHeight - pad.y,
+  };
+}
 
 /**
- * Largest 384:272 that fits `availW` × `availH`.
- * Tablet layout is CSS contain-fit in the bezel — this is the math check only.
+ * True when the glass really fills a laid-out bezel. Used only to wait for
+ * layout before EJS reads the box — never to size anything.
  */
-export function measureTabletContainSize(
+export function tabletGlassFillsBezel(
+  screenW: number,
+  screenH: number,
   availW: number,
   availH: number,
-): { w: number; h: number } | null {
-  if (!(availW >= 8) || !(availH >= 8)) return null;
-  const w = Math.round(Math.min(availW, (availH * TABLET_CRT_W) / TABLET_CRT_H));
-  const h = Math.round((w * TABLET_CRT_H) / TABLET_CRT_W);
-  return { w, h };
-}
-
-/** @deprecated #64 measured-width. Kept for the known-fail contract tests. */
-export function measureTabletContainWidth(availW: number, availH: number): number | null {
-  return measureTabletContainSize(availW, availH)?.w ?? null;
+  cover = 0.85,
+): boolean {
+  // Floor is above a 384x272 stamp box so a not-yet-laid-out bezel cannot
+  // pass just because the glass fills it. Bounded: on timeout the boot
+  // proceeds exactly as before.
+  if (!(availW >= 480) || !(availH >= 300)) return false;
+  return screenW >= availW * cover && screenH >= availH * cover;
 }
 
 /**
- * Tablet #65: CSS contain-fits `.g64-screen` in an out-of-flow bezel slot.
- * Drop `--g64-tablet-crt-w` so a collapsed #64 measure cannot pin a stamp.
- * Phone / desktop: clear leftovers so the var cannot leak onto CriOS glass.
+ * Flush tablet layout before a box read, and clear the #64 measured-width
+ * custom property if a cached bundle left one behind.
  */
-export function applyTabletContainFit(root: ParentNode | Document = document): number | null {
-  if (typeof document === "undefined") return null;
+export function applyTabletContainFit(root: ParentNode | Document = document): boolean {
+  if (typeof document === "undefined") return false;
   const bezel = root.querySelector(".g64-bezel") as HTMLElement | null;
-  const screen = root.querySelector(".g64-screen") as HTMLElement | null;
   bezel?.style.removeProperty("--g64-tablet-crt-w");
-  screen?.style.removeProperty("width");
-  screen?.style.removeProperty("height");
-  if (detectDevice() !== "tablet") return null;
-  return null;
+  if (detectDevice() !== "tablet" || !bezel) return false;
+  void bezel.offsetWidth;
+  return true;
 }
