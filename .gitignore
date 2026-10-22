@@ -4,7 +4,7 @@ node_modules/
 dist/
 .output/
 logs/
-screenshots/
+/screenshots/
 artifacts/
 attachments/
 fixtures/
