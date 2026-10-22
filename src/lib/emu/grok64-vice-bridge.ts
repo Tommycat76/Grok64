@@ -24,6 +24,7 @@ type Grok64Module = {
   _grok64_kbdbuf_feed?: (text: string) => void;
   _grok64_kbdbuf_feed_runcmd?: (text: string) => void;
   _grok64_sd2iec_detach?: (unit: number) => void;
+  _grok64_cartridge_trigger_freeze?: () => void;
   grok64Sd2iecHost?: {
     poll: () => void;
     attach: (unit: number) => void;
@@ -71,6 +72,9 @@ export function bindGrok64WasmExports(mod: Grok64Module & { cwrap?: (...args: un
     }
     if (!mod._grok64_sd2iec_detach) {
       mod._grok64_sd2iec_detach = wrap("grok64_sd2iec_detach", null, ["number"]) as (unit: number) => void;
+    }
+    if (!mod._grok64_cartridge_trigger_freeze) {
+      mod._grok64_cartridge_trigger_freeze = wrap("grok64_cartridge_trigger_freeze", null, []) as () => void;
     }
     const modAny = mod as {
       _retro_get_memory_data?: (id: number) => number;

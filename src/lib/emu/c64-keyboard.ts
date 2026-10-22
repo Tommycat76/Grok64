@@ -132,3 +132,17 @@ export async function feedBasicLine(
   if (n === 0) return true;
   return feedViaCanvasKeys(line);
 }
+
+/** Read C64 jiffies from PRINT TI (for load-timing QA). */
+export async function readPrintTi(
+  emu: RamEmu | null,
+  screenText: () => string,
+): Promise<number | null> {
+  if (!emu) return null;
+  const ok = await feedBasicLine(emu, "PRINT TI", { runcmd: true });
+  if (!ok) return null;
+  await sleep(800);
+  const text = screenText();
+  const m = text.match(/TI\s*=\s*(\d+)/i) ?? text.match(/(?:^|\s)(\d{5,})(?:\s|$)/m);
+  return m ? Number.parseInt(m[1], 10) : null;
+}

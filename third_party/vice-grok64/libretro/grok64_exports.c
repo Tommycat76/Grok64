@@ -7,6 +7,8 @@
 #include "machine.h"
 #include <stdint.h>
 
+extern void cartridge_trigger_freeze(void);
+
 static void grok64_kbdbuf_ensure(void)
 {
     kbdbuf_reset(631, 198, 10, (CLOCK)machine_get_cycles_per_frame());
@@ -99,4 +101,12 @@ int grok64_kbdbuf_feed_runcmd(const char *text)
     }
     grok64_kbdbuf_ensure();
     return kbdbuf_feed_runcmd(text);
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void grok64_cartridge_trigger_freeze(void)
+{
+    cartridge_trigger_freeze();
 }

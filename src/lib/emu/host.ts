@@ -1,6 +1,20 @@
 import { detectDevice, detectOs, isIos, isIosPhone, isTouchMobile } from "./detect";
 import { sidOptions } from "./machines";
-import { catalogFiles, hasCmdRom, hasJiffyPair, romFileMap, romsHaveJiffyPair } from "./roms";
+import {
+  catalogFiles,
+  hasCmdRom,
+  hasJiffyPair,
+  jiffyRomPayload,
+  romFileMap,
+  romsHaveJiffyPair,
+} from "./roms";
+import {
+  clearSessionMedia,
+  removeSessionCart,
+  sessionMediaList,
+  setSessionDisk,
+  type SessionMediaSlot,
+} from "./session-media";
 import { buildViceExtras, workDiskFor } from "./vice-extras";
 import {
   iecMapFromLegacy,
@@ -1499,9 +1513,19 @@ export function hardReset(emu: EjsInstance | null) {
  */
 export function cartFreeze(emu: EjsInstance | null): boolean {
   if (!emu?.gameManager?.setVariable && !emu?.gameManager?.restart) return false;
-  const mod = emu.Module as { cwrap?: (name: string, ret: string | null, args: string[]) => () => void };
+  const mod = emu.Module as {
+    cwrap?: (name: string, ret: string | null, args: string[]) => () => void;
+    _grok64_cartridge_trigger_freeze?: () => void;
+  };
   try {
-    const freeze = mod.cwrap?.("cartridge_trigger_freeze", null, []);
+    const direct = mod._grok64_cartridge_trigger_freeze;
+    if (typeof direct === "function") {
+      direct();
+      return true;
+    }
+    const freeze =
+      mod.cwrap?.("grok64_cartridge_trigger_freeze", null, []) ??
+      mod.cwrap?.("cartridge_trigger_freeze", null, []);
     if (typeof freeze === "function") {
       freeze();
       return true;
@@ -1509,9 +1533,13 @@ export function cartFreeze(emu: EjsInstance | null): boolean {
   } catch {
     /* stock core */
   }
-  applyRuntimeOptions(emu, { vice_reset: "freeze" });
+  applyRuntimeOptions(emu, {
+    vice_reset: "freeze",
+    vice_autostart: "disabled",
+    vice_autostart_warp: "disabled",
+    vice_autoloadwarp: "disabled",
+  });
   resetEmu(emu);
-  window.setTimeout(() => applyRuntimeOptions(emu, { vice_reset: "autostart" }), 120);
   return true;
 }
 
@@ -1546,6 +1574,7 @@ export function cartEject(emu: EjsInstance | null, workDisk?: Uint8Array | null)
     vice_reset: "hard",
   });
   resetEmu(emu);
+  removeSessionCart();
   return Boolean(isCartBoot || workDisk);
 }
 
@@ -1715,6 +1744,17 @@ export function jiffyPairLanded(emu: EjsInstance | null): boolean {
     const has1541 = d41.some((n) => fsFileExists(FS, `${root}/${n}`));
     if (hasC64 && has1541) return true;
   }
+  if (!FS.readdir) return false;
+  for (const root of VICE_SYSTEM_ROOTS) {
+    try {
+      const names = FS.readdir(root);
+      const hasC64 = names.some((n) => /JIFFYDOS_C64/i.test(n) && fsFileExists(FS, `${root}/${n}`));
+      const has1541 = names.some((n) => /JIFFYDOS_1541/i.test(n) && fsFileExists(FS, `${root}/${n}`));
+      if (hasC64 && has1541) return true;
+    } catch {
+      /* next */
+    }
+  }
   return false;
 }
 
@@ -1762,7 +1802,7 @@ export async function applyJiffyDos(emu: EjsInstance | null, want: boolean): Pro
   if (!romsHaveJiffyPair(roms)) {
     return finalizeJiffyOption(emu, false);
   }
-  injectRoms(emu, roms);
+  injectRoms(emu, jiffyRomPayload(roms));
   await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
   return finalizeJiffyOption(emu, jiffyPairLanded(emu));
 }
@@ -1775,7 +1815,7 @@ export function applyJiffyFromRoms(
 ): boolean {
   if (!emu) return false;
   if (!want || !romsHaveJiffyPair(roms)) return finalizeJiffyOption(emu, false);
-  injectRoms(emu, roms);
+  injectRoms(emu, jiffyRomPayload(roms));
   return finalizeJiffyOption(emu, jiffyPairLanded(emu));
 }
 
@@ -1878,6 +1918,7 @@ const WORK_DISK_NAMES = new Set(["WORK DISK.D64", "work disk.d64"]);
 
 export function clearUnitMounts() {
   unitMounts.clear();
+  clearSessionMedia();
 }
 
 export function applyIecUnit(emu: EjsInstance | null, iec: IecDrive, unit: IecUnit) {
@@ -1933,7 +1974,7 @@ export async function prepareCore(
   let cmd = false;
   try {
     const files = await romFileMap();
-    if (Object.keys(files).length) roms = injectRoms(emu, files);
+    if (Object.keys(files).length) roms = injectRoms(emu, jiffyRomPayload(files));
     const wantsCmd =
       opts.user.iec === "cmdhd" || Object.values(opts.driveMap ?? {}).includes("cmdhd");
     cmd = wantsCmd && (await hasCmdRom());
@@ -2023,6 +2064,7 @@ export function mountDiskOnUnit(
   const wrote = writeBootFile(emu, data, base);
   if (wrote) {
     unitMounts.set(unit, base);
+    setSessionDisk(base, data, unit);
     pruneExtraDisks(emu);
   }
   return wrote;
@@ -2091,6 +2133,8 @@ export function attachAutostartDisk(
     unitMounts.set(unit, mounted);
     if (emu) emu.fileName = mounted;
     applyIecUnit(emu, iec, unit);
+    const label = (_fallbackName || mounted).replace(/^\//, "");
+    setSessionDisk(label, data, unit);
   }
   return wrote;
 }
@@ -2171,26 +2215,45 @@ const MEDIA_EXT = /\.(d64|d71|d81|g64|g71|crt|tap|t64)$/i;
 const SKIP_DIR = new Set(["dev", "proc", "core", "tmp"]);
 
 /** UI / QA list — hide stale blank.d64; label work disk after Insert. */
+function mergeSessionMedia(
+  fsMedia: { name: string; data: Uint8Array }[],
+  displayName?: string | null,
+): { name: string; data: Uint8Array }[] {
+  const session = sessionMediaList();
+  if (!session.length) {
+    const out: { name: string; data: Uint8Array }[] = [];
+    for (const m of fsMedia) {
+      if (/^blank\.d64$/i.test(m.name)) continue;
+      const isWork = WORK_DISK_NAMES.has(m.name.toUpperCase()) || /^work\s*disk/i.test(m.name);
+      if (isWork && displayName) {
+        out.push({ name: displayName, data: m.data });
+        continue;
+      }
+      out.push(m);
+    }
+    if (!out.length && displayName) {
+      const work = fsMedia.find(
+        (m) => WORK_DISK_NAMES.has(m.name.toUpperCase()) || /work\s*disk/i.test(m.name),
+      );
+      if (work) out.push({ name: displayName, data: work.data });
+    }
+    return out;
+  }
+  const out: SessionMediaSlot[] = [...session];
+  for (const m of fsMedia) {
+    if (/^blank\.d64$/i.test(m.name)) continue;
+    if (WORK_DISK_NAMES.has(m.name.toUpperCase())) continue;
+    if (out.some((s) => s.name === m.name)) continue;
+    out.push({ name: m.name, bytes: m.data, kind: /\.(crt|bin)$/i.test(m.name) ? "cart" : "disk" });
+  }
+  return out.map((s) => ({ name: s.name, data: s.bytes }));
+}
+
 export function readMountedMediaForUi(
   emu: EjsInstance | null,
   displayName?: string | null,
 ): { name: string; data: Uint8Array }[] {
-  const raw = readMountedMedia(emu);
-  const out: { name: string; data: Uint8Array }[] = [];
-  for (const m of raw) {
-    if (/^blank\.d64$/i.test(m.name)) continue;
-    const isWork = WORK_DISK_NAMES.has(m.name.toUpperCase()) || /^work\s*disk/i.test(m.name);
-    if (isWork && displayName) {
-      out.push({ name: displayName, data: m.data });
-      continue;
-    }
-    out.push(m);
-  }
-  if (!out.length && displayName && raw.length) {
-    const work = raw.find((m) => WORK_DISK_NAMES.has(m.name.toUpperCase()) || /work\s*disk/i.test(m.name));
-    if (work) out.push({ name: displayName, data: work.data });
-  }
-  return out;
+  return mergeSessionMedia(readMountedMedia(emu), displayName);
 }
 
 export function applyReal1541Timing(emu: EjsInstance | null, unit: IecUnit = 8): void {

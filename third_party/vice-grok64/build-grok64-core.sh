@@ -34,6 +34,9 @@ fi
 if ! grep -q '_grok64_kbdbuf_flush' "${MAKEFILE}"; then
   sed -i 's|_grok64_kbdbuf_feed_runcmd|_grok64_kbdbuf_feed_runcmd,_grok64_kbdbuf_flush|' "${MAKEFILE}"
 fi
+if ! grep -q '_grok64_cartridge_trigger_freeze' "${MAKEFILE}"; then
+  sed -i 's|_grok64_kbdbuf_flush|_grok64_kbdbuf_flush,_grok64_cartridge_trigger_freeze|' "${MAKEFILE}"
+fi
 
 cd "${RA}"
 emmake make -f Makefile.emulatorjs HAVE_7ZIP=1 HAVE_CHD=1 HAVE_THREADS=0 PTHREAD_POOL_SIZE=0 ASYNC=0 \

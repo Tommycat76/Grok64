@@ -345,7 +345,7 @@ export function prepareAutostartDisk(data: Uint8Array, filename: string, title?:
 }
 
 export function wantsCracktroNudge(title: string): boolean {
-  return /paradroid/i.test(title);
+  return /paradroid|commando|turrican/i.test(title);
 }
 
 export function wrapForDiskSwap(kind: MediaKind, data: Uint8Array, name: string): Uint8Array | null {

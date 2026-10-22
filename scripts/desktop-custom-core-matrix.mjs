@@ -68,6 +68,7 @@ async function loadStarReal1541(page, diskPath) {
   const name = diskPath.split("/").pop() ?? "game.d64";
   const bytes = [...readFileSync(diskPath)];
   await ensureReal1541Timing(page);
+  const tiBefore = await page.evaluate(async () => window.__g64?.printTi?.());
   await page.evaluate(
     async ({ name, bytes }) => {
       await window.__g64?.playBytes?.(name, bytes, { autostart: false });
@@ -77,6 +78,9 @@ async function loadStarReal1541(page, diskPath) {
   await waitRunning(page, 90_000);
   await typeBasic(page, 'LOAD"*",8,1', { afterMs: 120_000, listAfterDollar: false });
   await page.waitForTimeout(3000);
+  const tiAfter = await page.evaluate(async () => window.__g64?.printTi?.());
+  const delta = tiBefore != null && tiAfter != null ? tiAfter - tiBefore : null;
+  return { tiBefore, tiAfter, tiDelta: delta, wallMs: null };
 }
 
 const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
@@ -121,21 +125,30 @@ try {
     detail: { head: text.slice(0, 80), ...loadDollar },
   });
 
-  // (2) Insert + LOAD"*",8,1
+  // (2) Insert + media list + LOAD"*",8,1
   const disk = join(FIX, "disks", "boulder-dash.d64");
   if (existsSync(disk)) {
-    await page.evaluate(() => window.__g64?.setIecSlot?.(8, "1541"));
-    await page.waitForTimeout(800);
-    const bytes = [...readFileSync(disk)];
-    await page.evaluate(
-      async ({ bytes, name }) => {
-        await window.__g64?.playBytes?.(name, bytes);
-      },
-      { name: "boulder-dash.d64", bytes },
-    );
-    await waitRunning(page, 90000);
+    await boot(page, { drive: "1541" });
     await page.evaluate(() => window.__g64?.resetReady?.());
     await waitRunning(page, 30000);
+    const insertName = "boulder-dash.d64";
+    const bytes = [...readFileSync(disk)];
+    const inserted = await page.evaluate(
+      async ({ bytes, name }) => {
+        await window.__g64?.playBytes?.(name, bytes, { autostart: false });
+        await new Promise((r) => setTimeout(r, 2000));
+        const media = window.__g64?.media?.() ?? [];
+        return { media, len: media.length, first: media[0] ?? null };
+      },
+      { name: insertName, bytes },
+    );
+    core = await coreOf(page);
+    push({
+      id: "insert-media-list",
+      pass: inserted.len >= 1 && inserted.first?.size > 170000 && /boulder|dash|d64/i.test(inserted.first?.name ?? ""),
+      core,
+      detail: inserted,
+    });
     await typeBasic(page, 'LOAD"*",8,1');
     await page.waitForTimeout(15000);
     text = await page.evaluate(() => window.__g64?.screenText?.() || "");
@@ -282,22 +295,24 @@ try {
     await boot(page, { jiffy: false, drive: "1541" });
     const tStock0 = Date.now();
     const stockTiming = await ensureReal1541Timing(page);
-    await loadStarReal1541(page, disk);
-    const stockMs = Date.now() - tStock0;
+    const stockTi = await loadStarReal1541(page, disk);
+    stockTi.wallMs = Date.now() - tStock0;
+    const stockMs = stockTi.wallMs;
     await patchLocalStorage(page, { jiffy: true, drive: "1541" });
     await page.reload();
     await boot(page, { jiffy: true, drive: "1541" });
     const tJ0 = Date.now();
     const jiffyTiming = await ensureReal1541Timing(page);
-    await loadStarReal1541(page, disk);
-    const jiffyMs = Date.now() - tJ0;
+    const jiffyTi = await loadStarReal1541(page, disk);
+    jiffyTi.wallMs = Date.now() - tJ0;
+    const jiffyMs = jiffyTi.wallMs;
     const jiffyLive = await page.evaluate(() => window.__g64?.jiffyLive?.());
     core = await coreOf(page);
     push({
       id: "jiffy-timing",
       pass: jiffyLive && jiffyMs <= stockMs && stockMs >= 35_000,
       core,
-      detail: { stockMs, jiffyMs, jiffyLive, stockTiming, jiffyTiming },
+      detail: { stockMs, jiffyMs, jiffyLive, stockTiming, jiffyTiming, stockTi, jiffyTi },
       optional: true,
     });
   }

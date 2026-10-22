@@ -141,10 +141,33 @@ export function matchRomCatalogId(fileName: string, byteLength: number): string 
   return null;
 }
 
+function jiffyBytes(roms: Record<string, Uint8Array>, id: "jiffy-c64" | "jiffy-1541"): Uint8Array | null {
+  for (const n of catalogFiles(id)) {
+    const b = roms[n];
+    if (b && b.byteLength >= 4096) return b;
+  }
+  const re = id === "jiffy-c64" ? /JIFFYDOS_C64|JIFFY.?DOS.?C64/i : /JIFFYDOS_1541|JIFFY.?DOS.?1541/i;
+  for (const [name, b] of Object.entries(roms)) {
+    if (b.byteLength >= 4096 && re.test(name)) return b;
+  }
+  return null;
+}
+
 /** Bytes in a romFileMap that are a usable Jiffy C64 + 1541 pair. */
 export function romsHaveJiffyPair(roms: Record<string, Uint8Array>): boolean {
-  const big = (n: string) => (roms[n]?.byteLength ?? 0) >= 4096;
-  return catalogFiles("jiffy-c64").some(big) && catalogFiles("jiffy-1541").some(big);
+  return Boolean(jiffyBytes(roms, "jiffy-c64") && jiffyBytes(roms, "jiffy-1541"));
+}
+
+/** VICE libretro expects canonical filenames under system/vice — always inject these. */
+export function jiffyRomPayload(roms: Record<string, Uint8Array>): Record<string, Uint8Array> {
+  const out: Record<string, Uint8Array> = { ...roms };
+  const c64 = jiffyBytes(roms, "jiffy-c64");
+  const d41 = jiffyBytes(roms, "jiffy-1541");
+  const c64Name = catalogFiles("jiffy-c64")[0];
+  const d41Name = catalogFiles("jiffy-1541")[0];
+  if (c64 && c64Name) out[c64Name] = c64;
+  if (d41 && d41Name) out[d41Name] = d41;
+  return out;
 }
 
 export async function hasCmdRom(): Promise<boolean> {

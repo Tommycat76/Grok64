@@ -152,7 +152,8 @@ import { snapshotDevice, readViewport, applyViewport, detectDevice, isIos, isIos
 import { applyTabletContainFit, tabletBezelAvail, tabletGlassFillsBezel } from "@/lib/emu/tablet-fit";
 import { detectJoyPort, detectSoftwareStandard } from "@/lib/emu/region";
 import { RETRO_BTN } from "@/lib/emu/types";
-import { feedBasicLine } from "@/lib/emu/c64-keyboard";
+import { feedBasicLine, readPrintTi } from "@/lib/emu/c64-keyboard";
+import { setSessionCart, setSessionDisk } from "@/lib/emu/session-media";
 import { focusGrok64Player } from "@/lib/emu/focus-player";
 import { dispatchC64Key, isJoyFireKey, muteC64Space, onBeforeC64Space, typeC64 } from "@/lib/emu/keys";
 import {
@@ -262,6 +263,7 @@ export function Grok64App() {
   const loadGenRef = useRef(0);
   const playModeRef = useRef("basic");
   const basicRunAfterLoadRef = useRef(false);
+  const diskRunAfterLoadRef = useRef(false);
   const persistGateRef = useRef(true);
   const inGameplayRef = useRef(false);
   const cracktroOnceRef = useRef("");
@@ -721,6 +723,7 @@ export function Grok64App() {
       debugWasmIec: (dev, sec) => debugWasmIec(dev, sec),
       iecOpenDollarChannel: (unit = 8) => iecOpenDollarChannel(emuRef.current, unit as 8 | 9 | 10 | 11 | 12),
       feedBasic: (line) => feedBasicLine(emuRef.current, line),
+      printTi: async () => readPrintTi(emuRef.current, () => readScreenText(emuRef.current)),
       bootGeos: async (name, bytes) => {
         let buf: ArrayBuffer;
         if (bytes instanceof ArrayBuffer) buf = bytes;
@@ -730,6 +733,7 @@ export function Grok64App() {
         useEmu.getState().setIecSlot(8, "1541");
         const ok = await bootGeosFloppy(emuRef.current, new Uint8Array(buf), name);
         if (!ok) return false;
+        setSessionDisk(name, new Uint8Array(buf), 8);
         const loaded = await feedBasicLine(emuRef.current, 'LOAD"GEOS",8,1');
         if (!loaded) return false;
         await new Promise((r) => window.setTimeout(r, 45_000));
@@ -1132,8 +1136,12 @@ export function Grok64App() {
           applyEmuVolume(emuRef.current, vol.muted, vol.volume);
           gestureUnlockAudio(emuRef.current);
           scheduleCracktroNudge(unlockedTitle);
-          if (basicRunAfterLoadRef.current && playModeRef.current !== "disk" && playModeRef.current !== "cart") {
-            basicRunAfterLoadRef.current = false;
+          const wantRun =
+            basicRunAfterLoadRef.current ||
+            (diskRunAfterLoadRef.current && (playModeRef.current === "disk" || playModeRef.current === "auto"));
+          basicRunAfterLoadRef.current = false;
+          diskRunAfterLoadRef.current = false;
+          if (wantRun && playModeRef.current !== "cart") {
             const runGen = playLockGen.current;
             window.setTimeout(() => {
               if (playLockGen.current !== runGen) return;
@@ -1686,6 +1694,9 @@ export function Grok64App() {
             playerBuf = await res.arrayBuffer();
           }
           useEmu.getState().setReuSize(C64OS_REU);
+          if (emuRef.current) {
+            applyRuntimeOptions(emuRef.current, { vice_ram_expansion_unit: C64OS_REU });
+          }
           const { zipSync } = await import("fflate");
           const boot = `${base}.prg`;
           const zip = zipSync({
@@ -1773,6 +1784,8 @@ export function Grok64App() {
         useEmu.getState().setFastLoadCart(null);
       }
       const jiffyWant = resolveJiffyWant(jiffyWantSetting, sessionFastCart);
+      diskRunAfterLoadRef.current =
+        !work && plan.autostartAfterReady && (plan.kind === "floppy" || plan.kind === "cart");
       const attach = plan.attach;
       // Hard lock: CriOS never logs `hot-swap` (Tom #35 / #37 → DNP).
       // After READY, recycle is in-place on the live canvas (#18/#30).
@@ -1898,6 +1911,9 @@ export function Grok64App() {
         return;
       }
       playModeRef.current = plan.kind === "floppy" ? "disk" : plan.kind === "basic" ? "basic" : "auto";
+      if (plan.kind === "cart") {
+        setSessionCart(bootName, new Uint8Array(safe));
+      }
       const hadCart = cartLiveRef.current;
       cartLiveRef.current = plan.kind === "cart" || (hadCart && plan.kind === "floppy");
       setCartLive(cartLiveRef.current);
@@ -1964,11 +1980,20 @@ export function Grok64App() {
         const mounted = inPlaceAutostartTarget(bootFileOf(emuRef.current), bootName);
         const wrote = mounted
           ? attach
-            ? attachAutostartDisk(emuRef.current, payloadDisk, mounted, playIec, playAttachUnit)
+            ? attachAutostartDisk(
+                emuRef.current,
+                payloadDisk,
+                filename || bootName || mounted,
+                playIec,
+                playAttachUnit,
+              )
             : swapBootDisk(emuRef.current, payloadDisk, mounted)
           : false;
         if (wrote) {
           emuRef.current.fileName = mounted;
+          if (plan.kind === "floppy" && !work) {
+            useEmu.getState().setInsertedDiskName(filename);
+          }
           if (canHotSwap) {
             glog("hot-swap", {
               filename,
@@ -2047,6 +2072,13 @@ export function Grok64App() {
             skipJiffy: true,
             driveMap: stNow.iecMap,
           });
+          await applyJiffyDos(
+            emuRef.current,
+            resolveJiffyWant(stNow.jiffyDos, stNow.fastLoadCart),
+          );
+          if (plan.kind === "floppy" && !work) {
+            useEmu.getState().setInsertedDiskName(filename);
+          }
           applyIecUnit(emuRef.current, playIec, playAttachUnit);
           plugJoysticks(emuRef.current, useEmu.getState().joyPort);
           // #13: never reset paint / wipe the live canvas on in-place Play.
@@ -2184,6 +2216,21 @@ export function Grok64App() {
         toast.error("That file is missing.");
         return;
       }
+      if (/geos/i.test(file.name) && /\.d64$/i.test(file.name) && emuRef.current && useEmu.getState().running) {
+        useEmu.getState().setIecSlot(8, "1541");
+        const raw = new Uint8Array(file.data);
+        const ok = await bootGeosFloppy(emuRef.current, raw, file.name);
+        if (!ok) {
+          toast.error("Could not mount GEOS disk");
+          return;
+        }
+        setSessionDisk(file.name, raw, 8);
+        useEmu.getState().setInsertedDiskName(file.name);
+        focusGrok64Player();
+        toast.message('GEOS mounted on unit 8 — type LOAD"GEOS",8,1 then RUN');
+        await touchPlayed(item.id);
+        return;
+      }
       if (
         meta?.catalogKey &&
         file.catalogKey &&
@@ -2247,6 +2294,7 @@ export function Grok64App() {
     await flushEmuFs(emuRef.current, 600);
     await touchPlayed(item.id);
     const label = d64DiskName(media) ?? item.name.replace(/\.[a-z0-9]{2,4}$/i, "");
+    setSessionDisk(item.name, media, unit);
     useEmu.getState().setInsertedDiskName(item.name);
     focusGrok64Player();
     toast.success(`Inserted ${label} on drive ${unit}`);
@@ -2555,6 +2603,25 @@ export function Grok64App() {
       window.clearTimeout(b);
     };
   }, [s.running, cartLive]);
+  useEffect(() => {
+    const onFn = (e: KeyboardEvent) => {
+      if (!useEmu.getState().running || playLockRef.current) return;
+      if (!/^F[1-8]$/.test(e.code)) return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      e.preventDefault();
+      e.stopPropagation();
+      const down = e.type === "keydown";
+      if (down && e.repeat) return;
+      dispatchC64Key(e.code, e.key, down);
+    };
+    window.addEventListener("keydown", onFn, true);
+    window.addEventListener("keyup", onFn, true);
+    return () => {
+      window.removeEventListener("keydown", onFn, true);
+      window.removeEventListener("keyup", onFn, true);
+    };
+  }, [s.running]);
   useEffect(() => {
     if (
       !shouldDismissPictureHold({
