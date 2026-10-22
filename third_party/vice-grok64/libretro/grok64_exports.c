@@ -29,8 +29,8 @@ EMSCRIPTEN_KEEPALIVE
 #endif
 uint8_t grok64_c64_read(uint16_t addr)
 {
-    void *data = retro_get_memory_data(0);
-    size_t size = retro_get_memory_size(0);
+    void *data = retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM);
+    size_t size = retro_get_memory_size(RETRO_MEMORY_SYSTEM_RAM);
     if (!data || addr >= size) {
         return 0;
     }
@@ -42,8 +42,8 @@ EMSCRIPTEN_KEEPALIVE
 #endif
 void grok64_c64_write(uint16_t addr, uint8_t value)
 {
-    void *data = retro_get_memory_data(0);
-    size_t size = retro_get_memory_size(0);
+    void *data = retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM);
+    size_t size = retro_get_memory_size(RETRO_MEMORY_SYSTEM_RAM);
     if (!data || addr >= size) {
         return;
     }

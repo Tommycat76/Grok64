@@ -38,4 +38,5 @@ STOCK="${ROOT}/package"
   "${STOCK}/license.txt" "${STOCK}/core.json" "${STOCK}/reports/vice_x64sc.json"
 
 cp -f "${OUT}/vice_x64sc-wasm.data" "${OUT}/vice_x64sc_grok64-wasm.data"
-echo "Wrote ${OUT}/vice_x64sc-wasm.data"
+cp -f "${OUT}/vice_x64sc-wasm.data" "${OUT}/vice_x64sc-grok64-iec-wasm.data"
+echo "Wrote ${OUT}/vice_x64sc-wasm.data (+ grok64 IEC aliases)"

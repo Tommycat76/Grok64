@@ -1,4 +1,4 @@
-/** C64 system RAM via libretro RETRO_MEMORY_SYSTEM (64 KiB). */
+/** C64 system RAM via libretro RETRO_MEMORY_SYSTEM_RAM (64 KiB). */
 
 export type RamEmu = {
   Module?: {
@@ -11,7 +11,7 @@ export type RamEmu = {
   };
 };
 
-const RETRO_MEMORY_SYSTEM = 0;
+const RETRO_MEMORY_SYSTEM_RAM = 2;
 
 export function c64RamView(emu: RamEmu | null): Uint8Array | null {
   const mod = emu?.Module;
@@ -25,13 +25,13 @@ export function c64RamView(emu: RamEmu | null): Uint8Array | null {
   let size = 0;
   try {
     if (typeof mod._retro_get_memory_data === "function") {
-      ptr = mod._retro_get_memory_data(RETRO_MEMORY_SYSTEM) as number;
-      size = (mod._retro_get_memory_size as (n: number) => number)?.(RETRO_MEMORY_SYSTEM) ?? 0;
+      ptr = mod._retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM) as number;
+      size = (mod._retro_get_memory_size as (n: number) => number)?.(RETRO_MEMORY_SYSTEM_RAM) ?? 0;
     } else if (mod.cwrap) {
       const getData = mod.cwrap("retro_get_memory_data", "number", ["number"]);
       const getSize = mod.cwrap("retro_get_memory_size", "number", ["number"]);
-      ptr = getData(RETRO_MEMORY_SYSTEM) as number;
-      size = getSize(RETRO_MEMORY_SYSTEM) as number;
+      ptr = getData(RETRO_MEMORY_SYSTEM_RAM) as number;
+      size = getSize(RETRO_MEMORY_SYSTEM_RAM) as number;
     }
   } catch {
     return null;

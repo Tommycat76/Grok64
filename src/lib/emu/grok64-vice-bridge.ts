@@ -60,6 +60,20 @@ export function bindGrok64WasmExports(mod: Grok64Module & { cwrap?: (...args: un
         value: number,
       ) => void;
     }
+    const modAny = mod as {
+      _retro_get_memory_data?: (id: number) => number;
+      _retro_get_memory_size?: (id: number) => number;
+    };
+    if (!modAny._retro_get_memory_data) {
+      modAny._retro_get_memory_data = wrap("retro_get_memory_data", "number", ["number"]) as (
+        id: number,
+      ) => number;
+    }
+    if (!modAny._retro_get_memory_size) {
+      modAny._retro_get_memory_size = wrap("retro_get_memory_size", "number", ["number"]) as (
+        id: number,
+      ) => number;
+    }
   } catch {
     /* stock core */
   }

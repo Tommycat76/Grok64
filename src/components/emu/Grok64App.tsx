@@ -79,6 +79,7 @@ import {
   suspendAudio,
   viceJoyOptions,
   waitForCoreFs,
+  injectViceRc,
 } from "@/lib/emu/host";
 import { hasCmdRom, hasJiffyPair, prefetchBundledRoms } from "@/lib/emu/roms";
 import {
@@ -87,6 +88,7 @@ import {
   listPartitions,
   partitionsForMount,
   debugWasmIec,
+  iecLoadDollarList,
   kernalIecTrapActive,
   resetSd2iecSession,
   runSdCommand,
@@ -129,6 +131,8 @@ import {
   shouldWaitForLiveCore,
   unitOfDrive,
   userAttachFromMap,
+  viceDriveTypeVars,
+  viceRcForDrives,
 } from "@/lib/emu/play-session";
 import {
   actionForPress,
@@ -566,7 +570,31 @@ export function Grok64App() {
           cmdhd: mapHasDrive(useEmu.getState().iecMap, "cmdhd"),
           scpu: useEmu.getState().machineId === "scpu",
         }).map((b) => b.id),
-      setIecSlot: (unit, slot) => useEmu.getState().setIecSlot(unit, slot),
+      setIecSlot: (unit, slot) => {
+        useEmu.getState().setIecSlot(unit, slot);
+        const emu = emuRef.current;
+        if (!emu || !useEmu.getState().running) return;
+        const iecMap = useEmu.getState().iecMap;
+        applyRuntimeOptions(emu, viceDriveTypeVars(iecMap));
+        injectViceRc(emu, viceRcForDrives(iecMap, false));
+        if (slot === "sd2iec") {
+          wireGrok64ViceHost(emu);
+          attachGrok64Sd2iec(emu, unit);
+          applyIecUnit(emu, "sd2iec", unit);
+          void partitionsForMount().then((parts) => remountSd2iecFromParts(emu, unit, parts));
+        } else if (slot === "1541" || slot === "1581") {
+          applyIecUnit(emu, slot, unit);
+          applyRuntimeOptions(emu, {
+            [`vice_drive${unit}_type`]: slot === "1581" ? "1581" : "1541",
+          });
+        }
+      },
+      typeC64: (text, opts) => typeC64(text, opts),
+      typeBasic: async (text, opts) => {
+        await typeC64(text, { delayMs: opts?.delayMs ?? 55 });
+        dispatchC64Key("Enter", "Enter", true);
+        dispatchC64Key("Enter", "Enter", false);
+      },
       iecMap: () => useEmu.getState().iecMap,
       resetReady: () => resetReadyRef.current?.(),
       setCartLive: (v) => {
@@ -664,6 +692,7 @@ export function Grok64App() {
       setSd2iecUnit: (unit) => setIecDevice(unit),
       kernalIecTrapActive: () => kernalIecTrapActive(emuRef.current),
       debugWasmIec: (dev, sec) => debugWasmIec(dev, sec),
+      iecLoadDollarList: (unit = 8) => iecLoadDollarList(emuRef.current, unit as 8 | 9 | 10 | 11 | 12),
       settings: () => {
         const st = useEmu.getState();
         return {
@@ -796,6 +825,8 @@ export function Grok64App() {
           joyPort: st.joyPort,
           reuSize: st.reuSize,
           showKeyboard: st.showKeyboard,
+          mouseMode: st.mouseMode,
+          cart: cartLiveRef.current,
         };
       },
       runDos: (cmd) => runSdCommand(cmd),

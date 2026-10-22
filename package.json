@@ -19,6 +19,8 @@
     "test:cmd-sd2iec": "node scripts/cmd-sd2iec-e2e.mjs",
     "test:desktop-sd2iec-iec": "node scripts/desktop-sd2iec-iec-e2e.mjs",
     "test:desktop-grok64-core": "node scripts/desktop-grok64-core-e2e.mjs",
+    "test:desktop-custom-matrix": "NODE_OPTIONS=--max-old-space-size=6144 node scripts/desktop-custom-core-matrix.mjs",
+    "fetch-fixtures": "node scripts/fetch-fixtures.mjs",
     "test:desktop-e2e": "node scripts/desktop-e2e.mjs",
     "test:desktop-matrix": "node scripts/desktop-matrix.mjs",
     "test:desktop-catalog": "node scripts/desktop-catalog-e2e.mjs",

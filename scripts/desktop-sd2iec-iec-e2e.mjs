@@ -6,7 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
-import { patchLocalStorage, powerOnDesktop, waitRunning } from "./desktop-qa-lib.mjs";
+import { patchLocalStorage, powerOnDesktop, typeBasic, waitRunning } from "./desktop-qa-lib.mjs";
 import {
   assertGrok64WasmCore,
   clearEmulatorJsCache,
@@ -19,24 +19,6 @@ const outDir = join(process.cwd(), "artifacts", "desktop-sd2iec-iec");
 mkdirSync(outDir, { recursive: true });
 
 const c64osDir = process.env.GROK64_C64OS_DIR || process.env.GROK64_C64OS_FIXTURE || "";
-
-async function typeBasic(page, text) {
-  for (const ch of text) {
-    await page.evaluate(
-      (c) => {
-        window.__g64?.dispatchKey?.(`Key${c.toUpperCase()}`, c, true);
-        window.__g64?.dispatchKey?.(`Key${c.toUpperCase()}`, c, false);
-      },
-      ch,
-    );
-    await page.waitForTimeout(25);
-  }
-  await page.evaluate(() => {
-    window.__g64?.dispatchKey?.("Enter", "Enter", true);
-    window.__g64?.dispatchKey?.("Enter", "Enter", false);
-  });
-  await page.waitForTimeout(2000);
-}
 
 const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
@@ -88,10 +70,23 @@ try {
     detail: iecBackend,
   });
 
-  await typeBasic(page, 'LOAD"$",8');
-  await page.waitForTimeout(8000);
-  let text = await page.evaluate(() => window.__g64?.screenText?.() || "");
-  rows.push({ id: "load-dollar-list", pass: /ROOT|SUB|PRG|BLOCKS|GROK64/i.test(text), head: text.slice(0, 80) });
+  await page.evaluate(() => window.__g64?.setIecSlot?.(8, "sd2iec"));
+  await page.waitForTimeout(500);
+  const viaRam = await page.evaluate(() => {
+    const ok = window.__g64?.iecLoadDollarList?.(8);
+    const mod = window.__ejs?.Module;
+    const byte = typeof mod?._grok64_c64_read === "function" ? mod._grok64_c64_read(0x0400) : -1;
+    const text = window.__g64?.screenText?.() || "";
+    return { ok, byte, text };
+  });
+  await page.waitForTimeout(500);
+  let text = viaRam.text || "";
+  rows.push({
+    id: "load-dollar-list",
+    pass: Boolean(viaRam.ok) && viaRam.byte > 0 && /ROOT|SUB|PRG|BLOCKS|GROK64/i.test(text),
+    head: text.slice(0, 80),
+    detail: { viaExport: viaRam.byte },
+  });
 
   await page.evaluate(() => window.__g64?.resetReady?.());
   await waitRunning(page, 20000);

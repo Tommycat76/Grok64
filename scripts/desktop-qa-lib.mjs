@@ -115,6 +115,60 @@ export function patchLocalStorage(page, combo) {
   }, combo);
 }
 
+const C64_EXTRA = {
+  '"': { code: "Digit2", shift: true },
+  "*": { code: "BracketRight", shift: false },
+  ",": { code: "Comma", shift: false },
+  $: { code: "Digit4", shift: true },
+  ":": { code: "Semicolon", shift: false },
+  ";": { code: "Quote", shift: false },
+  "+": { code: "Minus", shift: false },
+  "-": { code: "Equal", shift: false },
+  "=": { code: "IntlBackslash", shift: false },
+  "/": { code: "Slash", shift: false },
+  "(": { code: "Digit9", shift: true },
+  ")": { code: "Digit0", shift: true },
+};
+
+/** C64 keystrokes for Playwright (trusted keys → Emscripten !parent). */
+export function c64Keystrokes(text) {
+  const out = [];
+  for (const ch of text) {
+    if (/^[A-Za-z]$/.test(ch)) {
+      const up = ch.toUpperCase();
+      out.push({ code: `Key${up}`, shift: false });
+      continue;
+    }
+    if (/^[0-9]$/.test(ch)) {
+      out.push({ code: `Digit${ch}`, shift: false });
+      continue;
+    }
+    const extra = C64_EXTRA[ch];
+    if (extra) out.push(extra);
+  }
+  return out;
+}
+
+async function pressC64Stroke(page, stroke, delayMs) {
+  if (stroke.shift) await page.keyboard.down("Shift");
+  await page.keyboard.press(stroke.code, { delay: delayMs });
+  if (stroke.shift) await page.keyboard.up("Shift");
+}
+
+/** Type a BASIC line with correct C64 PETSCII key mapping (+ Enter). */
+export async function typeBasic(page, text, { delayMs = 55, afterMs = 400 } = {}) {
+  await page.evaluate(() => {
+    window.__ejs?.Module?._grok64_sd2iec_attach?.(8);
+    document.getElementById("grok64-player")?.focus();
+  });
+  await page.focus("#grok64-player");
+  for (const stroke of c64Keystrokes(text)) {
+    await pressC64Stroke(page, stroke, delayMs);
+  }
+  await page.keyboard.press("Enter", { delay: delayMs });
+  await page.waitForTimeout(afterMs);
+}
+
 export async function matrixColdBoot(page, base, combo) {
   await page.goto(base, { waitUntil: "domcontentloaded" });
   await waitForG64(page);
