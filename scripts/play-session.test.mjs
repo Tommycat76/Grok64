@@ -270,10 +270,12 @@ test("hardware buttons: short/long map matches real devices", () => {
   assert.equal(actionForPress(sd89, "long"), "sd2iec-unit8");
   assert.equal(actionForPress(cmd, "short"), "cmd-swap");
   assert.equal(actionForPress(cmd, "long"), "cmd-unswap");
+  const cartOut = hwButtonById("cart-out");
+  assert.equal(actionForPress(cartOut, "short"), "cart-eject");
   const ids = visibleHwButtons({ cart: true, sd2iec: true, cmdhd: true, scpu: true }).map((b) => b.id);
-  assert.deepEqual(ids, ["cart-fz", "sd-disk", "sd-swap", "cmd-swap", "scpu-rst"]);
+  assert.deepEqual(ids, ["cart-fz", "cart-out", "sd-disk", "sd-swap", "cmd-swap", "scpu-rst"]);
   const noCmd = visibleHwButtons({ cart: true, sd2iec: true, cmdhd: false, scpu: false }).map((b) => b.id);
-  assert.deepEqual(noCmd, ["cart-fz", "sd-disk", "sd-swap"]);
+  assert.deepEqual(noCmd, ["cart-fz", "cart-out", "sd-disk", "sd-swap"]);
   assert.deepEqual(visibleHwButtons({}).map((b) => b.id), []);
   assert.deepEqual(visibleHwButtons({ cart: false, sd2iec: false }).map((b) => b.id), []);
   assert.ok(HW_BUTTONS.every((b) => b.shortAction));

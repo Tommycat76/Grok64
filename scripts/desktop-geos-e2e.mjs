@@ -41,12 +41,12 @@ await page.reload();
 await powerOnDesktop(page, base, { navigate: false });
 
 const name = images[0];
-const bytes = [...readFileSync(join(dir, name))];
+const fileBuf = readFileSync(join(dir, name));
 await page.evaluate(
   async ({ name, bytes }) => {
     await window.__g64?.playBytes?.(name, bytes);
   },
-  { name, bytes },
+  { name, bytes: Array.from(fileBuf) },
 );
 
 await waitRunning(page, 90000);

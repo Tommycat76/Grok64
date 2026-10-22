@@ -40,19 +40,36 @@ export function probeGrok64ViceModule(emu: Grok64Emu | null): boolean {
   return Boolean(mod?._grok64_sd2iec_poll || mod?._grok64_sd2iec_attach || mod?.grok64Sd2iecHost);
 }
 
-/** Register JS host functions for a custom Grok64 VICE core (Emscripten imports). */
-function bindGrok64WasmExports(mod: Grok64Module & { cwrap?: (...args: unknown[]) => unknown }): void {
-  if (mod._grok64_sd2iec_attach) return;
+/** Bind Emscripten exports onto Module (idempotent). */
+export function bindGrok64WasmExports(mod: Grok64Module & { cwrap?: (...args: unknown[]) => unknown }): void {
   const wrap = mod.cwrap;
   if (!wrap) return;
   try {
-    mod._grok64_sd2iec_attach = wrap("grok64_sd2iec_attach", null, ["number"]) as (unit: number) => void;
-    mod._grok64_sd2iec_poll = wrap("grok64_sd2iec_poll", null, []) as () => void;
-    mod._grok64_c64_read = wrap("grok64_c64_read", "number", ["number"]) as (addr: number) => number;
-    mod._grok64_c64_write = wrap("grok64_c64_write", null, ["number", "number"]) as (addr: number, value: number) => void;
+    if (!mod._grok64_sd2iec_attach) {
+      mod._grok64_sd2iec_attach = wrap("grok64_sd2iec_attach", null, ["number"]) as (unit: number) => void;
+    }
+    if (!mod._grok64_sd2iec_poll) {
+      mod._grok64_sd2iec_poll = wrap("grok64_sd2iec_poll", null, []) as () => void;
+    }
+    if (!mod._grok64_c64_read) {
+      mod._grok64_c64_read = wrap("grok64_c64_read", "number", ["number"]) as (addr: number) => number;
+    }
+    if (!mod._grok64_c64_write) {
+      mod._grok64_c64_write = wrap("grok64_c64_write", null, ["number", "number"]) as (
+        addr: number,
+        value: number,
+      ) => void;
+    }
   } catch {
     /* stock core */
   }
+}
+
+export function ensureGrok64WasmExports(emu: Grok64Emu | null): boolean {
+  const mod = emu?.Module as Grok64Module & { cwrap?: (...args: unknown[]) => unknown };
+  if (!mod) return false;
+  bindGrok64WasmExports(mod);
+  return Boolean(mod._grok64_sd2iec_attach && mod._grok64_c64_read);
 }
 
 export function wireGrok64ViceHost(emu: Grok64Emu | null): Grok64IecBackend {

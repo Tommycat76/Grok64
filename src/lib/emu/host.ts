@@ -13,7 +13,7 @@ import {
   type DriveAttach,
 } from "./play-session";
 import { cmdDriveMap, cmdSwapUnits, sd2iecSwapUnit } from "./hw-buttons";
-import { attachGrok64Sd2iec, wireGrok64ViceHost } from "./grok64-vice-bridge";
+import { attachGrok64Sd2iec, bindGrok64WasmExports, ensureGrok64WasmExports, wireGrok64ViceHost } from "./grok64-vice-bridge";
 import type { SdPartition } from "./sd2iec";
 import type { Sd2iecVolume } from "./sd2iec-volume";
 import type {
@@ -48,21 +48,76 @@ export function grok64ViceCoreRoot(): string | null {
   return null;
 }
 
-/** EmulatorJS data root — always the full CDN tree; Grok64 core is overridden via `filePaths`. */
+/** EmulatorJS data root — CDN runtime; Grok64 blobs overridden via `filePaths`. */
 export function emulatorDataPath(): string {
   return CDN_DATA;
 }
 
-/** Per-file overrides (custom vice_x64sc WASM payload on test branch). */
-export function grok64EmulatorFilePaths(): Record<string, string> | undefined {
+export const GROK64_IEC_CORE_BLOB = "vice_x64sc-grok64-iec-wasm.data";
+
+/** Absolute URL of the Grok64 IEC 7z core (when configured). */
+export function grok64CoreBlobUrl(): string | null {
   const root = grok64ViceCoreRoot();
-  if (!root) return undefined;
-  const rel = `${root}/cores/vice_x64sc-grok64-iec-wasm.data`;
-  const abs =
-    typeof window !== "undefined" && window.location?.origin
-      ? `${window.location.origin}${rel.startsWith("/") ? rel : `/${rel}`}`
-      : rel;
-  return { "vice_x64sc-wasm.data": abs };
+  if (!root) return null;
+  const rel = `${root.startsWith("/") ? root : `/${root}`}/cores/${GROK64_IEC_CORE_BLOB}`;
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return `${window.location.origin}${rel}`;
+  }
+  return rel;
+}
+
+function grok64LocalDataUrl(rel: string): string | null {
+  const root = grok64ViceCoreRoot();
+  if (!root || typeof window === "undefined" || !window.location?.origin) return null;
+  const base = root.startsWith("/") ? root : `/${root}`;
+  return `${window.location.origin}${base}/${rel.replace(/^\//, "")}`;
+}
+
+/** Per-file overrides (custom vice_x64sc WASM + shipped compression/reports). */
+export function grok64EmulatorFilePaths(): Record<string, string> | undefined {
+  const out: Record<string, string> = {};
+  const core = grok64CoreBlobUrl();
+  if (core) out["vice_x64sc-wasm.data"] = core;
+  for (const rel of [
+    "compression/extract7z.js",
+    "compression/extractzip.js",
+    "compression/libunrar.js",
+    "compression/libunrar.wasm",
+    "cores/reports/vice_x64sc.json",
+  ]) {
+    const local = grok64LocalDataUrl(rel);
+    if (local) out[rel] = local;
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+export type Grok64CoreLoadRecord = { leaf: string; url: string; action: string; at: number };
+
+export type Grok64CoreStatus = {
+  kind: string;
+  blobUrl: string | null;
+  datapath: string | null;
+  loads: Grok64CoreLoadRecord[];
+  blockedStock: string[];
+  attach: boolean;
+  c64read: boolean;
+  iecBackend: string;
+};
+
+export function grok64CoreStatus(emu: EjsInstance | null): Grok64CoreStatus {
+  const w = typeof window !== "undefined" ? (window as unknown as Record<string, unknown>) : {};
+  const mod = emu?.Module as { _grok64_sd2iec_attach?: unknown; _grok64_c64_read?: unknown } | undefined;
+  if (emu?.Module) bindGrok64WasmExports(emu.Module as Parameters<typeof bindGrok64WasmExports>[0]);
+  return {
+    kind: "vice_x64sc-grok64-iec",
+    blobUrl: grok64CoreBlobUrl(),
+    datapath: grok64ViceCoreRoot(),
+    loads: (w.__GROK64_CORE_LOADS__ as Grok64CoreLoadRecord[]) ?? [],
+    blockedStock: (w.__GROK64_STOCK_CORE_BLOCKED__ as string[]) ?? [],
+    attach: typeof mod?._grok64_sd2iec_attach === "function",
+    c64read: typeof mod?._grok64_c64_read === "function",
+    iecBackend: grok64ViceCoreRoot() ? "grok64-datapath" : "cdn-stock",
+  };
 }
 
 const DATA = CDN_DATA;
@@ -275,6 +330,10 @@ export function guardCore(emu: EjsInstance | null) {
       glog("abort-blocked");
     };
   }
+  if (grok64ViceCoreRoot()) {
+    ensureGrok64WasmExports(emu);
+    wireGrok64ViceHost(emu);
+  }
 }
 
 function btn(i: number, on: boolean) {
@@ -451,16 +510,15 @@ function loadCss(href: string) {
 /** Warm the VICE WASM payload so power-on is not a ~39s blank on first paint. */
 export function prefetchViceCores() {
   if (typeof fetch === "undefined") return;
+  const blob = grok64CoreBlobUrl();
+  if (blob) {
+    void fetch(blob, { mode: "cors", credentials: "omit", cache: "no-store" }).catch(() => undefined);
+    return;
+  }
   const names = isIosPhone() ? ["vice_x64sc"] : ["vice_x64sc", "vice_x64"];
-  const overrides = grok64EmulatorFilePaths();
   for (const n of names) {
     for (const ext of ["-wasm.js", "-wasm.data"] as const) {
-      const file = `${n}${ext}`;
-      const url =
-        ext === "-wasm.data" && n === "vice_x64sc" && overrides?.["vice_x64sc-wasm.data"]
-          ? overrides["vice_x64sc-wasm.data"]
-          : `${DATA}cores/${file}`;
-      void fetch(url, { mode: "cors", credentials: "omit" }).catch(() => undefined);
+      void fetch(`${DATA}cores/${n}${ext}`, { mode: "cors", credentials: "omit" }).catch(() => undefined);
     }
   }
 }
@@ -485,10 +543,23 @@ export function ensureRuntime(): Promise<void> {
   return scriptsReady;
 }
 
-/** EmulatorJS core path includes `?v=` — `filePaths` lookup misses; force Grok64 blob URL. */
+function recordGrok64CoreLoad(leaf: string, url: string, action: string) {
+  if (typeof window === "undefined") return;
+  const w = window as unknown as { __GROK64_CORE_LOADS__?: Grok64CoreLoadRecord[] };
+  if (!w.__GROK64_CORE_LOADS__) w.__GROK64_CORE_LOADS__ = [];
+  w.__GROK64_CORE_LOADS__.push({ leaf, url, action, at: Date.now() });
+}
+
+function recordBlockedStockCore(url: string) {
+  if (typeof window === "undefined") return;
+  const w = window as unknown as { __GROK64_STOCK_CORE_BLOCKED__?: string[] };
+  if (!w.__GROK64_STOCK_CORE_BLOCKED__) w.__GROK64_STOCK_CORE_BLOCKED__ = [];
+  w.__GROK64_STOCK_CORE_BLOCKED__.push(url);
+}
+
+/** EmulatorJS core path includes `?v=` — force single Grok64 blob; never CDN-fallback stock vice cores. */
 function patchEjsGrok64CoreDownload() {
-  const overrides = grok64EmulatorFilePaths();
-  const url = overrides?.["vice_x64sc-wasm.data"];
+  const url = grok64CoreBlobUrl();
   if (!url) return;
   const EJS = (window as unknown as {
     EmulatorJS?: { prototype: { downloadFile?: (...a: unknown[]) => unknown; __g64Core?: boolean } };
@@ -501,11 +572,38 @@ function patchEjsGrok64CoreDownload() {
     const path = String(args[0] ?? "");
     const type = String(args[1] ?? "");
     const leaf = path.split("?")[0].split("/").pop() ?? "";
-    if (type === "Core" && /^vice_x64sc(-legacy)?(-thread)?-wasm\.data$/.test(leaf)) {
+    const isViceCoreData = type === "Core" && /^vice_.*-wasm\.data$/i.test(leaf);
+    if (isViceCoreData) {
+      recordGrok64CoreLoad(leaf, url, "redirect");
       args[0] = url;
       args[3] = true;
     }
-    return orig.apply(this, args);
+    if (/cdn\.emulatorjs\.org/i.test(path) && /\/cores\/vice_.*wasm\.data/i.test(path)) {
+      recordBlockedStockCore(path);
+      recordGrok64CoreLoad(leaf || path, url, "blocked-cdn");
+      args[0] = url;
+      args[3] = true;
+    }
+    const dt = (this as { downloadType?: { core?: { cdnFallback?: boolean } } }).downloadType;
+    let prevFb: boolean | undefined;
+    if (type === "Core" && dt?.core) {
+      prevFb = dt.core.cdnFallback;
+      dt.core.cdnFallback = false;
+    }
+    try {
+      const out = orig.apply(this, args);
+      if (out && typeof (out as Promise<unknown>).then === "function") {
+        return (out as Promise<unknown>).then((res) => {
+          if (res === -1 && isViceCoreData) {
+            throw new Error(`Grok64 core download failed for ${leaf}`);
+          }
+          return res;
+        });
+      }
+      return out;
+    } finally {
+      if (prevFb !== undefined && dt?.core) dt.core.cdnFallback = prevFb;
+    }
   };
 }
 
@@ -1380,14 +1478,54 @@ export function hardReset(emu: EjsInstance | null) {
  */
 export function cartFreeze(emu: EjsInstance | null): boolean {
   if (!emu?.gameManager?.setVariable && !emu?.gameManager?.restart) return false;
+  const mod = emu.Module as { cwrap?: (name: string, ret: string | null, args: string[]) => () => void };
+  try {
+    const freeze = mod.cwrap?.("cartridge_trigger_freeze", null, []);
+    if (typeof freeze === "function") {
+      freeze();
+      return true;
+    }
+  } catch {
+    /* stock core */
+  }
   applyRuntimeOptions(emu, { vice_reset: "freeze" });
   resetEmu(emu);
-  joyInput(emu, RETRO_BTN.R3, true);
-  window.setTimeout(() => {
-    joyInput(emu, RETRO_BTN.R3, false);
-    applyRuntimeOptions(emu, { vice_reset: "soft" });
-  }, 80);
+  window.setTimeout(() => applyRuntimeOptions(emu, { vice_reset: "autostart" }), 120);
   return true;
+}
+
+/** Remove a CRT that was loaded as content and return to the work disk. */
+export function cartEject(emu: EjsInstance | null, workDisk?: Uint8Array | null): boolean {
+  if (!emu || !coreHasFs(emu)) return false;
+  const FS = fsOf(emu);
+  if (!FS?.writeFile) return false;
+  const boot = bootFileOf(emu);
+  const isCartBoot = boot && /\.(crt|bin)$/i.test(boot);
+  for (const m of readMountedMedia(emu)) {
+    if (/\.(crt|bin)$/i.test(m.name)) {
+      try {
+        FS.unlink?.(m.name.startsWith("/") ? m.name : `/${m.name}`);
+      } catch {
+        /* missing */
+      }
+      try {
+        FS.unlink?.(m.name.replace(/^\//, ""));
+      } catch {
+        /* missing */
+      }
+    }
+  }
+  const workName = "WORK DISK.D64";
+  if (workDisk && workDisk.byteLength > 0) writeBootFile(emu, workDisk, workName);
+  emu.fileName = workName;
+  applyRuntimeOptions(emu, {
+    vice_autostart: "disabled",
+    vice_autostart_warp: "disabled",
+    vice_autoloadwarp: "disabled",
+    vice_reset: "hard",
+  });
+  resetEmu(emu);
+  return Boolean(isCartBoot || workDisk);
 }
 
 /** Retro Replay / freezer-cart RESET button (long-press on CART FZ). */
@@ -1954,6 +2092,18 @@ export function remountSd2iecFromParts(
   attachGrok64Sd2iec(emu, unit);
   applyIecUnit(emu, "sd2iec", unit);
   return true;
+}
+
+/** Write sidecar files (e.g. `.reu` next to a `.prg`) before VICE autostart. */
+export function writeCompanionMedia(
+  emu: EjsInstance | null,
+  files: { name: string; data: Uint8Array }[],
+): number {
+  let n = 0;
+  for (const f of files) {
+    if (writeBootFile(emu, f.data, f.name.replace(/^\//, ""))) n += 1;
+  }
+  return n;
 }
 
 export function writeBootFile(emu: EjsInstance | null, data: Uint8Array, preferred?: string | null): boolean {

@@ -16,19 +16,18 @@ function petToChar(code: number): string {
   return " ";
 }
 
-import { c64RamView, type RamEmu } from "./c64-memory";
+import { readC64Byte, type RamEmu } from "./c64-memory";
 
 export function readScreenText(emu: RamEmu | null): string {
-  const ram = c64RamView(emu);
-  if (!ram) return "";
+  if (!emu) return "";
   const lines: string[] = [];
   for (let row = 0; row < 25; row++) {
     let line = "";
     const base = ROW[row] ?? 0x0400 + row * 40;
     for (let col = 0; col < 40; col++) {
       const addr = base + col;
-      if (addr >= ram.length) line += " ";
-      else line += petToChar(ram[addr]);
+      const b = readC64Byte(emu, addr);
+      line += b === null ? " " : petToChar(b);
     }
     lines.push(line.replace(/\s+$/, ""));
   }

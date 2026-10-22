@@ -39,6 +39,7 @@ import {
   ensureRuntime,
   prefetchViceCores,
   fitEmu,
+  grok64CoreStatus,
   hardReset,
   hasRealGamepad,
   joyInput,
@@ -46,8 +47,10 @@ import {
   mountDiskOnUnit,
   applyIecUnit,
   attachAutostartDisk,
+  cartEject,
   cartFreeze,
   cartReset,
+  writeCompanionMedia,
   cmdHdSwap,
   flushEmuFs,
   lastAppliedJiffy,
@@ -155,7 +158,7 @@ import {
 } from "@/lib/emu/formats";
 import { wrapForDiskSwap, prepareAutostartDisk, wantsCracktroNudge } from "@/lib/emu/d64";
 import { isSid, psidToPrg } from "@/lib/emu/psid";
-import { toArrayBuffer } from "@/lib/emu/archive";
+import { explodeArchive, pickBootFile, toArrayBuffer } from "@/lib/emu/archive";
 import { BuildId } from "@/components/emu/BuildId";
 import { debugQueryOn, glog, glogFire, setDebugUi, subscribeLog } from "@/lib/emu/debug";
 import { readBuildId } from "@/lib/emu/build-id";
@@ -249,6 +252,7 @@ export function Grok64App() {
   const playLockRef = useRef(false);
   const playLockGen = useRef(0);
   const pendingSnapshotRef = useRef(null);
+  const pendingCompanionRef = useRef<{ name: string; data: Uint8Array }[]>([]);
   const playPayloadRef = useRef(null);
   const sessionIecRef = useRef(s.iecDrive);
   const sessionUnitRef = useRef(s.iecUnit);
@@ -548,6 +552,8 @@ export function Grok64App() {
       pad: () => useEmu.getState().padName,
       cartFreeze: () => cartFreeze(emuRef.current),
       cartReset: () => cartReset(emuRef.current),
+      cartEject: () => cartEject(emuRef.current, workDiskBytesRef.current),
+      grok64CoreStatus: () => grok64CoreStatus(emuRef.current),
       scpuReset: () => scpuReset(emuRef.current),
       cmdSwapped: () => cmdSwappedRef.current,
       cmdSwap: (next) => hwActionRef.current("cmd-swap", next === false ? "long" : "short"),
@@ -724,10 +730,14 @@ export function Grok64App() {
         return item.id;
       },
       playBytes: async (name, bytes) => {
-        const buf =
-          bytes instanceof ArrayBuffer
-            ? bytes
-            : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        let buf: ArrayBuffer;
+        if (bytes instanceof ArrayBuffer) buf = bytes;
+        else if (Array.isArray(bytes)) buf = new Uint8Array(bytes).buffer;
+        else if (bytes instanceof Uint8Array) {
+          buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+        } else {
+          buf = new Uint8Array(bytes as ArrayLike<number>).buffer;
+        }
         await playBufferRef.current(name, buf, { autostart: true, title: name });
         return true;
       },
@@ -1222,6 +1232,10 @@ export function Grok64App() {
       pendingKickRef.current = false;
       setAwaitingStart(false);
       spec.onStarted?.(emu);
+      if (pendingCompanionRef.current.length) {
+        writeCompanionMedia(emu, pendingCompanionRef.current);
+        pendingCompanionRef.current = [];
+      }
       if (spec.autostartAfterReady) {
         bootHoldRef.current = false;
         s.setRunning(true);
@@ -1610,6 +1624,24 @@ export function Grok64App() {
           return;
         }
       }
+      pendingCompanionRef.current = [];
+      if (kindOf(filename) === "zip") {
+        const parts = explodeArchive(filename, new Uint8Array(payload));
+        const bootPick = opts.bootName
+          ? parts.find((p) => p.name.toLowerCase() === opts.bootName!.toLowerCase()) ??
+            pickBootFile(parts, opts.title)
+          : pickBootFile(parts, opts.title);
+        if (!bootPick) {
+          toast.error("No playable file in that archive.");
+          return;
+        }
+        pendingCompanionRef.current = parts
+          .filter((p) => p.name !== bootPick.name)
+          .map((p) => ({ name: p.name, data: p.data }));
+        payload = toArrayBuffer(bootPick.data);
+        bootName = bootPick.name;
+        mediaName = bootPick.name;
+      }
       releaseBlob();
       let safe;
       try {
@@ -1770,8 +1802,10 @@ export function Grok64App() {
         return;
       }
       playModeRef.current = plan.kind === "floppy" ? "disk" : plan.kind === "basic" ? "basic" : "auto";
-      cartLiveRef.current = plan.kind === "cart";
-      setCartLive(plan.kind === "cart");
+      const hadCart = cartLiveRef.current;
+      cartLiveRef.current = plan.kind === "cart" || (hadCart && plan.kind === "floppy");
+      setCartLive(cartLiveRef.current);
+      const keepCartAcrossDisk = hadCart && plan.kind === "floppy" && !work;
       sessionIecRef.current = plan.live.iec;
       sessionUnitRef.current = plan.live.unit;
       setPictureHold(false);
@@ -1877,6 +1911,10 @@ export function Grok64App() {
             detected,
           );
           resolvedRef.current = resNow;
+          if (pendingCompanionRef.current.length) {
+            writeCompanionMedia(emuRef.current, pendingCompanionRef.current);
+            pendingCompanionRef.current = [];
+          }
           applyRuntimeOptions(emuRef.current, {
             ...videoStandardOptions(
               {
@@ -1890,11 +1928,13 @@ export function Grok64App() {
             vice_autostart: "disabled",
             vice_autostart_warp: "disabled",
             vice_autoloadwarp: "disabled",
-            vice_reset: "hard",
+            vice_reset: keepCartAcrossDisk ? "autostart" : "hard",
             vice_ram_expansion_unit: stNow.reuSize,
-            ...(attach
+            ...(plan.trueDrive || attach
               ? {
-                  vice_work_disk: workDiskFor(playIec, playAttachUnit),
+                  ...(attach
+                    ? { vice_work_disk: workDiskFor(playIec, playAttachUnit) }
+                    : {}),
                   vice_drive_true_emulation: "enabled",
                   vice_virtual_device_traps: "disabled",
                 }
@@ -2085,11 +2125,21 @@ export function Grok64App() {
     }
     const unit = item.iecUnit ?? useEmu.getState().iecUnit;
     const iec = useEmu.getState().iecDrive;
-    const ok = mountDiskOnUnit(emuRef.current, unit, media, bootFileName(file.name, kind), iec);
+    const boot = bootFileName(file.name, kind);
+    const mounted = bootFileOf(emuRef.current);
+    const ok = mounted
+      ? attachAutostartDisk(emuRef.current, media, mounted, iec, unit)
+      : mountDiskOnUnit(emuRef.current, unit, media, boot, iec);
     if (!ok) {
       toast.error("Could not mount that disk");
       return;
     }
+    if (mounted) emuRef.current.fileName = mounted.replace(/^\//, "");
+    applyRuntimeOptions(emuRef.current, {
+      vice_drive_true_emulation: "enabled",
+      vice_virtual_device_traps: "disabled",
+    });
+    await flushEmuFs(emuRef.current, 600);
     await touchPlayed(item.id);
     const label = d64DiskName(media) ?? item.name.replace(/\.[a-z0-9]{2,4}$/i, "");
     toast.success(`Inserted ${label} on drive ${unit}`);
@@ -2597,6 +2647,18 @@ export function Grok64App() {
       toast.message(ok ? "Cart RESET" : "Cart RESET not ready");
       return;
     }
+    if (action === "cart-eject") {
+      if (!running) {
+        toast.message("Power on first — cart eject");
+        return;
+      }
+      const ok = cartEject(emuRef.current, workDiskBytesRef.current);
+      cartLiveRef.current = false;
+      setCartLive(false);
+      glog("cart-eject", { ok });
+      toast.message(ok ? "Cartridge ejected" : "Could not eject cartridge");
+      return;
+    }
     if (action === "scpu-reset") {
       if (!running) {
         toast.message("Power on first — SuperCPU RESET");
@@ -3073,7 +3135,7 @@ export function Grok64App() {
                       ? cmdSwapped
                       : spec.id === "scpu-rst"
                         ? s.machineId === "scpu"
-                        : spec.id === "cart-fz"
+                        : spec.id === "cart-fz" || spec.id === "cart-out"
                           ? cartLive
                           : false
               }
