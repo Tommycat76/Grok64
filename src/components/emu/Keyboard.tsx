@@ -58,9 +58,15 @@ function KeyBtn({
     >
       {petscii ? (
         <span className="g64-key-petscii" aria-hidden="true">
-          <em data-side="cbm">{k.cbmPetscii != null ? <PetsciiGlyph petscii={k.cbmPetscii} size={14} /> : null}</em>
+          <em data-side="cbm">
+            {k.cbmPetscii != null ? <PetsciiGlyph petscii={k.cbmPetscii} size={16} /> : <span className="g64-key-hint">C=</span>}
+          </em>
           <em data-side="sh">
-            {k.shiftPetscii != null ? <PetsciiGlyph petscii={k.shiftPetscii} size={14} /> : (k.shift ?? "")}
+            {k.shiftPetscii != null ? (
+              <PetsciiGlyph petscii={k.shiftPetscii} size={16} />
+            ) : k.shift ? (
+              <span className="g64-key-hint">{k.shift}</span>
+            ) : null}
           </em>
         </span>
       ) : null}
@@ -142,8 +148,8 @@ export function C64Keyboard() {
 
   const face = (k: C64Key): { glyph: string; glyphPetscii?: number } => {
     if (cbm && k.cbmPetscii != null) return { glyph: k.label, glyphPetscii: k.cbmPetscii };
-    if (shift && k.shiftPetscii != null) return { glyph: k.shift ?? k.label, glyphPetscii: k.shiftPetscii };
-    if (shift && k.shift) return { glyph: k.shift };
+    if (shift && k.shiftPetscii != null) return { glyph: k.label, glyphPetscii: k.shiftPetscii };
+    if (shift && k.shift && !k.shiftPetscii) return { glyph: k.shift };
     return { glyph: k.label };
   };
 
@@ -202,6 +208,18 @@ export function C64Keyboard() {
         <KeyBtn k={downKey} className="mod" held={held(downKey)} glyph="↓" onDown={down} onUp={up} />
         <KeyBtn k={rightKey} className="mod" held={held(rightKey)} glyph="→" onDown={down} onUp={up} />
       </div>
+
+      {!sym ? (
+        <div className="g64-kb-row g64-kb-fn">
+          {["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8"].map((id) => {
+            const k = key(id);
+            const { glyph, glyphPetscii } = face(k);
+            return (
+              <KeyBtn key={k.id} k={k} className="fn" held={held(k)} glyph={glyph} glyphPetscii={glyphPetscii} onDown={down} onUp={up} />
+            );
+          })}
+        </div>
+      ) : null}
 
       <div className="g64-kb-row g64-kb-bar">
         <button

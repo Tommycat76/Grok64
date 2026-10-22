@@ -21,13 +21,73 @@ export interface SdPartition {
   id: number;
   label: string;
   files: SdFile[];
+  /** Virtual subdirectories (POSIX-style paths, no leading slash). */
+  dirs?: string[];
 }
 
 const DEFAULT_PARTS: SdPartition[] = [0, 1, 2, 3].map((id) => ({
   id,
   label: `PART${id}`,
   files: [],
+  dirs: [],
 }));
+
+export function resetSd2iecSession(): void {
+  currentPart = 0;
+  currentDir = "";
+  lastStatus = "00, OK,00,00";
+  openFiles.clear();
+}
+
+function normDir(path: string): string {
+  return path.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "").toUpperCase();
+}
+
+function parentDir(path: string): string {
+  const n = normDir(path);
+  if (!n) return "";
+  const parts = n.split("/").filter(Boolean);
+  parts.pop();
+  return parts.join("/");
+}
+
+function joinDir(base: string, name: string): string {
+  const b = normDir(base);
+  const n = normDir(name);
+  if (!n) return b;
+  return b ? `${b}/${n}` : n;
+}
+
+async function loadPart(partId: number): Promise<SdPartition> {
+  const part = (await listPartitions()).find((p) => p.id === partId);
+  return part ?? { id: partId, label: `PART${partId}`, files: [], dirs: [] };
+}
+
+async function ensureDir(partId: number, dirPath: string): Promise<void> {
+  const part = await loadPart(partId);
+  const want = normDir(dirPath);
+  if (!want) return;
+  const dirs = new Set((part.dirs ?? []).map(normDir));
+  const parts = want.split("/").filter(Boolean);
+  let acc = "";
+  for (const seg of parts) {
+    acc = acc ? `${acc}/${seg}` : seg;
+    dirs.add(acc);
+  }
+  part.dirs = [...dirs];
+  await savePartition(part);
+}
+
+async function removeDirTree(partId: number, dirPath: string): Promise<void> {
+  const part = await loadPart(partId);
+  const want = normDir(dirPath);
+  part.dirs = (part.dirs ?? []).filter((d) => normDir(d) !== want && !normDir(d).startsWith(`${want}/`));
+  part.files = part.files.filter((f) => {
+    const p = normDir(parentPath(f));
+    return p !== want && !p.startsWith(`${want}/`);
+  });
+  await savePartition(part);
+}
 
 export async function listPartitions(): Promise<SdPartition[]> {
   const db = await openExpansionDb();
@@ -66,7 +126,7 @@ export async function removeSdFile(partId: number, fileId: string): Promise<void
 }
 
 export async function formatPartition(partId: number): Promise<void> {
-  await savePartition({ id: partId, label: `PART${partId}`, files: [] });
+  await savePartition({ id: partId, label: `PART${partId}`, files: [], dirs: [] });
 }
 
 export function petsciiName(path: string): string {
@@ -348,11 +408,39 @@ function parentPath(f: SdFile): string {
   return "";
 }
 
+async function subdirsInDir(partId: number, dir = currentDir): Promise<string[]> {
+  const part = await loadPart(partId);
+  const want = normDir(dir);
+  const out = new Set<string>();
+  for (const d of part.dirs ?? []) {
+    const n = normDir(d);
+    if (!n) continue;
+    const p = parentDir(n);
+    if (p === want) out.add(n.split("/").pop() || n);
+    else if (!want && !n.includes("/")) out.add(n);
+  }
+  for (const f of part.files) {
+    const p = normDir(parentPath(f));
+    if (p !== want) continue;
+    const base = basename(f);
+    if (base.includes("/")) {
+      const seg = base.split("/")[0];
+      if (seg) out.add(seg);
+    }
+  }
+  return [...out].sort();
+}
+
 async function filesInDir(partId: number, dir = currentDir): Promise<SdFile[]> {
-  const part = (await listPartitions()).find((p) => p.id === partId);
+  const part = await loadPart(partId);
   const files = part?.files ?? [];
-  const want = dir.replace(/\/$/, "").toUpperCase();
-  return files.filter((f) => parentPath(f).toUpperCase() === want);
+  const want = normDir(dir);
+  return files.filter((f) => {
+    const p = normDir(parentPath(f));
+    const base = basename(f);
+    if (p !== want) return false;
+    return !base.includes("/");
+  });
 }
 
 async function findFile(partId: number, pattern: string): Promise<SdFile | null> {
@@ -437,13 +525,29 @@ function parsePath(raw: string): { part: number; path: string; file: string } {
   return slash >= 0 ? { part, path: rest.slice(0, slash), file: rest.slice(slash + 1) } : { part, path: currentDir, file: rest };
 }
 
-function dirListing(name: string, files: SdFile[]): Uint8Array {
+function dirListing(
+  name: string,
+  files: SdFile[],
+  subdirs: string[] = [],
+  inSubdir = false,
+): Uint8Array {
   const lines = [
     `0 "${name.toUpperCase().padEnd(16).slice(0, 16)}  SD 2A`,
+    ...(inSubdir ? [`${"0".padStart(4)} "←" DIR`] : []),
+    ...subdirs.map((d) => `${"0".padStart(4)} "${petsciiName(d).padEnd(16)}" DIR`),
     ...files.map((f) => `${Math.max(1, Math.ceil(f.size / 254)).toString().padStart(4)} "${petsciiName(basename(f)).padEnd(16)}" PRG`),
     "BLOCKS FREE.",
   ];
   return petsciiAscii(lines.join("\r") + "\r");
+}
+
+function parseDirFilter(raw: string): { part: number; filter: string } {
+  const upper = raw.toUpperCase();
+  if (upper.includes("$=P")) return { part: currentPart, filter: "$=P" };
+  const m = upper.match(/\$=([^"']+)/);
+  const filter = m?.[1]?.trim() || "*";
+  const p = parsePath(raw);
+  return { part: p.part, filter };
 }
 
 async function partitionCatalog(): Promise<Uint8Array> {
@@ -473,13 +577,20 @@ export async function runSdCommand(cmd: string): Promise<string> {
       return lastStatus;
     }
     if (upper.startsWith("CD")) {
-      const arg = trimmed.slice(2).replace(/^:/, "").trim();
-      if (arg === "_" || arg === ".." || arg === "//" || arg === "/") currentDir = "";
-      else if (arg.startsWith("//") || /^\d+\s*:/.test(arg)) {
-        const p = parsePath(arg);
+      let arg = trimmed.slice(2).replace(/^:/, "").trim();
+      if (arg === "<-" || arg === "_" || arg === "..") {
+        currentDir = parentDir(currentDir);
+      } else if (arg === "//" || arg === "/" || arg === "") {
+        currentDir = "";
+      } else if (arg.startsWith("//") || /^\d+\s*:/.test(arg)) {
+        const p = parsePath(arg.startsWith("//") ? `//${arg.slice(2)}` : arg);
         currentPart = p.part;
-        currentDir = (p.file || p.path || "").replace(/\/$/, "");
-      } else currentDir = arg.replace(/\/$/, "");
+        const sub = (p.file || p.path || "").replace(/\/$/, "");
+        currentDir = sub ? joinDir("", sub) : "";
+      } else {
+        currentDir = joinDir(currentDir, arg);
+        await ensureDir(currentPart, currentDir);
+      }
       lastStatus = "00, OK,00,00";
       return lastStatus;
     }
@@ -490,11 +601,14 @@ export async function runSdCommand(cmd: string): Promise<string> {
       return lastStatus;
     }
     if (upper.startsWith("MD:")) {
-      currentDir = trimmed.slice(3).trim();
+      const name = trimmed.slice(3).replace(/^["']|["']$/g, "").trim();
+      if (name) await ensureDir(currentPart, joinDir(currentDir, name));
       lastStatus = "00, OK,00,00";
       return lastStatus;
     }
     if (upper.startsWith("RD:")) {
+      const name = trimmed.slice(3).replace(/^["']|["']$/g, "").trim();
+      if (name) await removeDirTree(currentPart, joinDir(currentDir, name));
       lastStatus = "00, OK,00,00";
       return lastStatus;
     }
@@ -685,7 +799,8 @@ async function handleRead(ram: Uint8Array) {
   const name = String.fromCharCode(...ram.subarray(51216, 51216 + len));
   const track = ram[51203] || 0;
   const upper = name.toUpperCase();
-  if (upper.startsWith("$=P") || upper.includes("$=P")) {
+  const dirSpec = parseDirFilter(name);
+  if (dirSpec.filter === "$=P" || upper.startsWith("$=P") || upper.includes("$=P")) {
     const cat = await partitionCatalog();
     const addr = 2049;
     ram.set(cat.subarray(2), addr);
@@ -696,8 +811,16 @@ async function handleRead(ram: Uint8Array) {
     ram[IEC_Y] = 2;
     return;
   }
-  if (name.startsWith("$")) {
-    const files = await filesInDir(currentPart);
+  if (name.startsWith("$") || name.toUpperCase().includes("$=")) {
+    const spec = parseDirFilter(name);
+    if (spec.part !== currentPart) currentPart = spec.part;
+    let files = await filesInDir(currentPart);
+    const subdirs = await subdirsInDir(currentPart);
+    if (spec.filter && spec.filter !== "$=P" && spec.filter !== "*") {
+      const pat = spec.filter.replace(/\*/g, ".*").replace(/\?/g, ".");
+      const re = new RegExp(`^${pat}$`, "i");
+      files = files.filter((f) => re.test(petsciiName(basename(f))) || re.test(basename(f)));
+    }
     const out: number[] = [1, 8];
     let ptr = 2049;
     const line = (link: number, text: string) => {
@@ -709,6 +832,10 @@ async function handleRead(ram: Uint8Array) {
       ptr = addr;
     };
     line(0, `0 "${"GROK64 SD".toUpperCase().padEnd(16).slice(0, 16)}  SD 2A`);
+    if (currentDir) line(0, `${"0".padStart(4)} "←" DIR`);
+    for (const d of subdirs) {
+      line(0, `${"0".padStart(4)} "${petsciiName(d).padEnd(16)}" DIR`);
+    }
     for (const f of files) {
       line(Math.max(1, Math.ceil(f.size / 254)), `"${petsciiName(basename(f)).padEnd(16)}" PRG`);
     }
@@ -782,8 +909,17 @@ async function handleOpen(ram: Uint8Array) {
     ram[IEC_Y] = 2;
     return;
   }
-  if (name.startsWith("$")) {
-    openFiles.set(sa, { sa, name, data: dirListing("GROK64 SD", await filesInDir(currentPart)), pos: 0, write: false, cmd: false });
+  if (name.startsWith("$") || upper.includes("$=")) {
+    const sub = await subdirsInDir(currentPart);
+    const files = await filesInDir(currentPart);
+    openFiles.set(sa, {
+      sa,
+      name,
+      data: dirListing("GROK64 SD", files, sub, Boolean(currentDir)),
+      pos: 0,
+      write: false,
+      cmd: false,
+    });
     queueFile(ram, sa, mode);
     ram[IEC_Y] = 2;
     return;

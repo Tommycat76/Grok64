@@ -1,0 +1,39 @@
+import "fake-indexeddb/auto";
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createServer } from "vite";
+
+const server = await createServer({ server: { middlewareMode: true }, appType: "custom" });
+const { runSdCommand, resetSd2iecSession, addSdFile, formatPartition, listPartitions } = await server.ssrLoadModule(
+  "/src/lib/emu/sd2iec.ts",
+);
+await server.close();
+
+test.beforeEach(() => {
+  resetSd2iecSession();
+});
+
+test("CD<- and CD:_ return to parent directory", async () => {
+  assert.equal(await runSdCommand('MD:"OS"'), "00, OK,00,00");
+  assert.equal(await runSdCommand('CD:"OS"'), "00, OK,00,00");
+  assert.match(await runSdCommand("CD<-"), /OK/);
+  assert.match(await runSdCommand("X"), /PART 0/);
+  assert.equal(await runSdCommand('CD:"OS"'), "00, OK,00,00");
+  assert.match(await runSdCommand("CD:_"), /OK/);
+});
+
+test("CP switches partition", async () => {
+  assert.equal(await runSdCommand("CP1"), "00, OK,00,00");
+  assert.match(await runSdCommand("X"), /PART 1/);
+  assert.equal(await runSdCommand("CP0"), "00, OK,00,00");
+});
+
+test("RD removes a directory tree", async () => {
+  await formatPartition(0);
+  await addSdFile(0, "TMP.PRG", new Uint8Array([1, 8, 0, 0]).buffer, "scratch");
+  assert.equal(await runSdCommand('MD:"SCRATCH"'), "00, OK,00,00");
+  assert.equal(await runSdCommand('RD:"SCRATCH"'), "00, OK,00,00");
+  const parts = await listPartitions();
+  const f = parts[0].files.find((x) => x.path?.toUpperCase() === "SCRATCH");
+  assert.equal(f, undefined);
+});

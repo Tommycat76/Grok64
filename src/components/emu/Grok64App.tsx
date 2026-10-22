@@ -3,6 +3,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Disc3, FolderOpen, Gamepad2, Info, Keyboard as KeyboardIcon, MoreHorizontal, Pause, Play, Power, RotateCcw, Settings, Volume2, VolumeX } from "lucide-react";
 import { toast } from "sonner";
 import { C64Keyboard } from "@/components/emu/Keyboard";
+import { QuickDock } from "@/components/emu/QuickDock";
 import { TouchControls } from "@/components/emu/Joystick";
 import { LibrarySheet } from "@/components/emu/LibrarySheet";
 import { DiskMountSheet } from "@/components/emu/DiskMountSheet";
@@ -63,7 +64,15 @@ import {
   waitForCoreFs,
 } from "@/lib/emu/host";
 import { hasCmdRom, hasJiffyPair, prefetchBundledRoms } from "@/lib/emu/roms";
-import { listPartitions, partitionsForMount, setIecDevice } from "@/lib/emu/sd2iec";
+import {
+  addSdFile,
+  formatPartition,
+  listPartitions,
+  partitionsForMount,
+  resetSd2iecSession,
+  runSdCommand,
+  setIecDevice,
+} from "@/lib/emu/sd2iec";
 import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor } from "@/lib/emu/vice-extras";
 import { HwHoldChip } from "@/components/emu/HwHoldChip";
 import {
@@ -121,6 +130,7 @@ import { readBuildId } from "@/lib/emu/build-id";
 import { createMenuJoyGate, menuJoyStep, resetMenuJoyGate } from "@/lib/emu/menu-joy.mjs";
 import { applyStickPrecision, createStickPrecision, resetStickPrecision } from "@/lib/emu/stick-precision.mjs";
 import { publicUrl } from "@/lib/public-url";
+import { readScreenText } from "@/lib/emu/screen-text";
 import { applyEmuVolume, gestureUnlockAudio, pokeAudioUnlock } from "@/lib/emu/audio-unlock";
 import {
   forceIosMirrorBlit,
@@ -588,6 +598,16 @@ export function Grok64App() {
           return { b64, w: c.width, h: c.height, bytes: b64.length, mirror: c.classList.contains("g64-ios-mirror") };
         } catch {
           return null;
+        }
+      },
+      screenText: () => readScreenText(emuRef.current),
+      runDos: (cmd) => runSdCommand(cmd),
+      resetDos: () => resetSd2iecSession(),
+      seedSd: async (files) => {
+        await formatPartition(0);
+        for (const f of files) {
+          const buf = f.data instanceof ArrayBuffer ? f.data : f.data.buffer.slice(f.data.byteOffset, f.data.byteOffset + f.data.byteLength);
+          await addSdFile(0, f.name, buf, f.path ?? "");
         }
       },
       shot: async () => {
@@ -2998,6 +3018,21 @@ export function Grok64App() {
           ) : null}
         </div>
       </div>
+      {s.powered && (resolved.device === "phone" || resolved.device === "tablet") ? (
+        <QuickDock
+          paused={s.paused}
+          onDisk={() => setDiskOpen(true)}
+          onReset={() => resetReady()}
+          onSnapshot={() => s.setSnapsOpen(true)}
+          onPauseToggle={() => {
+            const next = !s.paused;
+            s.setPaused(next);
+            setPaused(emuRef.current, next);
+          }}
+          onWarp={toggleWarp}
+          onSwapJoy={swapJoyPort}
+        />
+      ) : null}
       <TouchControls
         onVector={onVector}
         stickHoldRef={stickCenterHoldRef}

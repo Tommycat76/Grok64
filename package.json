@@ -16,6 +16,8 @@
     "typecheck": "tsc --noEmit",
     "check:jsx": "node scripts/check-no-jsxdev.mjs dist",
     "test": "node --test 'scripts/**/*.test.mjs'",
+    "test:cmd-sd2iec": "node scripts/cmd-sd2iec-e2e.mjs",
+    "test:ui-layout": "node scripts/ui-layout-qa.mjs",
     "gate:crt": "node scripts/crt-fill-gate.mjs",
     "lint": "eslint .",
     "format": "prettier --write ."
@@ -85,6 +87,7 @@
     "eslint-plugin-prettier": "^5.2.6",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
+    "fake-indexeddb": "^6.2.6",
     "globals": "^15.15.0",
     "lightningcss": "^1.28.0",
     "nitro": "3.0.260610-beta",
