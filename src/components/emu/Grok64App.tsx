@@ -83,6 +83,7 @@ import {
   viceJoyOptions,
   waitForCoreFs,
   injectViceRc,
+  bumpCrtPaint,
 } from "@/lib/emu/host";
 import { hasCmdRom, hasJiffyPair, prefetchBundledRoms } from "@/lib/emu/roms";
 import {
@@ -100,7 +101,12 @@ import {
   attachSd2iecBus,
   setSd2iecWasmIecOnly,
 } from "@/lib/emu/sd2iec";
-import { grok64RetroKeyboardAvailable, grok64RetroKeyboardFromDom } from "@/lib/emu/grok64-keyboard";
+import {
+  grok64KeyboardReleaseAll,
+  grok64RetroKeyboardAvailable,
+  grok64RetroKeyboardFromDom,
+  setGrok64KeyboardPaintHook,
+} from "@/lib/emu/grok64-keyboard";
 import { attachGrok64Sd2iec, tickGrok64Iec, wireGrok64ViceHost } from "@/lib/emu/grok64-vice-bridge";
 import { readC64Byte, readC64Bytes, writeC64Byte, writeC64Bytes } from "@/lib/emu/c64-memory";
 import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor } from "@/lib/emu/vice-extras";
@@ -472,6 +478,14 @@ export function Grok64App() {
     return () => timers.forEach((id) => window.clearTimeout(id));
   }, [s.showKeyboard, view.orient, cartLive]);
   useEffect(() => {
+    if (!s.showKeyboard || !s.running) return;
+    const t = window.setTimeout(() => {
+      scheduleFit(true);
+      bumpCrtPaint(emuRef.current);
+    }, 60);
+    return () => window.clearTimeout(t);
+  }, [s.showKeyboard, s.running]);
+  useEffect(() => {
     const onFit = () => scheduleFit(true);
     window.addEventListener("g64-fit", onFit);
     return () => window.removeEventListener("g64-fit", onFit);
@@ -749,7 +763,7 @@ export function Grok64App() {
         const ok = await bootGeosFloppy(emuRef.current, new Uint8Array(buf), name);
         if (!ok) return false;
         setSessionDisk(name, new Uint8Array(buf), 8);
-        const loaded = await feedBasicLine(emuRef.current, 'LOAD"GEOS",8,1');
+        const loaded = await feedBasicLine(emuRef.current, 'LOAD"*",8,1');
         if (!loaded) return false;
         await new Promise((r) => window.setTimeout(r, 45_000));
         return feedBasicLine(emuRef.current, "RUN", { runcmd: true });
@@ -2281,7 +2295,7 @@ export function Grok64App() {
         useEmu.getState().setInsertedDiskName(file.name);
         focusGrok64Player();
         beginPlayLock(55_000, "Loading GEOS…");
-        const loaded = await feedBasicLine(emuRef.current, 'LOAD"GEOS",8,1');
+        const loaded = await feedBasicLine(emuRef.current, 'LOAD"*",8,1');
         if (!loaded) {
           toast.error("GEOS LOAD failed");
           return;
@@ -2664,10 +2678,14 @@ export function Grok64App() {
     };
   }, [s.running, cartLive]);
   useEffect(() => {
+    setGrok64KeyboardPaintHook((emu) => bumpCrtPaint(emu ?? emuRef.current));
     setC64HardwareKeySink((code, key, down, mods) =>
       grok64RetroKeyboardFromDom(emuRef.current, code, key, down, mods),
     );
-    return () => setC64HardwareKeySink(null);
+    return () => {
+      setGrok64KeyboardPaintHook(null);
+      setC64HardwareKeySink(null);
+    };
   }, []);
   useEffect(() => {
     if (!s.running) return;
@@ -2692,11 +2710,14 @@ export function Grok64App() {
       e.preventDefault();
       e.stopPropagation();
     };
+    const onBlur = () => grok64KeyboardReleaseAll(emuRef.current);
     window.addEventListener("keydown", onHostKey, true);
     window.addEventListener("keyup", onHostKey, true);
+    window.addEventListener("blur", onBlur);
     return () => {
       window.removeEventListener("keydown", onHostKey, true);
       window.removeEventListener("keyup", onHostKey, true);
+      window.removeEventListener("blur", onBlur);
     };
   }, [s.running]);
   useEffect(() => {

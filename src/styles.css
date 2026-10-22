@@ -1214,9 +1214,23 @@ div[class*="ejs_virtual"] {
   min-height: 148px;
 }
 .g64-app[data-kb="true"] .g64-stage {
-  flex: 1 1 0;
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: min(38vh, 320px);
   overflow: hidden;
+}
+.g64-app[data-kb="true"] .g64-bezel {
+  flex: 1 1 auto;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+}
+.g64-app[data-kb="true"] .g64-screen.is-on,
+.g64-app[data-kb="true"] .g64-screen {
+  flex: 1 1 auto;
+  min-height: 180px;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
 }
 .g64-app[data-kb="true"] .g64-bezel,
 .g64-app[data-kb="true"] .g64-screen {

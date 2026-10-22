@@ -1231,6 +1231,29 @@ export function resetFitCache() {
   lastFitBox = { pw: 0, ph: 0, bw: 0, bh: 0 };
 }
 
+/** Desktop/Chromium: nudge compositor so the CRT repaints without a mouse move. */
+export function bumpCrtPaint(emu: EjsInstance | null) {
+  const canvas =
+    (emu?.Module?.canvas as HTMLCanvasElement | undefined) ??
+    (document.querySelector("#grok64-player canvas:not(.g64-ios-present)") as HTMLCanvasElement | null);
+  if (!canvas) return;
+  try {
+    const prev = canvas.style.getPropertyValue("transform");
+    canvas.style.setProperty("transform", "translateZ(0.001px)");
+    void canvas.offsetWidth;
+    requestAnimationFrame(() => {
+      canvas.style.setProperty("transform", prev || "none");
+    });
+  } catch {
+    /* ignore */
+  }
+  try {
+    emu?.gameManager?.toggleMainLoop?.(1);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = false) {
   if (!el || fitting) return;
   fitting = true;

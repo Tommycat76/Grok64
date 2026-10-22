@@ -63,7 +63,18 @@ export function ExpansionPanel() {
                 {stored ? "Replace" : "Upload"}
               </button>
               {stored ? (
-                <button type="button" className="g64-btn" onClick={() => void removeRom(def.id).then(refresh)}>
+                <button
+                  type="button"
+                  className="g64-btn"
+                  onClick={() =>
+                    void removeRom(def.id).then(async () => {
+                      if (def.id === "jiffy-c64" || def.id === "jiffy-1541") {
+                        s.setJiffyDos(await hasJiffyPair());
+                      }
+                      refresh();
+                    })
+                  }
+                >
                   Remove
                 </button>
               ) : null}

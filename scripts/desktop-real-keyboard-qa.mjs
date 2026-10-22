@@ -108,7 +108,9 @@ try {
   await page.keyboard.up("Enter");
   await page.waitForTimeout(600);
   await focusC64(page);
-  await page.keyboard.type('LOAD"$",8', { delay: 150 });
+  await page.keyboard.type('LOAD"$', { delay: 120 });
+  await page.waitForTimeout(280);
+  await page.keyboard.type(",8", { delay: 120 });
   await page.waitForTimeout(1200);
   text = await page.evaluate(() => window.__g64?.screenText?.() || "");
   const loadLine = lineWith(text, 'LOAD"$",8');
