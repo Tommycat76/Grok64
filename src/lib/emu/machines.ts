@@ -8,6 +8,7 @@ import type {
   SidModel,
   VideoPref,
 } from "./types";
+import { VICE_LIBRETRO_SID_EXTRA2 } from "./vice-sid-cap";
 import {
   resolveCore,
   resolveDrive,
@@ -157,8 +158,10 @@ export function sidOptions(layout: SidLayout): Record<string, string> {
   if (model !== "default") opts.vice_sid_model = model;
   opts.vice_sid_extra = sid2;
   if (sid2 !== "disabled" && sid2Model !== "default") opts.vice_sid_model2 = sid2Model;
-  opts.vice_sid_extra2 = sid3;
-  if (sid3 !== "disabled" && sid3Model !== "default") opts.vice_sid_model3 = sid3Model;
+  if (VICE_LIBRETRO_SID_EXTRA2) {
+    opts.vice_sid_extra2 = sid3;
+    if (sid3 !== "disabled" && sid3Model !== "default") opts.vice_sid_model3 = sid3Model;
+  }
   opts.vice_resid_sampling_method = engine === "FastSID" ? "Fast" : "Interpolation";
   return opts;
 }

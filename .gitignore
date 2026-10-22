@@ -8,6 +8,7 @@ logs/
 artifacts/
 attachments/
 fixtures/
+public/__e2e_nuvie/
 *.log
 .env
 .env.*

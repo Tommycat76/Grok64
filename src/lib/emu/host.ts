@@ -618,6 +618,7 @@ export async function bootEmulator(el: HTMLElement, cfg: BootConfig): Promise<Ej
   await ensureRuntime();
   preserveWebglBuffer();
   keyboardArmed = false;
+  clearRuntimeViceOpts();
   const defaults = coreOptions(cfg);
   rememberWorkDisk(defaults.vice_work_disk);
   const config: Record<string, unknown> = {
@@ -1225,6 +1226,15 @@ export async function recycleCore(emu: EjsInstance | null, el: HTMLElement | nul
 
 let lastWorkDisk: string | null = null;
 let lastJiffy = false;
+const lastRuntimeViceOpts: Record<string, string> = {};
+
+export function runtimeViceOpts(): Record<string, string> {
+  return { ...lastRuntimeViceOpts };
+}
+
+export function clearRuntimeViceOpts() {
+  for (const k of Object.keys(lastRuntimeViceOpts)) delete lastRuntimeViceOpts[k];
+}
 
 export function lastAppliedWorkDisk(): string | null {
   return lastWorkDisk;
@@ -1247,6 +1257,7 @@ export function applyRuntimeOptions(emu: EjsInstance | null, opts: Record<string
   for (const [k, v] of Object.entries(opts)) {
     try {
       emu.gameManager.setVariable(k, v);
+      if (k.startsWith("vice_")) lastRuntimeViceOpts[k] = v;
       if (k === "vice_work_disk") rememberWorkDisk(v);
     } catch {
       /* option may not exist on this core */

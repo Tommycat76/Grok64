@@ -481,11 +481,14 @@ function assertCatalogBinary(buf: Uint8Array) {
 }
 
 /** Browser/static-host download — IA via /api/ia, Assembly64 direct, HVSC direct. */
-export async function downloadCatalogFileClient(data: {
-  name: string;
-  url?: string;
-  a64?: { itemId: string; category: number; fileId: string };
-}): Promise<{ name: string; base64: string; size: number }> {
+export async function downloadCatalogFileClient(
+  data: {
+    name: string;
+    url?: string;
+    a64?: { itemId: string; category: number; fileId: string };
+  },
+  opts?: { signal?: AbortSignal },
+): Promise<{ name: string; base64: string; size: number }> {
   let buf: Uint8Array;
   let name = data.name;
   if (data.a64) {
@@ -503,9 +506,11 @@ export async function downloadCatalogFileClient(data: {
     if (/^(localhost|127\.|10\.|192\.168\.|0\.|169\.254\.)/i.test(target.hostname)) {
       throw new Error("That address cannot be fetched.");
     }
+    const signals: AbortSignal[] = [AbortSignal.timeout(TIMEOUT)];
+    if (opts?.signal) signals.push(opts.signal);
     const res = await fetch(target.toString(), {
       headers: { Accept: "application/octet-stream,*/*", "User-Agent": "Grok64Emu/1.0" },
-      signal: AbortSignal.timeout(TIMEOUT),
+      signal: AbortSignal.any(signals),
       redirect: "follow",
     });
     if (!res.ok) throw new Error(`Download failed (${res.status})`);

@@ -9,7 +9,19 @@ import { LibrarySheet } from "@/components/emu/LibrarySheet";
 import { DiskMountSheet } from "@/components/emu/DiskMountSheet";
 import { SettingsSheet } from "@/components/emu/SettingsSheet";
 import { applyRecipe, saveSnapshot, SnapshotsSheet } from "@/components/emu/SnapshotsSheet";
-import { copyBuffer, getFile, listLibrary, putSaveState, deleteSaveState, touchPlayed, updateFileData, ensureWorkDisk, isWorkDisk, removeFile } from "@/lib/emu/library";
+import { freezeSlot, listSnapshots } from "@/lib/emu/snapshots";
+import {
+  copyBuffer,
+  getFile,
+  listLibrary,
+  putSaveState,
+  deleteSaveState,
+  touchPlayed,
+  updateFileData,
+  ensureWorkDisk,
+  isWorkDisk,
+  removeFile,
+} from "@/lib/emu/library";
 import { useEmu } from "@/lib/emu/store";
 import {
   applyRuntimeOptions,
@@ -40,6 +52,7 @@ import {
   flushEmuFs,
   lastAppliedJiffy,
   lastAppliedWorkDisk,
+  runtimeViceOpts,
   swapBootDisk,
   writeBootFile,
   sd2iecFreeze,
@@ -244,6 +257,8 @@ export function Grok64App() {
   const [cartLive, setCartLive] = useState(false);
   const cartLiveRef = useRef(false);
   const resetReadyRef = useRef(() => {});
+  const swapJoyPortRef = useRef(() => {});
+  const toggleWarpRef = useRef(() => {});
   const [softwareStd, setSoftwareStd] = useState(null);
   const softwareStdRef = useRef(null);
   const [snap, setSnap] = useState({
@@ -575,6 +590,18 @@ export function Grok64App() {
           })(),
         };
       },
+      runtimeViceOpts: () => runtimeViceOpts(),
+      openSoftware: () => useEmu.getState().setLibraryOpen(true),
+      closeSoftware: () => useEmu.getState().setLibraryOpen(false),
+      libraryCount: async () => (await listLibrary()).length,
+      fireTap: () => {
+        joyRef.current.fire = true;
+        emitJoyRef.current(true);
+        setTimeout(() => {
+          joyRef.current.fire = false;
+          emitJoyRef.current(false);
+        }, 100);
+      },
       opts: () => {
         try {
           const raw = emuRef.current?.gameManager?.getCoreOptions?.() ?? null;
@@ -667,6 +694,71 @@ export function Grok64App() {
         const buf = await res.arrayBuffer();
         await playBufferRef.current(item.name, buf, { autostart: true, title: item.name });
         return item.id;
+      },
+      playBytes: async (name, bytes) => {
+        const buf =
+          bytes instanceof ArrayBuffer
+            ? bytes
+            : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        await playBufferRef.current(name, buf, { autostart: true, title: name });
+        return true;
+      },
+      /** Nuvie: zip `base.prg` + `base.reu` so libretro VICE pairs the REU image. */
+      playNuvie: async (prgBytes, reuBytes, base = "nuvie-play") => {
+        const { zipSync } = await import("fflate");
+        const prg = prgBytes instanceof Uint8Array ? prgBytes : new Uint8Array(prgBytes);
+        const reu = reuBytes instanceof Uint8Array ? reuBytes : new Uint8Array(reuBytes);
+        const boot = `${base}.prg`;
+        const zip = zipSync({ [boot]: prg, [`${base}.reu`]: reu });
+        useEmu.getState().setReuSize(C64OS_REU);
+        if (emuRef.current) {
+          applyRuntimeOptions(emuRef.current, { vice_ram_expansion_unit: C64OS_REU });
+        }
+        await playBufferRef.current(`${base}.zip`, toArrayBuffer(zip), {
+          autostart: true,
+          title: boot,
+          bootName: boot,
+        });
+        return true;
+      },
+      setReuSize: (size) => {
+        useEmu.getState().setReuSize(size);
+        applyRuntimeOptions(emuRef.current, { vice_ram_expansion_unit: size });
+      },
+      setJoyPort: (port) => {
+        useEmu.getState().setJoyPort(port === 1 ? 1 : 2);
+        plugJoysticks(emuRef.current, port === 1 ? 1 : 2);
+        applyRuntimeOptions(emuRef.current, viceJoyOptions(port === 1 ? 1 : 2));
+      },
+      swapJoy: () => swapJoyPortRef.current?.(),
+      toggleWarp: () => toggleWarpRef.current?.(),
+      setMuted: (on) => {
+        useEmu.getState().setMuted(!!on);
+        applyEmuVolume(emuRef.current, !!on, useEmu.getState().volume);
+      },
+      setPaused: (on) => {
+        useEmu.getState().setPaused(!!on);
+        setPaused(emuRef.current, !!on);
+      },
+      openSnaps: () => useEmu.getState().setSnapsOpen(true),
+      saveFreezeSlot: async (slot) => {
+        const id = freezeSlot(slot);
+        const st = await captureState(emuRef.current);
+        if (!st || st.byteLength < 16) return false;
+        await saveSnapshot("hardware", id, st, useEmu.getState().currentTitle || "Freeze");
+        return true;
+      },
+      snapshotCount: async () => (await listSnapshots()).length,
+      sessionFlags: () => {
+        const st = useEmu.getState();
+        return {
+          warped: st.warped,
+          muted: st.muted,
+          paused: st.paused,
+          joyPort: st.joyPort,
+          reuSize: st.reuSize,
+          showKeyboard: st.showKeyboard,
+        };
       },
       runDos: (cmd) => runSdCommand(cmd),
       resetDos: () => resetSd2iecSession(),
@@ -1408,7 +1500,7 @@ export function Grok64App() {
       const playUnit = opts.iecUnit ?? useEmu.getState().iecUnit;
       setIecDevice(playUnit);
       let payload = data;
-      let bootName = bootFileName(filename, kindOf(filename));
+      let bootName = opts.bootName ?? bootFileName(filename, kindOf(filename));
       const raw = new Uint8Array(data);
       const work = isWorkDisk(filename) || opts.title === "BASIC" || opts.title === "BASIC READY";
       if (!work && isWorkDiskImage(raw)) {
@@ -1911,6 +2003,7 @@ export function Grok64App() {
     useEmu.getState().setWarped(next);
     setWarp(emuRef.current, next);
   }, []);
+  toggleWarpRef.current = toggleWarp;
   const powerOn = useCallback(() => {
     const st = useEmu.getState();
     if (st.powered && (coreHasFs(emuRef.current) || bootKickRef.current)) {
@@ -2492,6 +2585,7 @@ export function Grok64App() {
     glog("port-swap", { next, mouse: st.mouseMode });
     toast.message(st.mouseMode ? `Mouse → Port ${next}` : `Joystick → Port ${next}`);
   }, [expansionOpts]);
+  swapJoyPortRef.current = swapJoyPort;
   useEffect(() => {
     if (playModeRef.current === "disk") return;
     const plan = planPlay({

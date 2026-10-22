@@ -25,14 +25,17 @@ interface Props {
   onInsert?: (item: LibraryItem) => void;
 }
 
-async function fetchRemote(file: CatalogFile): Promise<{ name: string; data: Uint8Array }> {
+async function fetchRemote(
+  file: CatalogFile,
+  signal?: AbortSignal,
+): Promise<{ name: string; data: Uint8Array }> {
   const payload = {
     name: file.name,
     ...(file.url ? { url: file.url } : {}),
     ...(file.a64 ? { a64: file.a64 } : {}),
   };
   try {
-    const res = await downloadCatalogFileClient(payload);
+    const res = await downloadCatalogFileClient(payload, { signal });
     return { name: res.name || file.name, data: b64ToU8(res.base64) };
   } catch {
     /* static Plex hosts have no serverFn — try legacy path when client fetch fails */
@@ -58,6 +61,15 @@ export function CatalogPanel({ onPlay, onInsert }: Props) {
   const [files, setFiles] = useState<Record<string, CatalogFile[]>>({});
   const timer = useRef<number | null>(null);
   const boot = useRef(false);
+  const downloadAbort = useRef<AbortController | null>(null);
+  const libraryOpen = useEmu((s) => s.libraryOpen);
+
+  useEffect(() => {
+    if (!libraryOpen) {
+      downloadAbort.current?.abort();
+      downloadAbort.current = null;
+    }
+  }, [libraryOpen]);
 
   async function runSearch(q: string, k: CatalogKind) {
     setSearching(true);
@@ -94,7 +106,10 @@ export function CatalogPanel({ onPlay, onInsert }: Props) {
   }
 
   async function ingest(file: CatalogFile, mode: "play" | "save" | "insert") {
-    const got = await fetchRemote(file);
+    downloadAbort.current?.abort();
+    downloadAbort.current = new AbortController();
+    const signal = downloadAbort.current.signal;
+    const got = await fetchRemote(file, signal);
     const parts = explodeArchive(got.name, got.data);
     const chosen = pickBootFile(parts, file.name) ?? parts[0];
     if (!chosen) throw new Error("No C64 file in that download.");

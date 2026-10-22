@@ -21,7 +21,7 @@ test("single SID default matches stock (no extras)", () => {
   assert.equal(o.vice_sid_model2, undefined);
 });
 
-test("stereo + triple SID addresses map to VICE options", () => {
+test("stereo SID maps to vice_sid_extra (+ model2)", () => {
   const o = sidOptions({
     engine: "ReSID",
     model: "default",
@@ -32,6 +32,6 @@ test("stereo + triple SID addresses map to VICE options", () => {
   });
   assert.equal(o.vice_sid_extra, "0xde00");
   assert.equal(o.vice_sid_model2, "8580");
-  assert.equal(o.vice_sid_extra2, "0xd420");
-  assert.equal(o.vice_sid_model3, "6581");
+  assert.equal(o.vice_sid_extra2, undefined);
+  assert.equal(o.vice_sid_model3, undefined);
 });
