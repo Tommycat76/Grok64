@@ -64,6 +64,7 @@ async function fetchGeos() {
 const CART_WANT = [
   { pattern: /Action_Replay_V6\.0/i, label: "ar6" },
   { pattern: /Final_Cartridge_3_1987-09_v1/i, label: "fc3" },
+  { pattern: /Super_Snapshot_v4/i, label: "ss4" },
   { pattern: /Super_Snapshot_v5\.00_1990_NTSC/i, label: "ss5" },
 ];
 
