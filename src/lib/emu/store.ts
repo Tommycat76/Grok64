@@ -1,3 +1,4 @@
+import type { FastLoadCartKind } from "@/lib/emu/jiffy-cart-compat";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type {
@@ -136,6 +137,8 @@ interface SessionSlice {
   currentTitle: string | null;
   /** Last floppy inserted in-session (shown instead of blank.d64 / WORK DISK path). */
   insertedDiskName: string | null;
+  /** Active freezer / fast-load CRT this session (for JiffyDOS compatibility). */
+  fastLoadCart: FastLoadCartKind | null;
   powerOn: () => void;
   setRunning: (v: boolean) => void;
   setPaused: (v: boolean) => void;
@@ -151,6 +154,7 @@ interface SessionSlice {
   setLibrary: (items: LibraryItem[]) => void;
   setCurrentTitle: (n: string | null) => void;
   setInsertedDiskName: (n: string | null) => void;
+  setFastLoadCart: (cart: FastLoadCartKind | null) => void;
 }
 
 function withIecMap(map: IecMap) {
@@ -262,6 +266,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       library: [],
       currentTitle: null,
       insertedDiskName: null,
+      fastLoadCart: null,
       powerOn: () => set({ powered: true }),
       setRunning: (running) => set({ running }),
       setPaused: (paused) => set({ paused }),
@@ -278,6 +283,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       setLibrary: (library) => set({ library }),
       setCurrentTitle: (currentTitle) => set({ currentTitle }),
       setInsertedDiskName: (insertedDiskName) => set({ insertedDiskName }),
+      setFastLoadCart: (fastLoadCart) => set({ fastLoadCart }),
     }),
     {
       name: "grok64-settings",

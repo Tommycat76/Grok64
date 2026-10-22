@@ -13,6 +13,7 @@ import {
   runSdCommand,
   type SdPartition,
 } from "@/lib/emu/sd2iec";
+import { JiffyDosToggleRow, JiffyFastloadCartMatrix } from "@/components/emu/JiffyCartCompatPanel";
 import { useEmu } from "@/lib/emu/store";
 
 export function ExpansionPanel() {
@@ -88,20 +89,8 @@ export function ExpansionPanel() {
         />
       </div>
 
-      <div className="g64-row">
-        <span>JiffyDOS (needs C64 + 1541 ROMs)</span>
-        <button
-          type="button"
-          className="g64-switch"
-          data-on={s.jiffyDos ? "true" : "false"}
-          onClick={() => s.setJiffyDos(!s.jiffyDos)}
-          role="switch"
-          aria-checked={s.jiffyDos}
-        >
-          <i />
-        </button>
-      </div>
-      <p className="mb-3 text-xs text-fg-subtle">Applies on next load. Libretro looks for those exact filenames in system/vice.</p>
+      <JiffyFastloadCartMatrix />
+      <JiffyDosToggleRow />
 
       <div className="g64-field">
         <label>Virtual SD card</label>

@@ -156,6 +156,11 @@ import { feedBasicLine } from "@/lib/emu/c64-keyboard";
 import { focusGrok64Player } from "@/lib/emu/focus-player";
 import { dispatchC64Key, isJoyFireKey, muteC64Space, onBeforeC64Space, typeC64 } from "@/lib/emu/keys";
 import {
+  detectFastLoadCart,
+  jiffyCartCompat,
+  resolveJiffyWant,
+} from "@/lib/emu/jiffy-cart-compat";
+import {
   bootFileName,
   driveForPlay,
   d64DiskName,
@@ -1160,7 +1165,7 @@ export function Grok64App() {
     async (emu: typeof emuRef.current, reset: "hard" | "soft" | "none" = "none") => {
       if (!emu) return false;
       const st = useEmu.getState();
-      const on = await applyJiffyDos(emu, st.jiffyDos);
+      const on = await applyJiffyDos(emu, resolveJiffyWant(st.jiffyDos, st.fastLoadCart));
       if (reset === "hard") hardReset(emu);
       else if (reset === "soft") resetEmu(emu);
       return on;
@@ -1177,6 +1182,7 @@ export function Grok64App() {
     cracktroOnceRef.current = "";
     cartLiveRef.current = false;
     setCartLive(false);
+    useEmu.getState().setFastLoadCart(null);
     persistGateRef.current = false;
     pendingKickRef.current = false;
     playLockRef.current = false;
@@ -1733,7 +1739,7 @@ export function Grok64App() {
       const userUnit = user.unit;
       const liveIec = sessionIecRef.current;
       const liveWork = lastAppliedWorkDisk();
-      const jiffyWant = useEmu.getState().jiffyDos;
+      const jiffyWantSetting = useEmu.getState().jiffyDos;
       const jiffyLive = lastAppliedJiffy();
       const plan = planPlay({
         filename: bootName,
@@ -1744,9 +1750,29 @@ export function Grok64App() {
         liveWorkDisk: liveWork,
         autostart: opts.autostart !== false,
         iosPhone: isIosPhone(),
-        jiffyWant,
+        jiffyWant: jiffyWantSetting,
         jiffyLive,
       });
+      const playTitle = opts.title ?? filename;
+      const hadCartBefore = cartLiveRef.current;
+      const keepCartAcrossDiskEarly = hadCartBefore && plan.kind === "floppy" && !work;
+      let sessionFastCart = useEmu.getState().fastLoadCart;
+      if (plan.kind === "cart") {
+        sessionFastCart = detectFastLoadCart(bootName, playTitle);
+        useEmu.getState().setFastLoadCart(sessionFastCart);
+        if (sessionFastCart && jiffyWantSetting) {
+          const compat = jiffyCartCompat(sessionFastCart, true);
+          if (compat.suppressJiffy) {
+            toast.message(compat.summary, { duration: 9000 });
+          } else if (compat.warnIfJiffyOn) {
+            toast.message(compat.title, { description: compat.summary, duration: 9000 });
+          }
+        }
+      } else if (!keepCartAcrossDiskEarly) {
+        sessionFastCart = null;
+        useEmu.getState().setFastLoadCart(null);
+      }
+      const jiffyWant = resolveJiffyWant(jiffyWantSetting, sessionFastCart);
       const attach = plan.attach;
       // Hard lock: CriOS never logs `hot-swap` (Tom #35 / #37 → DNP).
       // After READY, recycle is in-place on the live canvas (#18/#30).
@@ -2017,7 +2043,7 @@ export function Grok64App() {
           await prepareCore(emuRef.current, {
             live: plan.live,
             user: plan.user,
-            jiffyWant: stNow.jiffyDos,
+            jiffyWant: resolveJiffyWant(stNow.jiffyDos, stNow.fastLoadCart),
             skipJiffy: true,
             driveMap: stNow.iecMap,
           });
@@ -2243,6 +2269,7 @@ export function Grok64App() {
     playLockRef.current = false;
     cartLiveRef.current = false;
     setCartLive(false);
+    useEmu.getState().setFastLoadCart(null);
     beginColdSession();
     useEmu.getState().setInsertedDiskName(null);
     cracktroOnceRef.current = "";
@@ -2737,6 +2764,7 @@ export function Grok64App() {
       const ok = cartEject(emuRef.current, workDiskBytesRef.current);
       cartLiveRef.current = false;
       setCartLive(false);
+      useEmu.getState().setFastLoadCart(null);
       glog("cart-eject", { ok });
       toast.message(ok ? "Cartridge ejected" : "Could not eject cartridge");
       return;
