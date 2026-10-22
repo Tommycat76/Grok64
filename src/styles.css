@@ -1068,11 +1068,6 @@ div[class*="ejs_virtual"] {
   height: 40px;
   font-size: 11px;
 }
-.g64-key-hint {
-  font-size: 9px;
-  font-weight: 700;
-  opacity: 0.85;
-}
 .g64-kb-row[data-pad="true"] {
   padding: 0 12px;
 }
@@ -1086,54 +1081,77 @@ div[class*="ejs_virtual"] {
   background: color-mix(in oklab, var(--color-key) 78%, transparent);
   color: var(--color-key-fg);
   font-family: var(--font-display);
-  font-size: 16px;
-  font-weight: 600;
   letter-spacing: 0.01em;
   display: flex;
-  flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
   line-height: 1;
   touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
   position: relative;
-  padding: 4px 2px 3px;
+  padding: 3px;
 }
 .g64-app[data-device="phone"] .g64-key,
 .g64-app[data-device="tablet"] .g64-key {
   overflow: hidden;
 }
-.g64-key-petscii {
-  position: absolute;
-  top: 3px;
-  left: 0;
-  right: 0;
+.g64-key-cap {
+  position: relative;
+  flex: 1 1 auto;
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 0 2px;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 100%;
   pointer-events: none;
+}
+.g64-key-primary {
+  font-size: 17px;
+  font-weight: 800;
   line-height: 1;
-  opacity: 1;
-  color: var(--color-phosphor);
-  -webkit-text-size-adjust: none;
-  text-size-adjust: none;
+  text-align: center;
+  color: var(--color-key-fg);
+  z-index: 2;
 }
-.g64-key-petscii em {
-  font-style: normal;
-  font-size: 8px;
+.g64-key-secondary {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: 9px;
   font-weight: 700;
-  color: var(--color-phosphor);
-  opacity: 1;
+  line-height: 1;
+  color: color-mix(in oklab, var(--color-key-fg) 55%, var(--color-fg-muted));
+  opacity: 0.72;
+  z-index: 1;
+}
+.g64-key-corner {
+  position: absolute;
   display: flex;
-  min-width: 14px;
-  min-height: 14px;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  color: color-mix(in oklab, var(--color-phosphor) 38%, var(--color-fg-muted));
+  opacity: 0.42;
+  pointer-events: none;
+  z-index: 1;
 }
-.g64-key-petscii em[data-side="sh"] {
-  font-size: 8px;
-  font-weight: 700;
-  color: color-mix(in oklab, var(--color-phosphor) 88%, #fff);
+.g64-key-corner[data-active="true"] {
+  opacity: 0.78;
+  color: color-mix(in oklab, var(--color-phosphor) 62%, var(--color-key-fg));
+}
+.g64-key-corner--tr {
+  top: 2px;
+  right: 3px;
+}
+.g64-key-corner--bl {
+  bottom: 2px;
+  left: 3px;
+}
+.g64-key-corner .g64-petg {
+  width: 10px;
+  height: 10px;
+  filter: none;
 }
 .g64-petg {
   display: block;
@@ -1141,41 +1159,33 @@ div[class*="ejs_virtual"] {
   fill: currentColor;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  filter: drop-shadow(0 0 2px color-mix(in oklab, var(--color-phosphor) 55%, transparent));
 }
-.g64-key-main-pet {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.g64-key-main-pet .g64-petg {
-  width: 18px;
-  height: 18px;
-}
-.g64-key-main {
-  margin-top: auto;
-  font-size: inherit;
-  line-height: 1;
-  z-index: 1;
-}
-.g64-key[data-petscii="true"] .g64-key-main {
-  margin-top: 10px;
+.g64-key.mod .g64-key-primary {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: var(--color-fg-muted);
 }
 .g64-key.mod {
   flex: 1.15 1 0;
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  color: var(--color-fg-muted);
+}
+.g64-key.wide .g64-key-primary {
+  font-size: 11px;
+  letter-spacing: 0.06em;
 }
 .g64-key.wide {
   flex: 1.6 1 0;
-  font-size: 12px;
-  letter-spacing: 0.06em;
+}
+.g64-key.space .g64-key-primary {
+  font-size: 11px;
+  letter-spacing: 0.18em;
 }
 .g64-key.space {
   flex: 4.2 1 0;
-  font-size: 12px;
-  letter-spacing: 0.18em;
+}
+.g64-kb-fn .g64-key.fn .g64-key-primary {
+  font-size: 11px;
+  font-weight: 800;
 }
 .g64-key[data-mod="true"],
 .g64-key[data-down="true"] {
@@ -1921,29 +1931,19 @@ div[class*="ejs_virtual"] {
   font-size: 17px;
   border-radius: 10px;
 }
-/* Touch keyboard PETSCII — real C64 8×8 glyphs on phone + tablet */
-.g64-app[data-device="phone"] .g64-key-petscii,
-.g64-app[data-device="tablet"] .g64-key-petscii {
-  top: 2px;
+/* Touch keyboard — corner PETSCII stays small; primary legend stays dominant */
+.g64-app[data-device="phone"] .g64-key-primary,
+.g64-app[data-device="tablet"] .g64-key-primary {
+  font-size: 18px;
 }
-.g64-app[data-device="phone"] .g64-key-petscii em,
-.g64-app[data-device="tablet"] .g64-key-petscii em {
-  color: var(--color-phosphor);
-  opacity: 1;
+.g64-app[data-device="phone"] .g64-key-corner .g64-petg,
+.g64-app[data-device="tablet"] .g64-key-corner .g64-petg {
+  width: 11px;
+  height: 11px;
 }
-.g64-app[data-device="phone"] .g64-key-petscii em,
-.g64-app[data-device="tablet"] .g64-key-petscii em {
-  min-width: 16px;
-  min-height: 16px;
-}
-.g64-app[data-device="phone"] .g64-key-petscii .g64-petg,
-.g64-app[data-device="tablet"] .g64-key-petscii .g64-petg {
-  width: 16px;
-  height: 16px;
-}
-.g64-app[data-device="phone"] .g64-key[data-petscii="true"] .g64-key-main,
-.g64-app[data-device="tablet"] .g64-key[data-petscii="true"] .g64-key-main {
-  margin-top: 13px;
+.g64-app[data-device="phone"] .g64-key-secondary,
+.g64-app[data-device="tablet"] .g64-key-secondary {
+  font-size: 10px;
 }
 .g64-app[data-device="phone"] .g64-kb[data-layer="abc"] .g64-key,
 .g64-app[data-device="phone"] .g64-kb[data-layer="sym"] .g64-key {
@@ -1963,9 +1963,15 @@ div[class*="ejs_virtual"] {
   color: var(--color-key-fg);
   font-weight: 700;
 }
-.g64-app[data-device="phone"] .g64-key-main,
-.g64-app[data-device="tablet"] .g64-key-main {
+.g64-app[data-device="phone"] .g64-key-primary,
+.g64-app[data-device="tablet"] .g64-key-primary {
   color: #ffffff;
+}
+.g64-app[data-device="desktop"] .g64-key-primary {
+  font-size: 16px;
+}
+.g64-app[data-device="desktop"][data-kb="true"] .g64-key-primary {
+  font-size: 17px;
 }
 .g64-app[data-device="tablet"] .g64-kb-bar .g64-key {
   min-height: 56px;
