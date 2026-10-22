@@ -232,7 +232,7 @@ function playLockDuration(mode: string, title?: string | null): number {
   if (isTouchMobile()) return mode === "disk" ? 4500 : mode === "cart" ? 900 : 1400;
   if (mode === "cart") return 1400;
   if (mode === "disk") {
-    const longLoad = /paradroid|turrican|boulder|commando|geos/i.test(title || "");
+    const longLoad = /paradroid|turrican|boulder|commando|geos|wheels/i.test(title || "");
     return longLoad ? 58_000 : 12_000;
   }
   return 3500;
