@@ -8,14 +8,35 @@ const ROW = [
 /** PETSCII screencode (0x01–0xFF) → display char for directory / BASIC listings. */
 function petToChar(code: number): string {
   const c = code & 0xff;
-  if (c === 0) return " ";
+  if (c === 0 || c === 32 || c === 160) return " ";
   if (c >= 1 && c <= 26) return String.fromCharCode(64 + c);
-  if (c >= 27 && c <= 32) return " !\"#$%&"[c - 27] ?? " ";
-  if (c >= 33 && c <= 58) return String.fromCharCode(91 + c - 33);
+  if (c >= 48 && c <= 57) return String.fromCharCode(c);
+  const sym: Record<number, string> = {
+    0x21: "!",
+    0x22: '"',
+    0x23: "#",
+    0x24: "$",
+    0x25: "%",
+    0x26: "&",
+    0x27: "'",
+    0x28: "(",
+    0x29: ")",
+    0x2a: "*",
+    0x2b: "+",
+    0x2c: ",",
+    0x2d: "-",
+    0x2e: ".",
+    0x2f: "/",
+    0x3a: ":",
+    0x3b: ";",
+    0x3c: "<",
+    0x3d: "=",
+    0x3e: ">",
+    0x3f: "?",
+  };
+  if (sym[c]) return sym[c];
   if (c >= 64 && c <= 95) return String.fromCharCode(c);
   if (c >= 97 && c <= 122) return String.fromCharCode(c - 32);
-  if (c === 160 || c === 32) return " ";
-  if (c >= 48 && c <= 57) return String.fromCharCode(c);
   if (c >= 193 && c <= 218) return String.fromCharCode(c - 128);
   return c >= 128 ? String.fromCharCode(c - 128) : " ";
 }

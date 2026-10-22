@@ -36,6 +36,7 @@ import {
   ensureGrok64WasmExports,
   wireGrok64ViceHost,
 } from "./grok64-vice-bridge";
+import { grok64RetroKeyboardAvailable } from "./grok64-keyboard";
 import type { SdPartition } from "./sd2iec";
 import type { Sd2iecVolume } from "./sd2iec-volume";
 import type {
@@ -795,7 +796,7 @@ function coreOptions(cfg: BootConfig): Record<string, string> {
     vice_statusbar: "disabled",
     vice_vkbd: "disabled",
     vice_keyboard_input: "enabled",
-    vice_physical_keyboard_pass_through: "enabled",
+    vice_physical_keyboard_pass_through: "disabled",
     ...viceJoyOptions(cfg.joyPort),
     ...buildViceExtras({
       reu: cfg.reu ?? "none",
@@ -1021,15 +1022,18 @@ export function plugJoysticks(emu: EjsInstance | null, _port: JoyPort = 2) {
   if (!emu) return;
   userJoyPort = _port;
   guardCore(emu);
+  const grokKbd = grok64RetroKeyboardAvailable(emu);
+  const grokDatapath = Boolean(grok64ViceCoreRoot());
+  applyRuntimeOptions(emu, {
+    vice_physical_keyboard_pass_through: grokDatapath ? "disabled" : "enabled",
+    vice_keyboard_input: "enabled",
+  });
   try {
-    emu.gameManager?.setKeyboardEnabled?.(true);
+    // Single keyboard path: libretro export OR EmulatorJS rwebinput — never both.
+    emu.gameManager?.setKeyboardEnabled?.(!grokKbd);
   } catch {
     /* ignore */
   }
-  applyRuntimeOptions(emu, {
-    vice_physical_keyboard_pass_through: "enabled",
-    vice_keyboard_input: "enabled",
-  });
   keyboardArmed = true;
   bindVirtualPad(emu);
   window.setTimeout(() => ensureValue2(emu), 250);

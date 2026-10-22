@@ -1223,6 +1223,11 @@ div[class*="ejs_virtual"] {
   min-height: 0;
   min-width: 0;
 }
+.g64-app[data-kb="true"] .g64-screen canvas:not(.g64-ios-present) {
+  min-height: 120px;
+  min-width: 200px;
+  flex: 1 1 auto;
+}
 .g64-app[data-kb="true"] .g64-kb {
   position: relative;
   left: auto;

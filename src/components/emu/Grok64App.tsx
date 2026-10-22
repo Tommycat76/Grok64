@@ -100,12 +100,8 @@ import {
   attachSd2iecBus,
   setSd2iecWasmIecOnly,
 } from "@/lib/emu/sd2iec";
-import {
-  attachGrok64Sd2iec,
-  grok64RetroKeyboard,
-  tickGrok64Iec,
-  wireGrok64ViceHost,
-} from "@/lib/emu/grok64-vice-bridge";
+import { grok64RetroKeyboardAvailable, grok64RetroKeyboardFromDom } from "@/lib/emu/grok64-keyboard";
+import { attachGrok64Sd2iec, tickGrok64Iec, wireGrok64ViceHost } from "@/lib/emu/grok64-vice-bridge";
 import { readC64Byte, readC64Bytes, writeC64Byte, writeC64Bytes } from "@/lib/emu/c64-memory";
 import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor } from "@/lib/emu/vice-extras";
 import { HwHoldChip } from "@/components/emu/HwHoldChip";
@@ -165,7 +161,7 @@ import {
   isJoyFireKey,
   muteC64Space,
   onBeforeC64Space,
-  setC64FnKeySink,
+  setC64HardwareKeySink,
   typeC64,
 } from "@/lib/emu/keys";
 import {
@@ -2668,26 +2664,39 @@ export function Grok64App() {
     };
   }, [s.running, cartLive]);
   useEffect(() => {
-    setC64FnKeySink((code, down) => grok64RetroKeyboard(emuRef.current, code, down));
-    return () => setC64FnKeySink(null);
+    setC64HardwareKeySink((code, key, down, mods) =>
+      grok64RetroKeyboardFromDom(emuRef.current, code, key, down, mods),
+    );
+    return () => setC64HardwareKeySink(null);
   }, []);
   useEffect(() => {
-    const onFn = (e: KeyboardEvent) => {
+    if (!s.running) return;
+    const onHostKey = (e: KeyboardEvent) => {
       if (!useEmu.getState().running || playLockRef.current) return;
-      if (!/^F[1-8]$/.test(e.code)) return;
-      const tag = (e.target as HTMLElement | null)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      e.preventDefault();
-      e.stopPropagation();
+      if (!grok64RetroKeyboardAvailable(emuRef.current)) return;
+      const target = e.target;
+      if (target instanceof Element && target.closest(".g64-kb, .g64-sheet")) return;
+      if (target instanceof HTMLElement) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      }
+      if (isJoyFireKey(e.code)) return;
       const down = e.type === "keydown";
       if (down && e.repeat) return;
-      dispatchC64Key(e.code, e.key, down);
+      const handled = grok64RetroKeyboardFromDom(emuRef.current, e.code, e.key, down, {
+        shift: e.shiftKey,
+        ctrl: e.ctrlKey,
+        alt: e.altKey,
+      });
+      if (!handled) return;
+      e.preventDefault();
+      e.stopPropagation();
     };
-    window.addEventListener("keydown", onFn, true);
-    window.addEventListener("keyup", onFn, true);
+    window.addEventListener("keydown", onHostKey, true);
+    window.addEventListener("keyup", onHostKey, true);
     return () => {
-      window.removeEventListener("keydown", onFn, true);
-      window.removeEventListener("keyup", onFn, true);
+      window.removeEventListener("keydown", onHostKey, true);
+      window.removeEventListener("keyup", onHostKey, true);
     };
   }, [s.running]);
   useEffect(() => {

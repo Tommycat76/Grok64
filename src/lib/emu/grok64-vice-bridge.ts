@@ -25,7 +25,7 @@ type Grok64Module = {
   _grok64_kbdbuf_feed_runcmd?: (text: string) => void;
   _grok64_sd2iec_detach?: (unit: number) => void;
   _grok64_cartridge_trigger_freeze?: () => void;
-  _grok64_retro_keyboard?: (code: number, down: number) => void;
+  _grok64_retro_keyboard?: (code: number, down: number, character: number, mod: number) => void;
   grok64Sd2iecHost?: {
     poll: () => void;
     attach: (unit: number) => void;
@@ -78,10 +78,12 @@ export function bindGrok64WasmExports(mod: Grok64Module & { cwrap?: (...args: un
       mod._grok64_cartridge_trigger_freeze = wrap("grok64_cartridge_trigger_freeze", null, []) as () => void;
     }
     if (!mod._grok64_retro_keyboard) {
-      mod._grok64_retro_keyboard = wrap("grok64_retro_keyboard", null, ["number", "number"]) as (
-        code: number,
-        down: number,
-      ) => void;
+      mod._grok64_retro_keyboard = wrap("grok64_retro_keyboard", null, [
+        "number",
+        "number",
+        "number",
+        "number",
+      ]) as (code: number, down: number, character: number, mod: number) => void;
     }
     const modAny = mod as {
       _retro_get_memory_data?: (id: number) => number;
@@ -185,29 +187,4 @@ export function detachGrok64Sd2iec(emu: Grok64Emu | null, unit: IecDeviceNumber)
   mod._grok64_sd2iec_detach?.(unit);
 }
 
-/** libretro RETROK_F1..F8 — DOM F-keys crash stock EJS keyboard glue on grok64 core. */
-const RETROK_FN: Record<string, number> = {
-  F1: 64,
-  F2: 65,
-  F3: 66,
-  F4: 67,
-  F5: 68,
-  F6: 69,
-  F7: 70,
-  F8: 71,
-};
-
-export function grok64RetroKeyboard(emu: Grok64Emu | null, code: string, down: boolean): boolean {
-  const retro = RETROK_FN[code];
-  if (retro == null || !emu?.Module) return false;
-  const mod = emu.Module as Grok64Module;
-  bindGrok64WasmExports(mod);
-  const fn = mod._grok64_retro_keyboard;
-  if (!fn) return false;
-  try {
-    fn(retro, down ? 1 : 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
+export { grok64RetroKeyboardAvailable, grok64RetroKeyboardFromDom } from "./grok64-keyboard";

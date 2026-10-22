@@ -215,11 +215,21 @@ export function isJoyFireKey(code: string): boolean {
   return code === FIRE_KEY_CODE;
 }
 
-let fnKeySink: ((code: string, down: boolean) => boolean) | null = null;
+type C64KeyMods = { shift?: boolean; ctrl?: boolean; alt?: boolean };
 
-/** Route F1–F8 through grok64 libretro keyboard when the custom core is loaded. */
+let hardwareKeySink: ((code: string, key: string, down: boolean, mods: C64KeyMods) => boolean) | null =
+  null;
+
+/** Grok64 libretro keyboard — single delivery path when the custom core is loaded. */
+export function setC64HardwareKeySink(
+  sink: ((code: string, key: string, down: boolean, mods: C64KeyMods) => boolean) | null,
+) {
+  hardwareKeySink = sink;
+}
+
+/** @deprecated Use setC64HardwareKeySink */
 export function setC64FnKeySink(sink: ((code: string, down: boolean) => boolean) | null) {
-  fnKeySink = sink;
+  setC64HardwareKeySink(sink ? (code, key, down, mods) => sink(code, down) : null);
 }
 
 export function dispatchC64Key(
@@ -228,7 +238,8 @@ export function dispatchC64Key(
   down: boolean,
   mods: { shift?: boolean } = {},
 ) {
-  if (/^F[1-8]$/.test(code) && fnKeySink?.(code, down)) {
+  const sinkMods = { shift: !!mods.shift };
+  if (hardwareKeySink?.(code, key, down, sinkMods)) {
     return;
   }
   if (isC64Space(code, key)) {
@@ -273,11 +284,14 @@ export function dispatchC64Key(
   } catch {
     /* ignore */
   }
-  parent?.dispatchEvent(make());
   const canvas =
     document.querySelector("#canvas") ??
-    document.querySelector("#grok64-player canvas");
-  canvas?.dispatchEvent(make());
+    document.querySelector("#grok64-player canvas:not(.g64-ios-present)");
+  if (canvas) {
+    canvas.dispatchEvent(make());
+    return;
+  }
+  parent?.dispatchEvent(make());
   // Do not broadcast to window/document. Space on a focused <button>
   // (toolbar Reset) is a click — that used to re-fire Autostart / hard reset
   // and yank Paradroid's cracktro back to BASIC READY.

@@ -115,7 +115,7 @@ void grok64_cartridge_trigger_freeze(void)
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
-void grok64_retro_keyboard(unsigned code, int down)
+void grok64_retro_keyboard(unsigned code, int down, unsigned character, unsigned mod)
 {
-    retro_keyboard_event(down != 0, code, 0, 0);
+    retro_keyboard_event(down != 0, code, character, (uint16_t)mod);
 }
