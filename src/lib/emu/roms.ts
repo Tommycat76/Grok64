@@ -26,7 +26,11 @@ export const ROM_CATALOG: RomDef[] = [
     id: "jiffy-1541",
     label: "JiffyDOS 1541",
     hint: "1541-II DOS · JiffyDOS_1541-II.bin",
-    files: ["JiffyDOS_1541-II.bin", "JiffyDOS_1541-II_6.00.bin"],
+    files: [
+      "JiffyDOS_1541-II.bin",
+      "JiffyDOS_1541-II_6.00.bin",
+      "JiffyDOS_1541-II_6.01.bin",
+    ],
   },
   {
     id: "jiffy-1571",
@@ -102,6 +106,7 @@ export async function romFileMap(): Promise<Record<string, Uint8Array>> {
       for (const row of req.result as StoredRom[]) {
         const def = ROM_CATALOG.find((d) => d.id === row.id);
         const bytes = new Uint8Array(row.data);
+        out[row.name] = bytes;
         for (const fname of def?.files ?? [row.name]) {
           out[fname] = bytes;
         }
@@ -119,6 +124,21 @@ export async function hasJiffyPair(): Promise<boolean> {
 
 export function catalogFiles(id: string): string[] {
   return ROM_CATALOG.find((d) => d.id === id)?.files ?? [];
+}
+
+/** Map uploaded filename (incl. versioned JiffyDOS) to catalog ROM id. */
+export function matchRomCatalogId(fileName: string, byteLength: number): string | null {
+  const upper = fileName.toUpperCase();
+  for (const def of ROM_CATALOG) {
+    if (def.files.some((f) => f.toUpperCase() === upper)) return def.id;
+  }
+  if (byteLength < 4096) return null;
+  if (/JIFFYDOS_C64|JIFFY.?DOS.?C64/i.test(upper)) return "jiffy-c64";
+  if (/JIFFYDOS_1541|JIFFY.?DOS.?1541/i.test(upper)) return "jiffy-1541";
+  if (/JIFFYDOS_1571|JIFFY.?DOS.?1571/i.test(upper)) return "jiffy-1571";
+  if (/JIFFYDOS_1581|JIFFY.?DOS.?1581/i.test(upper)) return "jiffy-1581";
+  if (/CMDHD|DOSCMDHD|HDD-DOS/i.test(upper)) return "cmdhd";
+  return null;
 }
 
 /** Bytes in a romFileMap that are a usable Jiffy C64 + 1541 pair. */

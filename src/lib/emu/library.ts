@@ -69,6 +69,7 @@ export async function putFile(
   name: string,
   data: ArrayBuffer,
   source: StoredFile["source"],
+  meta?: { catalogKey?: string; catalogTitle?: string },
 ): Promise<LibraryItem> {
   const item: StoredFile = {
     id: crypto.randomUUID(),
@@ -77,14 +78,16 @@ export async function putFile(
     source,
     size: data.byteLength,
     addedAt: Date.now(),
+    catalogKey: meta?.catalogKey,
+    catalogTitle: meta?.catalogTitle,
     data,
   };
   const db = await openDb();
   const tx = db.transaction(STORE, "readwrite");
   tx.objectStore(STORE).put(item);
   await txDone(tx);
-  const { data: _d, ...meta } = item;
-  return meta;
+  const { data: _d, ...row } = item;
+  return row;
 }
 
 export async function updateFileData(id: string, data: ArrayBuffer): Promise<void> {

@@ -60,6 +60,9 @@ export interface LibraryItem {
   bundledPath?: string;
   /** IEC bus unit for 1541 / 1581 / SD2IEC / CMD HD mounts (defaults to settings). */
   iecUnit?: IecUnit;
+  /** Catalog hit key when saved from Software search (play integrity). */
+  catalogKey?: string;
+  catalogTitle?: string;
 }
 
 export interface StoredFile extends LibraryItem {

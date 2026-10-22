@@ -19,7 +19,7 @@ export interface ViceExtrasInput {
  */
 export function workDiskFor(iec: IecDrive, unit: IecUnit = 8): string {
   if (iec === "cmdhd") return "disabled";
-  if (iec === "sd2iec") return `${unit}_fs`;
+  if (iec === "sd2iec") return `${unit}_d64`;
   if (iec === "1581") return `${unit}_d81`;
   if (iec === "1541") return `${unit}_d64`;
   return "disabled";

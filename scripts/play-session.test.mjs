@@ -173,10 +173,10 @@ test("live drive options: CMD is real (no 8_fs traps); SD2IEC is VICE FS card", 
     vice_drive9_type: "CMD HD",
   });
   assert.deepEqual(liveDriveOptions({ iec: "sd2iec", unit: 8 }), {
-    vice_work_disk: "8_fs",
-    vice_virtual_device_traps: "enabled",
-    vice_drive_true_emulation: "disabled",
-    vice_drive8_type: "None",
+    vice_work_disk: "8_d64",
+    vice_virtual_device_traps: "disabled",
+    vice_drive_true_emulation: "enabled",
+    vice_drive8_type: "1541",
   });
   assert.deepEqual(liveDriveOptions({ iec: "1541", unit: 8 }), {
     vice_work_disk: "8_d64",
@@ -185,7 +185,7 @@ test("live drive options: CMD is real (no 8_fs traps); SD2IEC is VICE FS card", 
     vice_drive8_type: "1541",
   });
   assert.equal(workDiskFor("cmdhd", 9), "disabled");
-  assert.equal(workDiskFor("sd2iec", 8), "8_fs");
+  assert.equal(workDiskFor("sd2iec", 8), "8_d64");
   assert.equal(workDiskFor("1541", 8), "8_d64");
 });
 

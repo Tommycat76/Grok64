@@ -63,6 +63,7 @@ import {
   probeCore,
   readMountedMedia,
   recycleCore,
+  remountSd2iecFromParts,
   restoreState,
   resetEmu,
   setJoyVector,
@@ -82,6 +83,7 @@ import {
   formatPartition,
   listPartitions,
   partitionsForMount,
+  buildSd2iecD64,
   resetSd2iecSession,
   runSdCommand,
   setIecDevice,
@@ -1010,6 +1012,12 @@ export function Grok64App() {
           applyEmuVolume(emuRef.current, vol.muted, vol.volume);
           gestureUnlockAudio(emuRef.current);
           scheduleCracktroNudge(unlockedTitle);
+          if (playModeRef.current !== "disk" && playModeRef.current !== "basic" && playModeRef.current !== "cart") {
+            window.setTimeout(() => {
+              dispatchC64Key("Escape", "Escape", true);
+              window.setTimeout(() => dispatchC64Key("Escape", "Escape", false), 90);
+            }, 650);
+          }
           if (isIosPhone()) {
             const playerEl = document.getElementById("grok64-player");
             presentIosCrt(emuRef.current, playerEl, "play-unlock");
@@ -1495,14 +1503,15 @@ export function Grok64App() {
   const playBuffer = useCallback(
     async (filename, data, opts = {}) => {
       await persistNow();
+      let mediaName = filename;
       libIdRef.current = opts.libraryId ?? null;
-      playPayloadRef.current = { filename, data, opts };
+      playPayloadRef.current = { filename: mediaName, data, opts };
       const playUnit = opts.iecUnit ?? useEmu.getState().iecUnit;
       setIecDevice(playUnit);
       let payload = data;
-      let bootName = opts.bootName ?? bootFileName(filename, kindOf(filename));
+      let bootName = opts.bootName ?? bootFileName(mediaName, kindOf(mediaName));
       const raw = new Uint8Array(data);
-      const work = isWorkDisk(filename) || opts.title === "BASIC" || opts.title === "BASIC READY";
+      const work = isWorkDisk(mediaName) || opts.title === "BASIC" || opts.title === "BASIC READY";
       if (!work && isWorkDiskImage(raw)) {
         if (opts.libraryId) {
           await removeFile(opts.libraryId);
@@ -1511,7 +1520,7 @@ export function Grok64App() {
         toast.error("That copy is empty. Grab the game again from Catalog.");
         return;
       }
-      const detected = work ? null : detectSoftwareStandard({ names: [filename, opts.title], data: raw });
+      const detected = work ? null : detectSoftwareStandard({ names: [mediaName, opts.title], data: raw });
       softwareStdRef.current = detected;
       setSoftwareStd(detected);
       if (kindOf(filename) === "sid" || isSid(raw)) {
@@ -1521,6 +1530,39 @@ export function Grok64App() {
           bootName = bootFileName(filename.replace(/\.sid$/i, "") + ".prg", "prg");
         } catch (err) {
           toast.error(err instanceof Error ? err.message : "Could not play SID");
+          return;
+        }
+      }
+      if (/\.(reu|nuv)$/i.test(mediaName)) {
+        try {
+          const base = mediaName.replace(/\.(reu|nuv)$/i, "") || "nuvie-play";
+          const playerUrl = publicUrl("/system/vice/nuvieplayer1.0.prg");
+          let playerBuf: ArrayBuffer | null = null;
+          try {
+            const res = await fetch(playerUrl);
+            if (res.ok) playerBuf = await res.arrayBuffer();
+          } catch {
+            /* optional bundled player */
+          }
+          if (!playerBuf || playerBuf.byteLength < 64) {
+            const res = await fetch(
+              "http://csdb.dk/getinternalfile.php/110242/nuvieplayer1.0.prg",
+            );
+            if (!res.ok) throw new Error("NUVIE player missing");
+            playerBuf = await res.arrayBuffer();
+          }
+          useEmu.getState().setReuSize(C64OS_REU);
+          const { zipSync } = await import("fflate");
+          const boot = `${base}.prg`;
+          const zip = zipSync({
+            [boot]: new Uint8Array(playerBuf),
+            [`${base}.reu`]: raw,
+          });
+          payload = toArrayBuffer(zip);
+          bootName = boot;
+          mediaName = `${base}.zip`;
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : "Could not open REU / NUVIE");
           return;
         }
       }
@@ -1953,16 +1995,24 @@ export function Grok64App() {
     [playBuffer, s],
   );
   const playLocal = useCallback(
-    async (item) => {
+    async (item, meta?: { catalogKey?: string; title?: string }) => {
       s.setLibraryOpen(false);
       const file = await getFile(item.id);
       if (!file) {
         toast.error("That file is missing.");
         return;
       }
+      if (
+        meta?.catalogKey &&
+        file.catalogKey &&
+        file.catalogKey !== meta.catalogKey
+      ) {
+        toast.error("That file doesn't match the catalog title you picked. Search again and tap Play.");
+        return;
+      }
       await playBuffer(file.name, file.data, {
         autostart: true,
-        title: item.name,
+        title: meta?.title ?? item.catalogTitle ?? item.name,
         libraryId: item.id,
         iecUnit: item.iecUnit,
       });
@@ -2516,11 +2566,19 @@ export function Grok64App() {
       }
       const dir = action === "sd2iec-prev" ? -1 : 1;
       const parts = await listPartitions();
-      const disks = parts.flatMap((p) =>
-        p.files
-          .filter((f) => /\.(d64|d71|d81|g64|g71)$/i.test(f.name))
-          .map((f) => ({ name: f.name, data: new Uint8Array(f.data) })),
-      );
+      const disks = parts.flatMap((p) => {
+        const d64ish = p.files.filter((f) => /\.(d64|d71|d81|g64|g71)$/i.test(f.name));
+        if (d64ish.length) {
+          return d64ish.map((f) => ({
+            name: f.name,
+            data: buildSd2iecD64([{ ...p, files: [f] }]),
+          }));
+        }
+        if (p.files.length) {
+          return [{ name: `PART${p.id}.D64`, data: buildSd2iecD64([p]) }];
+        }
+        return [];
+      });
       const result = sd2iecFreeze(emuRef.current, disks, dir, sessionUnitRef.current);
       glog("sd2iec-freeze", { ...result, dir });
       if (result.ok && result.count > 1) {
@@ -2619,6 +2677,18 @@ export function Grok64App() {
     void syncJiffy(emu, "none");
     if (s.mouseMode) plugJoysticks(emu, s.joyPort);
   }, [s.reuSize, s.iecDrive, s.iecUnit, s.mouseMode, s.joyPort, s.machineId, s.scpuSimm, s.scpuTurbo, expansionOpts, syncJiffy]);
+  useEffect(() => {
+    const emu = emuRef.current;
+    if (!emu || !s.running || playLockRef.current) return;
+    if (!mapHasDrive(s.iecMap, "sd2iec")) return;
+    const unit = Number(Object.entries(s.iecMap).find(([, v]) => v === "sd2iec")?.[0] ?? 8) as 8 | 9 | 10 | 11;
+    void (async () => {
+      const parts = await partitionsForMount();
+      if (!parts.length) return;
+      const ok = remountSd2iecFromParts(emu, unit, parts);
+      if (ok) glog("sd2iec-live-remount", { unit, files: parts.reduce((n, p) => n + p.files.length, 0) });
+    })();
+  }, [s.iecMap, s.running]);
   useEffect(() => {
     if (!emuRef.current || !useEmu.getState().running) return;
     if (playLockRef.current || playModeRef.current === "disk" || inGameplayRef.current) return;
@@ -3240,7 +3310,7 @@ export function Grok64App() {
       <DiskMountSheet
         open={diskOpen}
         onOpenChange={setDiskOpen}
-        onPlay={(i) => void playLocal(i)}
+        onPlay={(i, meta) => void playLocal(i, meta)}
         onInsert={(i) => void insertDisk(i)}
         onBrowse={() => s.setLibraryOpen(true)}
       />

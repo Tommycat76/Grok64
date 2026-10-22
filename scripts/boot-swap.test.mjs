@@ -73,7 +73,7 @@ test("attachAutostartDisk forces 1541 unit 8 even after SD2IEC 8_fs", () => {
   const files = new Map([["WORK DISK.D64", new Uint8Array([1])]]);
   const emu = mockEmu("WORK DISK.D64", files, vars);
   applyIecUnit(emu, "sd2iec", 8);
-  assert.equal(vars.get("vice_work_disk"), "8_fs");
+  assert.equal(vars.get("vice_work_disk"), "8_d64");
   const game = new Uint8Array(174848).fill(0x42);
   assert.equal(attachAutostartDisk(emu, game, "Burger_Time.d64", "1541", 8), true);
   assert.equal(vars.get("vice_work_disk"), "8_d64");

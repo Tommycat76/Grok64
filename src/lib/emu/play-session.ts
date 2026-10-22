@@ -537,10 +537,10 @@ export function liveDriveOptions(live: DriveAttach): Record<string, string> {
   }
   if (live.iec === "sd2iec") {
     return {
-      vice_work_disk: `${live.unit}_fs`,
-      vice_virtual_device_traps: "enabled",
-      vice_drive_true_emulation: "disabled",
-      ...typed,
+      vice_work_disk: `${live.unit}_d64`,
+      vice_virtual_device_traps: "disabled",
+      vice_drive_true_emulation: "enabled",
+      [typeKey]: "1541",
     };
   }
   if (live.iec === "1581") {

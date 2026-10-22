@@ -32,6 +32,6 @@ test("stereo SID maps to vice_sid_extra (+ model2)", () => {
   });
   assert.equal(o.vice_sid_extra, "0xde00");
   assert.equal(o.vice_sid_model2, "8580");
-  assert.equal(o.vice_sid_extra2, undefined);
+  assert.equal(o.vice_sid_extra2, "disabled");
   assert.equal(o.vice_sid_model3, undefined);
 });

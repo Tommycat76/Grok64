@@ -13,6 +13,7 @@ import {
   type DriveAttach,
 } from "./play-session";
 import { cmdDriveMap, cmdSwapUnits, sd2iecSwapUnit } from "./hw-buttons";
+import { buildSd2iecD64, type SdPartition } from "./sd2iec";
 import type {
   DriveMode,
   IecDrive,
@@ -1693,7 +1694,7 @@ export async function prepareCore(
     live: DriveAttach;
     user: DriveAttach;
     jiffyWant: boolean;
-    sdParts?: { id: number; files: { name: string; data: Uint8Array }[] }[];
+    sdParts?: SdPartition[];
     /** Hot-swap must not flip vice_jiffydos — that reset drops unit 8 on CriOS. */
     skipJiffy?: boolean;
     driveMap?: IecMap;
@@ -1719,9 +1720,9 @@ export async function prepareCore(
       if (viceMap[unit] === "cmdhd") delete viceMap[unit];
     }
   }
-  injectViceRc(emu, viceRcForDrives(viceMap, opts.live.iec === "sd2iec"));
+  injectViceRc(emu, viceRcForDrives(viceMap, false));
   if (opts.live.iec === "sd2iec" && opts.sdParts?.length) {
-    injectSdWork(emu, opts.sdParts);
+    mountSd2iecD64(emu, opts.live.unit, buildSd2iecD64(opts.sdParts));
   }
   applyRuntimeOptions(emu, viceDriveTypeVars(viceMap));
   applyIecUnit(emu, opts.live.iec, opts.live.unit);
@@ -1851,6 +1852,28 @@ export function attachAutostartDisk(
 export function coreHasFs(emu: EjsInstance | null): boolean {
   const FS = fsOf(emu);
   return Boolean(FS?.writeFile && FS.readFile);
+}
+
+export function mountSd2iecD64(emu: EjsInstance | null, unit: IecUnit, data: Uint8Array): boolean {
+  if (!emu || data.byteLength < 174848) return false;
+  const name = `SD2IEC${unit}.D64`;
+  const wrote = writeBootFile(emu, data, name);
+  if (wrote) {
+    emu.fileName = name;
+    unitMounts.set(unit, name);
+    glog("sd2iec-d64-mount", { unit, name, bytes: data.byteLength });
+  }
+  return wrote;
+}
+
+export function remountSd2iecFromParts(
+  emu: EjsInstance | null,
+  unit: IecUnit,
+  parts: SdPartition[],
+): boolean {
+  if (!emu || !parts.length) return false;
+  applyIecUnit(emu, "sd2iec", unit);
+  return mountSd2iecD64(emu, unit, buildSd2iecD64(parts));
 }
 
 export function writeBootFile(emu: EjsInstance | null, data: Uint8Array, preferred?: string | null): boolean {

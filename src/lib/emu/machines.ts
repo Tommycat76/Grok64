@@ -161,6 +161,8 @@ export function sidOptions(layout: SidLayout): Record<string, string> {
   if (VICE_LIBRETRO_SID_EXTRA2) {
     opts.vice_sid_extra2 = sid3;
     if (sid3 !== "disabled" && sid3Model !== "default") opts.vice_sid_model3 = sid3Model;
+  } else {
+    opts.vice_sid_extra2 = "disabled";
   }
   opts.vice_resid_sampling_method = engine === "FastSID" ? "Fast" : "Interpolation";
   return opts;

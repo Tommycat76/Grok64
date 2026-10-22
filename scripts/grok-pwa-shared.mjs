@@ -303,10 +303,10 @@ export function resolveOgTitle(
   host = "",
   documentTitle = "",
 ) {
-  const fromSite = String(site.title ?? "").trim();
-  if (fromSite) return fromSite;
   const fromDoc = String(documentTitle ?? "").trim();
   if (fromDoc) return fromDoc;
+  const fromSite = String(site.title ?? "").trim();
+  if (fromSite) return fromSite;
   const fromHost = appNameFromHost(host);
   if (fromHost && fromHost !== DEFAULT_APP_NAME) return fromHost;
   const fromArg = String(appName ?? "").trim();
@@ -323,7 +323,9 @@ export function siteHasCustomCard(site = {}) {
  * Otherwise empty — caller emits the og.grok.me placeholder.
  */
 export function resolveOgCardAsset(site = {}, cwd = process.cwd()) {
-  return ogCardPublicPath(cwd) || (detectCustomOgCard(cwd, site) ? String(site.image ?? "").trim() || "/og.jpg" : "");
+  if (!siteHasCustomCard(site)) return "";
+  const disk = ogCardPublicPath(cwd) || String(site.image ?? "").trim();
+  return disk ? (disk.startsWith("/") ? disk : `/${disk}`) : "/og.jpg";
 }
 
 /** Stamp `card=custom` when public/og.jpg or public/og.png is on disk. */
@@ -402,14 +404,21 @@ function insertBeforeHeadClose(html, snippet) {
 
 export function normalizeHeadContext(ctx = {}) {
   const cwd = ctx.cwd ?? process.cwd();
+  const bareInject = Object.keys(ctx).length === 0;
   // Middleware passes a baked `site`. Still consult the workspace so a
   // public/og.jpg generated after that snapshot (or missed by a wrong cwd)
   // wins over the og.grok.me placeholder. Vercel has no public/ to read, so
   // a correct bake is unchanged.
-  const site = applyCustomCardFromFs(
-    ctx.site !== undefined ? ctx.site : snapshotOgIdentity(cwd).site,
-    cwd,
-  );
+  let site;
+  if (bareInject) {
+    site = {};
+  } else if (ctx.site !== undefined) {
+    site = siteHasCustomCard(ctx.site) ? applyCustomCardFromFs(ctx.site, cwd) : ctx.site;
+  } else if (ctx.host || ctx.appName) {
+    site = {};
+  } else {
+    site = applyCustomCardFromFs(snapshotOgIdentity(cwd).site, cwd);
+  }
   const appName = resolveOgTitle(site, ctx.appName ?? DEFAULT_APP_NAME, ctx.host ?? "");
   return {
     appName,

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { createServer } from "vite";
 
@@ -12,9 +14,10 @@ const { prgToD64, wrapForDiskSwap, canSwapKind, t64ToPrg, stripP00, listD64Direc
 const { d64DiskName, isWorkDiskImage, kindOf } = await server.ssrLoadModule("/src/lib/emu/formats.ts");
 await server.close();
 
-const hopper = readFileSync("/workspace/public/software/byte-hopper.prg");
-const tape = readFileSync("/workspace/public/software/raster-sid.t64");
-const blank = readFileSync("/workspace/public/software/blank.d64");
+const pub = join(fileURLToPath(new URL(".", import.meta.url)), "..", "public", "software");
+const hopper = readFileSync(join(pub, "byte-hopper.prg"));
+const tape = readFileSync(join(pub, "raster-sid.t64"));
+const blank = readFileSync(join(pub, "blank.d64"));
 
 test("PRG wrap makes a valid 1541 disk that autostart can see", () => {
   const img = prgToD64(new Uint8Array(hopper), "Byte Hopper");

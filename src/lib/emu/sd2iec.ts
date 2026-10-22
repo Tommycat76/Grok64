@@ -1,4 +1,5 @@
 import { openExpansionDb, STORES, txDone } from "./expansion-db";
+import { packPrgsToD64, stripP00 } from "./d64";
 import type { IecUnit } from "./types";
 
 const SECTOR = 512;
@@ -510,12 +511,22 @@ function petsciiAscii(s: string): Uint8Array {
   return out;
 }
 
+function partFromHardware(n: number): number {
+  if (n >= 1 && n <= 16) return n - 1;
+  return n;
+}
+
 function parsePath(raw: string): { part: number; path: string; file: string } {
   let part = currentPart;
   let rest = raw.replace(/^["']|["']$/g, "").trim();
+  const sd2 = rest.match(/^(\d+)\/\/(.*)$/);
+  if (sd2) {
+    part = partFromHardware(Number(sd2[1]));
+    rest = sd2[2].trim();
+  }
   const m = rest.match(/^\/\/(\d+)\s*:?(.*)$/) || rest.match(/^(\d+)\s*:(.*)$/);
   if (m) {
-    part = Number(m[1]);
+    part = partFromHardware(Number(m[1]));
     rest = (m[2] || "").trim();
   } else if (rest.startsWith("//")) {
     rest = rest.slice(2);
@@ -1053,4 +1064,24 @@ export async function partitionsForMount(): Promise<SdPartition[]> {
       })),
     }))
     .filter((p) => p.files.length > 0);
+}
+
+/** Build a real 1541 D64 from the SD card folders (for VICE true drive — not `N_fs`). */
+export function buildSd2iecD64(parts: SdPartition[], diskName = "SD2IEC"): Uint8Array {
+  const files: { name: string; data: Uint8Array }[] = [];
+  for (const part of parts) {
+    for (const f of part.files) {
+      const raw = new Uint8Array(f.data);
+      if (/\.d64$/i.test(f.name) && raw.byteLength >= 174848) {
+        return raw.subarray(0, 174848);
+      }
+      const p00 = stripP00(raw);
+      const payload = p00 ?? raw;
+      if (payload.byteLength >= 2) {
+        const path = f.path ? `${f.path}/${f.name}` : f.name;
+        files.push({ name: path, data: payload });
+      }
+    }
+  }
+  return packPrgsToD64(files, diskName);
 }

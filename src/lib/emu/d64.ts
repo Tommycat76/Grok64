@@ -101,11 +101,14 @@ function range(from: number, to: number): number[] {
   return out;
 }
 
-export function prgToD64(prg: Uint8Array, fileName = "PROGRAM"): Uint8Array {
-  if (prg.byteLength < 2) throw new Error("Program is empty");
-  const image = emptyD64(fileName);
+function appendPrgToD64(image: Uint8Array, prg: Uint8Array, fileName: string): void {
+  if (prg.byteLength < 2) return;
   const bamOff = lba(18, 0) * 256;
   const bam = image.subarray(bamOff, bamOff + 256);
+  const dirOff = lba(18, 1) * 256;
+  let slot = 0;
+  while (slot < 8 && image[dirOff + slot * 32 + 2] !== 0) slot += 1;
+  if (slot >= 8) throw new Error("Disk directory full");
   const chunks: Uint8Array[] = [];
   for (let i = 0; i < prg.length; i += 254) chunks.push(prg.subarray(i, i + 254));
   if (!chunks.length) chunks.push(new Uint8Array(0));
@@ -124,8 +127,7 @@ export function prgToD64(prg: Uint8Array, fileName = "PROGRAM"): Uint8Array {
     sec.set(chunk, 2);
     image.set(sec, lba(t, s) * 256);
   }
-  const dirOff = lba(18, 1) * 256;
-  const dir = image.subarray(dirOff, dirOff + 256);
+  const dir = image.subarray(dirOff + slot * 32, dirOff + slot * 32 + 32);
   dir[0] = 0;
   dir[1] = 255;
   dir[2] = 0x82;
@@ -134,6 +136,26 @@ export function prgToD64(prg: Uint8Array, fileName = "PROGRAM"): Uint8Array {
   dir.set(petName(fileName), 5);
   dir[30] = chunks.length & 0xff;
   dir[31] = (chunks.length >> 8) & 0xff;
+}
+
+export function prgToD64(prg: Uint8Array, fileName = "PROGRAM"): Uint8Array {
+  if (prg.byteLength < 2) throw new Error("Program is empty");
+  const image = emptyD64(fileName);
+  appendPrgToD64(image, prg, fileName);
+  return image;
+}
+
+/** Pack many card files into one 1541 disk (PRG/P00). */
+export function packPrgsToD64(files: { name: string; data: Uint8Array }[], diskName = "SD2IEC"): Uint8Array {
+  const image = emptyD64(diskName);
+  for (const f of files) {
+    let raw = f.data;
+    const p00 = stripP00(raw);
+    if (p00) raw = p00;
+    if (raw.byteLength < 2) continue;
+    const base = f.name.replace(/\\/g, "/").split("/").pop() || "FILE";
+    appendPrgToD64(image, raw, base.replace(/\.(prg|p00)$/i, "") || "FILE");
+  }
   return image;
 }
 
