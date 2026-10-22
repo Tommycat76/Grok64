@@ -237,11 +237,7 @@ export function resolveMachine(
 
   const drive = resolveDrive(prefs.driveMode, coreMode);
   const useFastCore = family === "c64" && coreMode === "fast" && prefs.machineId !== "scpu";
-  let actualCore = useFastCore ? "vice_x64" : mac.core;
-  const grok64Core = import.meta.env?.VITE_GROK64_VICE_CORE;
-  if (grok64Core === "grok64" || grok64Core === "1") {
-    actualCore = actualCore === "vice_x64" ? "vice_x64_grok64" : "vice_x64sc_grok64";
-  }
+  const actualCore = useFastCore ? "vice_x64" : mac.core;
 
   const options: Record<string, string> = { ...mac.options };
   if (family === "c64" && prefs.machineId !== "scpu") {

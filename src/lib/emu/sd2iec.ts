@@ -37,6 +37,52 @@ const DEFAULT_PARTS: SdPartition[] = [0, 1, 2, 3].map((id) => ({
   dirs: [],
 }));
 
+/** In-memory mirror for WASM IEC (sync); refreshed from IDB when possible. */
+let syncParts: SdPartition[] = DEFAULT_PARTS.map((p) => ({ ...p, files: [...p.files], dirs: [...(p.dirs ?? [])] }));
+
+function syncPart(partId: number): SdPartition {
+  return syncParts.find((p) => p.id === partId) ?? syncParts[0]!;
+}
+
+function syncFilesInDir(partId: number, dir = currentDir): SdFile[] {
+  const want = normDir(dir);
+  const part = syncPart(partId);
+  return part.files.filter((f) => normDir(parentPath(f)) === want);
+}
+
+function syncSubdirsInDir(partId: number, dir = currentDir): string[] {
+  const want = normDir(dir);
+  const part = syncPart(partId);
+  const out = new Set<string>();
+  for (const d of part.dirs ?? []) {
+    const n = normDir(d);
+    if (!want) {
+      const first = n.split("/")[0];
+      if (first) out.add(first);
+    } else if (n.startsWith(`${want}/`)) {
+      const rest = n.slice(want.length + 1);
+      const seg = rest.split("/")[0];
+      if (seg) out.add(seg);
+    }
+  }
+  for (const f of part.files) {
+    const p = normDir(parentPath(f));
+    if (want && p.startsWith(`${want}/`)) {
+      const seg = p.slice(want.length + 1).split("/")[0];
+      if (seg) out.add(seg);
+    }
+  }
+  return [...out];
+}
+
+function syncFindFile(partId: number, pattern: string): SdFile | null {
+  const want = normDir(pattern);
+  const part = syncPart(partId);
+  const inDir = syncFilesInDir(partId);
+  const hit = inDir.find((f) => matchPattern(petsciiName(basename(f)), want));
+  return hit ?? part.files.find((f) => matchPattern(petsciiName(basename(f)), want)) ?? null;
+}
+
 export function resetSd2iecSession(): void {
   currentPart = 0;
   currentDir = "";
@@ -102,7 +148,8 @@ export async function listPartitions(): Promise<SdPartition[]> {
     req.onsuccess = () => {
       const rows = (req.result as SdPartition[]) ?? [];
       const map = new Map(rows.map((p) => [p.id, p]));
-      resolve(DEFAULT_PARTS.map((p) => map.get(p.id) ?? p));
+      syncParts = DEFAULT_PARTS.map((p) => map.get(p.id) ?? p);
+      resolve(syncParts);
     };
     req.onerror = () => reject(req.error);
   });
@@ -113,6 +160,9 @@ async function savePartition(part: SdPartition): Promise<void> {
   const tx = db.transaction(STORES.sdpart, "readwrite");
   tx.objectStore(STORES.sdpart).put(part);
   await txDone(tx);
+  const i = syncParts.findIndex((p) => p.id === part.id);
+  if (i >= 0) syncParts[i] = part;
+  else syncParts.push(part);
 }
 
 export async function addSdFile(partId: number, name: string, data: ArrayBuffer, path = ""): Promise<void> {
@@ -813,9 +863,21 @@ function patchTalkVector(ram: Uint8Array, off: number, target: number) {
 }
 
 /** Attach Grok64 SD2IEC on the IEC bus (KERNAL intercept — no VICE drive on this unit). */
+let wasmIecOnly = false;
+
+/** When true, SD2IEC is served by VICE IEC device (WASM) — do not patch KERNAL vectors. */
+export function setSd2iecWasmIecOnly(on: boolean) {
+  wasmIecOnly = on;
+}
+
+export function sd2iecWasmIecOnly(): boolean {
+  return wasmIecOnly;
+}
+
 export function attachSd2iecBus(emu: EjsLike | null, unit: IecDeviceNumber = deviceUnit): boolean {
   setIecDevice(unit);
   if (!emu) return false;
+  if (wasmIecOnly) return true;
   return installSd2iecHooks(emu);
 }
 
@@ -1129,6 +1191,80 @@ export async function partitionsForMount(): Promise<SdPartition[]> {
     }))
     .filter((p) => p.files.length > 0);
 }
+
+/** True when KERNAL IEC trap stubs are installed at $C900 (JS path only). */
+export function kernalIecTrapActive(emu: EjsLike): boolean {
+  const ram = c64Ram(emu);
+  if (!ram) return false;
+  return (ram[816] | (ram[817] << 8)) === 51456;
+}
+
+type WasmChan = { sec: number; data: Uint8Array; pos: number; nameBuf: string };
+
+const wasmChans = new Map<string, WasmChan>();
+
+function wasmKey(dev: number, sec: number) {
+  return `${dev}:${sec}`;
+}
+
+function wasmDirBytes(files: SdFile[], subdirs: string[]): Uint8Array {
+  return dirListing("GROK64 SD", files, subdirs, Boolean(currentDir));
+}
+
+/** Host callbacks for VICE grok64_sd2iec (serial-iec-bus → JS). */
+export const grok64WasmIecHost = {
+  iecOpen(dev: number, sec: number) {
+    wasmChans.set(wasmKey(dev, sec), { sec, data: new Uint8Array(0), pos: 0, nameBuf: "" });
+  },
+  iecClose(dev: number, sec: number) {
+    wasmChans.delete(wasmKey(dev, sec));
+  },
+  iecListenTalk(_dev: number, _sec: number) {
+    /* fsdrive listen/talk — filename bytes follow on write */
+  },
+  iecUnlisten(dev: number, sec: number) {
+    const k = wasmKey(dev, sec);
+    const ch = wasmChans.get(k);
+    const raw = ch?.nameBuf?.trim() ?? "";
+    const upper = raw.toUpperCase();
+    if (sec === 15 || /^(CD|MD|RD|S:|I|X|N|U|CP|G-P)/i.test(raw)) {
+      void runSdCommand(raw).then((st) => {
+        wasmChans.set(k, { sec, data: petsciiAscii(`${st}\r`), pos: 0, nameBuf: "" });
+      });
+      return;
+    }
+    if (upper.startsWith("$=P")) {
+      void partitionCatalog().then((data) => wasmChans.set(k, { sec, data, pos: 0, nameBuf: "" }));
+      return;
+    }
+    if (raw.startsWith("$") || upper.includes("$=")) {
+      const sub = syncSubdirsInDir(currentPart);
+      const files = syncFilesInDir(currentPart);
+      wasmChans.set(k, { sec, data: wasmDirBytes(files, sub), pos: 0, nameBuf: "" });
+      return;
+    }
+    const file = syncFindFile(currentPart, raw.replace(/^:/, ""));
+    wasmChans.set(k, {
+      sec,
+      data: file ? new Uint8Array(file.data) : new Uint8Array(0),
+      pos: 0,
+      nameBuf: "",
+    });
+  },
+  iecUntalk(_dev: number, _sec: number) {},
+  iecWrite(dev: number, sec: number, data: number) {
+    const k = wasmKey(dev, sec);
+    const ch = wasmChans.get(k) ?? { sec, data: new Uint8Array(0), pos: 0, nameBuf: "" };
+    ch.nameBuf += String.fromCharCode(data & 0xff);
+    wasmChans.set(k, ch);
+  },
+  iecRead(dev: number, sec: number): number {
+    const ch = wasmChans.get(wasmKey(dev, sec));
+    if (!ch || ch.pos >= ch.data.length) return 0xff;
+    return ch.data[ch.pos++] ?? 0xff;
+  },
+  iecSt(_dev: number, _st: number) {},
+};
 
 export {
   buildSd2iecD64,

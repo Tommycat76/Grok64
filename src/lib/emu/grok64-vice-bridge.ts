@@ -4,7 +4,14 @@
  */
 import { readC64Byte, writeC64Byte } from "./c64-memory";
 import { glog } from "./debug";
-import { attachSd2iecBus, tickSd2iec, type EjsLike, type IecDeviceNumber } from "./sd2iec";
+import {
+  attachSd2iecBus,
+  grok64WasmIecHost,
+  setSd2iecWasmIecOnly,
+  tickSd2iec,
+  type EjsLike,
+  type IecDeviceNumber,
+} from "./sd2iec";
 
 export type Grok64Emu = EjsLike;
 const asSd = (emu: Grok64Emu | null): EjsLike | null => emu;
@@ -48,6 +55,7 @@ export function wireGrok64ViceHost(emu: Grok64Emu | null): Grok64IecBackend {
     };
   };
   mod.grok64Host = {
+    ...grok64WasmIecHost,
     sd2iecAttach: (unit) => attachSd2iecBus(asSd(emu), unit as IecDeviceNumber),
     sd2iecPoll: () => {
       const e = asSd(emu);
@@ -59,6 +67,7 @@ export function wireGrok64ViceHost(emu: Grok64Emu | null): Grok64IecBackend {
     },
   };
   if (mod._grok64_sd2iec_poll || mod._grok64_sd2iec_attach) {
+    setSd2iecWasmIecOnly(true);
     mod.grok64Sd2iecHost = {
       attach: (unit: number) => {
         attachSd2iecBus(asSd(emu), unit as IecDeviceNumber);

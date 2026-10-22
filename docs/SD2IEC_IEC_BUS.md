@@ -38,8 +38,12 @@ The shipped WASM (`vice_x64sc` via EmulatorJS) does **not** export hooks to snoo
 | C64 RAM from JS | `c64-memory.ts` + `__g64.readC64Byte` / `writeC64Byte` |
 | Unit **12** + `1//:c64os` paths | `setSd2iecUnit(12)` + `parsePath` / `CD` |
 
-Enable custom core when built:
+**Built blob (test branch):** `public/system/vice/emulatorjs/data/cores/vice_x64sc-wasm.data` (~1.2 MB, Emscripten **3.1.74**, EmulatorJS RetroArch link).
 
-`VITE_GROK64_VICE_DATAPATH=/system/vice/emulatorjs/data VITE_GROK64_VICE_CORE=grok64`
+Enable in dev/preview:
+
+`VITE_GROK64_VICE_DATAPATH=/system/vice/emulatorjs/data` (set in `.grok/app-env.json` on this branch).
+
+Rebuild: `third_party/vice-grok64/build-grok64-core.sh` (requires `.emsdk` + `node_modules/7zip-bin`).
 
 Until the WASM blob is present, behavior matches the JS IEC device (same firmware / card backing).

@@ -1,3 +1,4 @@
 {
-  "VITE_AUTH_ENABLED": "false"
+  "VITE_AUTH_ENABLED": "false",
+  "VITE_GROK64_VICE_DATAPATH": "/system/vice/emulatorjs/data"
 }
