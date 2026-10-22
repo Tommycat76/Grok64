@@ -83,12 +83,16 @@ import {
   formatPartition,
   listPartitions,
   partitionsForMount,
+  debugWasmIec,
+  kernalIecTrapActive,
   resetSd2iecSession,
   runSdCommand,
   setIecDevice,
   setSd2iecJiffyFast,
+  attachSd2iecBus,
+  setSd2iecWasmIecOnly,
 } from "@/lib/emu/sd2iec";
-import { attachGrok64Sd2iec, tickGrok64Iec } from "@/lib/emu/grok64-vice-bridge";
+import { attachGrok64Sd2iec, tickGrok64Iec, wireGrok64ViceHost } from "@/lib/emu/grok64-vice-bridge";
 import { readC64Byte, readC64Bytes, writeC64Byte, writeC64Bytes } from "@/lib/emu/c64-memory";
 import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor } from "@/lib/emu/vice-extras";
 import { HwHoldChip } from "@/components/emu/HwHoldChip";
@@ -652,6 +656,8 @@ export function Grok64App() {
       },
       writeC64Bytes: (addr, arr) => writeC64Bytes(emuRef.current, addr, new Uint8Array(arr)),
       setSd2iecUnit: (unit) => setIecDevice(unit),
+      kernalIecTrapActive: () => kernalIecTrapActive(emuRef.current),
+      debugWasmIec: (dev, sec) => debugWasmIec(dev, sec),
       settings: () => {
         const st = useEmu.getState();
         return {
@@ -789,6 +795,16 @@ export function Grok64App() {
         for (const f of files) {
           const buf = f.data instanceof ArrayBuffer ? f.data : f.data.buffer.slice(f.data.byteOffset, f.data.byteOffset + f.data.byteLength);
           await addSdFile(0, f.name, buf, f.path ?? "");
+        }
+        const emu = emuRef.current;
+        const st = useEmu.getState();
+        if (emu && st.running && mapHasDrive(st.iecMap, "sd2iec")) {
+          const unit = Number(Object.entries(st.iecMap).find(([, v]) => v === "sd2iec")?.[0] ?? 8) as 8 | 9 | 10 | 11;
+          wireGrok64ViceHost(emu);
+          remountSd2iecFromParts(emu, unit);
+          const mod = emu.Module as { _grok64_sd2iec_attach?: unknown } | undefined;
+          if (typeof mod?._grok64_sd2iec_attach !== "function") setSd2iecWasmIecOnly(false);
+          attachSd2iecBus(emu, unit);
         }
       },
       shot: async () => {
@@ -2713,9 +2729,13 @@ export function Grok64App() {
     const unit = Number(Object.entries(s.iecMap).find(([, v]) => v === "sd2iec")?.[0] ?? 8) as 8 | 9 | 10 | 11;
     void (async () => {
       const parts = await partitionsForMount();
-      if (!parts.length) return;
       const ok = remountSd2iecFromParts(emu, unit, parts);
-      if (ok) glog("sd2iec-live-remount", { unit, files: parts.reduce((n, p) => n + p.files.length, 0) });
+      if (ok) {
+        glog("sd2iec-live-remount", {
+          unit,
+          files: parts.reduce((n, p) => n + p.files.length, 0),
+        });
+      }
     })();
   }, [s.iecMap, s.running]);
   useEffect(() => {

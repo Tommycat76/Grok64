@@ -36,16 +36,33 @@ import { stopIosPresent, stripIosPresent } from "./ios-present";
 
 const CDN_DATA = "https://cdn.emulatorjs.org/stable/data/";
 
-/** EmulatorJS data root — Grok64 custom VICE core on test branch when present. */
-export function emulatorDataPath(): string {
+/** Local Grok64 VICE core tree (usually only `cores/vice_x64sc-wasm.data`). */
+export function grok64ViceCoreRoot(): string | null {
   if (typeof import.meta !== "undefined" && import.meta.env?.VITE_GROK64_VICE_DATAPATH) {
-    return String(import.meta.env.VITE_GROK64_VICE_DATAPATH).replace(/\/$/, "") + "/";
+    return String(import.meta.env.VITE_GROK64_VICE_DATAPATH).replace(/\/$/, "");
   }
   if (typeof window !== "undefined") {
     const w = window as unknown as { __GROK64_VICE_DATA?: string };
-    if (w.__GROK64_VICE_DATA) return w.__GROK64_VICE_DATA.replace(/\/$/, "") + "/";
+    if (w.__GROK64_VICE_DATA) return w.__GROK64_VICE_DATA.replace(/\/$/, "");
   }
+  return null;
+}
+
+/** EmulatorJS data root — always the full CDN tree; Grok64 core is overridden via `filePaths`. */
+export function emulatorDataPath(): string {
   return CDN_DATA;
+}
+
+/** Per-file overrides (custom vice_x64sc WASM payload on test branch). */
+export function grok64EmulatorFilePaths(): Record<string, string> | undefined {
+  const root = grok64ViceCoreRoot();
+  if (!root) return undefined;
+  const rel = `${root}/cores/vice_x64sc-grok64-iec-wasm.data`;
+  const abs =
+    typeof window !== "undefined" && window.location?.origin
+      ? `${window.location.origin}${rel.startsWith("/") ? rel : `/${rel}`}`
+      : rel;
+  return { "vice_x64sc-wasm.data": abs };
 }
 
 const DATA = CDN_DATA;
@@ -435,9 +452,15 @@ function loadCss(href: string) {
 export function prefetchViceCores() {
   if (typeof fetch === "undefined") return;
   const names = isIosPhone() ? ["vice_x64sc"] : ["vice_x64sc", "vice_x64"];
+  const overrides = grok64EmulatorFilePaths();
   for (const n of names) {
     for (const ext of ["-wasm.js", "-wasm.data"] as const) {
-      void fetch(`${DATA}cores/${n}${ext}`, { mode: "cors", credentials: "omit" }).catch(() => undefined);
+      const file = `${n}${ext}`;
+      const url =
+        ext === "-wasm.data" && n === "vice_x64sc" && overrides?.["vice_x64sc-wasm.data"]
+          ? overrides["vice_x64sc-wasm.data"]
+          : `${DATA}cores/${file}`;
+      void fetch(url, { mode: "cors", credentials: "omit" }).catch(() => undefined);
     }
   }
 }
@@ -454,11 +477,36 @@ export function ensureRuntime(): Promise<void> {
     }
     if (!window.EmulatorJS) throw new Error("EmulatorJS failed to initialize");
     patchEjsInput();
+    patchEjsGrok64CoreDownload();
   })().catch((err) => {
     scriptsReady = null;
     throw err;
   });
   return scriptsReady;
+}
+
+/** EmulatorJS core path includes `?v=` — `filePaths` lookup misses; force Grok64 blob URL. */
+function patchEjsGrok64CoreDownload() {
+  const overrides = grok64EmulatorFilePaths();
+  const url = overrides?.["vice_x64sc-wasm.data"];
+  if (!url) return;
+  const EJS = (window as unknown as {
+    EmulatorJS?: { prototype: { downloadFile?: (...a: unknown[]) => unknown; __g64Core?: boolean } };
+  }).EmulatorJS;
+  const proto = EJS?.prototype;
+  if (!proto?.downloadFile || proto.__g64Core) return;
+  proto.__g64Core = true;
+  const orig = proto.downloadFile;
+  proto.downloadFile = function patchedDownload(...args: unknown[]) {
+    const path = String(args[0] ?? "");
+    const type = String(args[1] ?? "");
+    const leaf = path.split("?")[0].split("/").pop() ?? "";
+    if (type === "Core" && /^vice_x64sc(-legacy)?(-thread)?-wasm\.data$/.test(leaf)) {
+      args[0] = url;
+      args[3] = true;
+    }
+    return orig.apply(this, args);
+  };
 }
 
 function patchEjsInput() {
@@ -633,21 +681,25 @@ function coreOptions(cfg: BootConfig): Record<string, string> {
 
 export async function bootEmulator(el: HTMLElement, cfg: BootConfig): Promise<EjsInstance> {
   await ensureRuntime();
+  patchEjsGrok64CoreDownload();
   preserveWebglBuffer();
   keyboardArmed = false;
   clearRuntimeViceOpts();
   const defaults = coreOptions(cfg);
   rememberWorkDisk(defaults.vice_work_disk);
   const dataPath = emulatorDataPath();
+  const filePaths = grok64EmulatorFilePaths();
   const config: Record<string, unknown> = {
     gameUrl: cfg.gameUrl,
     dataPath,
+    ...(filePaths ? { filePaths } : {}),
     system: cfg.core,
     gameName: (cfg.gameName || "GROK64").replace(/[#<$+%>!`&*'|{}/\\?"=@:^\r\n]/g, "").trim() || "GROK64",
     color: "#c8ccd4",
     backgroundColor: "#0a0a0b",
     volume: cfg.volume,
     startOnLoad: true,
+    webgl2: true,
     threads: false,
     noAutoFocus: false,
     disableAutoLang: true,

@@ -35,6 +35,12 @@ mergeInto(LibraryManager.library, {
     }
     return 255;
   },
+  grok64_js_iec_read_st: function () {
+    if (typeof Module !== "undefined" && Module.grok64Host && Module.grok64Host.iecReadSt != null) {
+      return Module.grok64Host.iecReadSt & 255;
+    }
+    return 0;
+  },
   grok64_js_iec_st: function (device, st) {
     if (typeof Module !== "undefined" && Module.grok64Host && Module.grok64Host.iecSt) {
       Module.grok64Host.iecSt(device, st);

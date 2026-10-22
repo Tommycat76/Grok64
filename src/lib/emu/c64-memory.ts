@@ -41,12 +41,21 @@ export function c64RamView(emu: RamEmu | null): Uint8Array | null {
 }
 
 export function readC64Byte(emu: RamEmu | null, addr: number): number | null {
+  const mod = emu?.Module as { _grok64_c64_read?: (a: number) => number } | undefined;
+  if (typeof mod?._grok64_c64_read === "function" && addr >= 0 && addr < 65536) {
+    return mod._grok64_c64_read(addr) & 0xff;
+  }
   const ram = c64RamView(emu);
   if (!ram || addr < 0 || addr >= 65536) return null;
   return ram[addr] ?? null;
 }
 
 export function writeC64Byte(emu: RamEmu | null, addr: number, value: number): boolean {
+  const mod = emu?.Module as { _grok64_c64_write?: (a: number, v: number) => void } | undefined;
+  if (typeof mod?._grok64_c64_write === "function" && addr >= 0 && addr < 65536) {
+    mod._grok64_c64_write(addr, value & 0xff);
+    return true;
+  }
   const ram = c64RamView(emu);
   if (!ram || addr < 0 || addr >= 65536) return false;
   ram[addr] = value & 0xff;

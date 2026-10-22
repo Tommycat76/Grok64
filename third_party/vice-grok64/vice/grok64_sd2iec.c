@@ -36,6 +36,7 @@ extern void grok64_js_iec_unlisten(unsigned int device, uint8_t secondary);
 extern void grok64_js_iec_untalk(unsigned int device, uint8_t secondary);
 extern void grok64_js_iec_write(unsigned int device, uint8_t secondary, uint8_t data);
 extern int grok64_js_iec_read(unsigned int device, uint8_t secondary);
+extern int grok64_js_iec_read_st(void);
 extern void grok64_js_iec_st(unsigned int device, uint8_t st);
 
 void grok64_sd2iec_init(void)
@@ -100,7 +101,7 @@ void grok64_sd2iec_write(unsigned int device, uint8_t secondary, uint8_t data, v
 uint8_t grok64_sd2iec_read(unsigned int device, uint8_t secondary, void (*st_func)(uint8_t))
 {
     int v = grok64_js_iec_read(device, secondary);
-    call_st(st_func, 0);
+    call_st(st_func, (uint8_t)grok64_js_iec_read_st());
     return (uint8_t)(v & 0xff);
 }
 

@@ -40,6 +40,8 @@ const DEFAULT_PARTS: SdPartition[] = [0, 1, 2, 3].map((id) => ({
 /** In-memory mirror for WASM IEC (sync); refreshed from IDB when possible. */
 let syncParts: SdPartition[] = DEFAULT_PARTS.map((p) => ({ ...p, files: [...p.files], dirs: [...(p.dirs ?? [])] }));
 
+const wasmDevEarly = new Map<number, unknown[]>();
+
 function syncPart(partId: number): SdPartition {
   return syncParts.find((p) => p.id === partId) ?? syncParts[0]!;
 }
@@ -89,6 +91,7 @@ export function resetSd2iecSession(): void {
   lastStatus = "00, OK,00,00";
   openFiles.clear();
   clearMountedDiskImage();
+  wasmDevEarly.clear();
 }
 
 function normDir(path: string): string {
@@ -669,6 +672,31 @@ function dirListing(
   return petsciiAscii(lines.join("\r") + "\r");
 }
 
+/** CBM linked directory blocks for LOAD"$" / IEC read (matches KERNAL trap handleRead). */
+function buildLinkedDirectoryBytes(files: SdFile[], subdirs: string[], inSubdir: boolean): Uint8Array {
+  const out: number[] = [1, 8];
+  let ptr = 2049;
+  const line = (link: number, text: string) => {
+    const raw = petsciiAscii(text);
+    const addr = ptr + 5 + raw.length;
+    out.push(addr & 255, addr >> 8, link & 255, link >> 8, 34);
+    for (const b of raw) out.push(b);
+    out.push(34, 0);
+    ptr = addr;
+  };
+  line(0, `0 "${"GROK64 SD".toUpperCase().padEnd(16).slice(0, 16)}  SD 2A`);
+  if (inSubdir) line(0, `${"0".padStart(4)} "←" DIR`);
+  for (const d of subdirs) {
+    line(0, `${"0".padStart(4)} "${petsciiName(d).padEnd(16)}" DIR`);
+  }
+  for (const f of files) {
+    line(Math.max(1, Math.ceil(f.size / 254)), `"${petsciiName(basename(f)).padEnd(16)}" PRG`);
+  }
+  line(65535, "BLOCKS FREE");
+  out.push(0, 0);
+  return Uint8Array.from(out);
+}
+
 function parseDirFilter(raw: string): { part: number; filter: string } {
   const upper = raw.toUpperCase();
   if (upper.includes("$=P")) return { part: currentPart, filter: "$=P" };
@@ -1052,7 +1080,7 @@ async function handleOpen(ram: Uint8Array) {
     openFiles.set(sa, {
       sa,
       name,
-      data: dirListing("GROK64 SD", files, sub, Boolean(currentDir)),
+      data: buildLinkedDirectoryBytes(files, sub, Boolean(currentDir)),
       pos: 0,
       write: false,
       cmd: false,
@@ -1199,69 +1227,209 @@ export function kernalIecTrapActive(emu: EjsLike): boolean {
   return (ram[816] | (ram[817] << 8)) === 51456;
 }
 
-type WasmChan = { sec: number; data: Uint8Array; pos: number; nameBuf: string };
+const ISOPEN_CLOSED = 0;
+const ISOPEN_AWAITING_NAME = 1;
+const ISOPEN_OPEN = 2;
 
-const wasmChans = new Map<string, WasmChan>();
+const SERIAL_NAMELENGTH = 255;
+let wasmSerialPtr = 0;
+const wasmSerialBuffer: number[] = [];
+let wasmIecReadSt = 0;
 
-function wasmKey(dev: number, sec: number) {
-  return `${dev}:${sec}`;
+type WasmChan = {
+  isopen: number;
+  nameBuf: number[];
+  data: Uint8Array;
+  pos: number;
+};
+
+const wasmDev = wasmDevEarly as Map<number, WasmChan[]>;
+
+function wasmChannels(dev: number): WasmChan[] {
+  let chans = wasmDev.get(dev);
+  if (!chans) {
+    chans = Array.from({ length: 16 }, () => ({
+      isopen: ISOPEN_CLOSED,
+      nameBuf: [],
+      data: new Uint8Array(0),
+      pos: 0,
+    }));
+    wasmDev.set(dev, chans);
+  }
+  return chans;
 }
 
-function wasmDirBytes(files: SdFile[], subdirs: string[]): Uint8Array {
-  return dirListing("GROK64 SD", files, subdirs, Boolean(currentDir));
+function wasmCh(dev: number, sec: number): WasmChan {
+  return wasmChannels(dev)[sec & 0x0f];
 }
 
-/** Host callbacks for VICE grok64_sd2iec (serial-iec-bus → JS). */
+function nameFromBuf(buf: number[]): string {
+  let s = "";
+  for (const b of buf) {
+    if (b === 0) break;
+    s += String.fromCharCode(b & 0xff);
+  }
+  return s.replace(/\0/g, "").trim();
+}
+
+function wasmOpenFileOnChannel(dev: number, sec: number, raw: string) {
+  const ch = wasmCh(dev, sec);
+  const upper = raw.toUpperCase();
+  if (sec === 15 || /^(CD|MD|RD|S:|I|X|N|U|CP|G-P)/i.test(raw)) {
+    void runSdCommand(raw).then((st) => {
+      ch.data = petsciiAscii(`${st}\r`);
+      ch.pos = 0;
+    });
+    return;
+  }
+  if (upper.startsWith("$=P")) {
+    void partitionCatalog().then((data) => {
+      ch.data = data;
+      ch.pos = 0;
+    });
+    return;
+  }
+  if (raw.startsWith("$") || upper.includes("$=") || raw === "") {
+    const sub = syncSubdirsInDir(currentPart);
+    const files = syncFilesInDir(currentPart);
+    ch.data = buildLinkedDirectoryBytes(files, sub, Boolean(currentDir));
+    ch.pos = 0;
+    return;
+  }
+  const file = syncFindFile(currentPart, raw.replace(/^:/, "").replace(/[\r,].*$/, ""));
+  ch.data = file ? new Uint8Array(file.data) : new Uint8Array(0);
+  ch.pos = 0;
+}
+
+export function resetGrok64WasmIecBus() {
+  wasmDev.clear();
+  wasmSerialPtr = 0;
+  wasmSerialBuffer.length = 0;
+}
+
+/** Test / QA: WASM IEC channel state (VICE fsdrive mirror). */
+export function debugWasmIec(dev: number, sec: number) {
+  const ch = wasmCh(dev, sec);
+  return {
+    isopen: ch.isopen,
+    nameLen: ch.nameBuf.length,
+    dataLen: ch.data.length,
+    pos: ch.pos,
+    head: ch.data.length ? Array.from(ch.data.subarray(0, Math.min(24, ch.data.length))) : [],
+  };
+}
+
+function wasmNameFromSerial(): string {
+  const buf = wasmSerialPtr > 0 ? wasmSerialBuffer.slice(0, wasmSerialPtr) : [];
+  wasmSerialPtr = 0;
+  wasmSerialBuffer.length = 0;
+  return nameFromBuf(buf.length ? buf : []);
+}
+
+/** Mirrors VICE `fsdrive.c` `serialcommand()` (IECDevice path). */
+function wasmSerialCommand(dev: number, secondary: number) {
+  const chNum = secondary & 0x0f;
+  const hi = secondary & 0xf0;
+  const ch = wasmCh(dev, chNum);
+  if (hi !== 0x60) {
+    /* fsdrive resets read-ahead on non-0x60 attention commands */
+  }
+  switch (hi) {
+    case 0x20:
+    case 0x30:
+    case 0x40:
+    case 0x50:
+      break;
+    case 0x60:
+      if (ch.isopen === ISOPEN_AWAITING_NAME) {
+        ch.isopen = ISOPEN_OPEN;
+        const fromGlobal = wasmNameFromSerial();
+        const raw = fromGlobal || nameFromBuf(ch.nameBuf);
+        ch.nameBuf = [];
+        wasmOpenFileOnChannel(dev, chNum, raw);
+      }
+      break;
+    case 0xe0:
+      ch.isopen = ISOPEN_CLOSED;
+      ch.nameBuf = [];
+      ch.pos = 0;
+      ch.data = new Uint8Array(0);
+      break;
+    case 0xf0:
+      if (ch.isopen !== ISOPEN_CLOSED) {
+        if (wasmSerialPtr > 0 || ch.nameBuf.length > 0 || chNum === 0x0f) {
+          if (ch.isopen === ISOPEN_OPEN) {
+            ch.pos = 0;
+            ch.data = new Uint8Array(0);
+          }
+          const fromGlobal = wasmNameFromSerial();
+          const raw = fromGlobal || nameFromBuf(ch.nameBuf);
+          ch.nameBuf = [];
+          wasmOpenFileOnChannel(dev, chNum, raw);
+        }
+        ch.isopen = ISOPEN_OPEN;
+      }
+      break;
+    default:
+      break;
+  }
+}
+
+/** Host callbacks for VICE grok64_sd2iec (serial-iec-bus → fsdrive-equivalent). */
 export const grok64WasmIecHost = {
   iecOpen(dev: number, sec: number) {
-    wasmChans.set(wasmKey(dev, sec), { sec, data: new Uint8Array(0), pos: 0, nameBuf: "" });
+    const ch = wasmCh(dev, sec & 0x0f);
+    ch.isopen = ISOPEN_AWAITING_NAME;
+    ch.nameBuf = [];
+    ch.pos = 0;
+    ch.data = new Uint8Array(0);
   },
   iecClose(dev: number, sec: number) {
-    wasmChans.delete(wasmKey(dev, sec));
+    wasmSerialCommand(dev, (sec & 0xf0) === 0xe0 ? sec : (sec & 0x0f) | 0xe0);
   },
-  iecListenTalk(_dev: number, _sec: number) {
-    /* fsdrive listen/talk — filename bytes follow on write */
+  iecListenTalk(dev: number, sec: number) {
+    wasmSerialCommand(dev, sec);
   },
   iecUnlisten(dev: number, sec: number) {
-    const k = wasmKey(dev, sec);
-    const ch = wasmChans.get(k);
-    const raw = ch?.nameBuf?.trim() ?? "";
-    const upper = raw.toUpperCase();
-    if (sec === 15 || /^(CD|MD|RD|S:|I|X|N|U|CP|G-P)/i.test(raw)) {
-      void runSdCommand(raw).then((st) => {
-        wasmChans.set(k, { sec, data: petsciiAscii(`${st}\r`), pos: 0, nameBuf: "" });
-      });
-      return;
+    const chNum = sec & 0x0f;
+    const hi = sec & 0xf0;
+    if (hi === 0xf0 || chNum === 0x0f) {
+      wasmSerialCommand(dev, sec);
     }
-    if (upper.startsWith("$=P")) {
-      void partitionCatalog().then((data) => wasmChans.set(k, { sec, data, pos: 0, nameBuf: "" }));
-      return;
-    }
-    if (raw.startsWith("$") || upper.includes("$=")) {
-      const sub = syncSubdirsInDir(currentPart);
-      const files = syncFilesInDir(currentPart);
-      wasmChans.set(k, { sec, data: wasmDirBytes(files, sub), pos: 0, nameBuf: "" });
-      return;
-    }
-    const file = syncFindFile(currentPart, raw.replace(/^:/, ""));
-    wasmChans.set(k, {
-      sec,
-      data: file ? new Uint8Array(file.data) : new Uint8Array(0),
-      pos: 0,
-      nameBuf: "",
-    });
   },
   iecUntalk(_dev: number, _sec: number) {},
   iecWrite(dev: number, sec: number, data: number) {
-    const k = wasmKey(dev, sec);
-    const ch = wasmChans.get(k) ?? { sec, data: new Uint8Array(0), pos: 0, nameBuf: "" };
-    ch.nameBuf += String.fromCharCode(data & 0xff);
-    wasmChans.set(k, ch);
+    const ch = wasmCh(dev, sec & 0x0f);
+    if (ch.isopen === ISOPEN_AWAITING_NAME) {
+      if (wasmSerialPtr < SERIAL_NAMELENGTH) {
+        wasmSerialBuffer[wasmSerialPtr++] = data & 0xff;
+      }
+      if (ch.nameBuf.length < SERIAL_NAMELENGTH) ch.nameBuf.push(data & 0xff);
+      return;
+    }
+    if (ch.isopen === ISOPEN_OPEN && (sec & 0x0f) === 15) {
+      const c = String.fromCharCode(data & 0xff);
+      if (c !== "\r") ch.nameBuf.push(data & 0xff);
+      else {
+        void runSdCommand(nameFromBuf(ch.nameBuf)).then((st) => {
+          ch.data = petsciiAscii(`${st}\r`);
+          ch.pos = 0;
+        });
+        ch.nameBuf = [];
+      }
+    }
   },
   iecRead(dev: number, sec: number): number {
-    const ch = wasmChans.get(wasmKey(dev, sec));
-    if (!ch || ch.pos >= ch.data.length) return 0xff;
-    return ch.data[ch.pos++] ?? 0xff;
+    const ch = wasmCh(dev, sec & 0x0f);
+    if (ch.pos >= ch.data.length) {
+      wasmIecReadSt = 0x40;
+      return 0xc7;
+    }
+    wasmIecReadSt = 0;
+    return ch.data[ch.pos++] ?? 0xc7;
+  },
+  get iecReadSt() {
+    return wasmIecReadSt;
   },
   iecSt(_dev: number, _st: number) {},
 };

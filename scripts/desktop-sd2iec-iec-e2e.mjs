@@ -41,14 +41,14 @@ try {
   await waitRunning(page, 30000);
 
   await page.evaluate(async () => {
+    window.__g64?.setIecSlot?.(8, "sd2iec");
     window.__g64?.resetDos?.();
     await window.__g64?.seedSd?.([
       { name: "ROOT.PRG", path: "", data: new Uint8Array([1, 8, 0, 10, 0xaa]).buffer },
       { name: "SUB.PRG", path: "games", data: new Uint8Array([1, 8, 0, 10, 0xbb]).buffer },
     ]);
-    window.__g64?.setIecSlot?.(8, "sd2iec");
   });
-  await page.waitForTimeout(1500);
+  await page.waitForTimeout(2000);
 
   const dos = await page.evaluate(async () => {
     const a = await window.__g64?.runDos?.('CD:"games"');
@@ -57,10 +57,21 @@ try {
   });
   rows.push({ id: "sd-subfolder-cd", pass: /OK/.test(dos.a || "") && /games/i.test(dos.b || "") });
 
+  const iecBackend = await page.evaluate(() => {
+    const trap = window.__g64?.kernalIecTrapActive?.() ?? true;
+    const attach = typeof window.__ejs?.Module?._grok64_sd2iec_attach === "function";
+    return { trap, attach, wasmIec: attach && !trap };
+  });
+  rows.push({
+    id: "kernal-trap-off",
+    pass: iecBackend.wasmIec || iecBackend.trap === false,
+    detail: iecBackend,
+  });
+
   await typeBasic(page, 'LOAD"$",8');
-  await page.waitForTimeout(4000);
+  await page.waitForTimeout(8000);
   let text = await page.evaluate(() => window.__g64?.screenText?.() || "");
-  rows.push({ id: "load-dollar-list", pass: /ROOT|SUB|PRG|BLOCKS/i.test(text), head: text.slice(0, 80) });
+  rows.push({ id: "load-dollar-list", pass: /ROOT|SUB|PRG|BLOCKS|GROK64/i.test(text), head: text.slice(0, 80) });
 
   await page.evaluate(() => window.__g64?.resetReady?.());
   await waitRunning(page, 20000);

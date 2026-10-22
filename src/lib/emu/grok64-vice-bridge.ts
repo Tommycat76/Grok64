@@ -41,6 +41,20 @@ export function probeGrok64ViceModule(emu: Grok64Emu | null): boolean {
 }
 
 /** Register JS host functions for a custom Grok64 VICE core (Emscripten imports). */
+function bindGrok64WasmExports(mod: Grok64Module & { cwrap?: (...args: unknown[]) => unknown }): void {
+  if (mod._grok64_sd2iec_attach) return;
+  const wrap = mod.cwrap;
+  if (!wrap) return;
+  try {
+    mod._grok64_sd2iec_attach = wrap("grok64_sd2iec_attach", null, ["number"]) as (unit: number) => void;
+    mod._grok64_sd2iec_poll = wrap("grok64_sd2iec_poll", null, []) as () => void;
+    mod._grok64_c64_read = wrap("grok64_c64_read", "number", ["number"]) as (addr: number) => number;
+    mod._grok64_c64_write = wrap("grok64_c64_write", null, ["number", "number"]) as (addr: number, value: number) => void;
+  } catch {
+    /* stock core */
+  }
+}
+
 export function wireGrok64ViceHost(emu: Grok64Emu | null): Grok64IecBackend {
   if (!emu?.Module) {
     backend = "none";
@@ -54,6 +68,9 @@ export function wireGrok64ViceHost(emu: Grok64Emu | null): Grok64IecBackend {
       c64Write?: (a: number, v: number) => void;
     };
   };
+  bindGrok64WasmExports(mod);
+  const hasWasmExports = Boolean(mod._grok64_sd2iec_attach);
+  setSd2iecWasmIecOnly(hasWasmExports);
   mod.grok64Host = {
     ...grok64WasmIecHost,
     sd2iecAttach: (unit) => attachSd2iecBus(asSd(emu), unit as IecDeviceNumber),
@@ -66,8 +83,7 @@ export function wireGrok64ViceHost(emu: Grok64Emu | null): Grok64IecBackend {
       writeC64Byte(emu, addr, value);
     },
   };
-  if (mod._grok64_sd2iec_poll || mod._grok64_sd2iec_attach) {
-    setSd2iecWasmIecOnly(true);
+  if (hasWasmExports) {
     mod.grok64Sd2iecHost = {
       attach: (unit: number) => {
         attachSd2iecBus(asSd(emu), unit as IecDeviceNumber);

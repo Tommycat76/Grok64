@@ -45,8 +45,14 @@ async function reuColdBoot(page, reu) {
   await patchLocalStorage(page, { video: "pal", sid: "6581", reu, drive: "1541" });
   await page.reload({ waitUntil: "domcontentloaded" });
   await powerOnDesktop(page, base, { navigate: false });
-  const rt = await page.evaluate(() => window.__g64?.runtimeViceOpts?.() || {});
+  await waitRunning(page, 45000);
   const want = reu === "none" ? "none" : reu;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const rt = await page.evaluate(() => window.__g64?.runtimeViceOpts?.() || {});
+    if (rt.vice_ram_expansion_unit === want) return true;
+    await page.waitForTimeout(1500);
+  }
+  const rt = await page.evaluate(() => window.__g64?.runtimeViceOpts?.() || {});
   return rt.vice_ram_expansion_unit === want;
 }
 

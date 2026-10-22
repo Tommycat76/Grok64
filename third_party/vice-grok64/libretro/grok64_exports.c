@@ -7,7 +7,7 @@
 
 #ifdef GROK64_SD2IEC
 
-#include "grok64_sd2iec.h"
+extern void grok64_sd2iec_enable_unit(int unit);
 
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
