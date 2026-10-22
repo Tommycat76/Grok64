@@ -143,6 +143,7 @@ import {
   unitOfDrive,
   userAttachFromMap,
   viceDriveTypeVars,
+  viceMapFromIecMap,
   viceRcForDrives,
 } from "@/lib/emu/play-session";
 import {
@@ -765,11 +766,19 @@ export function Grok64App() {
         else if (bytes instanceof Uint8Array) {
           buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
         } else buf = new Uint8Array(bytes as ArrayLike<number>).buffer;
-        useEmu.getState().setIecSlot(8, "1541");
-        useEmu.getState().setMouseMode(true);
+        const stGeos = useEmu.getState();
+        stGeos.setIecSlot(8, "1541");
+        stGeos.setMouseMode(true);
+        sessionIecRef.current = "1541";
+        sessionUnitRef.current = 8;
+        const geosMap = { ...stGeos.iecMap, 8: "1541" as const };
+        applyIecUnit(emuRef.current, "1541", 8);
         setMouseAnalog(emuRef.current, true);
-        applyRuntimeOptions(emuRef.current, viceJoyOptions(useEmu.getState().joyPort));
-        const ok = await bootGeosFloppy(emuRef.current, new Uint8Array(buf), name);
+        applyRuntimeOptions(emuRef.current, {
+          ...viceDriveTypeVars(viceMapFromIecMap(geosMap)),
+          ...viceJoyOptions(stGeos.joyPort),
+        });
+        const ok = await bootGeosFloppy(emuRef.current, new Uint8Array(buf), name, 8, geosMap);
         if (!ok) return false;
         setSessionDisk(name, new Uint8Array(buf), 8);
         const loaded = await feedBasicLine(emuRef.current, 'LOAD"*",8,1');
@@ -2312,15 +2321,21 @@ export function Grok64App() {
         return;
       }
       if (/geos/i.test(file.name) && /\.d64$/i.test(file.name) && emuRef.current && useEmu.getState().running) {
-        useEmu.getState().setIecSlot(8, "1541");
-        useEmu.getState().setMouseMode(true);
+        const stGeos = useEmu.getState();
+        stGeos.setIecSlot(8, "1541");
+        stGeos.setMouseMode(true);
+        sessionIecRef.current = "1541";
+        sessionUnitRef.current = 8;
+        const geosMap = { ...stGeos.iecMap, 8: "1541" as const };
+        applyIecUnit(emuRef.current, "1541", 8);
         applyRuntimeOptions(emuRef.current, {
-          ...viceJoyOptions(useEmu.getState().joyPort),
-          vice_ram_expansion_unit: useEmu.getState().reuSize,
+          ...viceDriveTypeVars(viceMapFromIecMap(geosMap)),
+          ...viceJoyOptions(stGeos.joyPort),
+          vice_ram_expansion_unit: stGeos.reuSize,
         });
         setMouseAnalog(emuRef.current, true);
         const raw = new Uint8Array(file.data);
-        const ok = await bootGeosFloppy(emuRef.current, raw, file.name);
+        const ok = await bootGeosFloppy(emuRef.current, raw, file.name, 8, geosMap);
         if (!ok) {
           toast.error("Could not mount GEOS disk");
           return;

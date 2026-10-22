@@ -2075,14 +2075,32 @@ div[class*="ejs_virtual"] {
   margin: auto;
 }
 .g64-app[data-orient="landscape"][data-kb="true"]:not([data-device="tablet"]) .g64-screen {
-  min-height: 0;
   min-width: 0;
   max-width: 100%;
   max-height: 100%;
   width: auto;
   height: auto;
   aspect-ratio: 4 / 3;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
+  min-height: min(42vh, 300px);
+}
+.g64-app[data-device="desktop"][data-kb="true"] .g64-stage {
+  flex: 1 1 auto;
+  min-height: min(45vh, 360px);
+  overflow: hidden;
+}
+.g64-app[data-device="desktop"][data-kb="true"] .g64-bezel {
+  flex: 1 1 auto;
+  min-height: 220px;
+}
+.g64-app[data-device="desktop"][data-kb="true"] .g64-screen {
+  min-height: 200px;
+  flex: 1 1 auto;
+}
+.g64-app[data-device="desktop"][data-kb="true"] .g64-screen canvas:not(.g64-ios-present) {
+  min-height: 160px;
+  opacity: 1;
+  visibility: visible;
 }
 .g64-app[data-orient="landscape"][data-kb="true"][data-device="tablet"] .g64-screen {
   position: relative;

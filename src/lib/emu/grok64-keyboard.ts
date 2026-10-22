@@ -237,6 +237,20 @@ async function holdRetro(fn: RetroFn, retro: number, emu: Grok64Emu | null) {
   paintHook?.(emu);
 }
 
+/** Ensure C64 shift is up before an unshifted key (host Shift often leaks after `"` / `$`). */
+async function releaseC64Shift(fn: RetroFn, emu: Grok64Emu | null) {
+  for (const retro of [RETROK.ShiftLeft, RETROK.ShiftRight]) {
+    try {
+      fn(retro, 0, 0, 0);
+    } catch {
+      /* ignore */
+    }
+    downAt.delete(retro);
+  }
+  await sleep(MIN_HOLD_MS);
+  paintHook?.(emu);
+}
+
 async function playSyntheticShiftedGlyph(fn: RetroFn, glyph: string, emu: Grok64Emu | null) {
   const spec = C64_GLYPH[glyph];
   if (!spec?.shift) return false;
@@ -251,8 +265,10 @@ async function playSyntheticShiftedGlyph(fn: RetroFn, glyph: string, emu: Grok64
   fn(shiftRetro, 1, 0, 0);
   await sleep(24);
   await holdRetro(fn, retro, emu);
-  fn(shiftRetro, 0, 0, 0);
+  await releaseC64Shift(fn, emu);
   downAt.delete(shiftRetro);
+  hostShiftChord = false;
+  swallowHostShiftUp = true;
   paintHook?.(emu);
   return true;
 }
@@ -332,10 +348,17 @@ function scheduleDomKey(
     const retro = domCodeToRetrok(stroke.code);
     if (retro == null) return;
 
+    if (!stroke.mods.shift && (mods.shift || downAt.has(RETROK.ShiftLeft) || downAt.has(RETROK.ShiftRight))) {
+      await releaseC64Shift(fn, emu);
+      if (mods.shift) swallowHostShiftUp = true;
+      hostShiftChord = false;
+    }
+
     if (stroke.hostShiftChord || (hostShiftChord && mods.shift && !stroke.mods.shift)) {
       hostShiftChord = false;
       swallowHostShiftUp = true;
       await holdRetro(fn, retro, emu);
+      await releaseC64Shift(fn, emu);
       eatKeyUp.add(tag);
       return;
     }

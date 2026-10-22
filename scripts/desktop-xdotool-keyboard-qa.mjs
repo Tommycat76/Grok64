@@ -194,7 +194,10 @@ try {
   const loadLine = lineWith(text, 'LOAD"$",8');
   push({
     id: "xdo-load-dollar",
-    pass: loadCompact.includes('LOAD"$",8'.replace(/\s+/g, "").toUpperCase()),
+    pass:
+      loadCompact.includes('LOAD"$",8'.replace(/\s+/g, "").toUpperCase()) &&
+      !loadCompact.includes("LOAD\"$\"<8") &&
+      !(loadLine ?? "").includes("<"),
     detail: loadLine ?? text.slice(-220),
   });
 

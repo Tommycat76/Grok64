@@ -2133,15 +2133,34 @@ export async function bootGeosFloppy(
   data: Uint8Array,
   fileName: string,
   unit: IecUnit = 8,
+  iecMap?: IecMap,
 ): Promise<boolean> {
-  if (!emu) return false;
+  if (!emu || !coreHasFs(emu)) return false;
   detachGrok64Sd2iec(emu, unit);
+  if (iecMap) {
+    const viceMap = viceMapFromIecMap({ ...iecMap, [unit]: "1541" });
+    applyRuntimeOptions(emu, viceDriveTypeVars(viceMap));
+    injectViceRc(emu, viceRcForDrives(viceMap, false));
+  }
+  applyIecUnit(emu, "1541", unit);
   applyRuntimeOptions(emu, viceGeosFloppyOptions(unit));
-  const lines = ["[C64]", `Drive${unit}Type=1542`, "DriveTrueEmulation=1", "VirtualDevices=0"];
-  injectViceRc(emu, `${lines.join("\n")}\n`);
-  const ok = attachAutostartDisk(emu, data, fileName, "1541", unit);
-  await flushEmuFs(emu, 1200);
-  return ok;
+  injectViceRc(
+    emu,
+    ["[C64]", `Drive${unit}Type=1542`, "DriveTrueEmulation=1", "VirtualDevices=0"].join("\n") + "\n",
+  );
+  const mounted = bootFileOf(emu);
+  const target =
+    mounted && /\.(d64|d81)$/i.test(mounted)
+      ? mounted.replace(/^\//, "")
+      : fileName.replace(/^\//, "");
+  const wrote = swapBootDisk(emu, data, target) || writeBootFile(emu, data, target);
+  if (!wrote) return false;
+  unitMounts.set(unit, target);
+  emu.fileName = target;
+  setSessionDisk(fileName.replace(/^\//, ""), data, unit);
+  applyIecUnit(emu, "1541", unit);
+  const flushed = await flushEmuFs(emu, 3000);
+  return flushed;
 }
 
 export function attachAutostartDisk(
