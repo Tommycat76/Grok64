@@ -6,7 +6,13 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
-import { powerOnDesktop, waitRunning } from "./desktop-qa-lib.mjs";
+import { patchLocalStorage, powerOnDesktop, waitRunning } from "./desktop-qa-lib.mjs";
+import {
+  assertGrok64WasmCore,
+  clearEmulatorJsCache,
+  grok64DatapathFromEnv,
+  readGrok64CoreStatus,
+} from "./desktop-grok64-core.mjs";
 
 const base = process.env.GROK64_BASE_URL || "http://127.0.0.1:8080/";
 const outDir = join(process.cwd(), "artifacts", "desktop-sd2iec-iec");
@@ -37,8 +43,22 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 const rows = [];
 
 try {
-  await powerOnDesktop(page, base);
-  await waitRunning(page, 30000);
+  if (grok64DatapathFromEnv()) {
+    await page.goto(base, { waitUntil: "domcontentloaded" });
+    await clearEmulatorJsCache(page);
+    await patchLocalStorage(page, { video: "ntsc", drive: "1541" });
+    await page.reload();
+  }
+  await powerOnDesktop(page, base, { navigate: !grok64DatapathFromEnv() });
+  await waitRunning(page, 120000);
+  let coreStatus = grok64DatapathFromEnv()
+    ? await assertGrok64WasmCore(page, { timeoutMs: 120000 })
+    : await readGrok64CoreStatus(page);
+  rows.push({
+    id: "grok64-wasm-core",
+    pass: Boolean(coreStatus?.attach && coreStatus?.c64read),
+    core: coreStatus,
+  });
 
   await page.evaluate(async () => {
     window.__g64?.setIecSlot?.(8, "sd2iec");

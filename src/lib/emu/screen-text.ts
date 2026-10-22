@@ -16,20 +16,30 @@ function petToChar(code: number): string {
   return " ";
 }
 
-import { readC64Byte, type RamEmu } from "./c64-memory";
+import { c64RamView, readC64Byte, type RamEmu } from "./c64-memory";
 
-export function readScreenText(emu: RamEmu | null): string {
-  if (!emu) return "";
+function readScreenTextWith(
+  read: (addr: number) => number | null,
+): string {
   const lines: string[] = [];
   for (let row = 0; row < 25; row++) {
     let line = "";
     const base = ROW[row] ?? 0x0400 + row * 40;
     for (let col = 0; col < 40; col++) {
       const addr = base + col;
-      const b = readC64Byte(emu, addr);
+      const b = read(addr);
       line += b === null ? " " : petToChar(b);
     }
     lines.push(line.replace(/\s+$/, ""));
   }
   return lines.join("\n").trimEnd();
+}
+
+export function readScreenText(emu: RamEmu | null): string {
+  if (!emu) return "";
+  const viaExport = readScreenTextWith((addr) => readC64Byte(emu, addr));
+  if (viaExport.replace(/\s/g, "").length > 0) return viaExport;
+  const ram = c64RamView(emu);
+  if (!ram) return viaExport;
+  return readScreenTextWith((addr) => (addr >= 0 && addr < ram.length ? ram[addr] : null));
 }

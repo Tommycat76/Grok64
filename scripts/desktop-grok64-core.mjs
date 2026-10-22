@@ -31,13 +31,13 @@ export async function installGrok64CoreNetworkGuard(page, baseUrl) {
   await page.route("**/*", (route) => {
     const u = route.request().url();
     if (/cdn\.emulatorjs\.org/i.test(u) && /\/cores\/vice_.*wasm\.data/i.test(u)) {
-      return route.abort("blocked");
+      return route.abort("failed");
     }
     if (/\/cores\/vice_.*wasm\.data/i.test(u) && !u.includes(GROK64_IEC_CORE_FILE)) {
       if (allowed && u.startsWith(new URL(baseUrl).origin)) {
         return route.continue({ url: allowed });
       }
-      return route.abort("blocked");
+      return route.abort("failed");
     }
     return route.continue();
   });

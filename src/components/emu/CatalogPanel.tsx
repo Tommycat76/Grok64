@@ -84,7 +84,7 @@ export function CatalogPanel({ onPlay, onInsert }: Props) {
       try {
         res = await searchCatalog({ data: { query: q, kind: k } });
       } catch {
-        res = await searchCatalogClient({ query: q, kind: k });
+        res = await searchCatalogClient({ query: q, kind: k }, { signal: searchAbort.current.signal });
       }
       if (gen !== searchGen.current) return;
       setHits(res.hits);

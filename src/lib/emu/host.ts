@@ -73,21 +73,31 @@ function grok64LocalDataUrl(rel: string): string | null {
   return `${window.location.origin}${base}/${rel.replace(/^\//, "")}`;
 }
 
+/** EmulatorJS `filePaths` keys are bare filenames (see emulator.js downloadFile). */
+const GROK64_VICE_CORE_DATA_NAMES = [
+  "vice_x64sc-wasm.data",
+  "vice_x64sc-legacy-wasm.data",
+  "vice_x64sc-thread-wasm.data",
+  "vice_x64sc-thread-legacy-wasm.data",
+] as const;
+
+export function isGrok64ViceCoreDataLeaf(leaf: string): boolean {
+  return /^vice_.*-wasm\.data$/i.test(leaf);
+}
+
 /** Per-file overrides (custom vice_x64sc WASM + shipped compression/reports). */
 export function grok64EmulatorFilePaths(): Record<string, string> | undefined {
   const out: Record<string, string> = {};
   const core = grok64CoreBlobUrl();
-  if (core) out["vice_x64sc-wasm.data"] = core;
-  for (const rel of [
-    "compression/extract7z.js",
-    "compression/extractzip.js",
-    "compression/libunrar.js",
-    "compression/libunrar.wasm",
-    "cores/reports/vice_x64sc.json",
-  ]) {
-    const local = grok64LocalDataUrl(rel);
-    if (local) out[rel] = local;
+  if (core) {
+    for (const name of GROK64_VICE_CORE_DATA_NAMES) out[name] = core;
   }
+  for (const name of ["extract7z.js", "extractzip.js", "libunrar.js", "libunrar.wasm"]) {
+    const local = grok64LocalDataUrl(`compression/${name}`);
+    if (local) out[name] = local;
+  }
+  const report = grok64LocalDataUrl("cores/reports/vice_x64sc.json");
+  if (report) out["vice_x64sc.json"] = report;
   return Object.keys(out).length ? out : undefined;
 }
 
@@ -570,23 +580,26 @@ function patchEjsGrok64CoreDownload() {
   const orig = proto.downloadFile;
   proto.downloadFile = function patchedDownload(...args: unknown[]) {
     const path = String(args[0] ?? "");
-    const type = String(args[1] ?? "");
     const leaf = path.split("?")[0].split("/").pop() ?? "";
-    const isViceCoreData = type === "Core" && /^vice_.*-wasm\.data$/i.test(leaf);
+    const isViceCoreData = isGrok64ViceCoreDataLeaf(leaf);
+    const filePaths = (this as { config?: { filePaths?: Record<string, string> } }).config?.filePaths;
     if (isViceCoreData) {
-      recordGrok64CoreLoad(leaf, url, "redirect");
-      args[0] = url;
-      args[3] = true;
+      recordGrok64CoreLoad(leaf, filePaths?.[leaf] ?? url, filePaths?.[leaf] ? "filePaths" : "redirect");
+      // Prefer config.filePaths (bare filename keys). Only rewrite path when unmapped.
+      if (!filePaths?.[leaf]) {
+        args[0] = url;
+        if (args.length > 3) args[3] = true;
+      }
     }
     if (/cdn\.emulatorjs\.org/i.test(path) && /\/cores\/vice_.*wasm\.data/i.test(path)) {
       recordBlockedStockCore(path);
       recordGrok64CoreLoad(leaf || path, url, "blocked-cdn");
       args[0] = url;
-      args[3] = true;
+      if (args.length > 3) args[3] = true;
     }
     const dt = (this as { downloadType?: { core?: { cdnFallback?: boolean } } }).downloadType;
     let prevFb: boolean | undefined;
-    if (type === "Core" && dt?.core) {
+    if (isViceCoreData && dt?.core) {
       prevFb = dt.core.cdnFallback;
       dt.core.cdnFallback = false;
     }

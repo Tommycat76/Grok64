@@ -254,6 +254,25 @@ test("SD2IEC SWAP 8/9 and disk-change wrap", () => {
   assert.equal(sd2iecSwapUnit(10), 8);
 });
 
+test("grok64 vice core data leaf names match EmulatorJS", () => {
+  const isCoreData = (leaf) => /^vice_.*-wasm\.data$/i.test(leaf);
+  assert.ok(isCoreData("vice_x64sc-legacy-wasm.data"));
+  assert.ok(isCoreData("vice_x64sc-wasm.data"));
+  assert.ok(!isCoreData("vice_x64sc.json"));
+  assert.ok(!isCoreData("extract7z.js"));
+});
+
+test("catalog gibberish heuristic", () => {
+  const skipIa = (q) => {
+    const t = q.trim();
+    if (!t) return true;
+    if (t.length >= 7 && !/[aeiouy]/i.test(t)) return true;
+    return false;
+  };
+  assert.equal(skipIa("xqzjwqmvklpp"), true);
+  assert.equal(skipIa("Boulder Dash"), false);
+});
+
 test("hardware buttons: short/long map matches real devices", () => {
   assert.equal(classifyPress(200), "short");
   assert.equal(classifyPress(HW_LONG_MS), "long");

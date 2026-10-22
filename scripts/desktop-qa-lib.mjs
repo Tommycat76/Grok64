@@ -46,7 +46,18 @@ export async function catalogSearch(page, query) {
   await input.waitFor({ timeout: 8000 });
   await input.fill(query);
   await page.locator(".g64-search button[type='submit']").click();
-  await page.waitForTimeout(2500);
+  await page
+    .waitForFunction(
+      () => {
+        const root = document.querySelector(".g64-catalog");
+        if (!root) return false;
+        if (root.querySelector(".animate-spin")) return false;
+        return true;
+      },
+      { timeout: 12000 },
+    )
+    .catch(() => null);
+  await page.waitForTimeout(200);
 }
 
 export async function waitRunning(page, ms = 20000) {

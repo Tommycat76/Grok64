@@ -36,6 +36,16 @@ try {
   push({ id: "catalog-search-field", pass: hasSearch });
 
   await page.locator('.g64-chips button[data-on="true"]').first().waitFor({ timeout: 8000 }).catch(() => null);
+  const t0 = Date.now();
+  await catalogSearch(page, "xqzjwqmvklpp");
+  const nonsenseMs = Date.now() - t0;
+  const nonsenseHits = await page.locator(".g64-hit").count();
+  push({
+    id: "catalog-nonsense-fast",
+    pass: nonsenseMs < 9000 && nonsenseHits === 0,
+    detail: { ms: nonsenseMs, hits: nonsenseHits },
+  });
+
   await catalogSearch(page, "Boulder Dash");
   const hits = await page.locator(".g64-hit").count();
   push({ id: "catalog-search-hits", pass: hits > 0, detail: `hits=${hits}`, optional: hits === 0 });

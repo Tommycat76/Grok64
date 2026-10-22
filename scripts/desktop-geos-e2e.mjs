@@ -6,7 +6,13 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { chromium } from "playwright";
-import { canvasHasSignal, patchLocalStorage, powerOnDesktop, waitRunning } from "./desktop-qa-lib.mjs";
+import { patchLocalStorage, powerOnDesktop, waitRunning } from "./desktop-qa-lib.mjs";
+import {
+  assertGrok64WasmCore,
+  clearEmulatorJsCache,
+  grok64DatapathFromEnv,
+  readGrok64CoreStatus,
+} from "./desktop-grok64-core.mjs";
 
 const dir = process.env.GROK64_GEOS_DIR;
 const base = process.env.GROK64_BASE_URL || "http://127.0.0.1:8080/";
@@ -28,6 +34,7 @@ if (!images.length) {
 const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 await page.goto(base, { waitUntil: "domcontentloaded" });
+if (grok64DatapathFromEnv()) await clearEmulatorJsCache(page);
 await patchLocalStorage(page, {
   video: "ntsc",
   sid: "8580",
@@ -40,6 +47,15 @@ await patchLocalStorage(page, {
 await page.reload();
 await powerOnDesktop(page, base, { navigate: false });
 
+let core = null;
+if (grok64DatapathFromEnv()) {
+  await waitRunning(page, 120000);
+  core = await assertGrok64WasmCore(page, { timeoutMs: 120000 });
+} else {
+  await waitRunning(page, 90000);
+  core = await readGrok64CoreStatus(page);
+}
+
 const name = images[0];
 const fileBuf = readFileSync(join(dir, name));
 await page.evaluate(
@@ -49,10 +65,23 @@ await page.evaluate(
   { name, bytes: Array.from(fileBuf) },
 );
 
-await waitRunning(page, 90000);
-await page.waitForTimeout(20000);
-const ok = await canvasHasSignal(page);
-writeFileSync(join(outDir, "results.json"), JSON.stringify({ name, pass: ok }, null, 2));
-console.log(JSON.stringify({ name, pass: ok }));
+await waitRunning(page, 120000);
+await page.waitForTimeout(45000);
+
+const screen = await page.evaluate(() => window.__g64?.screenText?.() || "");
+const geosDesktop =
+  /GEOS|DESK|INFO|DISK|DIRECTORY|GEODISC|GEOSDISK|64\s*K/i.test(screen) &&
+  !/FILE NOT FOUND|DEVICE NOT PRESENT/i.test(screen);
+
+const report = {
+  name,
+  pass: Boolean(geosDesktop && core?.attach && core?.c64read),
+  geosDesktop,
+  core,
+  screenTextLen: screen.length,
+  screenPrefix: screen.slice(0, 120),
+};
+writeFileSync(join(outDir, "results.json"), JSON.stringify(report, null, 2));
+console.log(JSON.stringify(report));
 await browser.close();
-process.exit(ok ? 0 : 1);
+process.exit(report.pass ? 0 : 1);
