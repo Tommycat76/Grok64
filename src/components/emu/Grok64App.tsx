@@ -221,12 +221,19 @@ function frameMsForStandard(standard: string) {
 }
 
 function playLockDuration(mode: string, title?: string | null): number {
-  if (isTouchMobile()) return mode === "disk" ? 4500 : 1400;
+  if (isTouchMobile()) return mode === "disk" ? 4500 : mode === "cart" ? 900 : 1400;
+  if (mode === "cart") return 1400;
   if (mode === "disk") {
     const longLoad = /paradroid|turrican|boulder|commando|geos/i.test(title || "");
     return longLoad ? 58_000 : 12_000;
   }
   return 3500;
+}
+
+function autoloadWarpForPlay(mode: string, filename?: string | null): boolean | undefined {
+  if (mode === "disk" || mode === "cart") return false;
+  if (filename && /\.(crt|bin)$/i.test(filename)) return false;
+  return undefined;
 }
 
 function gameplayReadyDelay(lockMs: number): number {
@@ -1162,7 +1169,13 @@ export function Grok64App() {
           playLockRef.current = false;
           fireArmedAt.current = Date.now() + 300;
           setWarp(emuRef.current, false);
-          disarmAutostart(emuRef.current);
+          disarmAutostart(
+            emuRef.current,
+            playModeRef.current === "cart" || cartLiveRef.current ? "cart" : undefined,
+          );
+          if (playModeRef.current === "cart" || cartLiveRef.current) {
+            bumpCrtPaint(emuRef.current);
+          }
           muteC64Space(false);
           s.setBooting(false);
           s.setRunning(true);
@@ -1334,10 +1347,14 @@ export function Grok64App() {
         /* optional card */
       }
       const st = useEmu.getState();
+      const cartBoot = /\.(crt|bin)$/i.test(bootFileOf(emu) || spec.title || "");
       const prep = await prepareCore(emu, {
         live: spec.live,
         user: spec.user,
-        jiffyWant: st.jiffyDos,
+        jiffyWant:
+          cartBoot && st.fastLoadCart === "action-replay"
+            ? false
+            : resolveJiffyWant(st.jiffyDos, st.fastLoadCart),
         sdParts: parts,
         driveMap: st.iecMap,
       });
@@ -1385,7 +1402,9 @@ export function Grok64App() {
         setBusy(`Loading ${spec.title}…`, 78);
         if (isIosPhone()) await new Promise((r) => setTimeout(r, 140));
         if (loadGenRef.current !== gen) return;
-        autostartAfterReady(emu, true, { autoloadWarp: playModeRef.current === "disk" ? false : undefined });
+        autostartAfterReady(emu, true, {
+          autoloadWarp: autoloadWarpForPlay(playModeRef.current, spec.title),
+        });
         applyIecUnit(emu, spec.live.iec, spec.live.unit);
         if (isIosPhone())     kickIosAfterEmuAction(emu, "settle", gen);
         beginPlayLock(playLockDuration(playModeRef.current, spec.title), `Loading ${spec.title}…`);
@@ -1973,7 +1992,14 @@ export function Grok64App() {
         toast.error("Play stayed on the live CRT — C64 is still starting.");
         return;
       }
-      playModeRef.current = plan.kind === "floppy" ? "disk" : plan.kind === "basic" ? "basic" : "auto";
+      playModeRef.current =
+        plan.kind === "floppy"
+          ? "disk"
+          : plan.kind === "basic"
+            ? "basic"
+            : plan.kind === "cart"
+              ? "cart"
+              : "auto";
       if (plan.kind === "cart") {
         setSessionCart(bootName, new Uint8Array(safe));
       }
@@ -2137,7 +2163,9 @@ export function Grok64App() {
           });
           await applyJiffyDos(
             emuRef.current,
-            resolveJiffyWant(stNow.jiffyDos, stNow.fastLoadCart),
+            plan.kind === "cart" && sessionFastCart === "action-replay"
+              ? false
+              : resolveJiffyWant(stNow.jiffyDos, stNow.fastLoadCart),
           );
           if (plan.kind === "floppy" && !work) {
             useEmu.getState().setInsertedDiskName(filename);
@@ -2163,7 +2191,9 @@ export function Grok64App() {
               }, 800),
             );
           } else {
-            autostartAfterReady(emuRef.current, true, { autoloadWarp: false });
+            autostartAfterReady(emuRef.current, true, {
+              autoloadWarp: autoloadWarpForPlay(playModeRef.current, bootName),
+            });
             applyIecUnit(emuRef.current, playIec, playAttachUnit);
             if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, keepLiveCrt || floppyKeep ? "play-recycle" : "hot-swap");
             beginPlayLock(playLockDuration(playModeRef.current, title), `Loading ${title}…`);
@@ -2204,7 +2234,9 @@ export function Grok64App() {
           markSessionPlay(title);
           notePlayMarker();
           s.setRunning(true);
-          autostartAfterReady(emuRef.current, true, { autoloadWarp: false });
+          autostartAfterReady(emuRef.current, true, {
+            autoloadWarp: autoloadWarpForPlay(playModeRef.current, bootName),
+          });
           if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, "play-recycle");
           scheduleFit(true);
           beginPlayLock(playLockDuration(playModeRef.current, title), `Loading ${title}…`);
@@ -2692,7 +2724,9 @@ export function Grok64App() {
   useEffect(() => {
     if (!s.running) return;
     const onHostKey = (e: KeyboardEvent) => {
-      if (!useEmu.getState().running || playLockRef.current) return;
+      if (!useEmu.getState().running) return;
+      const freezerFn = /^F[1-8]$/.test(e.code) && (cartLiveRef.current || useEmu.getState().fastLoadCart);
+      if (playLockRef.current && !freezerFn) return;
       if (!grok64RetroKeyboardAvailable(emuRef.current)) return;
       const target = e.target;
       if (target instanceof Element && target.closest(".g64-kb, .g64-sheet")) return;

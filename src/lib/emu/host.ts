@@ -19,6 +19,7 @@ import { buildViceExtras, workDiskFor } from "./vice-extras";
 import {
   iecMapFromLegacy,
   liveDriveOptions,
+  CART_PLAY_UNLOCK_VICE_OPTS,
   PLAY_UNLOCK_VICE_OPTS,
   viceDriveTypeVars,
   viceMapFromIecMap,
@@ -2055,9 +2056,9 @@ export function autostartAfterReady(
  * Stop Autostart / autoload-warp after LOAD has been typed. Does not restart
  * the core, recycle WASM, or touch unit 8.
  */
-export function disarmAutostart(emu: EjsInstance | null) {
-  applyRuntimeOptions(emu, { ...PLAY_UNLOCK_VICE_OPTS });
-  glog("autostart-disarmed");
+export function disarmAutostart(emu: EjsInstance | null, mode?: "cart" | "disk") {
+  applyRuntimeOptions(emu, mode === "cart" ? { ...CART_PLAY_UNLOCK_VICE_OPTS } : { ...PLAY_UNLOCK_VICE_OPTS });
+  glog("autostart-disarmed", { mode: mode ?? "disk" });
 }
 
 function removeMediaFile(FS: EmscriptenFS, name: string) {

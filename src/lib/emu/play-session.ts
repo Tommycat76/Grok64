@@ -731,6 +731,13 @@ export const PLAY_UNLOCK_VICE_OPTS = {
   vice_reset: "hard",
 } as const;
 
+/** Freezer / CRT play — disarm autostart without arming `vice_reset=hard` on a live cart. */
+export const CART_PLAY_UNLOCK_VICE_OPTS = {
+  vice_autostart: "disabled",
+  vice_autostart_warp: "disabled",
+  vice_autoloadwarp: "disabled",
+} as const;
+
 /** Toolbar Reset is always a cold boot to READY — never Autostart re-fire. */
 export function userResetKind(_mode?: string): "hard" {
   return "hard";

@@ -4,7 +4,7 @@
  */
 import { spawn } from "node:child_process";
 import { chromium } from "playwright";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { patchLocalStorage, powerOnDesktop, waitRunning } from "./desktop-qa-lib.mjs";
 import { assertGrok64WasmCore, clearEmulatorJsCache, grok64DatapathFromEnv } from "./desktop-grok64-core.mjs";
@@ -133,6 +133,27 @@ try {
     detail: text.slice(-120),
   });
 
+  await sh("xdotool", ["key", "--window", win, "Return"]);
+  await new Promise((r) => setTimeout(r, 500));
+  await sh("xdotool", ["type", "--delay", "100", "--window", win, "PRINT 5-2"]);
+  await page.evaluate(() => window.__g64?.kbdDrain?.());
+  await new Promise((r) => setTimeout(r, 900));
+  text = await page.evaluate(() => window.__g64?.screenText?.() || "");
+  push({
+    id: "xdo-print-5minus2",
+    pass: (lineWith(text, "PRINT 5-2") ?? "").replace(/\s+/g, "").toUpperCase().includes("PRINT5-2"),
+    detail: lineWith(text, "PRINT 5-2"),
+  });
+  await sh("xdotool", ["key", "--window", win, "Return"]);
+  await page.evaluate(() => window.__g64?.kbdDrain?.());
+  await new Promise((r) => setTimeout(r, 2800));
+  text = await page.evaluate(() => window.__g64?.screenText?.() || "");
+  push({
+    id: "xdo-print-5minus2-run",
+    pass: /\n\s*3\s*\n/m.test(text) || /\n\s*3\s*READY/m.test(text),
+    detail: text.slice(-120),
+  });
+
   const kbBtn = page.locator('[aria-label="Keyboard"]').first();
   await kbBtn.click({ timeout: 15_000, force: true });
   await page.waitForSelector('.g64-app[data-kb="true"]', { timeout: 8000 });
@@ -177,6 +198,43 @@ try {
     detail: loadLine ?? text.slice(-220),
   });
 
+  const ar6Path = join(process.cwd(), "fixtures", "carts", "ar6.crt");
+  if (existsSync(ar6Path)) {
+    const arBytes = [...readFileSync(ar6Path)];
+    const arName = "Action_Replay_V6.0_6.0_1989_PAL.crt";
+    await page.evaluate(
+      async ({ name, bytes }) => {
+        await window.__g64?.playBytes?.(name, bytes, { autostart: true });
+      },
+      { name: arName, bytes: arBytes },
+    );
+    await waitRunning(page, 120000);
+    await page.waitForFunction(() => window.__g64?.sessionFlags?.().cart === true, { timeout: 60_000 });
+    await new Promise((r) => setTimeout(r, 5500));
+    await page.evaluate(() => window.__g64?.kbdDrain?.());
+    let arText = await page.evaluate(() => window.__g64?.screenText?.() || "");
+    const readyOnly = /^\s*READY\.?\s*$/m.test(arText.trim());
+    push({
+      id: "xdo-ar6-boot",
+      pass: !readyOnly && arText.replace(/\s+/g, "").length > 12,
+      detail: arText.slice(0, 90),
+    });
+    await sh("xdotool", ["key", "--window", win, "F1"]);
+    await page.evaluate(() => window.__g64?.kbdDrain?.());
+    await new Promise((r) => setTimeout(r, 1800));
+    const afterF1 = await page.evaluate(() => window.__g64?.screenText?.() || "");
+    push({
+      id: "xdo-ar6-f1",
+      pass:
+        afterF1.length > 20 &&
+        (afterF1 !== arText || /REPLAY|FREEZE|AR |DISK|FILE|MONITOR/i.test(afterF1)),
+      detail: afterF1.slice(0, 90),
+    });
+  } else {
+    push({ id: "xdo-ar6-boot", pass: true, skipped: true, detail: "fixtures/carts/ar6.crt missing" });
+    push({ id: "xdo-ar6-f1", pass: true, skipped: true, detail: "fixtures/carts/ar6.crt missing" });
+  }
+
   await page.screenshot({ path: join(outDir, "final.png") });
   writeFileSync(join(outDir, "results.json"), JSON.stringify(rows, null, 2));
 
@@ -192,5 +250,5 @@ try {
   xvfb?.kill("SIGTERM");
 }
 
-const failed = rows.filter((r) => !r.pass);
+const failed = rows.filter((r) => !r.pass && !r.skipped);
 process.exit(failed.length ? 1 : 0);

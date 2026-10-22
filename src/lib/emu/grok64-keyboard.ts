@@ -113,7 +113,10 @@ export function grok64KeyboardReleaseAll(emu: Grok64Emu | null) {
   flushAllKeys(mod._grok64_retro_keyboard);
 }
 
-/** C64 key positions for symbols (aligned with `keys.ts` EXTRA / C64_ROWS). */
+/**
+ * C64 key positions for symbols (aligned with `keys.ts` EXTRA / C64_ROWS).
+ * DOM `code: "Minus"` → libretro `RETROK_MINUS` is the C64 **+** key (left of −).
+ */
 const C64_GLYPH: Record<string, { code: string; shift: boolean }> = {
   "+": { code: "Minus", shift: false },
   "-": { code: "Equal", shift: false },
