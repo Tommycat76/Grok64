@@ -215,12 +215,22 @@ export function isJoyFireKey(code: string): boolean {
   return code === FIRE_KEY_CODE;
 }
 
+let fnKeySink: ((code: string, down: boolean) => boolean) | null = null;
+
+/** Route F1–F8 through grok64 libretro keyboard when the custom core is loaded. */
+export function setC64FnKeySink(sink: ((code: string, down: boolean) => boolean) | null) {
+  fnKeySink = sink;
+}
+
 export function dispatchC64Key(
   code: string,
   key: string,
   down: boolean,
   mods: { shift?: boolean } = {},
 ) {
+  if (/^F[1-8]$/.test(code) && fnKeySink?.(code, down)) {
+    return;
+  }
   if (isC64Space(code, key)) {
     if (c64SpaceMuted) return;
     blurHostButtons();

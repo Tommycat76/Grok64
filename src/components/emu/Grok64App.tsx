@@ -100,7 +100,12 @@ import {
   attachSd2iecBus,
   setSd2iecWasmIecOnly,
 } from "@/lib/emu/sd2iec";
-import { attachGrok64Sd2iec, tickGrok64Iec, wireGrok64ViceHost } from "@/lib/emu/grok64-vice-bridge";
+import {
+  attachGrok64Sd2iec,
+  grok64RetroKeyboard,
+  tickGrok64Iec,
+  wireGrok64ViceHost,
+} from "@/lib/emu/grok64-vice-bridge";
 import { readC64Byte, readC64Bytes, writeC64Byte, writeC64Bytes } from "@/lib/emu/c64-memory";
 import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor } from "@/lib/emu/vice-extras";
 import { HwHoldChip } from "@/components/emu/HwHoldChip";
@@ -155,7 +160,14 @@ import { RETRO_BTN } from "@/lib/emu/types";
 import { feedBasicLine, readPrintTi } from "@/lib/emu/c64-keyboard";
 import { setSessionCart, setSessionDisk } from "@/lib/emu/session-media";
 import { focusGrok64Player } from "@/lib/emu/focus-player";
-import { dispatchC64Key, isJoyFireKey, muteC64Space, onBeforeC64Space, typeC64 } from "@/lib/emu/keys";
+import {
+  dispatchC64Key,
+  isJoyFireKey,
+  muteC64Space,
+  onBeforeC64Space,
+  setC64FnKeySink,
+  typeC64,
+} from "@/lib/emu/keys";
 import {
   detectFastLoadCart,
   jiffyCartCompat,
@@ -785,10 +797,14 @@ export function Grok64App() {
         );
       },
       putRomBytes: async (id, name, bytes) => {
-        const buf =
-          bytes instanceof ArrayBuffer
-            ? bytes
-            : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        let buf: ArrayBuffer;
+        if (bytes instanceof ArrayBuffer) buf = bytes;
+        else if (Array.isArray(bytes)) buf = new Uint8Array(bytes).buffer;
+        else if (bytes instanceof Uint8Array) {
+          buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+        } else {
+          buf = new Uint8Array(bytes as ArrayLike<number>).buffer;
+        }
         await putRom(id, name, buf);
       },
       removeRomSlot: (id) => removeRom(id),
@@ -836,6 +852,7 @@ export function Grok64App() {
           applyRuntimeOptions(emuRef.current, { vice_ram_expansion_unit: C64OS_REU });
           if (useEmu.getState().running) {
             hardReset(emuRef.current);
+            await new Promise((r) => window.setTimeout(r, 2500));
           }
         }
         await playBufferRef.current(`${base}.zip`, toArrayBuffer(zip), {
@@ -1148,6 +1165,13 @@ export function Grok64App() {
           applyEmuVolume(emuRef.current, vol.muted, vol.volume);
           gestureUnlockAudio(emuRef.current);
           scheduleCracktroNudge(unlockedTitle);
+          if (useEmu.getState().fastLoadCart === "super-snapshot-5" && playModeRef.current === "disk") {
+            const ssGen = playLockGen.current;
+            window.setTimeout(() => {
+              if (playLockGen.current !== ssGen) return;
+              void feedBasicLine(emuRef.current, 'LOAD"*",8,1', { runcmd: true });
+            }, 1200);
+          }
           const wantRun =
             basicRunAfterLoadRef.current ||
             (diskRunAfterLoadRef.current && (playModeRef.current === "disk" || playModeRef.current === "auto"));
@@ -2643,6 +2667,10 @@ export function Grok64App() {
       window.clearTimeout(b);
     };
   }, [s.running, cartLive]);
+  useEffect(() => {
+    setC64FnKeySink((code, down) => grok64RetroKeyboard(emuRef.current, code, down));
+    return () => setC64FnKeySink(null);
+  }, []);
   useEffect(() => {
     const onFn = (e: KeyboardEvent) => {
       if (!useEmu.getState().running || playLockRef.current) return;

@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 extern void cartridge_trigger_freeze(void);
+extern void retro_keyboard_event(bool down, unsigned code, uint32_t character, uint16_t mod);
 
 static void grok64_kbdbuf_ensure(void)
 {
@@ -109,4 +110,12 @@ EMSCRIPTEN_KEEPALIVE
 void grok64_cartridge_trigger_freeze(void)
 {
     cartridge_trigger_freeze();
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void grok64_retro_keyboard(unsigned code, int down)
+{
+    retro_keyboard_event(down != 0, code, 0, 0);
 }

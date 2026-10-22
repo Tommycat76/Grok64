@@ -141,8 +141,14 @@ export async function readPrintTi(
   if (!emu) return null;
   const ok = await feedBasicLine(emu, "PRINT TI", { runcmd: true });
   if (!ok) return null;
-  await sleep(800);
-  const text = screenText();
-  const m = text.match(/TI\s*=\s*(\d+)/i) ?? text.match(/(?:^|\s)(\d{5,})(?:\s|$)/m);
-  return m ? Number.parseInt(m[1], 10) : null;
+  for (const ms of [1200, 2200]) {
+    await sleep(ms);
+    const text = screenText();
+    const m =
+      text.match(/TI\s*=\s*(\d+)/i) ??
+      text.match(/(?:^|\s)(\d{4,})(?:\s|$)/m) ??
+      text.match(/\b(\d{5,})\b/);
+    if (m) return Number.parseInt(m[1], 10);
+  }
+  return null;
 }

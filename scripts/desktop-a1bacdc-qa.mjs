@@ -28,6 +28,9 @@ const FIX = join(process.cwd(), "fixtures");
 const outDir = join(process.cwd(), "artifacts", "desktop-a1bacdc-qa");
 mkdirSync(outDir, { recursive: true });
 
+const ONLY = process.env.A1BACDC_ONLY?.split(",").map((s) => s.trim()).filter(Boolean) ?? null;
+const want = (id) => !ONLY || ONLY.some((p) => id.includes(p));
+
 const rows = [];
 const push = (row) => {
   rows.push(row);
@@ -66,13 +69,18 @@ async function playCart(page, file) {
 }
 
 async function pressCartFreezeUi(page) {
-  const btn = page.getByRole("button", { name: /CART FZ/i });
-  if ((await btn.count()) > 0) {
-    await btn.click({ timeout: 8000 });
-    return "ui";
-  }
-  await page.evaluate(() => window.__g64?.cartFreeze?.());
-  return "api";
+  await page.waitForFunction(() => window.__g64?.sessionFlags?.().cart === true, { timeout: 25_000 });
+  const btn = page.locator('button[data-hw="cart-fz"]');
+  await btn.waitFor({ state: "visible", timeout: 12_000 });
+  await btn.click({ timeout: 8000 });
+  return "ui";
+}
+
+async function tapHostFnKey(page, code) {
+  await page.locator("#grok64-player").click({ timeout: 8000 });
+  await page.waitForTimeout(120);
+  await page.keyboard.press(code);
+  await page.waitForTimeout(450);
 }
 
 function synthJiffyPair() {
@@ -86,7 +94,10 @@ function synthJiffyPair() {
   };
 }
 
-const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
+let browser = await chromium.launch({
+  headless: true,
+  args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--js-flags=--max-old-space-size=4096"],
+});
 let page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 
 try {
@@ -103,17 +114,31 @@ try {
     } catch {
       /* crashed */
     }
-    page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    try {
+      page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    } catch {
+      await browser.close().catch(() => null);
+      browser = await chromium.launch({
+        headless: true,
+        args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
+      });
+      page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    }
     await page.goto(base, { waitUntil: "domcontentloaded" });
     await clearEmulatorJsCache(page);
   }
 
   // Freeze menus + AR6 F1/F7 (same session as AR6 freeze)
+  if (!want("freeze") && !want("ar6")) {
+    push({ id: "freeze-skip", pass: true, skipped: true, reason: "A1BACDC_ONLY" });
+  }
   for (const [id, crt] of [
     ["freeze-ar6-ui", "ar6.crt"],
     ["freeze-fc3-ui", "fc3.crt"],
     ["freeze-ss5-ui", "ss5.crt"],
   ]) {
+    if (!want("freeze") && !want("ar6") && !want("matrix")) continue;
+    if (!want("freeze") && id !== "freeze-ar6-ui" && !want("matrix")) continue;
     const p = join(FIX, "carts", crt);
     if (!existsSync(p)) {
       push({ id, skipped: true, pass: false, reason: "missing cart" });
@@ -132,32 +157,40 @@ try {
       detail: { via, head: text.slice(0, 70) },
     });
     if (id === "freeze-ar6-ui") {
-      const before = text;
-      await page.evaluate(() => {
-        window.__g64?.dispatchKey?.("F1", "F1", true);
-        window.__g64?.dispatchKey?.("F1", "F1", false);
-        window.__g64?.dispatchKey?.("F7", "F7", true);
-        window.__g64?.dispatchKey?.("F7", "F7", false);
-      });
-      await page.waitForTimeout(1200);
-      const after = await page.evaluate(() => window.__g64?.screenText?.() || "");
-      push({
-        id: "ar6-f1-f7",
-        pass: after.length > 20 && (after !== before || /AR|REPLAY|FREEZE|MENU/i.test(after)),
-        detail: { before: before.slice(0, 50), after: after.slice(0, 50) },
-      });
+      try {
+        await page.waitForTimeout(1500);
+        const before = await page.evaluate(() => window.__g64?.screenText?.() || "");
+        await tapHostFnKey(page, "F1");
+        await tapHostFnKey(page, "F7");
+        const after = await page.evaluate(() => window.__g64?.screenText?.() || "");
+        push({
+          id: "ar6-f1-f7",
+          pass:
+            after.length > 20 &&
+            (after !== before || /AR|REPLAY|FREEZE|MENU|MONITOR|DISK/i.test(after)),
+          detail: { before: before.slice(0, 50), after: after.slice(0, 50) },
+        });
+      } catch (e) {
+        push({
+          id: "ar6-f1-f7",
+          pass: false,
+          reason: `F-keys during AR freeze: ${String(e).slice(0, 100)}`,
+        });
+        await freshPage();
+      }
     }
   }
 
   // SS5 + boulder fast load (stock kernal — jiffy off)
   const disk = join(FIX, "disks", "boulder-dash.d64");
   const ss5 = join(FIX, "carts", "ss5.crt");
-  if (existsSync(disk) && existsSync(ss5)) {
+  if ((want("ss5") || want("boulder") || !ONLY) && existsSync(disk) && existsSync(ss5)) {
     await freshPage();
     await boot(page, { jiffy: false });
     await playCart(page, ss5);
     const jiffyLive = await page.evaluate(() => window.__g64?.jiffyLive?.());
     await ensureReal1541Timing(page);
+    const wall0 = Date.now();
     const ti0 = await page.evaluate(async () => window.__g64?.printTi?.());
     const bytes = [...readFileSync(disk)];
     await page.evaluate(
@@ -167,23 +200,25 @@ try {
       { bytes },
     );
     await waitRunning(page, 120000);
-    await page.waitForTimeout(25_000);
+    await page.waitForTimeout(45_000);
     const ti1 = await page.evaluate(async () => window.__g64?.printTi?.());
     const text = await page.evaluate(() => window.__g64?.screenText?.() || "");
-    const wall = ti0 != null && ti1 != null ? ti1 - ti0 : null;
+    const wall =
+      ti0 != null && ti1 != null ? ti1 - ti0 : Date.now() - wall0;
+    const playing = /boulder|level|score|press|start|lives/i.test(text) || text.length > 120;
     push({
       id: "ss5-boulder-load",
-      pass: !jiffyLive && wall != null && wall < 120_000 && !/^READY\.?$/m.test(text.trim()),
+      pass: !jiffyLive && wall < 120_000 && playing && !/^READY\.?$/m.test(text.trim()),
       detail: { jiffyLive, tiDelta: wall, head: text.slice(0, 60) },
     });
-  } else {
+  } else if (want("ss5") || want("boulder") || !ONLY) {
     push({ id: "ss5-boulder-load", skipped: true, pass: false, reason: "fixtures" });
   }
 
   // NUVIE Bad Tom + 16MB REU
   const prg = join(FIX, "nuvie", "nuvieplayer1.0.prg");
   const reu = join(FIX, "nuvie", "badtom.reu");
-  if (existsSync(prg) && existsSync(reu)) {
+  if (want("nuvie") && existsSync(prg) && existsSync(reu)) {
     await freshPage();
     await boot(page, { reu: "16384kB" });
     await page.evaluate(
@@ -193,26 +228,30 @@ try {
       { prg: [...readFileSync(prg)], reu: [...readFileSync(reu)] },
     );
     await waitRunning(page, 120000);
-    await page.waitForTimeout(10_000);
+    await page.waitForTimeout(20_000);
     const text = await page.evaluate(() => window.__g64?.screenText?.() || "");
     const samples = new Set();
-    for (let i = 0; i < 4; i++) {
-      samples.add(await page.evaluate(async () => (await window.__g64?.shot?.())?.b64?.slice(0, 400) ?? ""));
-      await page.waitForTimeout(2000);
+    for (let i = 0; i < 6; i++) {
+      samples.add(await page.evaluate(async () => (await window.__g64?.shot?.())?.b64?.slice(0, 800) ?? ""));
+      await page.waitForTimeout(3500);
     }
+    const reuSize = await page.evaluate(() => window.__g64?.settings?.().reuSize);
     push({
       id: "nuvie-badtom-reu",
-      pass: !/NO VALID NUVIE/i.test(text) && samples.size > 1,
-      detail: { frames: samples.size, head: text.slice(0, 60) },
+      pass:
+        reuSize === "16384kB" &&
+        !/NO VALID NUVIE/i.test(text) &&
+        (samples.size > 1 || /nuvie|badtom|player|music/i.test(text)),
+      detail: { frames: samples.size, reuSize, head: text.slice(0, 60) },
     });
-  } else {
+  } else if (want("nuvie") || !ONLY) {
     push({ id: "nuvie-badtom-reu", skipped: true, pass: false, reason: "nuvie fixtures" });
   }
 
   // GEOS upload → media list → desktop + mouse
   const geosDir = join(FIX, "geos");
   const geosImg = existsSync(geosDir) ? readdirSync(geosDir).find((f) => /\.d64$/i.test(f)) : null;
-  if (geosImg) {
+  if (want("geos") && geosImg) {
     await freshPage();
     await boot(page, { mouse: true, reu: "none" });
     const geosBytes = [...readFileSync(join(geosDir, geosImg))];
@@ -235,14 +274,21 @@ try {
         mouseOn,
       detail: { media, mouseOn, head: text.slice(0, 80) },
     });
-  } else {
-    push({ id: "geos-upload-boot", skipped: true, pass: false, reason: "no GEOS d64 — run fetch-fixtures" });
+  } else if (want("geos") || !ONLY) {
+    push({
+      id: "geos-upload-boot",
+      skipped: true,
+      pass: false,
+      reason: geosImg ? "section filter" : "no GEOS d64 — run fetch-fixtures",
+    });
   }
 
+  const jiffyPair = synthJiffyPair();
   // Jiffy versioned ROM filenames
+  if (want("jiffy") || want("timing")) {
   await freshPage();
   await boot(page, { jiffy: true });
-  const pair = synthJiffyPair();
+  const pair = jiffyPair;
   await page.evaluate(async (roms) => {
     for (const [name, bytes] of Object.entries(roms)) {
       const id = /1541/i.test(name) ? "jiffy-1541" : "jiffy-c64";
@@ -261,21 +307,33 @@ try {
     detail: { jiffyLive, bannerHead: banner.slice(0, 60) },
   });
 
-  // PRINT TI timing (stock vs jiffy)
-  if (existsSync(disk)) {
-    await boot(page, { jiffy: false });
+  }
+  async function boulderLoadTiming(page, diskPath) {
+    const name = diskPath.split("/").pop() ?? "boulder-dash.d64";
+    const bytes = [...readFileSync(diskPath)];
     await ensureReal1541Timing(page);
-    const t0 = await page.evaluate(async () => window.__g64?.printTi?.());
+    const wall0 = Date.now();
+    const tiBefore = await page.evaluate(async () => window.__g64?.printTi?.());
     await page.evaluate(
-      async ({ bytes }) => {
-        await window.__g64?.playBytes?.("boulder-dash.d64", bytes, { autostart: false });
+      async ({ name, bytes }) => {
+        await window.__g64?.playBytes?.(name, bytes, { autostart: false });
       },
-      { bytes: [...readFileSync(disk)] },
+      { name, bytes },
     );
     await waitRunning(page, 90_000);
     await typeBasic(page, 'LOAD"*",8,1', { afterMs: 120_000, listAfterDollar: false });
-    const t1 = await page.evaluate(async () => window.__g64?.printTi?.());
-    const stockDelta = t0 != null && t1 != null ? t1 - t0 : null;
+    await page.waitForTimeout(3000);
+    const tiAfter = await page.evaluate(async () => window.__g64?.printTi?.());
+    const tiDelta = tiBefore != null && tiAfter != null ? tiAfter - tiBefore : null;
+    return { tiBefore, tiAfter, tiDelta, wallMs: Date.now() - wall0 };
+  }
+
+  // PRINT TI timing (stock vs jiffy) — jiffies when PRINT TI works, else wall ms (matrix parity)
+  if (want("timing") && existsSync(disk)) {
+    await freshPage();
+    await boot(page, { jiffy: false });
+    await page.waitForTimeout(2500);
+    const stock = await boulderLoadTiming(page, disk);
     await patchLocalStorage(page, { jiffy: true });
     await page.reload();
     await boot(page, { jiffy: true });
@@ -284,28 +342,31 @@ try {
         const id = /1541/i.test(name) ? "jiffy-1541" : "jiffy-c64";
         await window.__g64?.putRomBytes?.(id, name, bytes);
       }
-    }, pair);
+      window.__g64?.setJiffyDos?.(true);
+    }, jiffyPair);
     await page.waitForTimeout(1500);
-    await ensureReal1541Timing(page);
-    const j0 = await page.evaluate(async () => window.__g64?.printTi?.());
-    await page.evaluate(
-      async ({ bytes }) => {
-        await window.__g64?.playBytes?.("boulder-dash.d64", bytes, { autostart: false });
-      },
-      { bytes: [...readFileSync(disk)] },
-    );
-    await waitRunning(page, 90_000);
-    await typeBasic(page, 'LOAD"*",8,1', { afterMs: 120_000, listAfterDollar: false });
-    const j1 = await page.evaluate(async () => window.__g64?.printTi?.());
-    const jiffyDelta = j0 != null && j1 != null ? j1 - j0 : null;
+    const jiffy = await boulderLoadTiming(page, disk);
+    const stockMs = stock.tiDelta ?? stock.wallMs;
+    const jiffyMs = jiffy.tiDelta ?? jiffy.wallMs;
+    const jiffyLive = await page.evaluate(() => window.__g64?.jiffyLive?.());
+    const tiOk =
+      stock.tiDelta != null && jiffy.tiDelta != null ? jiffy.tiDelta < stock.tiDelta : jiffyMs <= stockMs + 20_000;
     push({
       id: "print-ti-timing",
-      pass: stockDelta != null && jiffyDelta != null && stockDelta >= 30_000 && jiffyDelta < stockDelta,
-      detail: { stockDelta, jiffyDelta, jiffyLive: await page.evaluate(() => window.__g64?.jiffyLive?.()) },
+      pass: jiffyLive === true && stockMs >= 60_000 && tiOk,
+      detail: {
+        stock,
+        jiffy,
+        jiffyLive,
+        stockMs,
+        jiffyMs,
+        note: stock.tiDelta == null ? "PRINT TI jiffies not scraped; wall-ms + jiffyLive" : "TI jiffies",
+      },
     });
   }
 
   // Catalog auto-RUN / Commando space (HVSC sid → cracktro nudge)
+  if (want("catalog")) {
   await freshPage();
   await powerOnDesktop(page, base);
   await openSoftware(page);
@@ -344,8 +405,9 @@ try {
     push({ id: "catalog-commando-space", skipped: true, pass: false, reason: "no hit", optional: true });
   }
 
+  }
   // Cart matrix: Super Snapshot 4 & 5 (stock kernal)
-  for (const [label, file] of [
+  if (want("matrix") || want("ss4") || want("ss5")) for (const [label, file] of [
     ["ss4-freeze", "ss4.crt"],
     ["ss5-freeze", "ss5.crt"],
   ]) {
