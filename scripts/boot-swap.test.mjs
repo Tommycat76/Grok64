@@ -67,13 +67,13 @@ test("in-place Play overwrites WORK DISK — not a new filename (#60 FILE NOT FO
   assert.equal(files.has("Paradroid.d64"), false);
 });
 
-test("attachAutostartDisk forces 1541 unit 8 even after SD2IEC 8_fs", () => {
+test("attachAutostartDisk forces 1541 unit 8 even after SD2IEC IEC session", () => {
   clearUnitMounts();
-  const vars = new Map([["vice_work_disk", "8_fs"]]);
+  const vars = new Map([["vice_work_disk", "disabled"]]);
   const files = new Map([["WORK DISK.D64", new Uint8Array([1])]]);
   const emu = mockEmu("WORK DISK.D64", files, vars);
   applyIecUnit(emu, "sd2iec", 8);
-  assert.equal(vars.get("vice_work_disk"), "8_d64");
+  assert.equal(vars.get("vice_work_disk"), "disabled");
   const game = new Uint8Array(174848).fill(0x42);
   assert.equal(attachAutostartDisk(emu, game, "Burger_Time.d64", "1541", 8), true);
   assert.equal(vars.get("vice_work_disk"), "8_d64");

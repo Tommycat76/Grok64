@@ -13,8 +13,8 @@ import { floppyPlayCanHotSwap, iecForAutostart, isFsWorkDisk, kindOf, needsTyped
  *   - CMD HD is a real VICE CMD HD (dosCMDHD.bin on the drive CPU, true
  *     drive ON, virtual traps OFF). Prefer unit 9 so floppy Play does not
  *     evict the HD.
- *   - SD2IEC is the virtual FAT card (VICE `N_fs` + partition files), NOT
- *     KERNAL SoftIEC / C64 Ultimate-style vector patches. Floppy Play may
+ *   - SD2IEC is Grok64 software on the IEC bus (KERNAL vector intercept +
+ *     IndexedDB/FAT card), not a VICE drive type. Floppy Play may
  *     temporarily recycle unit 8 to a 1541; the card preference stays.
  *
  * Autostart is applied only after FS + ROMs + drive attach are ready.
@@ -521,26 +521,26 @@ export function planPlay(input: {
 /**
  * VICE resources for a live attach.
  * CMD HD: real drive firmware (ROM injected separately), no FS-device, no traps.
- * SD2IEC: VICE directory device (`N_fs`) for the FAT card — not KERNAL patches.
+ * SD2IEC: no VICE drive on that unit — Grok64 answers IEC in software.
  * 1541/1581: true drive + matching work disk.
  */
 export function liveDriveOptions(live: DriveAttach): Record<string, string> {
   const typeKey = `vice_drive${live.unit}_type`;
   const typed = { [typeKey]: viceDriveTypeOption(live.iec) };
+  if (live.iec === "sd2iec") {
+    return {
+      vice_work_disk: "disabled",
+      vice_virtual_device_traps: "disabled",
+      vice_drive_true_emulation: "enabled",
+      [typeKey]: "None",
+    };
+  }
   if (live.iec === "cmdhd") {
     return {
       vice_work_disk: "disabled",
       vice_virtual_device_traps: "disabled",
       vice_drive_true_emulation: "enabled",
       ...typed,
-    };
-  }
-  if (live.iec === "sd2iec") {
-    return {
-      vice_work_disk: `${live.unit}_d64`,
-      vice_virtual_device_traps: "disabled",
-      vice_drive_true_emulation: "enabled",
-      [typeKey]: "1541",
     };
   }
   if (live.iec === "1581") {
@@ -563,6 +563,7 @@ export function liveDriveOptions(live: DriveAttach): Record<string, string> {
 export function viceDriveTypeCode(iec: IecDrive): number {
   if (iec === "cmdhd") return 4844;
   if (iec === "1581") return 1581;
+  if (iec === "sd2iec") return 0;
   return 1541;
 }
 
@@ -605,7 +606,11 @@ export function viceRcForUser(
   opts?: { cmdRom?: boolean },
 ): string {
   const drive8 =
-    live.unit === 8 && live.iec !== "sd2iec" ? viceDriveTypeCode(live.iec) : 1541;
+    live.unit === 8 && live.iec === "sd2iec"
+      ? 0
+      : live.unit === 8
+        ? viceDriveTypeCode(live.iec)
+        : 1541;
   const lines = ["[C64]", `Drive8Type=${drive8}`];
   const cmdUnit =
     user.iec === "cmdhd" && user.unit !== 8
@@ -620,11 +625,7 @@ export function viceRcForUser(
     /* Floppy Play stole #8 — keep user HD preference out of the live 1541. */
   }
   lines.push("DriveTrueEmulation=1");
-  if (live.iec === "sd2iec") {
-    lines.push("VirtualDevices=1");
-  } else {
-    lines.push("VirtualDevices=0");
-  }
+  lines.push("VirtualDevices=0");
   return `${lines.join("\n")}\n`;
 }
 

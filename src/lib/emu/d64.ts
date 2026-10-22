@@ -213,6 +213,45 @@ function petToAscii(raw: Uint8Array): string {
   return s.replace(/\s+/g, " ").trim();
 }
 
+/** Load one closed PRG from a 1541 D64 image (for SD2IEC CD-into-disk). */
+export function readD64Prg(image: Uint8Array, filePattern: string): Uint8Array | null {
+  if (image.byteLength < D64_SIZE) return null;
+  const upper = filePattern.replace(/^:/, "").toUpperCase();
+  const want = upper.replace(/\.PRG$/i, "");
+  const entry = listD64Directory(image).find((e) => {
+    if (!e.prg) return false;
+    const n = e.name.toUpperCase();
+    return n === want || n === upper || `${n}.PRG` === upper;
+  });
+  if (!entry) return null;
+  const dirOff = entry.slot;
+  const track = image[dirOff + 3]!;
+  const sector = image[dirOff + 4]!;
+  const blocks = image[dirOff + 30]! | (image[dirOff + 31]! << 8);
+  const payload = new Uint8Array(Math.max(2, blocks * 254 + 2));
+  let t = track;
+  let s = sector;
+  let written = 0;
+  let guard = 0;
+  while (t && guard++ < 512 && written < payload.length - 2) {
+    const off = lba(t, s) * 256;
+    if (off + 256 > image.byteLength) break;
+    const linkT = image[off]!;
+    const linkS = image[off + 1]!;
+    const chunkLen = linkT ? 254 : Math.max(0, (image[off + 1] ?? 0) - 1);
+    const chunk = image.subarray(off + 2, off + 2 + Math.min(254, chunkLen || 254));
+    if (written + chunk.length > payload.length - 2) break;
+    payload.set(chunk, 2 + written);
+    written += chunk.length;
+    if (!linkT) break;
+    t = linkT;
+    s = linkS;
+  }
+  payload[0] = 0x01;
+  payload[1] = 0x08;
+  return payload.subarray(0, 2 + written);
+}
+
 export function listD64Directory(data: Uint8Array): D64DirEntry[] {
   if (data.byteLength < D64_SIZE) return [];
   const bam = lba(18, 0) * 256;

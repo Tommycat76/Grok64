@@ -13,7 +13,8 @@ import {
   type DriveAttach,
 } from "./play-session";
 import { cmdDriveMap, cmdSwapUnits, sd2iecSwapUnit } from "./hw-buttons";
-import { buildSd2iecD64, type SdPartition } from "./sd2iec";
+import { attachSd2iecBus, type SdPartition } from "./sd2iec";
+import type { Sd2iecVolume } from "./sd2iec-volume";
 import type {
   DriveMode,
   IecDrive,
@@ -1721,8 +1722,8 @@ export async function prepareCore(
     }
   }
   injectViceRc(emu, viceRcForDrives(viceMap, false));
-  if (opts.live.iec === "sd2iec" && opts.sdParts?.length) {
-    mountSd2iecD64(emu, opts.live.unit, buildSd2iecD64(opts.sdParts));
+  if (opts.live.iec === "sd2iec") {
+    attachSd2iecBus(emu, opts.live.unit);
   }
   applyRuntimeOptions(emu, viceDriveTypeVars(viceMap));
   applyIecUnit(emu, opts.live.iec, opts.live.unit);
@@ -1855,13 +1856,21 @@ export function coreHasFs(emu: EjsInstance | null): boolean {
 }
 
 export function mountSd2iecD64(emu: EjsInstance | null, unit: IecUnit, data: Uint8Array): boolean {
-  if (!emu || data.byteLength < 174848) return false;
-  const name = `SD2IEC${unit}.D64`;
-  const wrote = writeBootFile(emu, data, name);
+  const format = data.byteLength >= 819200 ? "d81" : "d64";
+  const driveType = format === "d81" ? "1581" : "1541";
+  return mountSd2iecVolume(emu, unit, { data, format, driveType, blocksUsed: 0 });
+}
+
+export function mountSd2iecVolume(emu: EjsInstance | null, unit: IecUnit, vol: Sd2iecVolume): boolean {
+  const min = vol.format === "d81" ? 819200 : 174848;
+  if (!emu || vol.data.byteLength < min) return false;
+  const ext = vol.format === "d81" ? "D81" : "D64";
+  const name = `SD2IEC${unit}.${ext}`;
+  const wrote = writeBootFile(emu, vol.data, name);
   if (wrote) {
     emu.fileName = name;
     unitMounts.set(unit, name);
-    glog("sd2iec-d64-mount", { unit, name, bytes: data.byteLength });
+    glog("sd2iec-volume-mount", { unit, name, format: vol.format, bytes: vol.data.byteLength });
   }
   return wrote;
 }
@@ -1869,11 +1878,12 @@ export function mountSd2iecD64(emu: EjsInstance | null, unit: IecUnit, data: Uin
 export function remountSd2iecFromParts(
   emu: EjsInstance | null,
   unit: IecUnit,
-  parts: SdPartition[],
+  _parts?: SdPartition[],
 ): boolean {
-  if (!emu || !parts.length) return false;
+  if (!emu) return false;
+  attachSd2iecBus(emu, unit);
   applyIecUnit(emu, "sd2iec", unit);
-  return mountSd2iecD64(emu, unit, buildSd2iecD64(parts));
+  return true;
 }
 
 export function writeBootFile(emu: EjsInstance | null, data: Uint8Array, preferred?: string | null): boolean {

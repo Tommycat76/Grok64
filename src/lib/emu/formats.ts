@@ -35,6 +35,11 @@ export function extOf(name: string): string {
   return i >= 0 ? name.slice(i + 1).toLowerCase() : "";
 }
 
+/** PRG load address $0801 — needs RUN after LOAD, not RUN/STOP. */
+export function isBasicPrg(data: Uint8Array): boolean {
+  return data.byteLength >= 2 && data[0] === 0x01 && data[1] === 0x08;
+}
+
 export function kindOf(name: string): MediaKind {
   const e = extOf(name);
   const map: Record<string, MediaKind> = {

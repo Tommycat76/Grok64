@@ -15,7 +15,7 @@ Last reviewed: Grok64 branch `cursor/cmd-sd2iec-ui-f650`.
 
 | Layer | Grok64 behavior |
 |-------|-----------------|
-| **SD2IEC** | IndexedDB card → FAT16 image → VICE `N_fs` work disk **plus** RAM IEC hooks (`sd2iec.ts`) for command channel, `$`, partitions, and fast path loads |
+| **SD2IEC** | IndexedDB card / FAT `.img` import → Grok64 software IEC device (`attachSd2iecBus` + `tickSd2iec` in `sd2iec.ts`). VICE has **no** drive on that unit (`DriveNType=0`). See `docs/SD2IEC_IEC_BUS.md`. |
 | **CMD HD** | VICE true drive + CMD HD DOS ROM (`dosCMDHD.bin`); `vice_work_disk=disabled`; SWAP button via `cmdHdSwap()` |
 | **JiffyDOS** | User-supplied ROMs injected into VICE FS; `vice_jiffydos=enabled` when C64+1541 pair present |
 
@@ -38,7 +38,7 @@ Last reviewed: Grok64 branch `cursor/cmd-sd2iec-ui-f650`.
 | `$` directory | **Implemented** | BASIC-linked listing in RAM hook |
 | `$=P` partition catalog | **Implemented** | |
 | `$=pattern` filtered listing | **Implemented** | Wildcards `*` `?` (this PR) |
-| `.D64/.D71/.D81/.DNP` on card | **Partial** | Files on FAT; freeze button cycles images in VICE playlist |
+| `.D64/.D71/.D81/.DNP` on card | **Partial** | `CD:IMAGE.D64` mounts in software; D64 PRG load/list OK; D81/DNP TBD |
 | P00 wrapper | **Implemented** | Import/export |
 | MBR multi-partition `.img` | **Implemented** | `exportSdImage` / `importSdImage` |
 | Subdir file paths | **Implemented** | `path` field on SD files |

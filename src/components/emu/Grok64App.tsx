@@ -83,7 +83,8 @@ import {
   formatPartition,
   listPartitions,
   partitionsForMount,
-  buildSd2iecD64,
+  attachSd2iecBus,
+  tickSd2iec,
   resetSd2iecSession,
   runSdCommand,
   setIecDevice,
@@ -136,8 +137,17 @@ import { snapshotDevice, readViewport, applyViewport, detectDevice, isIos, isIos
 import { applyTabletContainFit, tabletBezelAvail, tabletGlassFillsBezel } from "@/lib/emu/tablet-fit";
 import { detectJoyPort, detectSoftwareStandard } from "@/lib/emu/region";
 import { RETRO_BTN } from "@/lib/emu/types";
-import { dispatchC64Key, isJoyFireKey, muteC64Space, onBeforeC64Space } from "@/lib/emu/keys";
-import { bootFileName, driveForPlay, d64DiskName, isDiskKind, isWorkDiskImage, kindOf, needsTypedBoot } from "@/lib/emu/formats";
+import { dispatchC64Key, isJoyFireKey, muteC64Space, onBeforeC64Space, typeC64 } from "@/lib/emu/keys";
+import {
+  bootFileName,
+  driveForPlay,
+  d64DiskName,
+  isBasicPrg,
+  isDiskKind,
+  isWorkDiskImage,
+  kindOf,
+  needsTypedBoot,
+} from "@/lib/emu/formats";
 import { wrapForDiskSwap, prepareAutostartDisk, wantsCracktroNudge } from "@/lib/emu/d64";
 import { isSid, psidToPrg } from "@/lib/emu/psid";
 import { toArrayBuffer } from "@/lib/emu/archive";
@@ -223,6 +233,7 @@ export function Grok64App() {
   const splashRef = useRef(null);
   const loadGenRef = useRef(0);
   const playModeRef = useRef("basic");
+  const basicRunAfterLoadRef = useRef(false);
   const persistGateRef = useRef(true);
   const inGameplayRef = useRef(false);
   const cracktroOnceRef = useRef("");
@@ -1012,11 +1023,17 @@ export function Grok64App() {
           applyEmuVolume(emuRef.current, vol.muted, vol.volume);
           gestureUnlockAudio(emuRef.current);
           scheduleCracktroNudge(unlockedTitle);
-          if (playModeRef.current !== "disk" && playModeRef.current !== "basic" && playModeRef.current !== "cart") {
+          if (basicRunAfterLoadRef.current && playModeRef.current !== "disk" && playModeRef.current !== "cart") {
+            basicRunAfterLoadRef.current = false;
+            const runGen = playLockGen.current;
             window.setTimeout(() => {
-              dispatchC64Key("Escape", "Escape", true);
-              window.setTimeout(() => dispatchC64Key("Escape", "Escape", false), 90);
-            }, 650);
+              if (playLockGen.current !== runGen) return;
+              void typeC64("RUN", { delayMs: 55, cancelled: () => playLockGen.current !== runGen }).then(() => {
+                if (playLockGen.current !== runGen) return;
+                dispatchC64Key("Enter", "Enter", true);
+                window.setTimeout(() => dispatchC64Key("Enter", "Enter", false), 90);
+              });
+            }, 700);
           }
           if (isIosPhone()) {
             const playerEl = document.getElementById("grok64-player");
@@ -1132,6 +1149,7 @@ export function Grok64App() {
       try {
         if (spec.user.iec === "sd2iec" || spec.live.iec === "sd2iec") {
           parts = await partitionsForMount();
+          attachSd2iecBus(emu, spec.live.unit);
         }
       } catch {
         /* optional card */
@@ -1579,6 +1597,8 @@ export function Grok64App() {
         return;
       }
       const origKind = kindOf(bootName);
+      basicRunAfterLoadRef.current =
+        !work && opts.autostart !== false && (origKind === "prg" || origKind === "p00") && isBasicPrg(new Uint8Array(safe));
       const diskLoad = !work && needsTypedBoot(origKind) && opts.autostart === false;
       const user = userAttachFromMap(useEmu.getState().iecMap);
       const userIec = user.iec;
@@ -2494,8 +2514,10 @@ export function Grok64App() {
       raf = requestAnimationFrame(tick);
       const emu = emuRef.current;
       if (!emu) return;
-      /* Real SD2IEC/CMD — no KERNAL SoftIEC hooks. */
       const st = useEmu.getState();
+      if (mapHasDrive(st.iecMap, "sd2iec") && st.running && !playLockRef.current) {
+        void tickSd2iec(emu);
+      }
       if (st.mouseMode && !playLockRef.current && !st.booting && st.running) {
         const v = mouseVelRef.current;
         const b = mouseBtnRef.current;
@@ -2569,13 +2591,10 @@ export function Grok64App() {
       const disks = parts.flatMap((p) => {
         const d64ish = p.files.filter((f) => /\.(d64|d71|d81|g64|g71)$/i.test(f.name));
         if (d64ish.length) {
-          return d64ish.map((f) => ({
-            name: f.name,
-            data: buildSd2iecD64([{ ...p, files: [f] }]),
-          }));
+          return d64ish.map((f) => ({ name: f.name, data: new Uint8Array(f.data) }));
         }
         if (p.files.length) {
-          return [{ name: `PART${p.id}.D64`, data: buildSd2iecD64([p]) }];
+          return [];
         }
         return [];
       });

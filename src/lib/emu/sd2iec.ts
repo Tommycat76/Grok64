@@ -1,5 +1,5 @@
 import { openExpansionDb, STORES, txDone } from "./expansion-db";
-import { packPrgsToD64, stripP00 } from "./d64";
+import { listD64Directory, readD64Prg } from "./d64";
 import type { IecUnit } from "./types";
 
 const SECTOR = 512;
@@ -38,6 +38,7 @@ export function resetSd2iecSession(): void {
   currentDir = "";
   lastStatus = "00, OK,00,00";
   openFiles.clear();
+  clearMountedDiskImage();
 }
 
 function normDir(path: string): string {
@@ -432,7 +433,33 @@ async function subdirsInDir(partId: number, dir = currentDir): Promise<string[]>
   return [...out].sort();
 }
 
-async function filesInDir(partId: number, dir = currentDir): Promise<SdFile[]> {
+async function findFileOnCard(partId: number, pattern: string): Promise<SdFile | null> {
+  const files = await filesInDir(partId, currentDir, false);
+  const upper = pattern.toUpperCase();
+  return (
+    files.find((f) => petsciiName(basename(f)) === upper || basename(f).toUpperCase() === upper) ??
+    files.find((f) => matchPattern(petsciiName(basename(f)), upper) || matchPattern(basename(f), upper)) ??
+    null
+  );
+}
+
+async function filesInDir(partId: number, dir = currentDir, honorMount = true): Promise<SdFile[]> {
+  if (honorMount && mountedDiskImage && mountedDiskImage.byteLength >= 174848) {
+    return listD64Directory(mountedDiskImage)
+      .filter((e) => e.prg)
+      .map((e) => ({
+        id: e.name,
+        name: `${e.name}.PRG`,
+        size: e.blocks * 254,
+        data: (() => {
+          const prg = readD64Prg(mountedDiskImage!, e.name);
+          if (!prg) return new ArrayBuffer(0);
+          const copy = new Uint8Array(prg.byteLength);
+          copy.set(prg);
+          return copy.buffer;
+        })(),
+      }));
+  }
   const part = await loadPart(partId);
   const files = part?.files ?? [];
   const want = normDir(dir);
@@ -445,6 +472,21 @@ async function filesInDir(partId: number, dir = currentDir): Promise<SdFile[]> {
 }
 
 async function findFile(partId: number, pattern: string): Promise<SdFile | null> {
+  if (mountedDiskImage && mountedDiskImage.byteLength >= 174848) {
+    const prg = readD64Prg(mountedDiskImage, pattern);
+    if (prg) {
+      return {
+        id: pattern,
+        name: pattern,
+        size: prg.byteLength,
+        data: (() => {
+          const copy = new Uint8Array(prg.byteLength);
+          copy.set(prg);
+          return copy.buffer;
+        })(),
+      };
+    }
+  }
   const files = await filesInDir(partId);
   const upper = pattern.toUpperCase();
   if (!pattern || pattern === "*" || pattern === "*.*") return files[0] ?? null;
@@ -468,6 +510,18 @@ let currentPart = 0;
 let currentDir = "";
 let lastStatus = "00, OK,00,00";
 let hooksInstalled = false;
+/** After `CD:GAME.D64`, listings/loads come from this image (sd2iec firmware behavior). */
+let mountedDiskImage: Uint8Array | null = null;
+let mountedDiskName = "";
+
+export function clearMountedDiskImage() {
+  mountedDiskImage = null;
+  mountedDiskName = "";
+}
+
+export function mountedDiskImageName(): string | null {
+  return mountedDiskName || null;
+}
 
 const IEC_Y = 51200;
 const CMD_READ = 1;
@@ -590,15 +644,30 @@ export async function runSdCommand(cmd: string): Promise<string> {
     if (upper.startsWith("CD")) {
       let arg = trimmed.slice(2).replace(/^:/, "").trim();
       if (arg === "<-" || arg === "_" || arg === "..") {
-        currentDir = parentDir(currentDir);
+        if (mountedDiskImage) {
+          clearMountedDiskImage();
+        } else {
+          currentDir = parentDir(currentDir);
+        }
       } else if (arg === "//" || arg === "/" || arg === "") {
         currentDir = "";
+        clearMountedDiskImage();
       } else if (arg.startsWith("//") || /^\d+\s*:/.test(arg)) {
         const p = parsePath(arg.startsWith("//") ? `//${arg.slice(2)}` : arg);
         currentPart = p.part;
         const sub = (p.file || p.path || "").replace(/\/$/, "");
         currentDir = sub ? joinDir("", sub) : "";
       } else {
+        const diskTarget = arg.replace(/^["']|["']$/g, "");
+        const onCard = await findFileOnCard(currentPart, diskTarget);
+        if (onCard && /\.(d64|d81|d71|dnp)$/i.test(basename(onCard))) {
+          mountedDiskImage = new Uint8Array(onCard.data);
+          mountedDiskName = basename(onCard);
+          currentDir = "";
+          lastStatus = "00, OK,00,00";
+          return lastStatus;
+        }
+        if (mountedDiskImage) clearMountedDiskImage();
         currentDir = joinDir(currentDir, arg);
         await ensureDir(currentPart, currentDir);
       }
@@ -753,6 +822,13 @@ function patchTalkVector(ram: Uint8Array, off: number, target: number) {
     }
   }
   put16(ram, off, target);
+}
+
+/** Attach Grok64 SD2IEC on the IEC bus (KERNAL intercept — no VICE drive on this unit). */
+export function attachSd2iecBus(emu: EjsLike | null, unit: IecUnit = deviceUnit): boolean {
+  setIecDevice(unit);
+  if (!emu) return false;
+  return installSd2iecHooks(emu);
 }
 
 export function installSd2iecHooks(emu: EjsLike): boolean {
@@ -1066,22 +1142,10 @@ export async function partitionsForMount(): Promise<SdPartition[]> {
     .filter((p) => p.files.length > 0);
 }
 
-/** Build a real 1541 D64 from the SD card folders (for VICE true drive — not `N_fs`). */
-export function buildSd2iecD64(parts: SdPartition[], diskName = "SD2IEC"): Uint8Array {
-  const files: { name: string; data: Uint8Array }[] = [];
-  for (const part of parts) {
-    for (const f of part.files) {
-      const raw = new Uint8Array(f.data);
-      if (/\.d64$/i.test(f.name) && raw.byteLength >= 174848) {
-        return raw.subarray(0, 174848);
-      }
-      const p00 = stripP00(raw);
-      const payload = p00 ?? raw;
-      if (payload.byteLength >= 2) {
-        const path = f.path ? `${f.path}/${f.name}` : f.name;
-        files.push({ name: path, data: payload });
-      }
-    }
-  }
-  return packPrgsToD64(files, diskName);
-}
+export {
+  buildSd2iecD64,
+  buildSd2iecVolume,
+  estimateSd2iecBlocks,
+  lastSd2iecVolume,
+  type Sd2iecVolume,
+} from "./sd2iec-volume";
