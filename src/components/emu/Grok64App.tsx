@@ -83,12 +83,13 @@ import {
   formatPartition,
   listPartitions,
   partitionsForMount,
-  attachSd2iecBus,
-  tickSd2iec,
   resetSd2iecSession,
   runSdCommand,
   setIecDevice,
+  setSd2iecJiffyFast,
 } from "@/lib/emu/sd2iec";
+import { attachGrok64Sd2iec, tickGrok64Iec } from "@/lib/emu/grok64-vice-bridge";
+import { readC64Byte, readC64Bytes, writeC64Byte, writeC64Bytes } from "@/lib/emu/c64-memory";
 import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor } from "@/lib/emu/vice-extras";
 import { HwHoldChip } from "@/components/emu/HwHoldChip";
 import {
@@ -643,6 +644,14 @@ export function Grok64App() {
         }
       },
       screenText: () => readScreenText(emuRef.current),
+      readC64Byte: (addr) => readC64Byte(emuRef.current, addr),
+      writeC64Byte: (addr, v) => writeC64Byte(emuRef.current, addr, v),
+      readC64Bytes: (addr, len) => {
+        const u = readC64Bytes(emuRef.current, addr, len);
+        return u ? Array.from(u) : null;
+      },
+      writeC64Bytes: (addr, arr) => writeC64Bytes(emuRef.current, addr, new Uint8Array(arr)),
+      setSd2iecUnit: (unit) => setIecDevice(unit),
       settings: () => {
         const st = useEmu.getState();
         return {
@@ -1149,7 +1158,8 @@ export function Grok64App() {
       try {
         if (spec.user.iec === "sd2iec" || spec.live.iec === "sd2iec") {
           parts = await partitionsForMount();
-          attachSd2iecBus(emu, spec.live.unit);
+          attachGrok64Sd2iec(emu, spec.live.unit);
+          setSd2iecJiffyFast(st.jiffyDos);
         }
       } catch {
         /* optional card */
@@ -2516,7 +2526,7 @@ export function Grok64App() {
       if (!emu) return;
       const st = useEmu.getState();
       if (mapHasDrive(st.iecMap, "sd2iec") && st.running && !playLockRef.current) {
-        void tickSd2iec(emu);
+        void tickGrok64Iec(emu);
       }
       if (st.mouseMode && !playLockRef.current && !st.booting && st.running) {
         const v = mouseVelRef.current;

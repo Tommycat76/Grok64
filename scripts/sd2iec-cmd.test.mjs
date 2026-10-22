@@ -22,6 +22,13 @@ test("CD<- and CD:_ return to parent directory", async () => {
   assert.match(await runSdCommand("CD:_"), /OK/);
 });
 
+test("1//:c64os partition path (sd2iec 1-based)", async () => {
+  await formatPartition(0);
+  await addSdFile(0, "BOOT.PRG", new Uint8Array([1, 8, 0, 0]).buffer, "c64os");
+  assert.match(await runSdCommand('CD:"1//:c64os"'), /OK/);
+  assert.match(await runSdCommand("X"), /c64os/i);
+});
+
 test("CP switches partition", async () => {
   assert.equal(await runSdCommand("CP1"), "00, OK,00,00");
   assert.match(await runSdCommand("X"), /PART 1/);

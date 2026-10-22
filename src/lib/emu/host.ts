@@ -13,7 +13,8 @@ import {
   type DriveAttach,
 } from "./play-session";
 import { cmdDriveMap, cmdSwapUnits, sd2iecSwapUnit } from "./hw-buttons";
-import { attachSd2iecBus, type SdPartition } from "./sd2iec";
+import { attachGrok64Sd2iec, wireGrok64ViceHost } from "./grok64-vice-bridge";
+import type { SdPartition } from "./sd2iec";
 import type { Sd2iecVolume } from "./sd2iec-volume";
 import type {
   DriveMode,
@@ -33,7 +34,21 @@ import { RETRO_BTN } from "./types";
 import { glog } from "./debug";
 import { stopIosPresent, stripIosPresent } from "./ios-present";
 
-const DATA = "https://cdn.emulatorjs.org/stable/data/";
+const CDN_DATA = "https://cdn.emulatorjs.org/stable/data/";
+
+/** EmulatorJS data root — Grok64 custom VICE core on test branch when present. */
+export function emulatorDataPath(): string {
+  if (typeof import.meta !== "undefined" && import.meta.env?.VITE_GROK64_VICE_DATAPATH) {
+    return String(import.meta.env.VITE_GROK64_VICE_DATAPATH).replace(/\/$/, "") + "/";
+  }
+  if (typeof window !== "undefined") {
+    const w = window as unknown as { __GROK64_VICE_DATA?: string };
+    if (w.__GROK64_VICE_DATA) return w.__GROK64_VICE_DATA.replace(/\/$/, "") + "/";
+  }
+  return CDN_DATA;
+}
+
+const DATA = CDN_DATA;
 
 const SCRIPTS = [
   "nipplejs.js",
@@ -623,9 +638,10 @@ export async function bootEmulator(el: HTMLElement, cfg: BootConfig): Promise<Ej
   clearRuntimeViceOpts();
   const defaults = coreOptions(cfg);
   rememberWorkDisk(defaults.vice_work_disk);
+  const dataPath = emulatorDataPath();
   const config: Record<string, unknown> = {
     gameUrl: cfg.gameUrl,
-    dataPath: DATA,
+    dataPath,
     system: cfg.core,
     gameName: (cfg.gameName || "GROK64").replace(/[#<$+%>!`&*'|{}/\\?"=@:^\r\n]/g, "").trim() || "GROK64",
     color: "#c8ccd4",
@@ -1723,7 +1739,8 @@ export async function prepareCore(
   }
   injectViceRc(emu, viceRcForDrives(viceMap, false));
   if (opts.live.iec === "sd2iec") {
-    attachSd2iecBus(emu, opts.live.unit);
+    wireGrok64ViceHost(emu);
+    attachGrok64Sd2iec(emu, opts.live.unit);
   }
   applyRuntimeOptions(emu, viceDriveTypeVars(viceMap));
   applyIecUnit(emu, opts.live.iec, opts.live.unit);
@@ -1881,7 +1898,8 @@ export function remountSd2iecFromParts(
   _parts?: SdPartition[],
 ): boolean {
   if (!emu) return false;
-  attachSd2iecBus(emu, unit);
+  wireGrok64ViceHost(emu);
+  attachGrok64Sd2iec(emu, unit);
   applyIecUnit(emu, "sd2iec", unit);
   return true;
 }

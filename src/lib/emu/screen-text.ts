@@ -16,46 +16,10 @@ function petToChar(code: number): string {
   return " ";
 }
 
-type RamEmu = {
-  Module?: {
-    HEAPU8?: Uint8Array;
-    HEAP8?: Int8Array;
-    wasmMemory?: WebAssembly.Memory;
-    _retro_get_memory_data?: (n: number) => number;
-    _retro_get_memory_size?: (n: number) => number;
-    cwrap?: (n: string, r: string | null, a: string[]) => (...a: unknown[]) => unknown;
-  };
-};
-
-function c64Ram(emu: RamEmu | null): Uint8Array | null {
-  const mod = emu?.Module;
-  if (!mod) return null;
-  const heap =
-    mod.HEAPU8 ??
-    (mod.HEAP8 ? new Uint8Array(mod.HEAP8.buffer) : null) ??
-    (mod.wasmMemory ? new Uint8Array(mod.wasmMemory.buffer) : null);
-  if (!heap) return null;
-  let ptr = 0;
-  let size = 0;
-  try {
-    if (typeof mod._retro_get_memory_data === "function") {
-      ptr = mod._retro_get_memory_data(0) as number;
-      size = mod._retro_get_memory_size?.(0) ?? 0;
-    } else if (mod.cwrap) {
-      const getData = mod.cwrap("retro_get_memory_data", "number", ["number"]);
-      const getSize = mod.cwrap("retro_get_memory_size", "number", ["number"]);
-      ptr = getData(0) as number;
-      size = getSize(0) as number;
-    }
-  } catch {
-    return null;
-  }
-  if (!ptr || size < 65536) return null;
-  return heap.subarray(ptr, ptr + Math.min(size, 65536));
-}
+import { c64RamView, type RamEmu } from "./c64-memory";
 
 export function readScreenText(emu: RamEmu | null): string {
-  const ram = c64Ram(emu);
+  const ram = c64RamView(emu);
   if (!ram) return "";
   const lines: string[] = [];
   for (let row = 0; row < 25; row++) {

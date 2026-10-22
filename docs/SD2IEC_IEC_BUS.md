@@ -27,4 +27,19 @@ The shipped WASM (`vice_x64sc` via EmulatorJS) does **not** export hooks to snoo
 4. Ship a custom core blob in `public/system/vice/` and select it when IEC map slot is `sd2iec`.
 5. Regression: `npm run test:cmd-sd2iec`, C64 OS fixture (`GROK64_C64OS_FIXTURE`), Jiffy fast-load spot checks.
 
-Until that rebuild lands, the KERNAL intercept path is the supported production approach and matches “software on the IEC bus” from the C64’s point of view (LOAD/CLOSE/OPEN to device 8).
+## Grok64 VICE rebuild (Tom-approved)
+
+| Item | Status |
+|------|--------|
+| Build tree + `grok64_library.js` Emscripten imports | `third_party/vice-grok64/` |
+| `build.sh` → `public/system/vice/emulatorjs/data/cores/` | Run when `emcc` is available |
+| JS host (`grok64-vice-bridge.ts`) | Wired — auto-detects `_grok64_sd2iec_*` exports |
+| Stock CDN core fallback | `attachGrok64Sd2iec` + `tickGrok64Iec` (KERNAL IEC layer) |
+| C64 RAM from JS | `c64-memory.ts` + `__g64.readC64Byte` / `writeC64Byte` |
+| Unit **12** + `1//:c64os` paths | `setSd2iecUnit(12)` + `parsePath` / `CD` |
+
+Enable custom core when built:
+
+`VITE_GROK64_VICE_DATAPATH=/system/vice/emulatorjs/data VITE_GROK64_VICE_CORE=grok64`
+
+Until the WASM blob is present, behavior matches the JS IEC device (same firmware / card backing).

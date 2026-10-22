@@ -1,6 +1,10 @@
 import { openExpansionDb, STORES, txDone } from "./expansion-db";
+import { c64RamView } from "./c64-memory";
 import { listD64Directory, readD64Prg } from "./d64";
 import type { IecUnit } from "./types";
+
+/** IEC device numbers SD2IEC may answer on (incl. C64 OS on #12). */
+export type IecDeviceNumber = IecUnit | 12;
 
 const SECTOR = 512;
 const CLUSTER_BYTES = 4;
@@ -533,14 +537,19 @@ const CMD_SETIN = 6;
 const CMD_SETOUT = 7;
 const CMD_CLRCH = 8;
 const CMD_TALK = 9;
-let deviceUnit: IecUnit = 8;
+let deviceUnit: IecDeviceNumber = 8;
+let jiffyFastPath = false;
 
-export function setIecDevice(unit: IecUnit) {
+export function setSd2iecJiffyFast(on: boolean) {
+  jiffyFastPath = on;
+}
+
+export function setIecDevice(unit: IecDeviceNumber) {
   deviceUnit = unit;
   hooksInstalled = false;
 }
 
-export function iecDevice(): IecUnit {
+export function iecDevice(): IecDeviceNumber {
   return deviceUnit;
 }
 
@@ -573,10 +582,14 @@ function partFromHardware(n: number): number {
 function parsePath(raw: string): { part: number; path: string; file: string } {
   let part = currentPart;
   let rest = raw.replace(/^["']|["']$/g, "").trim();
-  const sd2 = rest.match(/^(\d+)\/\/(.*)$/);
+  const sd2 = rest.match(/^(\d+)\/\/:?(.+)?$/);
   if (sd2) {
     part = partFromHardware(Number(sd2[1]));
-    rest = sd2[2].trim();
+    rest = (sd2[2] || "").trim().replace(/^:/, "");
+    const slash = rest.lastIndexOf("/");
+    return slash >= 0
+      ? { part, path: rest.slice(0, slash), file: rest.slice(slash + 1) }
+      : { part, path: "", file: rest };
   }
   const m = rest.match(/^\/\/(\d+)\s*:?(.*)$/) || rest.match(/^(\d+)\s*:(.*)$/);
   if (m) {
@@ -652,6 +665,12 @@ export async function runSdCommand(cmd: string): Promise<string> {
       } else if (arg === "//" || arg === "/" || arg === "") {
         currentDir = "";
         clearMountedDiskImage();
+      } else if (/^\d+\/\//.test(arg.replace(/^["']|["']$/g, ""))) {
+        const p = parsePath(arg.replace(/^["']|["']$/g, ""));
+        currentPart = p.part;
+        const merged = [p.path, p.file].filter(Boolean).join("/");
+        currentDir = normDir(merged);
+        if (currentDir) await ensureDir(currentPart, currentDir);
       } else if (arg.startsWith("//") || /^\d+\s*:/.test(arg)) {
         const p = parsePath(arg.startsWith("//") ? `//${arg.slice(2)}` : arg);
         currentPart = p.part;
@@ -725,44 +744,13 @@ export async function runSdCommand(cmd: string): Promise<string> {
   }
 }
 
-type EjsLike = { Module?: Record<string, unknown>; gameManager?: { FS?: EmscriptenLite } };
+export type EjsLike = { Module?: Record<string, unknown>; gameManager?: { FS?: EmscriptenLite } };
 interface EmscriptenLite {
   mkdir?: (p: string) => void;
 }
 
 function c64Ram(emu: EjsLike): Uint8Array | null {
-  const mod = emu.Module;
-  if (!mod) return null;
-  const heap =
-    (mod.HEAPU8 as Uint8Array | undefined) ??
-    (mod.HEAP8 ? new Uint8Array((mod.HEAP8 as Int8Array).buffer) : null) ??
-    (mod.wasmMemory ? new Uint8Array((mod.wasmMemory as WebAssembly.Memory).buffer) : null);
-  if (!heap) return null;
-  let ptr = 0;
-  let size = 0;
-  try {
-    if (typeof mod._retro_get_memory_data === "function") {
-      ptr = mod._retro_get_memory_data(0) as number;
-      size = (mod._retro_get_memory_size as (n: number) => number)?.(0) ?? 0;
-    } else if (mod.cwrap) {
-      const getData = (mod.cwrap as (n: string, r: string | null, a: string[]) => (...a: unknown[]) => unknown)(
-        "retro_get_memory_data",
-        "number",
-        ["number"],
-      );
-      const getSize = (mod.cwrap as (n: string, r: string | null, a: string[]) => (...a: unknown[]) => unknown)(
-        "retro_get_memory_size",
-        "number",
-        ["number"],
-      );
-      ptr = getData(0) as number;
-      size = getSize(0) as number;
-    }
-  } catch {
-    return null;
-  }
-  if (!ptr || size < 65536) return null;
-  return heap.subarray(ptr, ptr + Math.min(size, 65536));
+  return c64RamView(emu);
 }
 
 function patchVector(ram: Uint8Array, off: number, target: number) {
@@ -825,7 +813,7 @@ function patchTalkVector(ram: Uint8Array, off: number, target: number) {
 }
 
 /** Attach Grok64 SD2IEC on the IEC bus (KERNAL intercept — no VICE drive on this unit). */
-export function attachSd2iecBus(emu: EjsLike | null, unit: IecUnit = deviceUnit): boolean {
+export function attachSd2iecBus(emu: EjsLike | null, unit: IecDeviceNumber = deviceUnit): boolean {
   setIecDevice(unit);
   if (!emu) return false;
   return installSd2iecHooks(emu);
