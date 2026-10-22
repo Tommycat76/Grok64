@@ -51,6 +51,7 @@ STOCK="${ROOT}/package"
   "${RA}/vice_x64sc_libretro.wasm" "${RA}/vice_x64sc_libretro.js" \
   "${STOCK}/license.txt" "${STOCK}/core.json" "${STOCK}/reports/vice_x64sc.json"
 
-cp -f "${OUT}/vice_x64sc-wasm.data" "${OUT}/vice_x64sc_grok64-wasm.data"
-cp -f "${OUT}/vice_x64sc-wasm.data" "${OUT}/vice_x64sc-grok64-iec-wasm.data"
+for alias in vice_x64sc_grok64-wasm.data vice_x64sc-grok64-iec-wasm.data; do
+  cp -f "${OUT}/vice_x64sc-wasm.data" "${OUT}/${alias}"
+done
 echo "Wrote ${OUT}/vice_x64sc-wasm.data (+ grok64 IEC aliases)"
