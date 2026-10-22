@@ -60,13 +60,13 @@ const name = images[0];
 const fileBuf = readFileSync(join(dir, name));
 await page.evaluate(
   async ({ name, bytes }) => {
-    await window.__g64?.playBytes?.(name, bytes);
+    await window.__g64?.bootGeos?.(name, bytes);
   },
   { name, bytes: Array.from(fileBuf) },
 );
 
 await waitRunning(page, 120000);
-await page.waitForTimeout(45000);
+await page.waitForTimeout(90_000);
 
 const screen = await page.evaluate(() => window.__g64?.screenText?.() || "");
 const geosDesktop =

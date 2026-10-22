@@ -66,6 +66,8 @@ import {
   prepareCore,
   probeCore,
   readMountedMedia,
+  readMountedMediaForUi,
+  applyReal1541Timing,
   recycleCore,
   remountSd2iecFromParts,
   restoreState,
@@ -151,6 +153,7 @@ import { applyTabletContainFit, tabletBezelAvail, tabletGlassFillsBezel } from "
 import { detectJoyPort, detectSoftwareStandard } from "@/lib/emu/region";
 import { RETRO_BTN } from "@/lib/emu/types";
 import { feedBasicLine } from "@/lib/emu/c64-keyboard";
+import { focusGrok64Player } from "@/lib/emu/focus-player";
 import { dispatchC64Key, isJoyFireKey, muteC64Space, onBeforeC64Space, typeC64 } from "@/lib/emu/keys";
 import {
   bootFileName,
@@ -213,7 +216,13 @@ function playerCanvasReady(root?: HTMLElement | null) {
 }
 
 const PlayerMount = memo(function PlayerMount() {
-  return <div id="grok64-player" />;
+  return (
+    <div
+      id="grok64-player"
+      tabIndex={0}
+      onPointerDown={() => focusGrok64Player()}
+    />
+  );
 });
 
 let fitTimers: number[] = [];
@@ -529,11 +538,22 @@ export function Grok64App() {
         };
       },
       media: () =>
-        readMountedMedia(emuRef.current).map((m) => ({
+        readMountedMediaForUi(emuRef.current, useEmu.getState().insertedDiskName).map((m) => ({
           name: m.name,
           size: m.data.byteLength,
           disk: d64DiskName(m.data),
         })),
+      setWarp: (on) => {
+        useEmu.getState().setWarped(!!on);
+        setWarp(emuRef.current, !!on);
+      },
+      prepareReal1541Timing: () => {
+        const unit = useEmu.getState().iecUnit;
+        applyReal1541Timing(emuRef.current, unit);
+        useEmu.getState().setWarped(false);
+        setWarp(emuRef.current, false);
+        return true;
+      },
       fire: (down) => {
         if (playLockRef.current || useEmu.getState().booting) return;
         joyRef.current.fire = down;
@@ -775,7 +795,7 @@ export function Grok64App() {
         await playBufferRef.current(item.name, buf, { autostart: true, title: item.name });
         return item.id;
       },
-      playBytes: async (name, bytes) => {
+      playBytes: async (name, bytes, opts?: { autostart?: boolean }) => {
         let buf: ArrayBuffer;
         if (bytes instanceof ArrayBuffer) buf = bytes;
         else if (Array.isArray(bytes)) buf = new Uint8Array(bytes).buffer;
@@ -784,7 +804,8 @@ export function Grok64App() {
         } else {
           buf = new Uint8Array(bytes as ArrayLike<number>).buffer;
         }
-        await playBufferRef.current(name, buf, { autostart: true, title: name });
+        const autostart = opts?.autostart !== false;
+        await playBufferRef.current(name, buf, { autostart, title: name });
         return true;
       },
       /** Nuvie: zip `base.prg` + `base.reu` so libretro VICE pairs the REU image. */
@@ -1179,6 +1200,7 @@ export function Grok64App() {
         scheduleIosCrtPresents(emu, playerEl, "user-reset");
       }
     })();
+    focusGrok64Player();
     toast.message("Reset — READY");
   }, [syncJiffy]);
   resetReadyRef.current = resetReady;
@@ -2182,7 +2204,16 @@ export function Grok64App() {
       toast.error("Could not mount that disk");
       return;
     }
+    bootPathRef.current = mounted ?? boot;
     if (mounted) emuRef.current.fileName = mounted.replace(/^\//, "");
+    const FS = emuRef.current?.Module?.FS ?? emuRef.current?.gameManager?.FS;
+    for (const stale of ["blank.d64", "/blank.d64", "BLANK.D64"]) {
+      try {
+        FS?.unlink?.(stale);
+      } catch {
+        /* missing */
+      }
+    }
     applyRuntimeOptions(emuRef.current, {
       vice_drive_true_emulation: "enabled",
       vice_virtual_device_traps: "disabled",
@@ -2190,6 +2221,8 @@ export function Grok64App() {
     await flushEmuFs(emuRef.current, 600);
     await touchPlayed(item.id);
     const label = d64DiskName(media) ?? item.name.replace(/\.[a-z0-9]{2,4}$/i, "");
+    useEmu.getState().setInsertedDiskName(item.name);
+    focusGrok64Player();
     toast.success(`Inserted ${label} on drive ${unit}`);
   }, []);
   const toggleWarp = useCallback(() => {
@@ -2211,6 +2244,7 @@ export function Grok64App() {
     cartLiveRef.current = false;
     setCartLive(false);
     beginColdSession();
+    useEmu.getState().setInsertedDiskName(null);
     cracktroOnceRef.current = "";
     pokeAudioUnlock();
     gestureUnlockAudio(emuRef.current);
@@ -3019,6 +3053,16 @@ export function Grok64App() {
   useEffect(() => {
     if (s.libraryOpen || s.settingsOpen || s.aboutOpen || diskOpen) setRailMoreOpen(false);
   }, [s.libraryOpen, s.settingsOpen, s.aboutOpen, diskOpen]);
+
+  useEffect(() => {
+    const anyOverlay =
+      s.libraryOpen || s.settingsOpen || s.aboutOpen || diskOpen || s.mapperOpen || s.snapsOpen;
+    if (!anyOverlay && s.powered) {
+      const id = window.requestAnimationFrame(() => focusGrok64Player());
+      return () => window.cancelAnimationFrame(id);
+    }
+    return undefined;
+  }, [s.libraryOpen, s.settingsOpen, s.aboutOpen, diskOpen, s.mapperOpen, s.snapsOpen, s.powered]);
   const tapPower = useCallback((e) => {
     if (e && typeof e.preventDefault === "function") e.preventDefault();
     glog("power-tap", { t: e?.type ?? "ui" });
@@ -3345,6 +3389,7 @@ export function Grok64App() {
           <div
             className={s.running || s.powered ? "g64-screen is-on" : "g64-screen"}
             onPointerDown={(e) => {
+              focusGrok64Player();
               pokeAudioUnlock();
               gestureUnlockAudio(emuRef.current);
               unlockAudio(emuRef.current);

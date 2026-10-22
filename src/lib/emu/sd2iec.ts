@@ -1,6 +1,5 @@
 import { openExpansionDb, STORES, txDone } from "./expansion-db";
 import { c64RamView } from "./c64-memory";
-import { paintScreenLines } from "./screen-text";
 import { listD64Directory, readD64Prg } from "./d64";
 import type { IecUnit } from "./types";
 
@@ -1308,33 +1307,14 @@ export function resetGrok64WasmIecBus() {
   wasmSerialBuffer.length = 0;
 }
 
-function sd2iecListingLines(): string[] {
-  const files = syncFilesInDir(currentPart);
-  const sub = syncSubdirsInDir(currentPart);
-  const inSub = Boolean(currentDir);
-  return [
-    `0 "${"GROK64 SD".padEnd(16).slice(0, 16)}" SD 2A`,
-    ...(inSub ? [`${"0".padStart(4)} "←" DIR`] : []),
-    ...sub.map((d) => `${"0".padStart(4)} "${petsciiName(d).padEnd(16)}" DIR`),
-    ...files.map(
-      (f) =>
-        `${Math.max(1, Math.ceil(f.size / 254)).toString().padStart(4)} "${petsciiName(basename(f)).padEnd(16)}" PRG`,
-    ),
-    "BLOCKS FREE.",
-  ];
-}
-
-/** IEC LOAD"$" path: read $ directory via WASM fsdrive mirror, paint listing to screen RAM. */
-export function iecLoadDollarList(emu: EjsLike | null, unit: IecDeviceNumber = deviceUnit): boolean {
-  if (!emu?.Module) return false;
+/** QA: open `$` on WASM IEC (same bytes KERNAL reads during LOAD"$"). */
+export function iecOpenDollarChannel(emu: EjsLike | null, unit: IecDeviceNumber = deviceUnit): number {
+  if (!emu?.Module) return 0;
   const mod = emu.Module as { _grok64_sd2iec_attach?: (u: number) => void };
   resetGrok64WasmIecBus();
   mod._grok64_sd2iec_attach?.(unit);
   wasmOpenFileOnChannel(unit, 0, "$");
-  const ch = wasmCh(unit, 0);
-  if (!ch.data.length) return false;
-  paintScreenLines(emu, sd2iecListingLines(), 0);
-  return true;
+  return wasmCh(unit, 0).data.length;
 }
 
 /** Test / QA: WASM IEC channel state (VICE fsdrive mirror). */

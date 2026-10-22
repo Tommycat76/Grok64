@@ -7,12 +7,13 @@ import {
   liveDriveOptions,
   PLAY_UNLOCK_VICE_OPTS,
   viceDriveTypeVars,
-  viceGeosFloppyOptions,
   viceMapFromIecMap,
   viceRcForDrives,
   withLiveFloppy,
   type DriveAttach,
 } from "./play-session";
+import { viceGeosFloppyOptions } from "./vice-geos";
+import { viceReal1541TimingOptions } from "./vice-timing";
 import { cmdDriveMap, cmdSwapUnits, sd2iecSwapUnit } from "./hw-buttons";
 import {
   attachGrok64Sd2iec,
@@ -2168,6 +2169,35 @@ export function writeBootFile(emu: EjsInstance | null, data: Uint8Array, preferr
 
 const MEDIA_EXT = /\.(d64|d71|d81|g64|g71|crt|tap|t64)$/i;
 const SKIP_DIR = new Set(["dev", "proc", "core", "tmp"]);
+
+/** UI / QA list — hide stale blank.d64; label work disk after Insert. */
+export function readMountedMediaForUi(
+  emu: EjsInstance | null,
+  displayName?: string | null,
+): { name: string; data: Uint8Array }[] {
+  const raw = readMountedMedia(emu);
+  const out: { name: string; data: Uint8Array }[] = [];
+  for (const m of raw) {
+    if (/^blank\.d64$/i.test(m.name)) continue;
+    const isWork = WORK_DISK_NAMES.has(m.name.toUpperCase()) || /^work\s*disk/i.test(m.name);
+    if (isWork && displayName) {
+      out.push({ name: displayName, data: m.data });
+      continue;
+    }
+    out.push(m);
+  }
+  if (!out.length && displayName && raw.length) {
+    const work = raw.find((m) => WORK_DISK_NAMES.has(m.name.toUpperCase()) || /work\s*disk/i.test(m.name));
+    if (work) out.push({ name: displayName, data: work.data });
+  }
+  return out;
+}
+
+export function applyReal1541Timing(emu: EjsInstance | null, unit: IecUnit = 8): void {
+  if (!emu) return;
+  applyRuntimeOptions(emu, viceReal1541TimingOptions(unit));
+  setWarp(emu, false);
+}
 
 export function readMountedMedia(emu: EjsInstance | null): { name: string; data: Uint8Array }[] {
   const FS = fsOf(emu);

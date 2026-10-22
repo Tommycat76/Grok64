@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { join } from "node:path";
 import { chromium } from "playwright";
 import {
+  ensureReal1541Timing,
   patchLocalStorage,
   powerOnDesktop,
   typeBasic,
@@ -52,15 +53,30 @@ async function boot(page, combo = {}) {
   return core;
 }
 
-async function playBytes(page, name, path) {
+async function playBytes(page, name, path, { autostart = true } = {}) {
   const bytes = [...readFileSync(path)];
   await page.evaluate(
+    async ({ name, bytes, autostart }) => {
+      await window.__g64?.playBytes?.(name, bytes, { autostart });
+    },
+    { name, bytes, autostart },
+  );
+  await waitRunning(page, 120000);
+}
+
+async function loadStarReal1541(page, diskPath) {
+  const name = diskPath.split("/").pop() ?? "game.d64";
+  const bytes = [...readFileSync(diskPath)];
+  await ensureReal1541Timing(page);
+  await page.evaluate(
     async ({ name, bytes }) => {
-      await window.__g64?.playBytes?.(name, bytes);
+      await window.__g64?.playBytes?.(name, bytes, { autostart: false });
     },
     { name, bytes },
   );
-  await waitRunning(page, 120000);
+  await waitRunning(page, 90_000);
+  await typeBasic(page, 'LOAD"*",8,1', { afterMs: 120_000, listAfterDollar: false });
+  await page.waitForTimeout(3000);
 }
 
 const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
@@ -223,6 +239,10 @@ try {
   const prg = join(FIX, "nuvie", "nuvieplayer1.0.prg");
   const reu = join(FIX, "nuvie", "badtom.reu");
   if (existsSync(prg) && existsSync(reu)) {
+    await page.close();
+    page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await page.goto(base, { waitUntil: "domcontentloaded" });
+    await clearEmulatorJsCache(page);
     await boot(page, { reu: "16384kB" });
     const played = await page.evaluate(
       async ({ prg, reu }) => {
@@ -253,28 +273,31 @@ try {
     push({ id: "nuvie-badtom", skipped: true, pass: false, reason: "nuvie fixtures" });
   }
 
-  // (7) JiffyDOS — stock vs jiffy boot time (boulder dash)
+  // (7) JiffyDOS — stock vs jiffy boot time (boulder dash, real 1541 TDE @ 1×)
   if (existsSync(disk)) {
-    await boot(page, { jiffy: false });
+    await page.close();
+    page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+    await page.goto(base, { waitUntil: "domcontentloaded" });
+    await clearEmulatorJsCache(page);
+    await boot(page, { jiffy: false, drive: "1541" });
     const tStock0 = Date.now();
-    await playBytes(page, "boulder-dash.d64", disk);
-    await waitRunning(page, 120000);
+    const stockTiming = await ensureReal1541Timing(page);
+    await loadStarReal1541(page, disk);
     const stockMs = Date.now() - tStock0;
-    await patchLocalStorage(page, { jiffy: true });
+    await patchLocalStorage(page, { jiffy: true, drive: "1541" });
     await page.reload();
-    await boot(page, { jiffy: true });
-    await page.evaluate(() => window.__g64?.sessionFlags?.()); // touch
+    await boot(page, { jiffy: true, drive: "1541" });
     const tJ0 = Date.now();
-    await playBytes(page, "boulder-dash.d64", disk);
-    await waitRunning(page, 120000);
+    const jiffyTiming = await ensureReal1541Timing(page);
+    await loadStarReal1541(page, disk);
     const jiffyMs = Date.now() - tJ0;
     const jiffyLive = await page.evaluate(() => window.__g64?.jiffyLive?.());
     core = await coreOf(page);
     push({
       id: "jiffy-timing",
-      pass: jiffyLive && jiffyMs <= stockMs,
+      pass: jiffyLive && jiffyMs <= stockMs && stockMs >= 35_000,
       core,
-      detail: { stockMs, jiffyMs, jiffyLive },
+      detail: { stockMs, jiffyMs, jiffyLive, stockTiming, jiffyTiming },
       optional: true,
     });
   }

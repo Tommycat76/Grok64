@@ -156,6 +156,27 @@ async function pressC64Stroke(page, stroke, delayMs) {
 }
 
 /** Type a BASIC line via VICE kbdbuf / KERNAL queue (real LOAD path). */
+/** Real 1541 @ 1× — for load timing (no warp / virtual traps). */
+export async function ensureReal1541Timing(page) {
+  return page.evaluate(async () => {
+    window.__g64?.setWarp?.(false);
+    window.__g64?.setIecSlot?.(8, "1541");
+    const timing = await window.__g64?.prepareReal1541Timing?.();
+    const opts = window.__g64?.opts?.() ?? {};
+    const flags = window.__g64?.sessionFlags?.() ?? {};
+    return {
+      timing,
+      warped: flags.warped,
+      opts: {
+        tde: opts.vice_drive_true_emulation,
+        traps: opts.vice_virtual_device_traps,
+        autostartWarp: opts.vice_autostart_warp,
+        drive8: opts.vice_drive8_type,
+      },
+    };
+  });
+}
+
 export async function typeBasic(page, text, { afterMs = 12_000, listAfterDollar = null } = {}) {
   const wantList = listAfterDollar ?? /LOAD\s*"\$"/i.test(text);
   const ok = await page.evaluate(async (line) => {

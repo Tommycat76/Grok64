@@ -575,6 +575,9 @@ export function viceDriveTypeOption(iec: IecDrive): string {
   return "1541";
 }
 
+export { viceGeosFloppyOptions } from "./vice-geos";
+export { viceReal1541TimingOptions } from "./vice-timing";
+
 export function viceDriveTypeVars(map: Partial<Record<IecUnit, IecDrive>>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const unit of [8, 9, 10, 11] as IecUnit[]) {

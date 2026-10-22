@@ -134,6 +134,8 @@ interface SessionSlice {
   padName: string | null;
   library: LibraryItem[];
   currentTitle: string | null;
+  /** Last floppy inserted in-session (shown instead of blank.d64 / WORK DISK path). */
+  insertedDiskName: string | null;
   powerOn: () => void;
   setRunning: (v: boolean) => void;
   setPaused: (v: boolean) => void;
@@ -148,6 +150,7 @@ interface SessionSlice {
   setPadName: (n: string | null) => void;
   setLibrary: (items: LibraryItem[]) => void;
   setCurrentTitle: (n: string | null) => void;
+  setInsertedDiskName: (n: string | null) => void;
 }
 
 function withIecMap(map: IecMap) {
@@ -258,6 +261,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       padName: null,
       library: [],
       currentTitle: null,
+      insertedDiskName: null,
       powerOn: () => set({ powered: true }),
       setRunning: (running) => set({ running }),
       setPaused: (paused) => set({ paused }),
@@ -273,6 +277,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       setPadName: (padName) => set({ padName }),
       setLibrary: (library) => set({ library }),
       setCurrentTitle: (currentTitle) => set({ currentTitle }),
+      setInsertedDiskName: (insertedDiskName) => set({ insertedDiskName }),
     }),
     {
       name: "grok64-settings",

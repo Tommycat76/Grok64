@@ -90,22 +90,30 @@ async function fetchCarts() {
 }
 
 async function fetchNuvieBadTom() {
-  const player = "http://csdb.dk/getinternalfile.php/110242/nuvieplayer1.0.prg";
-  await fetchTo(player, join(dirs.nuvie, "nuvieplayer1.0.prg"));
   const zipUrl = "http://csdb.dk/getinternalfile.php/147044/bad%20tom.zip";
   const res = await fetch(zipUrl, { redirect: "follow", signal: AbortSignal.timeout(120_000) });
   if (res.ok) {
     const { unzipSync } = await import("fflate");
     const zip = new Uint8Array(await res.arrayBuffer());
     const files = unzipSync(zip);
+    const { writeFileSync: w } = await import("node:fs");
+    const prgEntry = Object.entries(files).find(([n]) => /nuvieplayer.*\.prg$/i.test(n));
+    if (prgEntry) {
+      w(join(dirs.nuvie, "nuvieplayer1.0.prg"), prgEntry[1]);
+      console.log("ok", join(dirs.nuvie, "nuvieplayer1.0.prg"), "from", prgEntry[0]);
+    }
     const reuEntry = Object.entries(files).find(([n]) => /\.reu$/i.test(n));
     if (reuEntry) {
-      const { writeFileSync: w } = await import("node:fs");
       w(join(dirs.nuvie, "badtom.reu"), reuEntry[1]);
       console.log("ok", join(dirs.nuvie, "badtom.reu"), "from", reuEntry[0]);
     }
   } else {
     console.warn("Bad Tom zip fetch failed", res.status);
+  }
+  const playerPath = join(dirs.nuvie, "nuvieplayer1.0.prg");
+  if (!existsSync(playerPath)) {
+    const player = "http://csdb.dk/getinternalfile.php/110242/nuvieplayer1.0.prg";
+    await fetchTo(player, playerPath);
   }
 }
 
