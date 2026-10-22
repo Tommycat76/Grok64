@@ -5,7 +5,28 @@ import { ExpansionPanel } from "@/components/emu/ExpansionPanel";
 import { detectLine, MACHINES, type ResolvedMachine } from "@/lib/emu/machines";
 import { ACTION_LABEL, useEmu } from "@/lib/emu/store";
 import { setDebugUi } from "@/lib/emu/debug";
-import type { ActionId, CorePref, DriveMode, IecSlot, ReuSize, ScpuSimm, SidEngine, SidModel, VideoPref } from "@/lib/emu/types";
+import type {
+  ActionId,
+  CorePref,
+  DriveMode,
+  IecSlot,
+  ReuSize,
+  ScpuSimm,
+  SidChipModel,
+  SidEngine,
+  SidExtraAddress,
+  SidModel,
+  VideoPref,
+} from "@/lib/emu/types";
+
+const SID_ADDR: SidExtraAddress[] = ["disabled", "0xd420", "0xd500", "0xde00", "0xdf00"];
+const SID_ADDR_LABEL: Record<SidExtraAddress, string> = {
+  disabled: "Off",
+  "0xd420": "$D420",
+  "0xd500": "$D500",
+  "0xde00": "$DE00",
+  "0xdf00": "$DF00",
+};
 import { IEC_UNITS } from "@/lib/emu/types";
 import { IEC_SLOT_LABEL, REU_LABEL, SCPU_SIMM_LABEL } from "@/lib/emu/vice-extras";
 
@@ -232,7 +253,7 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
             </div>
 
             <div className="g64-field">
-              <label>SID chip</label>
+              <label>SID chip (primary)</label>
               <div className="g64-seg">
                 {(["6581", "8580", "default"] as SidModel[]).map((e) => (
                   <button key={e} type="button" data-on={s.sidModel === e} onClick={() => s.setSidModel(e)}>
@@ -240,6 +261,47 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
                   </button>
                 ))}
               </div>
+            </div>
+
+            <div className="g64-field">
+              <label>2nd SID (stereo)</label>
+              <div className="g64-seg" style={{ flexWrap: "wrap" }}>
+                {SID_ADDR.map((e) => (
+                  <button key={e} type="button" data-on={s.sid2Address === e} onClick={() => s.setSid2Address(e)}>
+                    {SID_ADDR_LABEL[e]}
+                  </button>
+                ))}
+              </div>
+              {s.sid2Address !== "disabled" ? (
+                <div className="g64-seg" style={{ marginTop: 8 }}>
+                  {(["default", "6581", "8580"] as SidChipModel[]).map((e) => (
+                    <button key={e} type="button" data-on={s.sid2Model === e} onClick={() => s.setSid2Model(e)}>
+                      {e === "default" ? "Same as primary" : e}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <p className="text-xs text-fg-subtle">Off by default (stock single SID). Address + chip apply on the next core start.</p>
+            </div>
+
+            <div className="g64-field">
+              <label>3rd SID</label>
+              <div className="g64-seg" style={{ flexWrap: "wrap" }}>
+                {SID_ADDR.map((e) => (
+                  <button key={e} type="button" data-on={s.sid3Address === e} onClick={() => s.setSid3Address(e)}>
+                    {SID_ADDR_LABEL[e]}
+                  </button>
+                ))}
+              </div>
+              {s.sid3Address !== "disabled" ? (
+                <div className="g64-seg" style={{ marginTop: 8 }}>
+                  {(["default", "6581", "8580"] as SidChipModel[]).map((e) => (
+                    <button key={e} type="button" data-on={s.sid3Model === e} onClick={() => s.setSid3Model(e)}>
+                      {e === "default" ? "Same as primary" : e}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
 
             <div className="g64-field">

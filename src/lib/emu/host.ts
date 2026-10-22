@@ -13,7 +13,20 @@ import {
   type DriveAttach,
 } from "./play-session";
 import { cmdDriveMap, cmdSwapUnits, sd2iecSwapUnit } from "./hw-buttons";
-import type { DriveMode, IecDrive, IecMap, IecUnit, JoyPort, ReuSize, ScpuSimm, SidEngine, SidModel } from "./types";
+import type {
+  DriveMode,
+  IecDrive,
+  IecMap,
+  IecUnit,
+  JoyPort,
+  ReuSize,
+  ScpuSimm,
+  SidChipModel,
+  SidEngine,
+  SidExtraAddress,
+  SidModel,
+} from "./types";
+import type { SidLayout } from "./machines";
 import { RETRO_BTN } from "./types";
 import { glog } from "./debug";
 import { stopIosPresent, stripIosPresent } from "./ios-present";
@@ -542,6 +555,10 @@ export interface BootConfig {
   machineOptions: Record<string, string>;
   sidEngine: SidEngine;
   sidModel: SidModel;
+  sid2?: SidExtraAddress;
+  sid2Model?: SidChipModel;
+  sid3?: SidExtraAddress;
+  sid3Model?: SidChipModel;
   driveMode: Exclude<DriveMode, "auto">;
   joyPort: JoyPort;
   volume: number;
@@ -563,7 +580,14 @@ function coreOptions(cfg: BootConfig): Record<string, string> {
   const trueDrive = cfg.driveMode === "true";
   return {
     ...cfg.machineOptions,
-    ...sidOptions(cfg.sidEngine, cfg.sidModel),
+    ...sidOptions({
+      engine: cfg.sidEngine,
+      model: cfg.sidModel,
+      sid2: cfg.sid2 ?? "disabled",
+      sid2Model: cfg.sid2Model ?? "default",
+      sid3: cfg.sid3 ?? "disabled",
+      sid3Model: cfg.sid3Model ?? "default",
+    }),
     vice_drive_true_emulation: trueDrive ? "enabled" : "disabled",
     vice_virtual_device_traps: trueDrive ? "disabled" : "enabled",
     vice_autostart: cfg.autostart === false ? "disabled" : "enabled",

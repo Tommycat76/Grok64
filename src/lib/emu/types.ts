@@ -31,6 +31,9 @@ export type MachineId =
 
 export type SidEngine = "ReSID" | "FastSID" | "ReSID-fp";
 export type SidModel = "6581" | "8580" | "default";
+/** VICE libretro `vice_sid_extra` / `vice_sid_extra2` base addresses (disabled = single SID). */
+export type SidExtraAddress = "disabled" | "0xd420" | "0xd500" | "0xde00" | "0xdf00";
+export type SidChipModel = SidModel;
 export type DriveMode = "auto" | "true" | "fast";
 export type VideoPref = "auto" | "pal" | "ntsc";
 export type CorePref = "auto" | "accurate" | "fast";

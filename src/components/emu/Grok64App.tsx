@@ -114,7 +114,9 @@ import {
   visibleHwButtons,
   type HwPress,
 } from "@/lib/emu/hw-buttons";
-import { detectLine, resolveMachine, videoStandardOptions } from "@/lib/emu/machines";
+import { detectLine, resolveMachine, sidOptions, videoStandardOptions } from "@/lib/emu/machines";
+import { BUNDLED } from "@/lib/emu/software";
+import { putRom, removeRom } from "@/lib/emu/roms";
 import { snapshotDevice, readViewport, applyViewport, detectDevice, isIos, isIosPhone, isTouchMobile } from "@/lib/emu/detect";
 import { applyTabletContainFit, tabletBezelAvail, tabletGlassFillsBezel } from "@/lib/emu/tablet-fit";
 import { detectJoyPort, detectSoftwareStandard } from "@/lib/emu/region";
@@ -601,6 +603,71 @@ export function Grok64App() {
         }
       },
       screenText: () => readScreenText(emuRef.current),
+      settings: () => {
+        const st = useEmu.getState();
+        return {
+          sidEngine: st.sidEngine,
+          sidModel: st.sidModel,
+          sid2Address: st.sid2Address,
+          sid2Model: st.sid2Model,
+          sid3Address: st.sid3Address,
+          sid3Model: st.sid3Model,
+          jiffyDos: st.jiffyDos,
+          reuSize: st.reuSize,
+          iecMap: st.iecMap,
+          joyPort: st.joyPort,
+          mouseMode: st.mouseMode,
+        };
+      },
+      setShowKeyboard: (on) => useEmu.getState().setShowKeyboard(!!on),
+      setSettingsOpen: (on) => useEmu.getState().setSettingsOpen(!!on),
+      setJiffyDos: (on) => useEmu.getState().setJiffyDos(!!on),
+      setSidAddresses: (patch) => {
+        const st = useEmu.getState();
+        if (patch.sid2 !== undefined) st.setSid2Address(patch.sid2);
+        if (patch.sid2Model !== undefined) st.setSid2Model(patch.sid2Model);
+        if (patch.sid3 !== undefined) st.setSid3Address(patch.sid3);
+        if (patch.sid3Model !== undefined) st.setSid3Model(patch.sid3Model);
+        const cur = useEmu.getState();
+        applyRuntimeOptions(
+          emuRef.current,
+          sidOptions({
+            engine: cur.sidEngine,
+            model: cur.sidModel,
+            sid2: cur.sid2Address,
+            sid2Model: cur.sid2Model,
+            sid3: cur.sid3Address,
+            sid3Model: cur.sid3Model,
+          }),
+        );
+      },
+      putRomBytes: async (id, name, bytes) => {
+        const buf =
+          bytes instanceof ArrayBuffer
+            ? bytes
+            : bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+        await putRom(id, name, buf);
+      },
+      removeRomSlot: (id) => removeRom(id),
+      applySidLayout: () => {
+        const st = useEmu.getState();
+        applyRuntimeOptions(emuRef.current, sidOptions({
+          engine: st.sidEngine,
+          model: st.sidModel,
+          sid2: st.sid2Address,
+          sid2Model: st.sid2Model,
+          sid3: st.sid3Address,
+          sid3Model: st.sid3Model,
+        }));
+      },
+      playBundled: async (id) => {
+        const item = BUNDLED.find((b) => b.id === id);
+        if (!item) throw new Error(`Unknown bundled id: ${id}`);
+        const res = await fetch(item.path);
+        const buf = await res.arrayBuffer();
+        await playBufferRef.current(item.name, buf, { autostart: true, title: item.name });
+        return item.id;
+      },
       runDos: (cmd) => runSdCommand(cmd),
       resetDos: () => resetSd2iecSession(),
       seedSd: async (files) => {
@@ -1265,6 +1332,10 @@ export function Grok64App() {
           machineOptions: res.options,
           sidEngine: st.sidEngine,
           sidModel: st.sidModel,
+          sid2: st.sid2Address,
+          sid2Model: st.sid2Model,
+          sid3: st.sid3Address,
+          sid3Model: st.sid3Model,
           driveMode: playDrive,
           joyPort: st.joyPort,
           volume: st.muted ? 0 : st.volume,

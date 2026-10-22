@@ -17,6 +17,8 @@
     "check:jsx": "node scripts/check-no-jsxdev.mjs dist",
     "test": "node --test 'scripts/**/*.test.mjs'",
     "test:cmd-sd2iec": "node scripts/cmd-sd2iec-e2e.mjs",
+    "test:desktop-e2e": "node scripts/desktop-e2e.mjs",
+    "test:desktop-matrix": "node scripts/desktop-matrix.mjs",
     "test:ui-layout": "node scripts/ui-layout-qa.mjs",
     "gate:crt": "node scripts/crt-fill-gate.mjs",
     "lint": "eslint .",

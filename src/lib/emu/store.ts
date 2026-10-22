@@ -15,7 +15,9 @@ import type {
   PadSide,
   ReuSize,
   ScpuSimm,
+  SidChipModel,
   SidEngine,
+  SidExtraAddress,
   SidModel,
   VideoPref,
 } from "./types";
@@ -54,6 +56,10 @@ interface SettingsSlice {
   coreMode: CorePref;
   sidEngine: SidEngine;
   sidModel: SidModel;
+  sid2Address: SidExtraAddress;
+  sid2Model: SidChipModel;
+  sid3Address: SidExtraAddress;
+  sid3Model: SidChipModel;
   driveMode: DriveMode;
   joyPort: JoyPort;
   crtFilter: boolean;
@@ -81,6 +87,10 @@ interface SettingsSlice {
   setCoreMode: (c: CorePref) => void;
   setSidEngine: (e: SidEngine) => void;
   setSidModel: (m: SidModel) => void;
+  setSid2Address: (a: SidExtraAddress) => void;
+  setSid2Model: (m: SidChipModel) => void;
+  setSid3Address: (a: SidExtraAddress) => void;
+  setSid3Model: (m: SidChipModel) => void;
   setDriveMode: (d: DriveMode) => void;
   setJoyPort: (p: JoyPort) => void;
   setCrtFilter: (v: boolean) => void;
@@ -153,6 +163,10 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       coreMode: "auto",
       sidEngine: "ReSID",
       sidModel: "6581",
+      sid2Address: "disabled",
+      sid2Model: "default",
+      sid3Address: "disabled",
+      sid3Model: "default",
       driveMode: "auto",
       joyPort: 2,
       crtFilter: true,
@@ -180,6 +194,10 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       setCoreMode: (coreMode) => set({ coreMode }),
       setSidEngine: (sidEngine) => set({ sidEngine }),
       setSidModel: (sidModel) => set({ sidModel }),
+      setSid2Address: (sid2Address) => set({ sid2Address }),
+      setSid2Model: (sid2Model) => set({ sid2Model }),
+      setSid3Address: (sid3Address) => set({ sid3Address }),
+      setSid3Model: (sid3Model) => set({ sid3Model }),
       setDriveMode: (driveMode) => set({ driveMode }),
       setJoyPort: (joyPort) => set({ joyPort }),
       setCrtFilter: (crtFilter) => set({ crtFilter }),
@@ -258,7 +276,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
     }),
     {
       name: "grok64-settings",
-      version: 11,
+      version: 12,
       storage: createJSONStorage(() =>
         typeof window === "undefined"
           ? {
@@ -274,6 +292,10 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         coreMode: s.coreMode,
         sidEngine: s.sidEngine,
         sidModel: s.sidModel,
+        sid2Address: s.sid2Address,
+        sid2Model: s.sid2Model,
+        sid3Address: s.sid3Address,
+        sid3Model: s.sid3Model,
         driveMode: s.driveMode,
         joyPort: s.joyPort,
         crtFilter: s.crtFilter,
@@ -303,6 +325,10 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
           "coreMode",
           "sidEngine",
           "sidModel",
+          "sid2Address",
+          "sid2Model",
+          "sid3Address",
+          "sid3Model",
           "driveMode",
           "joyPort",
           "crtFilter",
@@ -366,6 +392,12 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
             : "1541") as IecDrive;
           const unit = ([8, 9, 10, 11].includes(p.iecUnit as number) ? p.iecUnit : 8) as IecUnit;
           p.iecMap = iecMapFromLegacy(drive, unit);
+        }
+        if (version < 12) {
+          if (!p.sid2Address) p.sid2Address = "disabled";
+          if (!p.sid3Address) p.sid3Address = "disabled";
+          if (!p.sid2Model) p.sid2Model = "default";
+          if (!p.sid3Model) p.sid3Model = "default";
         }
         if (version < 7) {
           if (!p.reuSize) p.reuSize = "none";

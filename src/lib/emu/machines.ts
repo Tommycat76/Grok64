@@ -1,4 +1,13 @@
-import type { CorePref, DriveMode, MachineId, SidEngine, SidModel, VideoPref } from "./types";
+import type {
+  CorePref,
+  DriveMode,
+  MachineId,
+  SidChipModel,
+  SidEngine,
+  SidExtraAddress,
+  SidModel,
+  VideoPref,
+} from "./types";
 import {
   resolveCore,
   resolveDrive,
@@ -131,11 +140,25 @@ export function machineById(id: MachineId): MachineDef {
   return MACHINES.find((m) => m.id === id) ?? MACHINES[0]!;
 }
 
-export function sidOptions(engine: SidEngine, model: SidModel): Record<string, string> {
+export interface SidLayout {
+  engine: SidEngine;
+  model: SidModel;
+  sid2: SidExtraAddress;
+  sid2Model: SidChipModel;
+  sid3: SidExtraAddress;
+  sid3Model: SidChipModel;
+}
+
+export function sidOptions(layout: SidLayout): Record<string, string> {
+  const { engine, model, sid2, sid2Model, sid3, sid3Model } = layout;
   const opts: Record<string, string> = {
     vice_sid_engine: engine,
   };
   if (model !== "default") opts.vice_sid_model = model;
+  opts.vice_sid_extra = sid2;
+  if (sid2 !== "disabled" && sid2Model !== "default") opts.vice_sid_model2 = sid2Model;
+  opts.vice_sid_extra2 = sid3;
+  if (sid3 !== "disabled" && sid3Model !== "default") opts.vice_sid_model3 = sid3Model;
   opts.vice_resid_sampling_method = engine === "FastSID" ? "Fast" : "Interpolation";
   return opts;
 }

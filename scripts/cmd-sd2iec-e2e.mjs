@@ -77,7 +77,7 @@ async function runSuite(browserType, label) {
     const dosOk = /OK/.test(dos.a) && /OK/.test(dos.b) && /OK/.test(dos.c) && /PART 0/.test(dos.d);
     results.push({ label, id: "sd2iec-dos-cmd", pass: dosOk, detail: dos });
 
-    await page.getByRole("button", { name: "Keyboard" }).first().click();
+    await page.evaluate(() => window.__g64?.setShowKeyboard?.(true));
     await page.waitForTimeout(600);
     const kbVisible = (await page.locator(".g64-kb").count()) > 0;
     results.push({ label, id: "keyboard-open", pass: kbVisible });
