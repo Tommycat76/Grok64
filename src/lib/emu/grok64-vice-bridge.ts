@@ -21,6 +21,9 @@ type Grok64Module = {
   _grok64_sd2iec_poll?: () => void;
   _grok64_c64_read?: (addr: number) => number;
   _grok64_c64_write?: (addr: number, value: number) => void;
+  _grok64_kbdbuf_feed?: (text: string) => void;
+  _grok64_kbdbuf_feed_runcmd?: (text: string) => void;
+  _grok64_sd2iec_detach?: (unit: number) => void;
   grok64Sd2iecHost?: {
     poll: () => void;
     attach: (unit: number) => void;
@@ -59,6 +62,15 @@ export function bindGrok64WasmExports(mod: Grok64Module & { cwrap?: (...args: un
         addr: number,
         value: number,
       ) => void;
+    }
+    if (!mod._grok64_kbdbuf_feed) {
+      mod._grok64_kbdbuf_feed = wrap("grok64_kbdbuf_feed", null, ["string"]) as (text: string) => void;
+    }
+    if (!mod._grok64_kbdbuf_feed_runcmd) {
+      mod._grok64_kbdbuf_feed_runcmd = wrap("grok64_kbdbuf_feed_runcmd", null, ["string"]) as (text: string) => void;
+    }
+    if (!mod._grok64_sd2iec_detach) {
+      mod._grok64_sd2iec_detach = wrap("grok64_sd2iec_detach", null, ["number"]) as (unit: number) => void;
     }
     const modAny = mod as {
       _retro_get_memory_data?: (id: number) => number;
@@ -153,4 +165,11 @@ export function attachGrok64Sd2iec(emu: Grok64Emu | null, unit: IecDeviceNumber)
     return true;
   }
   return attachSd2iecBus(asSd(emu), unit);
+}
+
+export function detachGrok64Sd2iec(emu: Grok64Emu | null, unit: IecDeviceNumber): void {
+  if (!emu) return;
+  const mod = emu.Module as Grok64Module;
+  bindGrok64WasmExports(mod);
+  mod._grok64_sd2iec_detach?.(unit);
 }

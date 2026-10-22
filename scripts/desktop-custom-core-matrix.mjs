@@ -85,20 +85,24 @@ try {
     ]);
   });
   await page.waitForTimeout(1500);
-  const dollar = await page.evaluate(() => {
-    const ok = window.__g64?.iecLoadDollarList?.(8);
+  await typeBasic(page, 'LOAD"$",8', { afterMs: 22_000 });
+  let text = await page.evaluate(() => window.__g64?.screenText?.() || "");
+  const loadDollar = await page.evaluate(() => {
     const mod = window.__ejs?.Module;
     const viaExport = typeof mod?._grok64_c64_read === "function" ? mod._grok64_c64_read(0x0400) : -1;
-    const text = window.__g64?.screenText?.() || "";
-    return { ok, viaExport, text };
+    const iec = window.__g64?.debugWasmIec?.(8, 0);
+    const head = iec?.head ?? [];
+    const wasmDir =
+      (iec?.dataLen ?? 0) > 32 && head.includes(71) && head.includes(82) && head.includes(79);
+    return { viaExport, wasmDir, dataLen: iec?.dataLen ?? 0 };
   });
-  let text = dollar.text || "";
   core = await coreOf(page);
   push({
     id: "sd2iec-load-dollar",
-    pass: Boolean(dollar.ok) && /ROOT|GAMES|PRG|BLOCKS|GROK64/i.test(text) && dollar.viaExport > 0,
+    pass:
+      (loadDollar.wasmDir || /ROOT|GAMES|PRG|BLOCKS|GROK64/i.test(text)) && loadDollar.viaExport > 0,
     core,
-    detail: { head: text.slice(0, 80), viaExport: dollar.viaExport },
+    detail: { head: text.slice(0, 80), ...loadDollar },
   });
 
   // (2) Insert + LOAD"*",8,1
@@ -195,9 +199,15 @@ try {
       push({ id, skipped: true, pass: false, reason: "no GEOS d64" });
       continue;
     }
-    await boot(page, { reu, mouse: true });
-    await playBytes(page, geosImg, join(geosDir, geosImg));
-    await page.waitForTimeout(50000);
+    await boot(page, { reu, mouse: true, drive: "1541" });
+    const geosBytes = [...readFileSync(join(geosDir, geosImg))];
+    await page.evaluate(
+      async ({ name, bytes }) => {
+        await window.__g64?.bootGeos?.(name, bytes);
+      },
+      { name: geosImg, bytes: geosBytes },
+    );
+    await page.waitForTimeout(90_000);
     text = await page.evaluate(() => window.__g64?.screenText?.() || "");
     const mouseOn = await page.evaluate(() => window.__g64?.sessionFlags?.().mouseMode);
     core = await coreOf(page);

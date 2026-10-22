@@ -21,7 +21,18 @@ cp "${ROOT}/third_party/vice-grok64/grok64_library.js" "${RA}/emulatorjs/grok64_
 
 MAKEFILE="${RA}/Makefile.emulatorjs"
 if ! grep -q '_grok64_sd2iec_attach' "${MAKEFILE}"; then
-  sed -i 's|_ejs_get_controller_port_info|_ejs_get_controller_port_info,_grok64_sd2iec_attach,_grok64_sd2iec_poll,_grok64_c64_read,_grok64_c64_write|' "${MAKEFILE}"
+  sed -i 's|_ejs_get_controller_port_info|_ejs_get_controller_port_info,_grok64_sd2iec_attach,_grok64_sd2iec_poll,_grok64_c64_read,_grok64_c64_write,_grok64_kbdbuf_feed|' "${MAKEFILE}"
+elif ! grep -q '_grok64_kbdbuf_feed' "${MAKEFILE}"; then
+  sed -i 's|_grok64_c64_write|_grok64_c64_write,_grok64_kbdbuf_feed|' "${MAKEFILE}"
+fi
+if ! grep -q '_grok64_sd2iec_detach' "${MAKEFILE}"; then
+  sed -i 's|_grok64_sd2iec_attach|_grok64_sd2iec_attach,_grok64_sd2iec_detach|' "${MAKEFILE}"
+fi
+if ! grep -q '_grok64_kbdbuf_feed_runcmd' "${MAKEFILE}"; then
+  sed -i 's|_grok64_kbdbuf_feed|_grok64_kbdbuf_feed,_grok64_kbdbuf_feed_runcmd|' "${MAKEFILE}"
+fi
+if ! grep -q '_grok64_kbdbuf_flush' "${MAKEFILE}"; then
+  sed -i 's|_grok64_kbdbuf_feed_runcmd|_grok64_kbdbuf_feed_runcmd,_grok64_kbdbuf_flush|' "${MAKEFILE}"
 fi
 
 cd "${RA}"

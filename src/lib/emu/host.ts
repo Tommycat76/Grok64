@@ -7,13 +7,20 @@ import {
   liveDriveOptions,
   PLAY_UNLOCK_VICE_OPTS,
   viceDriveTypeVars,
+  viceGeosFloppyOptions,
   viceMapFromIecMap,
   viceRcForDrives,
   withLiveFloppy,
   type DriveAttach,
 } from "./play-session";
 import { cmdDriveMap, cmdSwapUnits, sd2iecSwapUnit } from "./hw-buttons";
-import { attachGrok64Sd2iec, bindGrok64WasmExports, ensureGrok64WasmExports, wireGrok64ViceHost } from "./grok64-vice-bridge";
+import {
+  attachGrok64Sd2iec,
+  bindGrok64WasmExports,
+  detachGrok64Sd2iec,
+  ensureGrok64WasmExports,
+  wireGrok64ViceHost,
+} from "./grok64-vice-bridge";
 import type { SdPartition } from "./sd2iec";
 import type { Sd2iecVolume } from "./sd2iec-volume";
 import type {
@@ -2049,6 +2056,23 @@ export function swapBootDisk(emu: EjsInstance | null, data: Uint8Array, fallback
  * #60 wrote a *new* filename instead of this overwrite — unit 8 stayed
  * the blank work disk and Autostart typed FILE NOT FOUND (not DNP).
  */
+/** Mount a GEOS (or other) system disk on unit 8 as true 1541-II, no autostart PRG sniff. */
+export async function bootGeosFloppy(
+  emu: EjsInstance | null,
+  data: Uint8Array,
+  fileName: string,
+  unit: IecUnit = 8,
+): Promise<boolean> {
+  if (!emu) return false;
+  detachGrok64Sd2iec(emu, unit);
+  applyRuntimeOptions(emu, viceGeosFloppyOptions(unit));
+  const lines = ["[C64]", `Drive${unit}Type=1542`, "DriveTrueEmulation=1", "VirtualDevices=0"];
+  injectViceRc(emu, `${lines.join("\n")}\n`);
+  const ok = attachAutostartDisk(emu, data, fileName, "1541", unit);
+  await flushEmuFs(emu, 1200);
+  return ok;
+}
+
 export function attachAutostartDisk(
   emu: EjsInstance | null,
   data: Uint8Array,

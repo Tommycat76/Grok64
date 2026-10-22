@@ -3,11 +3,19 @@
 #endif
 
 #include "libretro.h"
+#include "kbdbuf.h"
+#include "machine.h"
 #include <stdint.h>
+
+static void grok64_kbdbuf_ensure(void)
+{
+    kbdbuf_reset(631, 198, 10, (CLOCK)machine_get_cycles_per_frame());
+}
 
 #ifdef GROK64_SD2IEC
 
 extern void grok64_sd2iec_enable_unit(int unit);
+extern void grok64_sd2iec_disable_unit(int unit);
 
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
@@ -15,6 +23,14 @@ EMSCRIPTEN_KEEPALIVE
 void grok64_sd2iec_attach(int unit)
 {
     grok64_sd2iec_enable_unit(unit);
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void grok64_sd2iec_detach(int unit)
+{
+    grok64_sd2iec_disable_unit(unit);
 }
 
 #ifdef __EMSCRIPTEN__
@@ -51,3 +67,36 @@ void grok64_c64_write(uint16_t addr, uint8_t value)
 }
 
 #endif
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int grok64_kbdbuf_feed(const char *text)
+{
+    if (!text) {
+        return -1;
+    }
+    grok64_kbdbuf_ensure();
+    return kbdbuf_feed_string(text);
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void grok64_kbdbuf_flush(void)
+{
+    grok64_kbdbuf_ensure();
+    kbdbuf_flush();
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int grok64_kbdbuf_feed_runcmd(const char *text)
+{
+    if (!text) {
+        return -1;
+    }
+    grok64_kbdbuf_ensure();
+    return kbdbuf_feed_runcmd(text);
+}

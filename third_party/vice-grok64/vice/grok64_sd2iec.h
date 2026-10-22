@@ -9,6 +9,9 @@
 void grok64_sd2iec_init(void);
 void grok64_sd2iec_reset(void);
 
+void grok64_sd2iec_disable_unit(int unit);
+void grok64_sd2iec_enable_unit(int unit);
+
 int grok64_sd2iec_handles_device(unsigned int device);
 
 void grok64_sd2iec_open(unsigned int device, uint8_t secondary, void (*st_func)(uint8_t));

@@ -28,6 +28,7 @@ import {
   applyJiffyDos,
   autostartAfterReady,
   bootEmulator,
+  bootGeosFloppy,
   bootFileOf,
   captureState,
   clearRetroSaves,
@@ -88,7 +89,7 @@ import {
   listPartitions,
   partitionsForMount,
   debugWasmIec,
-  iecLoadDollarList,
+  iecOpenDollarChannel,
   kernalIecTrapActive,
   resetSd2iecSession,
   runSdCommand,
@@ -149,6 +150,7 @@ import { snapshotDevice, readViewport, applyViewport, detectDevice, isIos, isIos
 import { applyTabletContainFit, tabletBezelAvail, tabletGlassFillsBezel } from "@/lib/emu/tablet-fit";
 import { detectJoyPort, detectSoftwareStandard } from "@/lib/emu/region";
 import { RETRO_BTN } from "@/lib/emu/types";
+import { feedBasicLine } from "@/lib/emu/c64-keyboard";
 import { dispatchC64Key, isJoyFireKey, muteC64Space, onBeforeC64Space, typeC64 } from "@/lib/emu/keys";
 import {
   bootFileName,
@@ -692,7 +694,22 @@ export function Grok64App() {
       setSd2iecUnit: (unit) => setIecDevice(unit),
       kernalIecTrapActive: () => kernalIecTrapActive(emuRef.current),
       debugWasmIec: (dev, sec) => debugWasmIec(dev, sec),
-      iecLoadDollarList: (unit = 8) => iecLoadDollarList(emuRef.current, unit as 8 | 9 | 10 | 11 | 12),
+      iecOpenDollarChannel: (unit = 8) => iecOpenDollarChannel(emuRef.current, unit as 8 | 9 | 10 | 11 | 12),
+      feedBasic: (line) => feedBasicLine(emuRef.current, line),
+      bootGeos: async (name, bytes) => {
+        let buf: ArrayBuffer;
+        if (bytes instanceof ArrayBuffer) buf = bytes;
+        else if (bytes instanceof Uint8Array) {
+          buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+        } else buf = new Uint8Array(bytes as ArrayLike<number>).buffer;
+        useEmu.getState().setIecSlot(8, "1541");
+        const ok = await bootGeosFloppy(emuRef.current, new Uint8Array(buf), name);
+        if (!ok) return false;
+        const loaded = await feedBasicLine(emuRef.current, 'LOAD"GEOS",8,1');
+        if (!loaded) return false;
+        await new Promise((r) => window.setTimeout(r, 45_000));
+        return feedBasicLine(emuRef.current, "RUN", { runcmd: true });
+      },
       settings: () => {
         const st = useEmu.getState();
         return {

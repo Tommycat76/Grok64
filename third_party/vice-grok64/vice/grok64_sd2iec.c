@@ -14,6 +14,14 @@
 
 static int grok64_units[16];
 
+void grok64_sd2iec_disable_unit(int unit)
+{
+    if (unit < 4 || unit > 11) {
+        return;
+    }
+    grok64_units[unit] = 0;
+}
+
 void grok64_sd2iec_enable_unit(int unit)
 {
     char res[24];

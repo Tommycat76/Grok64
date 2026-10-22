@@ -155,18 +155,23 @@ async function pressC64Stroke(page, stroke, delayMs) {
   if (stroke.shift) await page.keyboard.up("Shift");
 }
 
-/** Type a BASIC line with correct C64 PETSCII key mapping (+ Enter). */
-export async function typeBasic(page, text, { delayMs = 55, afterMs = 400 } = {}) {
-  await page.evaluate(() => {
+/** Type a BASIC line via VICE kbdbuf / KERNAL queue (real LOAD path). */
+export async function typeBasic(page, text, { afterMs = 12_000, listAfterDollar = null } = {}) {
+  const wantList = listAfterDollar ?? /LOAD\s*"\$"/i.test(text);
+  const ok = await page.evaluate(async (line) => {
     window.__ejs?.Module?._grok64_sd2iec_attach?.(8);
-    document.getElementById("grok64-player")?.focus();
-  });
-  await page.focus("#grok64-player");
-  for (const stroke of c64Keystrokes(text)) {
-    await pressC64Stroke(page, stroke, delayMs);
+    return Boolean(await window.__g64?.feedBasic?.(line));
+  }, text);
+  if (!ok) throw new Error("feedBasic failed");
+  await page.waitForTimeout(wantList ? 18_000 : afterMs);
+  if (wantList) {
+    const listed = await page.evaluate(async () => {
+      window.__ejs?.Module?._grok64_sd2iec_attach?.(8);
+      return Boolean(await window.__g64?.feedBasic?.("LIST"));
+    });
+    if (!listed) throw new Error("feedBasic LIST failed");
+    await page.waitForTimeout(afterMs);
   }
-  await page.keyboard.press("Enter", { delay: delayMs });
-  await page.waitForTimeout(afterMs);
 }
 
 export async function matrixColdBoot(page, base, combo) {

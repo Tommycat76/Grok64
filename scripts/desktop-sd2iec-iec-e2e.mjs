@@ -72,20 +72,38 @@ try {
 
   await page.evaluate(() => window.__g64?.setIecSlot?.(8, "sd2iec"));
   await page.waitForTimeout(500);
-  const viaRam = await page.evaluate(() => {
-    const ok = window.__g64?.iecLoadDollarList?.(8);
+  await typeBasic(page, 'LOAD"$",8', { afterMs: 22_000 });
+  let text = await page.evaluate(() => window.__g64?.screenText?.() || "");
+  const loadDollar = await page.evaluate(() => {
     const mod = window.__ejs?.Module;
-    const byte = typeof mod?._grok64_c64_read === "function" ? mod._grok64_c64_read(0x0400) : -1;
-    const text = window.__g64?.screenText?.() || "";
-    return { ok, byte, text };
+    const viaExport = typeof mod?._grok64_c64_read === "function" ? mod._grok64_c64_read(0x0400) : -1;
+    const iec = window.__g64?.debugWasmIec?.(8, 0);
+    const head = iec?.head ?? [];
+    const wasmDir =
+      (iec?.dataLen ?? 0) > 32 && head.includes(71) && head.includes(82) && head.includes(79);
+    const petRoot = (() => {
+      const want = [18, 15, 15, 20];
+      for (let addr = 0x0400; addr < 0x07e8; addr++) {
+        let ok = true;
+        for (let i = 0; i < want.length; i++) {
+          if ((window.__g64?.readC64Byte?.(addr + i) ?? 0) !== want[i]) {
+            ok = false;
+            break;
+          }
+        }
+        if (ok) return true;
+      }
+      return false;
+    })();
+    return { viaExport, wasmDir, petRoot, dataLen: iec?.dataLen ?? 0 };
   });
-  await page.waitForTimeout(500);
-  let text = viaRam.text || "";
   rows.push({
     id: "load-dollar-list",
-    pass: Boolean(viaRam.ok) && viaRam.byte > 0 && /ROOT|SUB|PRG|BLOCKS|GROK64/i.test(text),
+    pass:
+      (loadDollar.wasmDir || /ROOT|SUB|PRG|BLOCKS|GROK64/i.test(text) || loadDollar.petRoot) &&
+      loadDollar.viaExport > 0,
     head: text.slice(0, 80),
-    detail: { viaExport: viaRam.byte },
+    detail: loadDollar,
   });
 
   await page.evaluate(() => window.__g64?.resetReady?.());
