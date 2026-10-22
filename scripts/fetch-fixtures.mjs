@@ -61,6 +61,17 @@ async function fetchGeos() {
   await iaDownload(id, d64.name, join(dirs.geos, d64.name.replace(/\s+/g, "_")));
 }
 
+/** Optional: GROK64_WHEELS_URL=https://…/Wheels64.d64 (not redistributed in-repo). */
+async function fetchWheelsOptional() {
+  const url = process.env.GROK64_WHEELS_URL;
+  if (!url) {
+    console.log("skip Wheels (set GROK64_WHEELS_URL to download)");
+    return;
+  }
+  const dest = join(dirs.geos, process.env.GROK64_WHEELS_NAME || "Wheels64.d64");
+  await fetchTo(url, dest);
+}
+
 const CART_WANT = [
   { pattern: /Action_Replay_V6\.0/i, label: "ar6" },
   { pattern: /Final_Cartridge_3_1987-09_v1/i, label: "fc3" },
@@ -125,6 +136,7 @@ async function fetchBoulderDisk() {
 
 console.log("Fetching fixtures →", root);
 await fetchGeos();
+await fetchWheelsOptional();
 await fetchCarts();
 await fetchNuvieBadTom();
 await fetchBoulderDisk();

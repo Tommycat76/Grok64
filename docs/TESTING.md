@@ -29,6 +29,7 @@ Private media (optional, never commit ROMs / commercial disks):
 GROK64_JIFFY_DIR=/path/to/jiffy npm run test:desktop-e2e
 GROK64_CART_DIR=/path/to/crts npm run test:desktop-e2e
 GROK64_GEOS_DIR=/path/to/geos npm run test:desktop-geos
+GROK64_WHEELS_DIR=/path/to/geos npm run test:desktop-xdotool-wheels
 GROK64_DEMO_DIR=/path/to/demo-disks npm run test:desktop-demo
 GROK64_NUVIE_DIR=/path/to/nuvie npm run test:desktop-nuvie
 # optional overrides (defaults: CSDb nuvieplayer + C64ReloadedMK2-Ad.reu)

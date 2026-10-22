@@ -111,6 +111,13 @@ import {
 import { attachGrok64Sd2iec, tickGrok64Iec, wireGrok64ViceHost } from "@/lib/emu/grok64-vice-bridge";
 import { readC64Byte, readC64Bytes, writeC64Byte, writeC64Bytes } from "@/lib/emu/c64-memory";
 import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor } from "@/lib/emu/vice-extras";
+import {
+  geosFamilyLoadMs,
+  geosFamilyPlayLockMs,
+  isGeosFamilyDiskName,
+  isWheelsDiskName,
+  reuForGeosFamilyDisk,
+} from "@/lib/emu/geos-boot";
 import { HwHoldChip } from "@/components/emu/HwHoldChip";
 import {
   beginColdSession,
@@ -767,6 +774,11 @@ export function Grok64App() {
           buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
         } else buf = new Uint8Array(bytes as ArrayLike<number>).buffer;
         const stGeos = useEmu.getState();
+        const reu = reuForGeosFamilyDisk(name, stGeos.reuSize);
+        if (reu !== stGeos.reuSize) {
+          stGeos.setReuSize(reu);
+          applyRuntimeOptions(emuRef.current, { vice_ram_expansion_unit: reu });
+        }
         stGeos.setIecSlot(8, "1541");
         stGeos.setMouseMode(true);
         sessionIecRef.current = "1541";
@@ -777,13 +789,14 @@ export function Grok64App() {
         applyRuntimeOptions(emuRef.current, {
           ...viceDriveTypeVars(viceMapFromIecMap(geosMap)),
           ...viceJoyOptions(stGeos.joyPort),
+          vice_ram_expansion_unit: reu,
         });
         const ok = await bootGeosFloppy(emuRef.current, new Uint8Array(buf), name, 8, geosMap);
         if (!ok) return false;
         setSessionDisk(name, new Uint8Array(buf), 8);
         const loaded = await feedBasicLine(emuRef.current, 'LOAD"*",8,1');
         if (!loaded) return false;
-        await new Promise((r) => window.setTimeout(r, 45_000));
+        await new Promise((r) => window.setTimeout(r, geosFamilyLoadMs(name)));
         return feedBasicLine(emuRef.current, "RUN", { runcmd: true });
       },
       settings: () => {
@@ -2320,8 +2333,15 @@ export function Grok64App() {
         toast.error("That file is missing.");
         return;
       }
-      if (/geos/i.test(file.name) && /\.d64$/i.test(file.name) && emuRef.current && useEmu.getState().running) {
+      if (isGeosFamilyDiskName(file.name) && emuRef.current && useEmu.getState().running) {
         const stGeos = useEmu.getState();
+        const reu = reuForGeosFamilyDisk(file.name, stGeos.reuSize);
+        if (reu !== stGeos.reuSize) {
+          stGeos.setReuSize(reu);
+          if (isWheelsDiskName(file.name)) {
+            toast.message("REU on for Wheels (512K+)");
+          }
+        }
         stGeos.setIecSlot(8, "1541");
         stGeos.setMouseMode(true);
         sessionIecRef.current = "1541";
@@ -2331,25 +2351,28 @@ export function Grok64App() {
         applyRuntimeOptions(emuRef.current, {
           ...viceDriveTypeVars(viceMapFromIecMap(geosMap)),
           ...viceJoyOptions(stGeos.joyPort),
-          vice_ram_expansion_unit: stGeos.reuSize,
+          vice_ram_expansion_unit: reu,
         });
         setMouseAnalog(emuRef.current, true);
         const raw = new Uint8Array(file.data);
         const ok = await bootGeosFloppy(emuRef.current, raw, file.name, 8, geosMap);
         if (!ok) {
-          toast.error("Could not mount GEOS disk");
+          toast.error(isWheelsDiskName(file.name) ? "Could not mount Wheels disk" : "Could not mount GEOS disk");
           return;
         }
         setSessionDisk(file.name, raw, 8);
         useEmu.getState().setInsertedDiskName(file.name);
         focusGrok64Player();
-        beginPlayLock(55_000, "Loading GEOS…");
+        beginPlayLock(
+          geosFamilyPlayLockMs(file.name),
+          isWheelsDiskName(file.name) ? "Loading Wheels…" : "Loading GEOS…",
+        );
         const loaded = await feedBasicLine(emuRef.current, 'LOAD"*",8,1');
         if (!loaded) {
-          toast.error("GEOS LOAD failed");
+          toast.error(isWheelsDiskName(file.name) ? "Wheels LOAD failed" : "GEOS LOAD failed");
           return;
         }
-        await new Promise((r) => window.setTimeout(r, 48_000));
+        await new Promise((r) => window.setTimeout(r, geosFamilyLoadMs(file.name)));
         await feedBasicLine(emuRef.current, "RUN", { runcmd: true });
         await touchPlayed(item.id);
         return;
