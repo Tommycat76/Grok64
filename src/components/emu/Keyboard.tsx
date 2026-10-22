@@ -41,6 +41,7 @@ function KeyBtn({
     <button
       type="button"
       className={className ? `g64-key ${className}` : "g64-key"}
+      data-key-id={k.id}
       data-mod={held ? "true" : "false"}
       data-petscii={petscii ? "true" : "false"}
       aria-label={k.label}

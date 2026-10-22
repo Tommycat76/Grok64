@@ -102,6 +102,7 @@ import {
   setSd2iecWasmIecOnly,
 } from "@/lib/emu/sd2iec";
 import {
+  grok64KeyboardDrain,
   grok64KeyboardReleaseAll,
   grok64RetroKeyboardAvailable,
   grok64RetroKeyboardFromDom,
@@ -737,6 +738,7 @@ export function Grok64App() {
         }
       },
       screenText: () => readScreenText(emuRef.current),
+      kbdDrain: () => grok64KeyboardDrain(),
       readC64Byte: (addr) => readC64Byte(emuRef.current, addr),
       writeC64Byte: (addr, v) => writeC64Byte(emuRef.current, addr, v),
       readC64Bytes: (addr, len) => {

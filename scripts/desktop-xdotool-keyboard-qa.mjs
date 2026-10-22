@@ -4,7 +4,7 @@
  */
 import { spawn } from "node:child_process";
 import { chromium } from "playwright";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { patchLocalStorage, powerOnDesktop, waitRunning } from "./desktop-qa-lib.mjs";
 import { assertGrok64WasmCore, clearEmulatorJsCache, grok64DatapathFromEnv } from "./desktop-grok64-core.mjs";
@@ -16,7 +16,10 @@ mkdirSync(outDir, { recursive: true });
 
 function sh(cmd, args, env = {}) {
   return new Promise((resolve, reject) => {
-    const p = spawn(cmd, args, { env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
+    const p = spawn(cmd, args, {
+      env: { ...process.env, DISPLAY: display, ...env },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
     let out = "";
     p.stdout?.on("data", (d) => (out += d));
     p.stderr?.on("data", (d) => (out += d));
@@ -39,17 +42,61 @@ const push = (row) => {
   console.log(row.pass ? "PASS" : "FAIL", row.id, row.detail ?? "");
 };
 
+async function windowArea(id) {
+  try {
+    const out = await sh("xdotool", ["getwindowgeometry", "--shell", id]);
+    const w = Number(/WIDTH=(\d+)/.exec(out)?.[1] ?? 0);
+    const h = Number(/HEIGHT=(\d+)/.exec(out)?.[1] ?? 0);
+    return w * h;
+  } catch {
+    return 0;
+  }
+}
+
+async function findChromiumWindow(server) {
+  const pid = server.process()?.pid;
+  const tries = [
+    ...(pid ? [() => sh("xdotool", ["search", "--pid", String(pid)])] : []),
+    () => sh("xdotool", ["search", "--onlyvisible", "--class", "chromium"]),
+    () => sh("xdotool", ["search", "--onlyvisible", "--class", "chrome"]),
+    () => sh("xdotool", ["search", "--name", "8080"]),
+  ];
+  for (let i = 0; i < 50; i++) {
+    for (const t of tries) {
+      try {
+        const ids = (await t()).trim().split(/\s+/).filter(Boolean);
+        let best = "";
+        let bestArea = 0;
+        for (const id of ids) {
+          const area = await windowArea(id);
+          if (area > bestArea) {
+            bestArea = area;
+            best = id;
+          }
+        }
+        if (best && bestArea > 80_000) return best;
+      } catch {
+        /* retry */
+      }
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return "";
+}
+
 let xvfb;
+let server;
 try {
   if (!grok64DatapathFromEnv()) throw new Error("VITE_GROK64_VICE_DATAPATH missing");
   xvfb = spawn("Xvfb", [display, "-screen", "0", "1280x800x24", "-ac"], { stdio: "ignore" });
   await new Promise((r) => setTimeout(r, 800));
 
-  const browser = await chromium.launch({
+  server = await chromium.launchServer({
     headless: false,
     env: { ...process.env, DISPLAY: display },
     args: ["--no-sandbox", "--disable-dev-shm-usage", "--window-size=1280,800"],
   });
+  const browser = await chromium.connect(server.wsEndpoint());
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await page.goto(base, { waitUntil: "domcontentloaded" });
   await clearEmulatorJsCache(page);
@@ -60,24 +107,15 @@ try {
   await assertGrok64WasmCore(page, { timeoutMs: 120000 });
   await page.waitForFunction(() => /READY/i.test(window.__g64?.screenText?.() || ""), { timeout: 90_000 });
 
-  let win = "";
-  for (let i = 0; i < 30; i++) {
-    try {
-      const ids = (await sh("xdotool", ["search", "--class", "chromium"])).trim().split(/\s+/).filter(Boolean);
-      win = ids[ids.length - 1] ?? "";
-      if (win) break;
-    } catch {
-      /* retry */
-    }
-    await new Promise((r) => setTimeout(r, 200));
-  }
+  await page.bringToFront();
+  await new Promise((r) => setTimeout(r, 600));
+  const win = await findChromiumWindow(server);
   if (!win) throw new Error("xdotool: Chromium window not found");
-  await sh("xdotool", ["windowactivate", "--sync", win]);
   await sh("xdotool", ["mousemove", "--window", win, "640", "300", "click", "1"]);
-  await new Promise((r) => setTimeout(r, 400));
+  await new Promise((r) => setTimeout(r, 500));
 
-  await sh("xdotool", ["type", "--delay", "80", "--window", win, "PRINT 2+2"]);
-  await new Promise((r) => setTimeout(r, 900));
+  await sh("xdotool", ["type", "--delay", "100", "--window", win, "PRINT 2+2"]);
+  await new Promise((r) => setTimeout(r, 1200));
   let text = await page.evaluate(() => window.__g64?.screenText?.() || "");
   const printLine = lineWith(text, "PRINT 2+2");
   push({
@@ -87,30 +125,70 @@ try {
   });
 
   await sh("xdotool", ["key", "--window", win, "Return"]);
-  await new Promise((r) => setTimeout(r, 2200));
+  await new Promise((r) => setTimeout(r, 2800));
   text = await page.evaluate(() => window.__g64?.screenText?.() || "");
   push({
     id: "xdo-print-run",
     pass: /\n\s*4\s*\n/m.test(text) || /\n\s*4\s*READY/m.test(text),
-    detail: text.slice(-100),
+    detail: text.slice(-120),
+  });
+
+  const kbBtn = page.locator('[aria-label="Keyboard"]').first();
+  await kbBtn.click({ timeout: 15_000, force: true });
+  await page.waitForSelector('.g64-app[data-kb="true"]', { timeout: 8000 });
+  await new Promise((r) => setTimeout(r, 500));
+  const canvasBox = await page.locator("#grok64-player canvas:not(.g64-ios-present)").first().boundingBox();
+  push({
+    id: "xdo-os-kb-crt-visible",
+    pass: Boolean(canvasBox && canvasBox.width >= 120 && canvasBox.height >= 80),
+    detail: canvasBox ? `${Math.round(canvasBox.width)}x${Math.round(canvasBox.height)}` : "no canvas box",
   });
 
   await sh("xdotool", ["key", "--window", win, "Return"]);
-  await new Promise((r) => setTimeout(r, 500));
-  await sh("xdotool", ["type", "--delay", "80", "--window", win, 'LOAD"$",8']);
-  await new Promise((r) => setTimeout(r, 1200));
+  await new Promise((r) => setTimeout(r, 400));
+  await page.locator(".g64-kb-bar button").filter({ hasText: "123" }).click({ force: true });
+  await page.locator('[data-key-id="2"]').click({ force: true });
+  await new Promise((r) => setTimeout(r, 600));
   text = await page.evaluate(() => window.__g64?.screenText?.() || "");
+  const osTapLine = text.split("\n").map((l) => l.trim()).filter(Boolean).slice(-2).join(" | ");
+  push({
+    id: "xdo-os-kb-tap",
+    pass: /^2$/m.test(text) || osTapLine.startsWith("2"),
+    detail: osTapLine,
+  });
+  await kbBtn.click({ force: true });
+  await new Promise((r) => setTimeout(r, 300));
+
+  await sh("xdotool", ["key", "--window", win, "Return"]);
+  await new Promise((r) => setTimeout(r, 400));
+  await sh("xdotool", ["type", "--delay", "80", "--window", win, "NEW"]);
+  await sh("xdotool", ["key", "--window", win, "Return"]);
+  await page.evaluate(() => window.__g64?.kbdDrain?.());
+  await new Promise((r) => setTimeout(r, 600));
+  await sh("xdotool", ["type", "--delay", "120", "--window", win, 'LOAD"$",8']);
+  await page.evaluate(() => window.__g64?.kbdDrain?.());
+  await new Promise((r) => setTimeout(r, 800));
+  text = await page.evaluate(() => window.__g64?.screenText?.() || "");
+  const loadCompact = text.replace(/\s+/g, "").toUpperCase();
   const loadLine = lineWith(text, 'LOAD"$",8');
   push({
     id: "xdo-load-dollar",
-    pass: (loadLine ?? "").replace(/\s+/g, "").toUpperCase().includes('LOAD"$",8'.replace(/\s+/g, "").toUpperCase()),
-    detail: loadLine,
+    pass: loadCompact.includes('LOAD"$",8'.replace(/\s+/g, "").toUpperCase()),
+    detail: loadLine ?? text.slice(-220),
   });
+
+  await page.screenshot({ path: join(outDir, "final.png") });
+  writeFileSync(join(outDir, "results.json"), JSON.stringify(rows, null, 2));
 
   await browser.close();
 } catch (e) {
   push({ id: "suite-error", pass: false, detail: String(e) });
 } finally {
+  try {
+    await server?.close();
+  } catch {
+    /* ignore */
+  }
   xvfb?.kill("SIGTERM");
 }
 

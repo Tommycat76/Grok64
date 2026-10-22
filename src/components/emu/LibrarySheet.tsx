@@ -35,7 +35,9 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
   }
 
   function runSaved(items: LibraryItem[]) {
-    const boot = pickBootFile(items.filter((i) => !isWorkDisk(i.name)));
+    const pool = items.filter((i) => !isWorkDisk(i.name));
+    const geos = pool.find((i) => /geos/i.test(i.name) && /\.d64$/i.test(i.name));
+    const boot = geos ?? pickBootFile(pool);
     if (!boot) return false;
     setOpen(false);
     onPlayLocal(boot);

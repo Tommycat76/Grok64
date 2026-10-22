@@ -1234,7 +1234,6 @@ div[class*="ejs_virtual"] {
 }
 .g64-app[data-kb="true"] .g64-bezel,
 .g64-app[data-kb="true"] .g64-screen {
-  min-height: 0;
   min-width: 0;
 }
 .g64-app[data-kb="true"] .g64-screen canvas:not(.g64-ios-present) {
