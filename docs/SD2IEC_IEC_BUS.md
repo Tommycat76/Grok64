@@ -1,5 +1,7 @@
 # SD2IEC IEC bus (Grok64 software device)
 
+Behavioral spec: [C64 OS SD2IEC User's Manual](https://www.c64os.com/post/sd2iecdocumentation) (command channel, `CD`/`CP`, `$`, disk images). Index: `docs/HARDWARE_SPEC_REFERENCE.md`.
+
 ## Feasibility in this core
 
 | Approach | Status |

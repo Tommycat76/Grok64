@@ -3,7 +3,10 @@ import { c64RamView } from "./c64-memory";
 import { listD64Directory, readD64Prg } from "./d64";
 import type { IecUnit } from "./types";
 
-/** IEC device numbers SD2IEC may answer on (incl. C64 OS on #12). */
+/**
+ * IEC device numbers SD2IEC may answer on (incl. C64 OS on #12).
+ * Firmware semantics: https://www.c64os.com/post/sd2iecdocumentation
+ */
 export type IecDeviceNumber = IecUnit | 12;
 
 const SECTOR = 512;
@@ -111,6 +114,19 @@ function joinDir(base: string, name: string): string {
   const n = normDir(name);
   if (!n) return b;
   return b ? `${b}/${n}` : n;
+}
+
+/** CD parent step — sd2iec manual (C64 OS): `CD<-`, `CD:_`, and PETSCII `CD←`. */
+function isCdParentStep(arg: string): boolean {
+  const a = arg.trim();
+  if (!a) return false;
+  if (a === "<-" || a === "_" || a === "..") return true;
+  if (a === "←" || a === "\u2190") return true;
+  if (a.length === 1) {
+    const c = a.charCodeAt(0);
+    if (c === 0x5f || c === 0x1e || c === 94) return true;
+  }
+  return false;
 }
 
 async function loadPart(partId: number): Promise<SdPartition> {
@@ -734,15 +750,20 @@ export async function runSdCommand(cmd: string): Promise<string> {
     }
     if (upper.startsWith("CD")) {
       let arg = trimmed.slice(2).replace(/^:/, "").trim();
-      if (arg === "<-" || arg === "_" || arg === "..") {
+      if (isCdParentStep(arg)) {
         if (mountedDiskImage) {
-          clearMountedDiskImage();
+          if (currentDir) currentDir = parentDir(currentDir);
+          else clearMountedDiskImage();
         } else {
           currentDir = parentDir(currentDir);
         }
       } else if (arg === "//" || arg === "/" || arg === "") {
-        currentDir = "";
-        clearMountedDiskImage();
+        if (mountedDiskImage) {
+          currentDir = "";
+        } else {
+          currentDir = "";
+          clearMountedDiskImage();
+        }
       } else if (/^\d+\/\//.test(arg.replace(/^["']|["']$/g, ""))) {
         const p = parsePath(arg.replace(/^["']|["']$/g, ""));
         currentPart = p.part;

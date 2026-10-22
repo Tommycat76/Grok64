@@ -2,6 +2,10 @@
  * JiffyDOS vs freezer / fast-load cartridges — real-hardware expectations.
  * Both replace or hook KERNAL IEC paths; Grok64 mirrors documented conflicts,
  * not emulator-only bugs.
+ *
+ * Hardware pairing notes align with community/CMD guidance summarized on
+ * https://c64os.com/buyersguide/ and freezer-cart manuals (AR, FC3, Super Snapshot).
+ * Spec reference only — no C64 OS files in-tree.
  */
 
 export type FastLoadCartKind =
@@ -74,7 +78,10 @@ export const JIFFY_FASTLOAD_CART_MATRIX: {
 ];
 
 const DETECT: { kind: FastLoadCartKind; re: RegExp }[] = [
-  { kind: "super-snapshot-5", re: /super\s*snapshot|supersnapshot|\bss5\b|snapshot\s*v\s*5/i },
+  {
+    kind: "super-snapshot-5",
+    re: /super\s*snapshot|supersnapshot|\bss[45]\b|snapshot\s*v\s*[45]/i,
+  },
   { kind: "action-replay", re: /action\s*replay|actionreplay|\bar\s*[456]|\bar[456]/i },
   { kind: "final-cartridge-3", re: /final\s*cartridge\s*(iii|3|\+)/i },
   { kind: "epyx-fastload", re: /epyx|fast\s*load/i },

@@ -44,6 +44,26 @@ test("CD into a D64 on the card lists PRGs from the image", async () => {
   resetSd2iecSession();
 });
 
+test("CD// keeps mounted D64; CD← at image root unmounts (C64 OS SD2IEC manual)", async () => {
+  const disk = prgToD64(new Uint8Array([1, 8, 0, 10, 0x11, 0x22]), "INNER");
+  await formatPartition(0);
+  await addSdFile(0, "WRAP.D64", disk.buffer, "");
+  assert.match(await runSdCommand('CD:"WRAP.D64"'), /OK/);
+  assert.match(await runSdCommand("CD//"), /OK/);
+  assert.equal(mountedDiskImageName(), "WRAP.D64");
+  assert.match(await runSdCommand("CD←"), /OK/);
+  assert.equal(mountedDiskImageName(), null);
+});
+
+test("CD← accepts PETSCII-style back alias CD<-", async () => {
+  const disk = prgToD64(new Uint8Array([1, 8, 0, 10, 0x11, 0x22]), "INNER");
+  await formatPartition(0);
+  await addSdFile(0, "WRAP.D64", disk.buffer, "");
+  await runSdCommand('CD:"WRAP.D64"');
+  assert.match(await runSdCommand("CD<-"), /OK/);
+  assert.equal(mountedDiskImageName(), null);
+});
+
 test("RD removes a directory tree", async () => {
   await formatPartition(0);
   await addSdFile(0, "TMP.PRG", new Uint8Array([1, 8, 0, 0]).buffer, "scratch");
