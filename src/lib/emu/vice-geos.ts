@@ -6,7 +6,8 @@ export function viceGeosFloppyOptions(unit: IecUnit = 8): Record<string, string>
     [`vice_drive${unit}_type`]: "1542",
     vice_drive_true_emulation: "enabled",
     vice_virtual_device_traps: "disabled",
-    vice_work_disk: `${unit}_d64`,
+    /** GEOS system disk replaces the blank work disk on this unit only. */
+    vice_work_disk: "disabled",
     vice_autostart: "disabled",
     vice_autostart_warp: "disabled",
     vice_autoloadwarp: "disabled",

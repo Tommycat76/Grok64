@@ -961,7 +961,7 @@ export function suspendAudio(emu: EjsInstance | null) {
 }
 
 export function dismissEjsPrompts(root: HTMLElement | null, mode: "boot" | "play" = "play") {
-  if (!root) return;
+  if (!root || typeof (root as HTMLElement).querySelectorAll !== "function") return;
   const nodes = root.querySelectorAll("button, a, .ejs_menu_button, .ejs_popup_container");
   for (const el of nodes) {
     const t = (el.textContent || "").replace(/\s+/g, " ").trim();
@@ -2158,8 +2158,9 @@ export async function bootGeosFloppy(
   applyRuntimeOptions(emu, {
     ...viceDriveTypeVars(viceMap),
     ...viceGeosFloppyOptions(unit),
+    [`vice_drive${unit}_type`]: "1542",
+    vice_work_disk: "disabled",
   });
-  injectViceRc(emu, viceRcForDrives(viceMap, false));
   injectViceRc(
     emu,
     ["[C64]", `Drive${unit}Type=1542`, "DriveTrueEmulation=1", "VirtualDevices=0"].join("\n") + "\n",
@@ -2167,7 +2168,11 @@ export async function bootGeosFloppy(
   applyIecUnit(emu, "1541", unit);
   disarmAutostart(emu, "disk");
 
-  applyRuntimeOptions(emu, viceGeosFloppyOptions(unit));
+  applyRuntimeOptions(emu, {
+    ...viceGeosFloppyOptions(unit),
+    [`vice_drive${unit}_type`]: "1542",
+    vice_work_disk: "disabled",
+  });
   applyIecUnit(emu, "1541", unit);
 
   const attached = attachAutostartDisk(emu, data, fileName, "1541", unit);

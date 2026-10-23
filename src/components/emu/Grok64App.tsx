@@ -121,6 +121,7 @@ import { attachGrok64Sd2iec, tickGrok64Iec, wireGrok64ViceHost } from "@/lib/emu
 import { readC64Byte, readC64Bytes, writeC64Byte, writeC64Bytes } from "@/lib/emu/c64-memory";
 import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor } from "@/lib/emu/vice-extras";
 import {
+  geosFamilyDesktopOk,
   geosFamilyLoadMs,
   geosFamilyPlayLockMs,
   isGeosFamilyDiskName,
@@ -812,7 +813,13 @@ export function Grok64App() {
         const loaded = await feedBasicLine(emuRef.current, 'LOAD"*",8,1');
         if (!loaded) return false;
         await new Promise((r) => window.setTimeout(r, geosFamilyLoadMs(name)));
-        return feedBasicLine(emuRef.current, "RUN", { runcmd: true });
+        const ran = await feedBasicLine(emuRef.current, "RUN", { runcmd: true });
+        if (!ran) return false;
+        await new Promise((r) => window.setTimeout(r, 8000));
+        const screen = readScreenText(emuRef.current);
+        if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen)) return false;
+        if (/^\s*READY\.?\s*$/m.test(screen.trim()) && screen.length < 120) return false;
+        return geosFamilyDesktopOk(screen, name) || screen.replace(/\s+/g, "").length > 40;
       },
       settings: () => {
         const st = useEmu.getState();
@@ -1496,7 +1503,7 @@ export function Grok64App() {
         });
         applyIecUnit(emu, spec.live.iec, spec.live.unit);
         if (cartBoot) {
-          dismissEjsPrompts(emu);
+          dismissEjsPrompts(document.getElementById("grok64-player"));
           bumpCrtPaint(emu);
           scheduleFit(true);
         }
@@ -3673,6 +3680,16 @@ export function Grok64App() {
           ) : null}
         </div>
         <div className="g64-top-pin">
+        <button
+          type="button"
+          className="g64-iconbtn g64-power-toggle g64-power-pin"
+          aria-label="Power off"
+          title="Power off"
+          onClick={() => powerOff()}
+        >
+          <Power className="size-5 g64-iconbtn-icon" aria-hidden="true" />
+          <span className="g64-iconbtn-label">Power</span>
+        </button>
         <button type="button" className="g64-iconbtn g64-software" data-on={s.libraryOpen} aria-label="Software" title="Software" onClick={() => s.setLibraryOpen(true)}>
           <FolderOpen className="size-5 g64-iconbtn-icon" aria-hidden="true" />
           <span className="g64-iconbtn-label">Software</span>

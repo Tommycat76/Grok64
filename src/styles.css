@@ -339,6 +339,13 @@ html, body, #app {
   flex-wrap: wrap;
   gap: 6px;
 }
+.g64-app[data-device="phone"] .g64-power-pin,
+.g64-app[data-device="tablet"] .g64-power-pin {
+  display: none;
+}
+.g64-app[data-device="desktop"] .g64-power-pin {
+  color: color-mix(in oklab, var(--color-phosphor) 88%, var(--g64-toolbar-label));
+}
 .g64-app[data-device="desktop"] .g64-top .g64-iconbtn:not(.g64-rail-more) {
   width: auto;
   min-width: 0;

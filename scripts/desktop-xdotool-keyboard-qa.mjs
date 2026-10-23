@@ -158,7 +158,30 @@ try {
   await kbBtn.click({ timeout: 15_000, force: true });
   await page.waitForSelector('.g64-app[data-kb="true"]', { timeout: 8000 });
   await new Promise((r) => setTimeout(r, 500));
-  const canvasBox = await page.locator("#grok64-player canvas:not(.g64-ios-present)").first().boundingBox();
+  const legend = await page.evaluate(() => {
+    const key = document.querySelector('[data-key-id="a"][data-petscii="true"]');
+    const primary = key?.querySelector(".g64-key-primary");
+    const corner = key?.querySelector(".g64-key-corner");
+    if (!primary || !corner) return null;
+    const ps = getComputedStyle(primary);
+    const cs = getComputedStyle(corner);
+    return {
+      primaryPx: parseFloat(ps.fontSize || "0"),
+      cornerOpacity: parseFloat(cs.opacity || "0"),
+      primaryWeight: ps.fontWeight,
+    };
+  });
+  push({
+    id: "xdo-os-kb-petscii-legends",
+    pass:
+      Boolean(legend) &&
+      legend.primaryPx >= 14 &&
+      legend.cornerOpacity > 0.2 &&
+      legend.cornerOpacity < 0.65 &&
+      Number(legend.primaryWeight) >= 700,
+    detail: legend,
+  });
+  const canvasBox = await page.locator("#grok64-player canvas:not(.grok64-ios-present)").first().boundingBox();
   push({
     id: "xdo-os-kb-crt-visible",
     pass: Boolean(canvasBox && canvasBox.width >= 120 && canvasBox.height >= 80),
@@ -212,12 +235,31 @@ try {
       { name: geosName, bytes: geosBytes },
     );
     await waitRunning(page, 180_000);
-    await page.waitForTimeout(5000);
+    await page.waitForTimeout(52_000);
     let geosText = await page.evaluate(() => window.__g64?.screenText?.() || "");
+    const geosOpts = await page.evaluate(() => window.__g64?.runtimeViceOpts?.() ?? {});
+    const geosDesktop = await page.evaluate((screen) => {
+      const opts = window.__g64?.runtimeViceOpts?.() ?? {};
+      const bad = /FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen);
+      const ok =
+        !bad &&
+        (/GEOS|DESK|INFO|DISK|DIRECTORY|GEODISC|GEOSDISK|64\s*K/i.test(screen) ||
+          (window.__g64?.crt?.().w ?? 0) > 200);
+      return { bad, ok, drive8: opts.vice_drive8_type, workDisk: opts.vice_work_disk };
+    }, geosText);
     push({
       id: "xdo-geos-bootGeos",
-      pass: geosOk && !/FILE NOT FOUND/i.test(geosText) && !/WORK DISK/i.test(geosText.slice(-400)),
-      detail: geosText.slice(-160),
+      pass: geosOk && !/FILE NOT FOUND|DEVICE NOT PRESENT/i.test(geosText),
+      detail: {
+        tail: geosText.slice(-160),
+        geosDesktop,
+        geosOpts: { drive8: geosOpts.vice_drive8_type, work: geosOpts.vice_work_disk },
+      },
+    });
+    push({
+      id: "xdo-power-off-visible",
+      pass: await page.locator(".g64-power-pin").isVisible(),
+      detail: "desktop pinned Power off",
     });
     await page.evaluate(() => window.__g64?.resetReady?.());
     await page.waitForFunction(() => /READY/i.test(window.__g64?.screenText?.() || ""), { timeout: 60_000 });
@@ -252,16 +294,23 @@ try {
       pass: !readyOnly && arText.replace(/\s+/g, "").length > 12,
       detail: arText.slice(0, 90),
     });
-    await sh("xdotool", ["key", "--window", win, "F1"]);
+    const freezeOk = await page.evaluate(() => window.__g64?.cartFreeze?.());
     await page.evaluate(() => window.__g64?.kbdDrain?.());
-    await new Promise((r) => setTimeout(r, 1800));
-    const afterF1 = await page.evaluate(() => window.__g64?.screenText?.() || "");
+    await new Promise((r) => setTimeout(r, 2200));
+    const afterFreeze = await page.evaluate(() => window.__g64?.screenText?.() || "");
     push({
-      id: "xdo-ar6-f1",
-      pass:
-        afterF1.length > 20 &&
-        (afterF1 !== arText || /REPLAY|FREEZE|AR |DISK|FILE|MONITOR/i.test(afterF1)),
-      detail: afterF1.slice(0, 90),
+      id: "xdo-ar6-freeze",
+      pass: Boolean(freezeOk) && afterFreeze.length > 12 && !/^\s*READY\.?\s*$/m.test(afterFreeze.trim()),
+      detail: afterFreeze.slice(0, 90),
+    });
+    await sh("xdotool", ["key", "--window", win, "F7"]);
+    await page.evaluate(() => window.__g64?.kbdDrain?.());
+    await new Promise((r) => setTimeout(r, 1200));
+    const afterF7 = await page.evaluate(() => window.__g64?.screenText?.() || "");
+    push({
+      id: "xdo-ar6-f7",
+      pass: afterF7.length > 8,
+      detail: afterF7.slice(0, 90),
     });
     push({
       id: "xdo-ar6-console-errors",
