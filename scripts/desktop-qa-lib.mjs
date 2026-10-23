@@ -111,8 +111,16 @@ export function patchLocalStorage(page, combo) {
     data.state.jiffyDos = !!combo.jiffy;
     data.state.mouseMode = !!combo.mouse;
     data.state.joyPort = combo.joy ?? 2;
-    if (combo.drive === "sd2iec") {
+    if (combo.iecMap) {
+      data.state.iecMap = combo.iecMap;
+      if (combo.iecDrive) data.state.iecDrive = combo.iecDrive;
+      if (combo.iecUnit) data.state.iecUnit = combo.iecUnit;
+    } else if (combo.drive === "sd2iec") {
       data.state.iecMap = { 8: "sd2iec", 9: "none", 10: "none", 11: "none" };
+    } else if (combo.drive === "cmd-layout") {
+      data.state.iecMap = { 8: "1541", 9: "cmdhd", 10: "none", 11: "none" };
+      data.state.iecDrive = "cmdhd";
+      data.state.iecUnit = 9;
     } else {
       data.state.iecMap = {
         8: combo.drive === "1581" ? "1581" : "1541",

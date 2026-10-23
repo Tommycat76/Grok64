@@ -25,6 +25,7 @@
     "test:desktop-xdotool-keyboard": "node scripts/desktop-xdotool-keyboard-qa.mjs",
     "test:desktop-xdotool-wheels": "node scripts/desktop-xdotool-wheels-qa.mjs",
     "test:desktop-xdotool-cart-matrix": "NODE_OPTIONS=--max-old-space-size=6144 node scripts/desktop-xdotool-cart-matrix.mjs",
+    "test:desktop-xdotool-extended": "NODE_OPTIONS=--max-old-space-size=6144 node scripts/desktop-xdotool-extended-qa.mjs",
     "test:desktop-os-keyboard": "node scripts/desktop-os-keyboard-qa.mjs",
     "fetch-fixtures": "node scripts/fetch-fixtures.mjs",
     "test:desktop-e2e": "node scripts/desktop-e2e.mjs",

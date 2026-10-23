@@ -44,6 +44,7 @@ _Last updated: 2026-10-23_
 | Artifact | Command |
 |----------|---------|
 | Cart matrix (xdotool) | `npm run test:desktop-xdotool-cart-matrix` → `docs/CART_COMPAT_MATRIX.md` |
+| Downloader, CMD HD, demos, freeze/autostart | `npm run test:desktop-xdotool-extended` → `docs/REAL_UI_QA_REPORT.md` |
 | Play / IEC state machine | `node scripts/play-session.test.mjs` |
 | Jiffy × cart pairing | `node scripts/jiffy-cart-compat.test.mjs` |
 | Desktop keyboard + AR6 | `npm run test:desktop-xdotool-keyboard` |
