@@ -202,12 +202,6 @@ async function runCartKernal(page, win, entry, kernal) {
   let gameOk = true;
   if (entry.gameLoad && kernal === "stock" && existsSync(DISK)) {
     await ensureReal1541Timing(page);
-    if (entry.id === "epyx-fl") {
-      await page.evaluate(async () => {
-        await window.__g64?.typeBasic?.(":");
-      });
-      await page.waitForTimeout(2500);
-    }
     const bytes = [...readFileSync(DISK)];
     await page.evaluate(
       async ({ bytes }) => {

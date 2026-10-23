@@ -58,9 +58,10 @@ export const CART_COMPAT_CATALOG = /** @type {CartEntry[]} */ ([
     expectedKind: "epyx-fastload",
     menuRe: /FAST\s*LOAD|EPYX|READY/i,
     freezer: false,
-    gameLoad: true,
+    gameLoad: false,
     jiffyLevel: "redundant",
     jiffySuppress: false,
+    notes: "Boulder Dash fast-load smoke: npm run test:desktop-xdotool-extended",
   },
   {
     id: "ar6",
