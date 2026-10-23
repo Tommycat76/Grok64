@@ -234,7 +234,7 @@ async function runCartKernal(page, win, entry, kernal) {
       !plainBasicOnly(frozen) &&
       (frozen !== before || entry.menuRe.test(frozen) || /SNAPSHOT|REPLAY|FINAL|FREEZE|MONITOR/i.test(frozen));
     if (entry.id.startsWith("ar")) {
-      await xdoKey(win, "F1");
+      await page.evaluate(() => window.__g64?.cartFreeze?.());
       await page.evaluate(() => window.__g64?.kbdDrain?.());
       await page.waitForTimeout(1200);
     }
