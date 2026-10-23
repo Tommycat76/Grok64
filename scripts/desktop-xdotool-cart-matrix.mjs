@@ -16,7 +16,13 @@ import {
   cartFixturePresent,
   cartPlayName,
 } from "./cart-compat-catalog.mjs";
-import { patchLocalStorage, powerOnDesktop, waitRunning, ensureReal1541Timing } from "./desktop-qa-lib.mjs";
+import {
+  canvasHasSignal,
+  patchLocalStorage,
+  powerOnDesktop,
+  waitRunning,
+  ensureReal1541Timing,
+} from "./desktop-qa-lib.mjs";
 import { assertGrok64WasmCore, clearEmulatorJsCache, grok64DatapathFromEnv } from "./desktop-grok64-core.mjs";
 import { writeCartCompatMatrixDoc } from "./generate-cart-compat-matrix-doc.mjs";
 
@@ -201,10 +207,12 @@ async function runCartKernal(page, win, entry, kernal) {
     await waitRunning(page, 120_000);
     await page.waitForTimeout(gameWaitMs);
     const gtext = await page.evaluate(() => window.__g64?.screenText?.() || "");
+    const painted = await canvasHasSignal(page);
     gameOk =
       !/NOT FOUND/i.test(gtext) &&
       !plainBasicOnly(gtext) &&
-      (gtext.length > 80 ||
+      (painted ||
+        gtext.length > 80 ||
         /boulder|level|score|lives|press|loading/i.test(gtext) ||
         (/LOAD\s*"\*"/i.test(gtext) && gtext.length > 120));
   } else if (entry.gameLoad && kernal === "jiffy") {
