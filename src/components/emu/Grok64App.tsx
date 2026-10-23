@@ -93,6 +93,7 @@ import {
   waitForCoreFs,
   injectViceRc,
   bumpCrtPaint,
+  tryGeosDiskAutostart,
 } from "@/lib/emu/host";
 import { hasCmdRom, hasJiffyPair, prefetchBundledRoms } from "@/lib/emu/roms";
 import {
@@ -132,6 +133,7 @@ import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor }
 import {
   geosBootSucceeded,
   geosBootStuckAtBasic,
+  geosBootLoadCandidates,
   geosBootLoadLine,
   geosBootLooksLaunched,
   geosFamilyDesktopOk,
@@ -796,6 +798,7 @@ export function Grok64App() {
         }
       },
       screenText: () => readScreenText(emuRef.current),
+      workD64Bytes: () => viceWorkD64ByteLength(emuRef.current),
       kbdDrain: () => grok64KeyboardDrain(),
       readC64Byte: (addr) => readC64Byte(emuRef.current, addr),
       writeC64Byte: (addr, v) => writeC64Byte(emuRef.current, addr, v),
@@ -867,31 +870,112 @@ export function Grok64App() {
         setSessionDisk(name, new Uint8Array(buf), 8);
         await flushEmuFs(emuRef.current, 3000);
         applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
-        const loadLine = geosBootLoadLine(name);
-        if (!(await feedBasicLine(emuRef.current, loadLine))) return false;
-        const loadEnd = Date.now() + geosFamilyLoadMs(name);
-        while (Date.now() < loadEnd) {
-          const mid = readScreenText(emuRef.current);
-          if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(mid)) return false;
-          if (/LOADING/i.test(mid) || (!geosBootStuckAtBasic(mid) && mid.replace(/\s+/g, "").length > 60)) break;
-          await new Promise((r) => window.setTimeout(r, 500));
+        setPaused(emuRef.current, false);
+        if (await tryGeosDiskAutostart(emuRef.current, 8)) {
+          await feedBasicLine(emuRef.current, "RUN", { runcmd: true });
+          const autoEnd = Date.now() + 120_000;
+          while (Date.now() < autoEnd) {
+            const screen = readScreenText(emuRef.current);
+            if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen)) break;
+            if (geosBootSucceeded(screen, name) || geosBootLooksLaunched(screen)) {
+              bumpCrtPaint(emuRef.current);
+              return true;
+            }
+            const pix = await (async () => {
+              const el = document.getElementById("grok64-player");
+              const c = shotDisplayCanvas(el);
+              const ctx = c?.getContext?.("2d");
+              if (!c || !ctx) return 0;
+              const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height);
+              let geosDesk = 0;
+              for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                if (g > 85 && b > 85 && r > 85 && r < 210) geosDesk += 1;
+              }
+              return geosDesk / (width * height);
+            })();
+            if (pix >= 0.1) {
+              bumpCrtPaint(emuRef.current);
+              return true;
+            }
+            bumpCrtPaint(emuRef.current);
+            fitEmu(document.getElementById("grok64-player"), emuRef.current);
+            await new Promise((r) => window.setTimeout(r, 800));
+          }
         }
-        applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
-        if (!(await feedBasicLine(emuRef.current, "RUN", { runcmd: true }))) return false;
-        const runEnd = Date.now() + 90_000;
-        while (Date.now() < runEnd) {
+        const loadCandidates = geosBootLoadCandidates(name);
+        for (const loadLine of loadCandidates) {
+          if (!(await feedBasicLine(emuRef.current, loadLine))) continue;
+          const loadEnd = Date.now() + geosFamilyLoadMs(name);
+          let loadFailed = false;
+          while (Date.now() < loadEnd) {
+            const mid = readScreenText(emuRef.current);
+            if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(mid)) {
+              loadFailed = true;
+              break;
+            }
+            if (/LOADING/i.test(mid)) {
+              await new Promise((r) => window.setTimeout(r, 1200));
+              continue;
+            }
+            if (/\bREADY\b/i.test(mid) && /LOADING|GEOS|\*"/i.test(mid)) break;
+            await new Promise((r) => window.setTimeout(r, 500));
+          }
+          if (loadFailed) {
+            await feedBasicLine(emuRef.current, "NEW", { runcmd: true });
+            await new Promise((r) => window.setTimeout(r, 400));
+            continue;
+          }
+          applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
+          await flushEmuFs(emuRef.current, 800);
+          setPaused(emuRef.current, false);
+          try {
+            emuRef.current.paused = false;
+            emuRef.current.gameManager?.toggleMainLoop(1);
+          } catch {
+            /* optional */
+          }
+          await feedBasicLine(emuRef.current, "RUN", { runcmd: true });
+          const runEnd = Date.now() + 120_000;
+          while (Date.now() < runEnd) {
+            const screen = readScreenText(emuRef.current);
+            if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen)) break;
+            if (geosBootSucceeded(screen, name) || geosBootLooksLaunched(screen)) {
+              bumpCrtPaint(emuRef.current);
+              return true;
+            }
+            bumpCrtPaint(emuRef.current);
+            fitEmu(document.getElementById("grok64-player"), emuRef.current);
+            await new Promise((r) => window.setTimeout(r, 800));
+          }
           const screen = readScreenText(emuRef.current);
-          if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen)) return false;
           if (geosBootSucceeded(screen, name) || geosBootLooksLaunched(screen)) {
             bumpCrtPaint(emuRef.current);
             return true;
           }
-          bumpCrtPaint(emuRef.current);
-          await new Promise((r) => window.setTimeout(r, 800));
+          await feedBasicLine(emuRef.current, "NEW", { runcmd: true });
+          await new Promise((r) => window.setTimeout(r, 400));
         }
-        const screen = readScreenText(emuRef.current);
-        bumpCrtPaint(emuRef.current);
-        return geosBootSucceeded(screen, name) || geosBootLooksLaunched(screen);
+        return false;
+      },
+      geosDesktopPixels: async () => {
+        const el = document.getElementById("grok64-player");
+        const c = shotDisplayCanvas(el);
+        if (!c || c.width < 8) return { ok: false };
+        const ctx = c.getContext("2d");
+        if (!ctx) return { ok: false };
+        const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height);
+        let geosDesk = 0;
+        const pixels = width * height;
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          if (g > 85 && b > 85 && r > 85 && r < 210) geosDesk += 1;
+        }
+        return { ok: true, geosDesk: geosDesk / pixels, w: width, h: height };
       },
       settings: () => {
         const st = useEmu.getState();

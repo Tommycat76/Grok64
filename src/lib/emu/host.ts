@@ -2057,11 +2057,13 @@ export function syncViceWorkD64(emu: EjsInstance | null, data: Uint8Array) {
   const targets = [
     "/data/saves/vice_work.d64",
     "/home/web_user/retroarch/userdata/saves/vice_work.d64",
+    "/vice_work/vice_work.d64",
+    "/home/web_user/retroarch/userdata/saves/vice_work/vice_work.d64",
   ];
   for (const path of targets) {
     try {
       const dir = path.slice(0, path.lastIndexOf("/"));
-      FS.mkdir?.(dir);
+      mkdirFs(FS, dir);
       FS.writeFile(path, data);
     } catch {
       /* optional */
@@ -2342,18 +2344,19 @@ export async function bootGeosFloppy(
   });
   applyIecUnit(emu, "1541", unit);
 
-  const attached = attachAutostartDisk(emu, data, fileName, "1541", unit);
-  if (!attached) {
-    const target = "WORK DISK.D64";
-    if (!swapBootDisk(emu, data, target) && !writeBootFile(emu, data, target)) return false;
-    emu.fileName = target;
-    unitMounts.set(unit, target);
-  }
+  const target = "WORK DISK.D64";
+  if (!writeBootFile(emu, data, target)) return false;
+  emu.fileName = target.replace(/^\//, "");
+  unitMounts.set(unit, target);
   setSessionDisk(fileName.replace(/^\//, ""), data, unit);
   syncViceWorkD64(emu, data);
+  if (viceWorkD64ByteLength(emu) < 174848) {
+    glog("geos-work-mirror-miss", { bytes: viceWorkD64ByteLength(emu) });
+  }
 
   const flushed = await flushEmuFs(emu, 3000);
   if (!flushed) return false;
+  await refreshViceWorkDisk(emu, unit);
   applyRuntimeOptions(emu, {
     ...viceGeosFloppyOptions(unit),
     [`vice_drive${unit}_type`]: "1542",
@@ -2367,6 +2370,24 @@ export async function bootGeosFloppy(
     vice_work_disk: `${unit}_d64`,
   });
   return await waitForC64Ready(emu, 45_000);
+}
+
+/** VICE autostart LOAD"*",8,1 — fallback when typed LOAD"GEOS" returns to BASIC. */
+export async function tryGeosDiskAutostart(emu: EjsInstance | null, unit: IecUnit = 8): Promise<boolean> {
+  if (!emu) return false;
+  disarmAutostart(emu, "disk");
+  applyRuntimeOptions(emu, {
+    ...viceGeosFloppyOptions(unit),
+    [`vice_drive${unit}_type`]: "1542",
+    vice_autostart: "enabled",
+    vice_autostart_warp: "enabled",
+    vice_autoloadwarp: "enabled",
+    vice_reset: "autostart",
+  });
+  resetEmu(emu);
+  await flushEmuFs(emu, 2000);
+  bumpCrtPaint(emu);
+  return await waitForC64Ready(emu, 60_000);
 }
 
 export function attachAutostartDisk(

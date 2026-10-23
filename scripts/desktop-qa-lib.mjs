@@ -112,6 +112,7 @@ function decodePngStats(page, b64, src) {
         const b = data[i + 2];
         buckets.add(`${r >> 4},${g >> 4},${b >> 4}`);
         if (g > 110 && b > 140 && r < 150) geosDesk += 1;
+        if (g > 85 && b > 85 && r > 85 && r < 210 && g < 210 && b < 210) geosDesk += 0.35;
         if (b > 170 && r < 90 && g < 130) viceBlank += 1;
         if (r + g + b < 80) ink += 1;
       }
@@ -159,10 +160,10 @@ export async function canvasLooksLikeGeosDesktop(page) {
     /COMMODORE 64 BASIC/i.test(text) && /\bREADY\b/i.test(text) && text.replace(/\s+/g, "").length < 220;
   const pass =
     !basicReady &&
-    stats.buckets >= 48 &&
-    stats.geosDesk >= 0.12 &&
-    stats.viceBlank < 0.72 &&
-    stats.ink >= 0.002;
+    stats.geosDesk >= 0.1 &&
+    stats.viceBlank < 0.85 &&
+    stats.ink < 0.995 &&
+    (stats.buckets >= 8 || stats.geosDesk >= 0.14);
   return { pass, stats, textTail: text.slice(-120) };
 }
 

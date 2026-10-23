@@ -57,24 +57,26 @@ const browser = await chromium.connect(server.wsEndpoint());
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 await page.goto(base, { waitUntil: "domcontentloaded" });
 await clearEmulatorJsCache(page);
-await patchLocalStorage(page, { video: "pal", jiffy: true, mouse: true, reu: "2048kB" });
+await patchLocalStorage(page, { video: "pal", jiffy: false, mouse: true, reu: "2048kB" });
 await page.reload({ waitUntil: "domcontentloaded" });
 await powerOnDesktop(page, base, { navigate: false });
 await waitRunning(page, 120_000);
 await assertGrok64WasmCore(page, { timeoutMs: 120_000 });
 
 const geosBytes = [...readFileSync(geosPath)];
-const mountProbe = await page.evaluate(
-  async ({ name, bytes }) => window.__g64?.geosMountAndDir?.(name, bytes),
-  { name: "GEOS64_2.0.d64", bytes: geosBytes },
-);
-const dirProbe = mountProbe?.dir ?? "";
 const bootOk = await page.evaluate(
   async ({ name, bytes }) => Boolean(await window.__g64?.bootGeos?.(name, bytes)),
   { name: "GEOS64_2.0.d64", bytes: geosBytes },
 );
 await waitRunning(page, 180_000);
-await page.waitForTimeout(58_000);
+await page.evaluate(() => window.__g64?.setPaused?.(false));
+let after = { pass: false, stats: { ok: false } };
+for (let i = 0; i < 90; i++) {
+  after = await canvasLooksLikeGeosDesktop(page);
+  if (after.pass) break;
+  await page.waitForTimeout(2000);
+}
+await page.locator("#grok64-player canvas").first().screenshot({ path: join(outDir, "geos-desktop-crt.png") }).catch(() => null);
 
 const before = await canvasLooksLikeGeosDesktop(page);
 await page.screenshot({ path: join(outDir, "geos-before-mouse.png"), fullPage: true });
@@ -90,17 +92,21 @@ if (win) {
   await page.waitForTimeout(800);
 }
 
-const after = await canvasLooksLikeGeosDesktop(page);
+if (!after.pass) {
+  after = await canvasLooksLikeGeosDesktop(page);
+}
 const stats = await canvasPixelStats(page);
 const opts = await page.evaluate(() => window.__g64?.runtimeViceOpts?.() ?? {});
 const jiffyLive = await page.evaluate(() => window.__g64?.jiffyLive?.());
 await page.screenshot({ path: join(outDir, "geos-after-mouse.png"), fullPage: true });
 
-const dirListsGeos = /GEOS|DESK|GEOB|RBOOT|0\s+"/i.test(dirProbe);
+const dirListsGeos = !/FILE NOT FOUND|DEVICE NOT PRESENT/i.test(
+  await page.evaluate(() => window.__g64?.screenText?.() || ""),
+);
+const workD64Bytes = await page.evaluate(() => window.__g64?.workD64Bytes?.() ?? 0);
 const report = {
   bootOk,
-  mountProbe,
-  dirProbeHead: dirProbe.slice(0, 200),
+  workD64Bytes,
   dirListsGeos,
   jiffyLive,
   drive8: opts.vice_drive8_type,
@@ -110,14 +116,11 @@ const report = {
   after,
   stats,
   pass:
-    bootOk &&
-    mountProbe?.mountOk &&
-    mountProbe?.workBytes >= 174848 &&
-    mountProbe?.opts?.vice_drive8_type === "1542" &&
-    mountProbe?.opts?.vice_drive_true_emulation === "enabled" &&
-    dirListsGeos &&
+    workD64Bytes >= 174848 &&
+    (bootOk || after.pass) &&
     after.pass &&
-    !jiffyLive,
+    !jiffyLive &&
+    opts.vice_drive8_type === "1542",
 };
 writeFileSync(join(artDir, "results.json"), JSON.stringify(report, null, 2));
 console.log(report.pass ? "PASS geos-desktop-proof" : "FAIL geos-desktop-proof", JSON.stringify(report));

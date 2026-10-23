@@ -42,11 +42,12 @@ export function geosFamilyPlayLockMs(fileName: string): number {
 /** Text heuristics for desktop QA (Wheels is mostly graphical). */
 /** BASIC READY after a GEOS boot attempt means the OS did not stay up. */
 export function geosBootStuckAtBasic(screen: string): boolean {
-  const compact = screen.replace(/\s+/g, " ").trim();
+  const tail = screen.split("\n").slice(-10).join("\n");
+  const compact = tail.replace(/\s+/g, " ").trim();
   return (
-    /COMMODORE 64 BASIC/i.test(screen) &&
-    /\bREADY\b/i.test(screen) &&
-    (/^READY\.?$/i.test(compact) || compact.length < 240)
+    /COMMODORE 64 BASIC/i.test(tail) &&
+    /\bREADY\b/i.test(tail) &&
+    (/^READY\.?$/i.test(compact) || compact.length < 120)
   );
 }
 
@@ -57,24 +58,31 @@ export function geosFamilyDesktopOk(screen: string, fileName?: string): boolean 
     if (/REU|RAM\s*EXPANS|NO\s*REU|EXPANSION\s*NOT/i.test(screen)) return false;
     return /WHEELS|DASH\s*BOARD|DASHBOARD|TOOL\s*BOX|CLICK\s*HERE|GEOS/i.test(screen);
   }
-  return /GEOS|DESK|INFO|DISK|DIRECTORY|GEODISC|GEOSDISK|64\s*K|deskTop/i.test(screen);
+  return /GEOS|DESK|INFO|DIRECTORY|GEODISC|GEOSDISK|deskTop|DISK\s+(NOT\s+)?(READY|FULL)/i.test(screen);
 }
 
 export function geosBootSucceeded(screen: string, fileName?: string): boolean {
   if (geosBootStuckAtBasic(screen)) return false;
-  return geosFamilyDesktopOk(screen, fileName);
+  const tail = screen.split("\n").slice(-14).join("\n");
+  return geosFamilyDesktopOk(tail, fileName);
 }
 
 /** Preferred LOAD line for GEOS-family system disks (GEOS 2.0 vs Wheels). */
 export function geosBootLoadLine(fileName: string): string {
-  if (isWheelsDiskName(fileName)) return 'LOAD"*",8,1';
-  return 'LOAD"GEOS",8,1';
+  return geosBootLoadCandidates(fileName)[0];
+}
+
+/** Try in order until one loads (fixture / mastering varies). */
+export function geosBootLoadCandidates(fileName: string): string[] {
+  if (isWheelsDiskName(fileName)) return ['LOAD"*",8,1', 'LOAD"GEOS",8,1'];
+  return ['LOAD"GEOS",8,1', 'LOAD"*",8,1', 'LOAD"RBOOT",8,1'];
 }
 
 /** After RUN, GEOS deskTop is graphical — KERNAL screen text may be garbage. */
 export function geosBootLooksLaunched(screen: string): boolean {
-  if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR|SYNTAX\s+ERROR/i.test(screen)) return false;
-  if (geosBootStuckAtBasic(screen)) return false;
-  const compact = screen.replace(/\s+/g, "");
-  return compact.length > 40 && !/^READY\.?$/i.test(compact);
+  const tail = screen.split("\n").slice(-14).join("\n");
+  if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR|SYNTAX\s+ERROR/i.test(tail)) return false;
+  if (/SEARCHING FOR|LOADING|LOAD"/i.test(tail)) return false;
+  if (geosBootStuckAtBasic(tail)) return false;
+  return /GEOS|DESK|DISK|DIRECTORY|GEODISC|WHEELS|deskTop/i.test(tail);
 }
