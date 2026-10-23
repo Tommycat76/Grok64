@@ -81,14 +81,24 @@ const diag = await page.evaluate(() => ({
 
 await page.screenshot({ path: join(out, "tom-power-02-ss5-play.png"), fullPage: true });
 
+const cartFzVisible = await page.locator('button[data-hw="cart-fz"]').count();
+const cartOutVisible = await page.locator('button[data-hw="cart-out"]').count();
+
 const report = {
   menu: ssMenuRe.test(text),
   poison: grok64FloppyAutostartPoison(text),
   basicOnly: /COMMODORE 64 BASIC/i.test(text) && /\bREADY\b/i.test(text) && !ssMenuRe.test(text),
+  cartFzVisible,
+  cartOutVisible,
   diag,
   consoleErrorCount: consoleErrors.length,
   consoleSample: consoleErrors.slice(0, 5),
-  pass: ssMenuRe.test(text) && !grok64FloppyAutostartPoison(text),
+  pass:
+    ssMenuRe.test(text) &&
+    !grok64FloppyAutostartPoison(text) &&
+    diag.cart === true &&
+    cartFzVisible > 0 &&
+    cartOutVisible > 0,
 };
 console.log(JSON.stringify(report, null, 2));
 await browser.close();

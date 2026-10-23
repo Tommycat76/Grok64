@@ -1899,6 +1899,10 @@ export function Grok64App() {
         scheduleFit(true);
         applyIecUnit(emu, spec.live.iec, spec.live.unit);
         if (isIosPhone()) kickIosAfterEmuAction(emu, "settle", gen);
+        if (cartMountedOnCore(emu)) {
+          cartLiveRef.current = true;
+          setCartLive(true);
+        }
         beginPlayLock(playLockDuration(playModeRef.current, spec.title), `Loading ${spec.title}…`);
       } else if (spec.autostartAfterReady) {
         bootHoldRef.current = false;
@@ -2983,6 +2987,14 @@ export function Grok64App() {
         userIec: plan.user.iec,
         userUnit: plan.user.unit,
       });
+      if (
+        (plan.kind === "cart" || forceCart) &&
+        emuRef.current &&
+        cartMountedOnCore(emuRef.current)
+      ) {
+        cartLiveRef.current = true;
+        setCartLive(true);
+      }
       notePlayMarker();
     },
     [s, persistNow, startWithUrl, beginPlayLock, syncJiffy],

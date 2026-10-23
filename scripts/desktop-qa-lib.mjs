@@ -225,6 +225,8 @@ export function patchLocalStorage(page, combo) {
     data.state.sid3Address = "disabled";
     data.state.reuSize = combo.reu ?? "none";
     data.state.jiffyDos = !!combo.jiffy;
+    if (combo.coreMode) data.state.coreMode = combo.coreMode;
+    if (combo.machineId) data.state.machineId = combo.machineId;
     data.state.mouseMode = !!combo.mouse;
     data.state.joyPort = combo.joy ?? 2;
     if (combo.iecMap) {
