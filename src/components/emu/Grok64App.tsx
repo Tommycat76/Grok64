@@ -1849,7 +1849,10 @@ export function Grok64App() {
           vice_drive_true_emulation: "enabled",
           vice_virtual_device_traps: "disabled",
         });
-        await applyJiffyDos(emu, jiffyForCart);
+        const ssCart = useEmu.getState().fastLoadCart;
+        const jiffyOnCart =
+          jiffyForCart && !(ssCart && jiffyCartCompat(ssCart, true).suppressJiffy);
+        await applyJiffyDos(emu, jiffyOnCart);
         disarmAutostart(emu, "cart");
         applyRuntimeOptions(emu, {
           ...CART_PLAY_UNLOCK_VICE_OPTS,
@@ -1859,7 +1862,6 @@ export function Grok64App() {
         });
         hardReset(emu);
         await flushEmuFs(emu, isIosPhone() ? 800 : 400);
-        const ssCart = useEmu.getState().fastLoadCart;
         scheduleSuperSnapshotVicFix(emu, ssCart);
         if (ssCart) stabilizeFreezerScreen(emu, ssCart);
         dismissEjsPrompts(document.getElementById("grok64-player"));
@@ -2786,6 +2788,7 @@ export function Grok64App() {
       }
       if (
         (plan.kind === "cart" || forceCart) &&
+        isIosPhone() &&
         emuRef.current &&
         coreHasFs(emuRef.current) &&
         cartMountedOnCore(emuRef.current) &&
@@ -2822,6 +2825,56 @@ export function Grok64App() {
         }
         glog("cart-inplace-fail-recycle", { bootName });
       }
+      if (
+        cartNeedsWasmRecycle &&
+        (plan.kind === "cart" || forceCart) &&
+        emuRef.current &&
+        coreHasFs(emuRef.current)
+      ) {
+        s.setBooting(true, plan.status, 35);
+        const fastCart = detectFastLoadCart(bootName, playTitle);
+        useEmu.getState().setFastLoadCart(fastCart);
+        const emu = emuRef.current;
+        const cartBytes = new Uint8Array(safe);
+        if (writeBootFile(emu, cartBytes, bootName)) {
+          emu.fileName = bootName.replace(/^\//, "");
+          setSessionCart(bootName, cartBytes);
+          playModeRef.current = "cart";
+          cartLiveRef.current = true;
+          setCartLive(true);
+          disarmAutostart(emu, "cart");
+          applyRuntimeOptions(emu, {
+            ...CART_PLAY_UNLOCK_VICE_OPTS,
+            vice_work_disk: "disabled",
+            vice_drive_true_emulation: "enabled",
+            vice_virtual_device_traps: "disabled",
+          });
+          const jiffyOnCart =
+            resolveJiffyWant(jiffyWantSetting, fastCart) &&
+            !(fastCart && jiffyCartCompat(fastCart, true).suppressJiffy);
+          await applyJiffyDos(emu, jiffyOnCart);
+          hardReset(emu);
+          await flushEmuFs(emu, isIosPhone() ? 800 : 400);
+          scheduleSuperSnapshotVicFix(emu, fastCart);
+          if (fastCart) stabilizeFreezerScreen(emu, fastCart);
+          persistGateRef.current = true;
+          inGameplayRef.current = true;
+          pendingKickRef.current = false;
+          setAwaitingStart(false);
+          clearBootTimers();
+          s.setCurrentTitle(title);
+          markSessionPlay(title);
+          notePlayMarker();
+          s.setRunning(true);
+          s.setBooting(false);
+          dismissEjsPrompts(document.getElementById("grok64-player"));
+          bumpCrtPaint(emu);
+          beginPlayLock(playLockDuration("cart", title), `Loading ${title}…`);
+          glog("cart-warm-boot", { bootName, fastCart, jiffyOnCart });
+          return;
+        }
+        glog("cart-warm-boot-fail", { bootName });
+      }
       const stayLive =
         waitLive ||
         mustKeep ||
@@ -2843,12 +2896,26 @@ export function Grok64App() {
       if ((plan.kind === "cart" || forceCart) && emuRef.current) {
         const el = document.getElementById("grok64-player");
         const onCore = cartMountedOnCore(emuRef.current);
-        if (cartNeedsWasmRecycle || !onCore || bootFileOf(emuRef.current)?.includes("WORK DISK")) {
+        const bootNow = bootFileOf(emuRef.current) || "";
+        const normBoot = (n: string) => n.replace(/^\//, "").toLowerCase();
+        const switchingCart =
+          onCore &&
+          bootNow &&
+          normBoot(bootName) !== normBoot(bootNow) &&
+          /\.(crt|bin)$/i.test(bootNow);
+        if (
+          cartNeedsWasmRecycle ||
+          !onCore ||
+          /WORK DISK/i.test(bootNow) ||
+          switchingCart ||
+          (!isIosPhone() && onCore)
+        ) {
           glog("cart-play-wasm-recycle", {
             bootName,
-            boot: bootFileOf(emuRef.current),
+            boot: bootNow,
             onCore,
             cartNeedsWasmRecycle,
+            switchingCart,
           });
           destroyEmu(emuRef.current, el);
           emuRef.current = null;
