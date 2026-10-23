@@ -4,7 +4,7 @@ Chromium under Xvfb; catalog typing via **xdotool** where noted; toolbar/hardwar
 
 **Regenerate:** `npm run test:desktop-xdotool-extended`
 
-_Last run: 2026-10-23T01:35:14.341Z_
+_Last run: 2026-10-23T07:06:26.899Z_
 
 ## Summary
 
@@ -16,7 +16,7 @@ _Last run: 2026-10-23T01:35:14.341Z_
 | cmd-fd-ramlink-modes | SKIP (FD2000/4000 and RAMLink not modeled — see docs/CMD_SD2IEC_COMPATIBILITY.md) | FD2000/4000 and RAMLink not modeled — see docs/CMD_SD2IEC_COMPATIBILITY.md |
 | cmd-plus-sd2iec-iec-map | **PASS** | {"8":"sd2iec","9":"cmdhd","10":"none","11":"none"} |
 | demo-edge-of-disgrace-stock | **PASS** | {"frames":3,"glitch":false,"head":"J*)H\r ], ]P{JJJJ\r ]\nJP |
-| demo-coma-light-13-stock | **PASS** | {"frames":1,"glitch":false,"head":"\n\n\n\n\n\n              |
+| demo-coma-light-13-stock | **PASS** | {"frames":2,"glitch":false,"head":"\n    **** COMMODORE 64 B |
 | demo-uncensored-stock | SKIP (no catalog hit) | no catalog hit |
 | demo-edge-of-disgrace-jiffy | **PASS** | {"frames":1,"glitch":false,"head":"              |
 | demo-coma-light-13-jiffy | **PASS** | {"frames":1,"glitch":false,"head":"              |
@@ -25,7 +25,7 @@ _Last run: 2026-10-23T01:35:14.341Z_
                         READY.
                     |
 | freeze-ui-ar6 | **PASS** | {"head":" WWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWWW\n    ACTION |
-| freeze-ui-fc3 | **FAIL** | {"head":"VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV\nVVVVVVVVV |
+| freeze-ui-fc3 | **PASS** | {"head":"VVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVVV\nVVVVVVVVV |
 | freeze-ui-ss5 | **PASS** | {"head":"\nSUPER SNAPSHOT BY LMS TECH  (C)  1989,90\nSUPER S |
 
 ## Steps (per test)
@@ -118,9 +118,9 @@ _Last run: 2026-10-23T01:35:14.341Z_
 
 ```json
 {
-  "frames": 1,
+  "frames": 2,
   "glitch": false,
-  "head": "\n\n\n\n\n\n                \u0013\f\u0005\u0004\u0007\u0005\b. \t\thH NEIYPR NEI\n PG NE( NE* NE\r@n'EPCn(EJPr\bPoLP"
+  "head": "\n    **** COMMODORE 64 BASIC V2 ****\n\n 64K RAM SYSTEM  38911 BASIC BYTES FREE\n\nR"
 }
 ```
 
@@ -144,7 +144,7 @@ _Last run: 2026-10-23T01:35:14.341Z_
 {
   "frames": 1,
   "glitch": false,
-  "head": "                  \n                  \n  "
+  "head": "                  \n          o        \n  "
 }
 ```
 
@@ -179,7 +179,7 @@ _Last run: 2026-10-23T01:35:14.341Z_
 3. Wait load window — screen must leave plain READY (game or LOAD path)
 
 ```json
-"  LOADING\n                        READY.\n                        RUN\n\n\n\n\n\n\n\n\n\n\n\n\n\n                              "
+"  LOADING\n                        READY.\n                        RUN\n\n\n\n\n\n\n\n\n\n\n\n\n\n                          \u0000   "
 ```
 
 ### freeze-ui-ar6 — PASS
@@ -194,7 +194,7 @@ _Last run: 2026-10-23T01:35:14.341Z_
 }
 ```
 
-### freeze-ui-fc3 — FAIL
+### freeze-ui-fc3 — PASS
 
 1. Mount CRT via playBytes
 2. Click hardware CART FZ (toolbar)

@@ -6,28 +6,28 @@ Automated **real-UI** runs: Chromium under Xvfb with **xdotool** host keys for f
 
 **Regenerate:** `npm run test:desktop-xdotool-cart-matrix`
 
-_Last run: 2026-10-23T01:07:44.676Z_
+_Last run: 2026-10-23T07:19:27.996Z_
 
 ## Pass / fail (per cart × KERNAL)
 
 | Cart | Stock KERNAL | JiffyDOS | Jiffy hardware note | Stock detail | Jiffy detail |
 |------|--------------|----------|---------------------|--------------|--------------|
-| Super Snapshot v5.00 NTSC | **FAIL** | PASS | incompatible (Jiffy suppressed when cart loaded) | game | ok |
-| Super Snapshot v4.0 NTSC | — | — | incompatible (Jiffy suppressed when cart loaded) |  |  |
-| Epyx FastLoad v1 | — | — | redundant |  |  |
-| Action Replay v6.0 PAL | — | — | caution |  |  |
-| Action Replay v5.0 PAL | — | — | caution |  |  |
-| Action Replay MK4 1988 PAL | — | — | caution |  |  |
-| Final Cartridge III v1 | — | — | compatible |  |  |
-| Final Cartridge II 1987 | — | — | caution |  |  |
-| Final Cartridge I v1 1986 | — | — | caution |  |  |
-| KCS Power Cartridge 1985 v1 | — | — | caution |  |  |
-| Warp Speed v1 1987 | — | — | caution |  |  |
-| EasyFlash (macks-easyflash) | — | — | caution |  |  |
-| Retro Replay | — | — | caution |  |  |
-| Expert Cartridge | — | — | caution |  |  |
-| Simons' BASIC | — | — | compatible |  |  |
-| Magic Desk | — | — | compatible |  |  |
+| Super Snapshot v5.00 NTSC | PASS | PASS | incompatible (Jiffy suppressed when cart loaded) | ok | ok |
+| Super Snapshot v4.0 NTSC | PASS | PASS | incompatible (Jiffy suppressed when cart loaded) | ok | ok |
+| Epyx FastLoad v1 | **FAIL** | PASS | redundant | game | ok |
+| Action Replay v6.0 PAL | **FAIL** | **FAIL** | caution | detect | detect |
+| Action Replay v5.0 PAL | **FAIL** | **FAIL** | caution | detect | detect, jiffy |
+| Action Replay MK4 1988 PAL | **FAIL** | **FAIL** | caution | detect | detect |
+| Final Cartridge III v1 | **FAIL** | **FAIL** | compatible | detect | detect |
+| Final Cartridge II 1987 | **FAIL** | **FAIL** | caution | boot, detect, menu | boot, detect, menu |
+| Final Cartridge I v1 1986 | **FAIL** | **FAIL** | caution | boot, detect, menu | boot, detect, menu |
+| KCS Power Cartridge 1985 v1 | **FAIL** | **FAIL** | caution | detect, game | detect |
+| Warp Speed v1 1987 | **FAIL** | PASS | caution | game | ok |
+| EasyFlash (macks-easyflash) | PASS | PASS | caution | ok | ok |
+| Retro Replay | SKIP (missing fixture) | SKIP (missing fixture) | caution |  |  |
+| Expert Cartridge | SKIP (missing fixture) | SKIP (missing fixture) | caution |  |  |
+| Simons' BASIC | SKIP (missing fixture) | SKIP (missing fixture) | compatible |  |  |
+| Magic Desk | SKIP (missing fixture) | SKIP (missing fixture) | compatible |  |  |
 
 ## Checks (each row)
 
