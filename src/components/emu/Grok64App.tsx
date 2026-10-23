@@ -242,6 +242,7 @@ import {
   recordLastCartPlayDiagnostic,
   validateCartForPlay,
   validateCrtImport,
+  scanLibraryCartHealth,
 } from "@/lib/emu/cart-crt-diag";
 import { createMenuJoyGate, menuJoyStep, resetMenuJoyGate } from "@/lib/emu/menu-joy.mjs";
 import { applyStickPrecision, createStickPrecision, resetStickPrecision } from "@/lib/emu/stick-precision.mjs";
@@ -604,6 +605,7 @@ export function Grok64App() {
       mirrorActive: () => isIosMirrorActive(),
       buildId: () => readBuildId(),
       lastCartPlay: () => getLastCartPlayDiagnostic(),
+      scanLibraryCarts: () => scanLibraryCartHealth(),
       grok64Core: () => grok64CoreStatus(emuRef.current),
       crt: () => {
         const root = document.getElementById("grok64-player");

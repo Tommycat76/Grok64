@@ -4,7 +4,11 @@ import { Drawer } from "vaul";
 import { ExpansionPanel } from "@/components/emu/ExpansionPanel";
 import { detectLine, MACHINES, type ResolvedMachine } from "@/lib/emu/machines";
 import { ACTION_LABEL, useEmu } from "@/lib/emu/store";
-import { getLastCartPlayDiagnostic } from "@/lib/emu/cart-crt-diag";
+import {
+  getLastCartPlayDiagnostic,
+  scanLibraryCartHealth,
+  type LibraryCartHealthRow,
+} from "@/lib/emu/cart-crt-diag";
 import { BuildId } from "@/components/emu/BuildId";
 import { setDebugUi } from "@/lib/emu/debug";
 import type {
@@ -478,10 +482,59 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               Build <BuildId className="font-mono text-fg" /> — hard reload if this does not match the release you expect.
             </p>
             <LastCartPlayDiagPanel />
+            <LibraryCartScanPanel />
           </Drawer.Content>
         </Drawer.Portal>
       </Drawer.Root>
     </>
+  );
+}
+
+function LibraryCartScanPanel() {
+  const [rows, setRows] = useState<LibraryCartHealthRow[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function runScan() {
+    setBusy(true);
+    try {
+      const r = await scanLibraryCartHealth();
+      setRows(r);
+      if (typeof console !== "undefined") console.info("[grok64] libraryCartScan", r);
+      const bad = r.filter((x) => !x.ok);
+      if (bad.length) {
+        toast.error(`${bad.length} library cartridge(s) look corrupt — delete and re-import.`, { duration: 12_000 });
+      } else if (r.length) {
+        toast.message(`All ${r.length} library cartridge(s) passed CRT header checks.`);
+      } else {
+        toast.message("No cartridge rows in On this device.");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Scan failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="mt-4 rounded-lg border border-border/60 bg-bg/40 p-3">
+      <h3 className="mb-2 text-sm font-medium text-fg">Library cartridge scan</h3>
+      <p className="mb-2 text-xs leading-5 text-fg-muted">
+        Checks every <strong>On this device</strong> row that looks like a CRT (including old saves without a{" "}
+        <code className="text-fg">.crt</code> extension). Also logged as{" "}
+        <code className="text-fg">[grok64] libraryCartScan</code> or <code className="text-fg">__g64.scanLibraryCarts()</code>.
+      </p>
+      <button
+        type="button"
+        className="mb-2 rounded-md border border-border bg-bg px-3 py-1.5 text-xs font-medium text-fg"
+        disabled={busy}
+        onClick={() => void runScan()}
+      >
+        {busy ? "Scanning…" : "Scan library CRTs"}
+      </button>
+      {rows && (
+        <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-snug text-fg-muted">
+          {JSON.stringify(rows, null, 2)}
+        </pre>
+      )}
+    </div>
   );
 }
 

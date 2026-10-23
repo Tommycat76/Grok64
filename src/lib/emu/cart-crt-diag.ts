@@ -1,6 +1,8 @@
 /** CRT header parse + last cart Play diagnostic (IndexedDB / attach debugging). */
 
 import { readBuildId } from "./build-id";
+import { isCartridgePayload } from "./formats";
+import { getFile, listLibrary } from "./library";
 import type { FastLoadCartKind } from "./jiffy-cart-compat";
 
 const HW_TYPE_NAMES: Record<number, string> = {
@@ -177,6 +179,43 @@ export function validateCrtImport(data: Uint8Array, fileName: string): string | 
   if (!/\.(crt|bin)$/i.test(fileName)) return null;
   const v = validateCartForPlay(data, fileName, null);
   return v.ok ? null : v.userMessage;
+}
+
+export type LibraryCartHealthRow = {
+  id: string;
+  name: string;
+  idbStoredSize: number;
+  payloadBytes: number;
+  ok: boolean;
+  message: string | null;
+  hwTypeId: number | null;
+  hwTypeLabel: string | null;
+  headerHex64: string;
+};
+
+/** Scan IndexedDB library rows that look like cartridges (Tom hands-on: stale/truncated saves). */
+export async function scanLibraryCartHealth(): Promise<LibraryCartHealthRow[]> {
+  const items = await listLibrary();
+  const rows: LibraryCartHealthRow[] = [];
+  for (const item of items) {
+    const file = await getFile(item.id);
+    if (!file?.data) continue;
+    const data = new Uint8Array(file.data);
+    if (!isCartridgePayload(data, file.name)) continue;
+    const v = validateCartForPlay(data, file.name, file.size);
+    rows.push({
+      id: item.id,
+      name: item.name,
+      idbStoredSize: file.size,
+      payloadBytes: data.byteLength,
+      ok: v.ok,
+      message: v.ok ? null : v.userMessage,
+      hwTypeId: v.header.hwTypeId ?? null,
+      hwTypeLabel: v.header.hwTypeLabel ?? null,
+      headerHex64: v.headerHex64,
+    });
+  }
+  return rows;
 }
 
 export function recordLastCartPlayDiagnostic(

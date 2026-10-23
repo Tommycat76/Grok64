@@ -78,6 +78,11 @@ const diag = await page.evaluate(() => ({
   jiffyLive: window.__g64?.jiffyLive?.(),
   playMode: window.__g64?.playMode?.(),
 }));
+const lastCart = await page.evaluate(() => window.__g64?.lastCartPlay?.() ?? null);
+const cartDiagOk =
+  Boolean(lastCart?.validationOk) &&
+  Boolean(lastCart?.cartMountedOnCore) &&
+  (lastCart?.attachCode ?? 0) > 0;
 
 await page.screenshot({ path: join(out, "tom-power-02-ss5-play.png"), fullPage: true });
 
@@ -91,12 +96,15 @@ const report = {
   cartFzVisible,
   cartOutVisible,
   diag,
+  lastCart,
+  cartDiagOk,
   consoleErrorCount: consoleErrors.length,
   consoleSample: consoleErrors.slice(0, 5),
   pass:
     ssMenuRe.test(text) &&
     !grok64FloppyAutostartPoison(text) &&
     diag.cart === true &&
+    cartDiagOk &&
     cartFzVisible > 0 &&
     cartOutVisible > 0,
 };
