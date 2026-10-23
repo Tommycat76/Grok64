@@ -64,3 +64,17 @@ export function geosBootSucceeded(screen: string, fileName?: string): boolean {
   if (geosBootStuckAtBasic(screen)) return false;
   return geosFamilyDesktopOk(screen, fileName);
 }
+
+/** Preferred LOAD line for GEOS-family system disks (GEOS 2.0 vs Wheels). */
+export function geosBootLoadLine(fileName: string): string {
+  if (isWheelsDiskName(fileName)) return 'LOAD"*",8,1';
+  return 'LOAD"GEOS",8,1';
+}
+
+/** After RUN, GEOS deskTop is graphical — KERNAL screen text may be garbage. */
+export function geosBootLooksLaunched(screen: string): boolean {
+  if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR|SYNTAX\s+ERROR/i.test(screen)) return false;
+  if (geosBootStuckAtBasic(screen)) return false;
+  const compact = screen.replace(/\s+/g, "");
+  return compact.length > 40 && !/^READY\.?$/i.test(compact);
+}
