@@ -324,7 +324,6 @@ export function Grok64App() {
   const splashRef = useRef(null);
   const loadGenRef = useRef(0);
   const playModeRef = useRef("basic");
-  const postCartOutPlayRef = useRef(false);
   const basicRunAfterLoadRef = useRef(false);
   const diskRunAfterLoadRef = useRef(false);
   const persistGateRef = useRef(true);
@@ -1572,7 +1571,6 @@ export function Grok64App() {
         userUnit: plan.user.unit,
       });
       markSessionReady();
-      postCartOutPlayRef.current = true;
       st.setBooting(false);
       inGameplayRef.current = true;
       toast.message("Cartridge out — BASIC READY");
