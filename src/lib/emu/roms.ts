@@ -182,9 +182,11 @@ export async function prefetchBundledRoms(): Promise<string[]> {
     if (have.has(entry.id)) continue;
     for (const url of entry.urls) {
       try {
-        const res = await fetch(url);
+        const res = await fetch(url, { method: "HEAD" });
         if (!res.ok) continue;
-        const buf = await res.arrayBuffer();
+        const get = await fetch(url);
+        if (!get.ok) continue;
+        const buf = await get.arrayBuffer();
         if (buf.byteLength < 4096) continue;
         await putRom(entry.id, url.split("/").pop() || entry.id, buf);
         added.push(entry.id);

@@ -42,6 +42,7 @@
     "test:desktop-geos-proof": "node scripts/desktop-geos-desktop-proof.mjs",
     "test:desktop-wheels-proof": "node scripts/desktop-wheels-proof.mjs",
     "test:browser-smoke-powered": "node scripts/browser-smoke-powered.mjs",
+    "test:browser-smoke-404": "node scripts/browser-smoke-powered.mjs",
     "test:desktop-demo": "node scripts/desktop-demo-e2e.mjs",
     "test:vice-sid-probe": "node scripts/vice-sid-probe.mjs",
     "test:desktop-regression": "node scripts/desktop-regression-e2e.mjs",
