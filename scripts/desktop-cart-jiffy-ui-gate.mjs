@@ -120,7 +120,6 @@ async function playLibraryCart(page, displayName) {
   await page.waitForFunction(
     () => {
       const t = window.__g64?.screenText?.() || "";
-      const t = window.__g64?.screenText?.() || "";
       return !/LOAD"\*",8,1/i.test(t) && !(/LOAD"\*"/i.test(t) && /SEARCHING FOR \*/i.test(t));
     },
     { timeout: 120_000 },

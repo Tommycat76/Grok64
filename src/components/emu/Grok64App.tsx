@@ -96,6 +96,7 @@ import {
   bumpCrtPaint,
   tryGeosDiskAutostart,
 } from "@/lib/emu/host";
+import { presentFloppyMountReady } from "@/lib/emu/disk-mount-ready";
 import { hasCmdRom, hasJiffyPair, prefetchBundledRoms } from "@/lib/emu/roms";
 import {
   addSdFile,
@@ -1562,6 +1563,11 @@ export function Grok64App() {
     sessionIecRef.current = plan.live.iec;
     sessionUnitRef.current = plan.live.unit;
     try {
+      try {
+        sessionStorage.setItem("grok64-post-cart-out", "1");
+      } catch {
+        /* private mode */
+      }
       await startWithUrlRef.current(publicUrl("/software/blank.d64"), "WORK DISK.D64", {
         autostart: false,
         title: "BASIC",
@@ -1896,6 +1902,13 @@ export function Grok64App() {
             ios: isIosPhone(),
           });
         }
+        if (spec.diskMountReady) {
+          setBusy("Disk on unit 8 · READY…", 68);
+          await presentFloppyMountReady(emu, spec.live);
+          if (loadGenRef.current !== gen) return;
+          markSessionPlay(spec.title);
+          s.setRunning(true);
+        }
         bootHoldRef.current = false;
         markSessionReady();
         setPictureHold(false);
@@ -2139,7 +2152,9 @@ export function Grok64App() {
             void settleAfterStart(emu, gen, {
               title: opts.title ?? gameName,
               bootName: gameName,
-              autostartAfterReady: opts.autostart !== false && playModeRef.current !== "basic",
+              autostartAfterReady:
+                opts.autostart !== false && playModeRef.current !== "basic" && !opts.diskLoad,
+              diskMountReady: Boolean(opts.diskLoad),
               coldBasicAfterCart: Boolean(opts.coldBasicAfterCart),
               live: {
                 iec: opts.iec ?? sessionIecRef.current ?? useEmu.getState().iecDrive,
@@ -2649,6 +2664,12 @@ export function Grok64App() {
                 useEmu.getState().setBooting(false);
               }, 800),
             );
+          } else if (plan.kind === "floppy") {
+            disarmAutostart(emuRef.current, "disk");
+            await presentFloppyMountReady(emuRef.current, plan.live);
+            applyIecUnit(emuRef.current, playIec, playAttachUnit);
+            if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, keepLiveCrt || floppyKeep ? "play-recycle" : "hot-swap");
+            beginPlayLock(playLockDuration(playModeRef.current, title), `Mounted ${title}…`);
           } else {
             autostartAfterReady(emuRef.current, true, {
               autoloadWarp: autoloadWarpForPlay(playModeRef.current, bootName),
@@ -2693,12 +2714,18 @@ export function Grok64App() {
           markSessionPlay(title);
           notePlayMarker();
           s.setRunning(true);
-          autostartAfterReady(emuRef.current, true, {
-            autoloadWarp: autoloadWarpForPlay(playModeRef.current, bootName),
-          });
+          if (plan.kind === "floppy") {
+            disarmAutostart(emuRef.current, "disk");
+            await presentFloppyMountReady(emuRef.current, plan.live);
+            beginPlayLock(playLockDuration(playModeRef.current, title), `Mounted ${title}…`);
+          } else {
+            autostartAfterReady(emuRef.current, true, {
+              autoloadWarp: autoloadWarpForPlay(playModeRef.current, bootName),
+            });
+            beginPlayLock(playLockDuration(playModeRef.current, title), `Loading ${title}…`);
+          }
           if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, "play-recycle");
           scheduleFit(true);
-          beginPlayLock(playLockDuration(playModeRef.current, title), `Loading ${title}…`);
           return;
         }
         glog("play-inplace-failed", { filename, title, kind: origKind, mustKeep, media: plan.kind });
@@ -2712,17 +2739,25 @@ export function Grok64App() {
         toast.error("Play stayed on the live CRT — cartridge did not attach.");
         return;
       }
+      const postCartOutReplay =
+        typeof sessionStorage !== "undefined" &&
+        sessionStorage.getItem("grok64-post-cart-out") === "1";
       if (
         (plan.kind === "cart" || forceCart) &&
         emuRef.current &&
         coreHasFs(emuRef.current) &&
-        cartMountedOnCore(emuRef.current)
+        (cartMountedOnCore(emuRef.current) || postCartOutReplay)
       ) {
         s.setBooting(true, plan.status, 35);
         const fastCart = detectFastLoadCart(bootName, playTitle);
         useEmu.getState().setFastLoadCart(fastCart);
         const attached = await attachCartridgeInPlace(emuRef.current, new Uint8Array(safe), bootName);
         if (attached) {
+          try {
+            sessionStorage.removeItem("grok64-post-cart-out");
+          } catch {
+            /* private mode */
+          }
           playModeRef.current = "cart";
           cartLiveRef.current = true;
           setCartLive(true);

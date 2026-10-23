@@ -76,7 +76,7 @@ test("floppy Play from SD2IEC@8 recycles to a real 1541 on unit 8", () => {
   assert.deepEqual(plan.live, { iec: "1541", unit: 8 });
   assert.deepEqual(plan.user, { iec: "sd2iec", unit: 8 });
   assert.equal(plan.recycle, true);
-  assert.equal(plan.autostartAfterReady, true);
+  assert.equal(plan.autostartAfterReady, false);
   assert.equal(plan.softIec, false);
   assert.equal(plan.trueDrive, true);
 });
@@ -133,7 +133,7 @@ test("already-1541 hot-swap — no recycle", () => {
     liveWorkDisk: "8_d64",
   });
   assert.equal(plan.recycle, false);
-  assert.equal(plan.autostartAfterReady, true);
+  assert.equal(plan.autostartAfterReady, false);
 });
 
 test("BASIC / C64 OS kit keeps user IEC (SD2IEC or CMD)", () => {
@@ -382,7 +382,7 @@ test("vicerc omits CMD type 4844 when the ROM is missing", () => {
   assert.doesNotMatch(noRom, /4844/);
 });
 
-test("Autostart is never a core-start flag — always after ready", () => {
+test("Floppy Play never arms VICE LOAD* autostart (Tom disk policy)", () => {
   const plan = planPlay({
     filename: "paradroid.d64",
     userIec: "sd2iec",
@@ -391,7 +391,7 @@ test("Autostart is never a core-start flag — always after ready", () => {
     liveWorkDisk: "8_fs",
     autostart: true,
   });
-  assert.equal(plan.autostartAfterReady, true);
+  assert.equal(plan.autostartAfterReady, false);
 });
 
 test("IEC map: one unit number is one drive", () => {

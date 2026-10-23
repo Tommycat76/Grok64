@@ -16,7 +16,7 @@ import {
  * Live attach is what the running VICE core actually has on the bus.
  *
  * C64 OS-class layout (official VICE guide):
- *   - Device 8 is a real 1541/1581 whenever Autostart must LOAD"*",8,1
+ *   - Device 8 is a real 1541/1581 for floppy mount / named LOAD (never LOAD"*")
  *   - CMD HD is a real VICE CMD HD (dosCMDHD.bin on the drive CPU, true
  *     drive ON, virtual traps OFF). Prefer unit 9 so floppy Play does not
  *     evict the HD.
@@ -44,7 +44,7 @@ export interface PlayPlan {
   user: DriveAttach;
   /** What the core must have while this title runs. */
   live: DriveAttach;
-  /** Floppy Autostart attach (1541/1581 @ 8). */
+  /** Floppy attach (1541/1581 @ 8) — mount only, no LOAD"*". */
   attach: DriveAttach | null;
   recycle: boolean;
   /** Always false at core-start; kicked after prepareCore. */
@@ -503,7 +503,7 @@ export function planPlay(input: {
   const kind = playKindOf(input.filename, work, input.payload);
   const user: DriveAttach = { iec: input.userIec, unit: input.userUnit };
   const attach = work ? null : iecForAutostart(kindOf(input.filename));
-  const autostart = input.autostart !== false && kind !== "basic";
+  const autostart = input.autostart !== false && kind !== "basic" && kind !== "floppy";
 
   if (kind === "floppy" && attach) {
     const recycle = floppyNeedsRecycle(input.liveIec, input.liveWorkDisk, user, {

@@ -1,6 +1,6 @@
 import type { ReuSize } from "./types";
 
-/** GEOS 2.0, Wheels, gateWay, etc. — boot via 1541-II + LOAD"*",8,1. */
+/** GEOS 2.0, Wheels, gateWay, etc. — boot via 1541-II + named LOAD (never LOAD"*"). */
 export function isGeosFamilyDiskName(name: string): boolean {
   return /\.(d64|d81|g64|g71)$/i.test(name) && /geos|wheels|gateway|geo\s*boot/i.test(name);
 }
@@ -74,8 +74,8 @@ export function geosBootLoadLine(fileName: string): string {
 
 /** Try in order until one loads (fixture / mastering varies). */
 export function geosBootLoadCandidates(fileName: string): string[] {
-  if (isWheelsDiskName(fileName)) return ['LOAD"*",8,1', 'LOAD"GEOS",8,1'];
-  return ['LOAD"GEOS",8,1', 'LOAD"*",8,1', 'LOAD"RBOOT",8,1'];
+  if (isWheelsDiskName(fileName)) return ['LOAD"GEOS",8,1', 'LOAD"RBOOT",8,1'];
+  return ['LOAD"GEOS",8,1', 'LOAD"RBOOT",8,1'];
 }
 
 /** After RUN, GEOS deskTop is graphical — KERNAL screen text may be garbage. */
