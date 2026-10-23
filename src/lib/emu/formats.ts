@@ -80,6 +80,33 @@ export function bootFileName(name: string, kind?: MediaKind): string {
   return `${cleaned}.${ext}`;
 }
 
+/**
+ * VICE boot file must match payload kind. CRT bytes with a .d64 boot name
+ * still get floppy autostart (LOAD"*") — the On this device path must not
+ * default unknown names to .d64 when the header is C64 CARTRIDGE.
+ */
+export function resolvePlayBootName(
+  mediaName: string,
+  data: Uint8Array,
+  explicitBoot?: string | null,
+): string {
+  const hinted = explicitBoot?.trim();
+  if (hinted) {
+    if (isCartridgePayload(data, hinted)) {
+      if (/\.(crt|bin)$/i.test(hinted)) return hinted;
+      const base = hinted.replace(/\.[^.]+$/, "").trim() || "cartridge";
+      return `${base}.crt`;
+    }
+    return hinted;
+  }
+  if (isCartridgePayload(data, mediaName)) {
+    if (/\.(crt|bin)$/i.test(mediaName)) return bootFileName(mediaName, "crt");
+    const base = mediaName.replace(/\.[^.]+$/, "").trim() || "cartridge";
+    return bootFileName(`${base}.crt`, "crt");
+  }
+  return bootFileName(mediaName, kindOf(mediaName));
+}
+
 const D64_BAM = 17 * 21 * 256;
 
 export function d64DiskName(data: Uint8Array): string | null {

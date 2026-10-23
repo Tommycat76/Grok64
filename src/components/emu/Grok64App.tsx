@@ -217,6 +217,7 @@ import {
 } from "@/lib/emu/jiffy-cart-compat";
 import {
   bootFileName,
+  resolvePlayBootName,
   driveForPlay,
   d64DiskName,
   isBasicPrg,
@@ -2207,7 +2208,6 @@ export function Grok64App() {
       const playUnit = opts.iecUnit ?? useEmu.getState().iecUnit;
       setIecDevice(playUnit);
       let payload = data;
-      let bootName = opts.bootName ?? bootFileName(mediaName, kindOf(mediaName));
       const raw = new Uint8Array(data);
       const work = isWorkDisk(mediaName) || opts.title === "BASIC" || opts.title === "BASIC READY";
       if (!work && isWorkDiskImage(raw)) {
@@ -2285,7 +2285,6 @@ export function Grok64App() {
           .filter((p) => p.name !== bootPick.name)
           .map((p) => ({ name: p.name, data: p.data }));
         payload = toArrayBuffer(bootPick.data);
-        bootName = bootPick.name;
         mediaName = bootPick.name;
       }
       releaseBlob();
@@ -2300,10 +2299,12 @@ export function Grok64App() {
         toast.error("That file is empty.");
         return;
       }
+      const payloadView = new Uint8Array(safe);
+      const bootName = resolvePlayBootName(mediaName, payloadView, opts.bootName);
       const origKind = kindOf(bootName);
       basicRunAfterLoadRef.current =
-        !work && opts.autostart !== false && (origKind === "prg" || origKind === "p00") && isBasicPrg(new Uint8Array(safe));
-      const diskLoad = !work && needsTypedBoot(origKind) && opts.autostart === false;
+        !work && opts.autostart !== false && (origKind === "prg" || origKind === "p00") && isBasicPrg(payloadView);
+      const diskLoad = !work && needsTypedBoot(origKind);
       const user = userAttachFromMap(useEmu.getState().iecMap);
       const userIec = user.iec;
       const userUnit = user.unit;
@@ -2311,7 +2312,6 @@ export function Grok64App() {
       const liveWork = lastAppliedWorkDisk();
       const jiffyWantSetting = useEmu.getState().jiffyDos;
       const jiffyLive = lastAppliedJiffy();
-      const payloadView = new Uint8Array(safe);
       const forceCart = isCartridgePayload(payloadView, bootName);
       const plan = planPlay({
         filename: bootName,
@@ -2535,8 +2535,8 @@ export function Grok64App() {
         kind: plan.kind,
       });
       const floppyKeep = mustKeep && plan.kind === "floppy";
-      let media = new Uint8Array(safe);
-      if (origKind === "d64") {
+      let media = payloadView;
+      if (plan.kind === "floppy" && origKind === "d64" && !forceCart) {
         media = prepareAutostartDisk(media, bootName, title);
       }
       const wrapped = wrapForDiskSwap(origKind, media, bootName);
@@ -2818,7 +2818,7 @@ export function Grok64App() {
       await startWithUrl(url, bootName, {
         autostart: plan.autostartAfterReady,
         playKind: plan.kind,
-        diskLoad: (plan.kind === "floppy" || diskLoad) && !forceCart && plan.kind !== "cart",
+        diskLoad: diskLoad && !forceCart && plan.kind !== "cart",
         title,
         iec: plan.live.iec,
         iecUnit: plan.live.unit,
@@ -2853,82 +2853,6 @@ export function Grok64App() {
         toast.error("That file is missing.");
         return;
       }
-      if (isGeosFamilyDiskName(file.name) && emuRef.current && useEmu.getState().running) {
-        const stGeos = useEmu.getState();
-        if (stGeos.jiffyDos) {
-          toast.message("Stock KERNAL for GEOS", { duration: 6000 });
-        }
-        const reu = reuForGeosFamilyDisk(file.name, stGeos.reuSize);
-        if (reu !== stGeos.reuSize) {
-          stGeos.setReuSize(reu);
-          if (isWheelsDiskName(file.name)) {
-            toast.message("REU on for Wheels (512K+)");
-          }
-        }
-        stGeos.setIecSlot(8, "1541");
-        stGeos.setMouseMode(true);
-        sessionIecRef.current = "1541";
-        sessionUnitRef.current = 8;
-        const geosMap = { ...stGeos.iecMap, 8: "1541" as const };
-        setMouseAnalog(emuRef.current, true);
-        disarmAutostart(emuRef.current, "disk");
-        const raw = new Uint8Array(file.data);
-        const ok = await bootGeosFloppy(emuRef.current, raw, file.name, 8, geosMap);
-        if (!ok) {
-          endPlayLock();
-          toast.error(isWheelsDiskName(file.name) ? "Could not mount Wheels disk" : "Could not mount GEOS disk");
-          return;
-        }
-        setSessionDisk(file.name, raw, 8);
-        useEmu.getState().setInsertedDiskName(file.name);
-        focusGrok64Player();
-        beginPlayLock(
-          geosFamilyPlayLockMs(file.name),
-          isWheelsDiskName(file.name) ? "Loading Wheels…" : "Loading GEOS…",
-        );
-        await flushEmuFs(emuRef.current, 3000);
-        applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
-        const loadLine = geosBootLoadLine(file.name);
-        if (!(await feedBasicLine(emuRef.current, loadLine))) {
-          endPlayLock();
-          toast.error(isWheelsDiskName(file.name) ? "Wheels LOAD failed" : "GEOS LOAD failed");
-          return;
-        }
-        const loadEnd = Date.now() + geosFamilyLoadMs(file.name);
-        while (Date.now() < loadEnd) {
-          const mid = readScreenText(emuRef.current);
-          if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(mid)) {
-            endPlayLock();
-            toast.error("GEOS disk not found on unit 8");
-            return;
-          }
-          if (/LOADING/i.test(mid) || (!geosBootStuckAtBasic(mid) && mid.replace(/\s+/g, "").length > 60)) break;
-          await new Promise((r) => window.setTimeout(r, 500));
-        }
-        applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
-        await feedBasicLine(emuRef.current, "RUN", { runcmd: true });
-        const runEnd = Date.now() + 75_000;
-        let screen = readScreenText(emuRef.current);
-        while (Date.now() < runEnd) {
-          screen = readScreenText(emuRef.current);
-          if (geosBootSucceeded(screen, file.name) || geosBootLooksLaunched(screen)) break;
-          await new Promise((r) => window.setTimeout(r, 800));
-        }
-        if (!geosBootSucceeded(screen, file.name) && !geosBootLooksLaunched(screen)) {
-          endPlayLock();
-          toast.error(
-            geosBootStuckAtBasic(screen)
-              ? "GEOS returned to BASIC — stock KERNAL and 1541-II are required"
-              : isWheelsDiskName(file.name)
-                ? "Wheels did not reach the desktop"
-                : "GEOS did not reach the deskTop",
-          );
-          return;
-        }
-        endPlayLock();
-        await touchPlayed(item.id);
-        return;
-      }
       if (
         meta?.catalogKey &&
         file.catalogKey &&
@@ -2937,8 +2861,11 @@ export function Grok64App() {
         toast.error("That file doesn't match the catalog title you picked. Search again and tap Play.");
         return;
       }
+      const localKind = kindOf(file.name);
+      const mountOnlyDisk =
+        isDiskKind(localKind) || isGeosFamilyDiskName(file.name) || needsTypedBoot(localKind);
       await playBuffer(file.name, file.data, {
-        autostart: true,
+        autostart: !mountOnlyDisk,
         title: meta?.title ?? item.catalogTitle ?? item.name,
         libraryId: item.id,
         iecUnit: item.iecUnit,
