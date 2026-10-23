@@ -227,6 +227,8 @@ import {
   isCartridgePayload,
   isDiskKind,
   isWorkDiskImage,
+  isLikelyBlankD64Payload,
+  isDiskKind,
   kindOf,
   needsTypedBoot,
 } from "@/lib/emu/formats";
@@ -1364,6 +1366,9 @@ export function Grok64App() {
     if (!id || !emu) return;
     const file = await getFile(id);
     if (!file) return;
+    const rowKind = kindOf(file.name);
+    // Never autosave MEMFS floppy/work-disk bytes into CRT/PRG/SID library rows (#68 data-loss).
+    if (!isDiskKind(rowKind)) return;
     const title = useEmu.getState().currentTitle;
     const workItem = isWorkDisk(file.name);
     if (title === "BASIC" && !workItem) return;
@@ -1378,9 +1383,14 @@ export function Grok64App() {
       const media = readMountedMedia(emu);
       const disk = media.find((m) => /\.(d64|d71|d81|g64|g71)$/i.test(m.name)) ?? media[0];
       if (!disk || disk.data.byteLength < 64) return;
-      const dataIsWork = isWorkDiskImage(disk.data);
-      if (workItem !== dataIsWork) return;
-      await updateFileData(id, toArrayBuffer(disk.data));
+      const diskBytes = disk.data instanceof Uint8Array ? disk.data : new Uint8Array(disk.data);
+      const dataIsWork = isWorkDiskImage(diskBytes);
+      if (workItem) {
+        if (!dataIsWork) return;
+      } else {
+        if (dataIsWork || isLikelyBlankD64Payload(diskBytes)) return;
+      }
+      await updateFileData(id, toArrayBuffer(diskBytes));
     } catch {}
   }, []);
   const startIosAutoPaint = useCallback((onPainted?: () => void) => {

@@ -1,7 +1,7 @@
 /** CRT header parse + last cart Play diagnostic (IndexedDB / attach debugging). */
 
 import { readBuildId } from "./build-id";
-import { isCartridgePayload } from "./formats";
+import { D64_STANDARD_SIZE, isCartridgePayload, isLikelyBlankD64Payload } from "./formats";
 import { getFile, listLibrary } from "./library";
 import type { FastLoadCartKind } from "./jiffy-cart-compat";
 
@@ -182,12 +182,19 @@ export function validateCrtImport(data: Uint8Array, fileName: string): string | 
   return v.ok ? null : v.userMessage;
 }
 
+export type LibraryCartHealthIssue =
+  | "invalid_crt"
+  | "blank_d64_as_crt"
+  | "size_mismatch"
+  | "truncated";
+
 export type LibraryCartHealthRow = {
   id: string;
   name: string;
   idbStoredSize: number;
   payloadBytes: number;
   ok: boolean;
+  issue: LibraryCartHealthIssue | null;
   message: string | null;
   hwTypeId: number | null;
   hwTypeLabel: string | null;
@@ -203,20 +210,49 @@ export async function scanLibraryCartHealth(): Promise<LibraryCartHealthRow[]> {
     if (!file?.data) continue;
     const data = new Uint8Array(file.data);
     if (!isCartridgePayload(data, file.name)) continue;
+    const blankD64 =
+      data.byteLength === D64_STANDARD_SIZE && isLikelyBlankD64Payload(data);
     const v = validateCartForPlay(data, file.name, file.size);
+    let issue: LibraryCartHealthIssue | null = null;
+    if (blankD64) {
+      issue = "blank_d64_as_crt";
+    } else if (file.size !== data.byteLength) {
+      issue = "size_mismatch";
+    } else if (!v.ok && data.byteLength < 4096) {
+      issue = "truncated";
+    } else if (!v.ok) {
+      issue = "invalid_crt";
+    }
+    const ok = !issue && v.ok;
     rows.push({
       id: item.id,
       name: item.name,
       idbStoredSize: file.size,
       payloadBytes: data.byteLength,
-      ok: v.ok,
-      message: v.ok ? null : v.userMessage,
+      ok,
+      issue,
+      message: ok
+        ? null
+        : blankD64
+          ? `Row is a ${D64_STANDARD_SIZE}-byte blank .d64 (all zeros), not a CRT — likely overwritten by an older autosave bug. Delete and re-import.`
+          : v.userMessage,
       hwTypeId: v.header.hwTypeId ?? null,
       hwTypeLabel: v.header.hwTypeLabel ?? null,
       headerHex64: v.headerHex64,
     });
   }
   return rows;
+}
+
+/** Remove corrupt cartridge rows from IndexedDB (scan panel / QA). */
+export async function deleteLibraryCartRows(ids: string[]): Promise<number> {
+  const { removeFile } = await import("./library");
+  let n = 0;
+  for (const id of ids) {
+    await removeFile(id);
+    n += 1;
+  }
+  return n;
 }
 
 export function recordLastCartPlayDiagnostic(

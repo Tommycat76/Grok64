@@ -107,6 +107,9 @@ export function resolvePlayBootName(
   return bootFileName(mediaName, kindOf(mediaName));
 }
 
+/** Standard 35-track C64 .d64 size (also bundled blank.d64 / WORK DISK). */
+export const D64_STANDARD_SIZE = 174848;
+
 const D64_BAM = 17 * 21 * 256;
 
 export function d64DiskName(data: Uint8Array): string | null {
@@ -121,6 +124,24 @@ export function d64DiskName(data: Uint8Array): string | null {
 export function isWorkDiskImage(data: ArrayBuffer | Uint8Array): boolean {
   const u8 = data instanceof Uint8Array ? data : new Uint8Array(data);
   return d64DiskName(u8)?.toUpperCase() === "WORK DISK";
+}
+
+/** True when bytes look like an empty bundled blank.d64 (not a CRT and not a named WORK DISK). */
+export function isLikelyBlankD64Payload(data: Uint8Array): boolean {
+  if (data.byteLength !== D64_STANDARD_SIZE) return false;
+  if (parseCrtHeaderQuick(data)) return false;
+  if (isWorkDiskImage(data)) return false;
+  const sample = Math.min(4096, data.byteLength);
+  for (let i = 0; i < sample; i++) {
+    if (data[i] !== 0) return false;
+  }
+  return true;
+}
+
+function parseCrtHeaderQuick(data: Uint8Array): boolean {
+  if (data.byteLength < 16) return false;
+  const head = new TextDecoder("ascii", { fatal: false }).decode(data.subarray(0, 16));
+  return /^C64 CARTRIDGE/.test(head) || /^C128 CARTRIDGE/.test(head);
 }
 
 export function slotFor(kind: MediaKind): "disk" | "tape" | "cart" | "prg" | "state" {

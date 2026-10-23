@@ -5,10 +5,12 @@ import { ExpansionPanel } from "@/components/emu/ExpansionPanel";
 import { detectLine, MACHINES, type ResolvedMachine } from "@/lib/emu/machines";
 import { ACTION_LABEL, useEmu } from "@/lib/emu/store";
 import {
+  deleteLibraryCartRows,
   getLastCartPlayDiagnostic,
   scanLibraryCartHealth,
   type LibraryCartHealthRow,
 } from "@/lib/emu/cart-crt-diag";
+import { listLibrary } from "@/lib/emu/library";
 import { BuildId } from "@/components/emu/BuildId";
 import { setDebugUi } from "@/lib/emu/debug";
 import type {
@@ -491,6 +493,7 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
 }
 
 function LibraryCartScanPanel() {
+  const setLibrary = useEmu((s) => s.setLibrary);
   const [rows, setRows] = useState<LibraryCartHealthRow[] | null>(null);
   const [busy, setBusy] = useState(false);
   async function runScan() {
@@ -513,6 +516,26 @@ function LibraryCartScanPanel() {
       setBusy(false);
     }
   }
+  async function deleteBadRows(target?: LibraryCartHealthRow[]) {
+    const bad = (target ?? rows ?? []).filter((r) => !r.ok);
+    if (!bad.length) {
+      toast.message("No corrupt cartridge rows to delete.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await deleteLibraryCartRows(bad.map((r) => r.id));
+      setLibrary(await listLibrary());
+      const remaining = (rows ?? []).filter((r) => r.ok);
+      setRows(remaining.length ? remaining : null);
+      toast.message(`Deleted ${bad.length} corrupt cartridge row(s). Re-import your .crt files.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+  const badRows = rows?.filter((r) => !r.ok) ?? [];
   return (
     <div className="mt-4 rounded-lg border border-border/60 bg-bg/40 p-3">
       <h3 className="mb-2 text-sm font-medium text-fg">Library cartridge scan</h3>
@@ -521,14 +544,46 @@ function LibraryCartScanPanel() {
         <code className="text-fg">.crt</code> extension). Also logged as{" "}
         <code className="text-fg">[grok64] libraryCartScan</code> or <code className="text-fg">__g64.scanLibraryCarts()</code>.
       </p>
-      <button
-        type="button"
-        className="mb-2 rounded-md border border-border bg-bg px-3 py-1.5 text-xs font-medium text-fg"
-        disabled={busy}
-        onClick={() => void runScan()}
-      >
-        {busy ? "Scanning…" : "Scan library CRTs"}
-      </button>
+      <div className="mb-2 flex flex-wrap gap-2">
+        <button
+          type="button"
+          className="rounded-md border border-border bg-bg px-3 py-1.5 text-xs font-medium text-fg"
+          disabled={busy}
+          onClick={() => void runScan()}
+        >
+          {busy ? "Scanning…" : "Scan library CRTs"}
+        </button>
+        {badRows.length > 0 ? (
+          <button
+            type="button"
+            className="rounded-md border border-red-500/50 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-fg"
+            disabled={busy}
+            onClick={() => void deleteBadRows()}
+          >
+            Delete {badRows.length} corrupt row{badRows.length === 1 ? "" : "s"}
+          </button>
+        ) : null}
+      </div>
+      {rows && badRows.length > 0 ? (
+        <ul className="mb-2 space-y-1 text-xs text-fg-muted">
+          {badRows.map((r) => (
+            <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-border/50 px-2 py-1">
+              <span className="min-w-0 break-all">
+                <strong className="text-fg">{r.name}</strong>
+                {r.issue ? ` · ${r.issue}` : ""} · {r.payloadBytes} bytes
+              </span>
+              <button
+                type="button"
+                className="shrink-0 text-red-400 underline"
+                disabled={busy}
+                onClick={() => void deleteBadRows([r])}
+              >
+                Delete
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {rows && (
         <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-snug text-fg-muted">
           {JSON.stringify(rows, null, 2)}
