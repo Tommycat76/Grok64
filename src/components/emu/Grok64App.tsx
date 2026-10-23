@@ -3611,10 +3611,12 @@ export function Grok64App() {
         </div>
         <div className="g64-top-pin">
         <button type="button" className="g64-iconbtn g64-software" data-on={s.libraryOpen} aria-label="Software" title="Software" onClick={() => s.setLibraryOpen(true)}>
-          <FolderOpen className="size-5" />
+          <FolderOpen className="size-5 g64-iconbtn-icon" aria-hidden="true" />
+          <span className="g64-iconbtn-label">Software</span>
         </button>
         <button type="button" className="g64-iconbtn g64-disk" data-on={diskOpen} aria-label="Insert disk" title="Load disk" onClick={() => setDiskOpen(true)}>
-          <Disc3 className="size-5" />
+          <Disc3 className="size-5 g64-iconbtn-icon" aria-hidden="true" />
+          <span className="g64-iconbtn-label">Load disk</span>
         </button>
         {railMoreOpen ? (
           <button
@@ -3638,7 +3640,8 @@ export function Grok64App() {
         </button>
         <div className="g64-top-icons">
         <button type="button" className="g64-iconbtn g64-rail-dup" data-on={s.showKeyboard} aria-label="Keyboard" onClick={() => { setRailMoreOpen(false); s.setShowKeyboard(!s.showKeyboard); }}>
-          <KeyboardIcon className="size-5" />
+          <KeyboardIcon className="size-5 g64-iconbtn-icon" aria-hidden="true" />
+          <span className="g64-iconbtn-label">Keyboard</span>
         </button>
         <button
           type="button"
@@ -3651,7 +3654,8 @@ export function Grok64App() {
             setPaused(emuRef.current, next);
           }}
         >
-          {s.paused ? <Play className="size-5" /> : <Pause className="size-5" />}
+          {s.paused ? <Play className="size-5 g64-iconbtn-icon" aria-hidden="true" /> : <Pause className="size-5 g64-iconbtn-icon" aria-hidden="true" />}
+          <span className="g64-iconbtn-label">{s.paused ? "Resume" : "Pause"}</span>
         </button>
         <button
           type="button"
@@ -3663,7 +3667,8 @@ export function Grok64App() {
             powerOff();
           }}
         >
-          <Power className="size-5" />
+          <Power className="size-5 g64-iconbtn-icon" aria-hidden="true" />
+          <span className="g64-iconbtn-label">Power</span>
         </button>
         <button
           type="button"
@@ -3687,16 +3692,20 @@ export function Grok64App() {
             resetReady();
           }}
         >
-          <RotateCcw className="size-5" />
+          <RotateCcw className="size-5 g64-iconbtn-icon" aria-hidden="true" />
+          <span className="g64-iconbtn-label">Reset</span>
         </button>
         <button type="button" className="g64-iconbtn extra g64-rail-dup" data-on={s.muted} aria-label={s.muted ? "Unmute" : "Mute"} onClick={() => { setRailMoreOpen(false); s.setMuted(!s.muted); }}>
-          {s.muted ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
+          {s.muted ? <VolumeX className="size-5 g64-iconbtn-icon" aria-hidden="true" /> : <Volume2 className="size-5 g64-iconbtn-icon" aria-hidden="true" />}
+          <span className="g64-iconbtn-label">{s.muted ? "Unmute" : "Mute"}</span>
         </button>
         <button type="button" className="g64-iconbtn" aria-label="Settings" onClick={() => { setRailMoreOpen(false); s.setSettingsOpen(true); }}>
-          <Settings className="size-5" />
+          <Settings className="size-5 g64-iconbtn-icon" aria-hidden="true" />
+          <span className="g64-iconbtn-label">Settings</span>
         </button>
         <button type="button" className="g64-iconbtn extra" aria-label="About" onClick={() => { setRailMoreOpen(false); s.setAboutOpen(true); }}>
-          <Info className="size-5" />
+          <Info className="size-5 g64-iconbtn-icon" aria-hidden="true" />
+          <span className="g64-iconbtn-label">About</span>
         </button>
         </div>
         </div>
