@@ -102,7 +102,8 @@ const DETECT: { kind: FastLoadCartKind; re: RegExp }[] = [
   { kind: "action-replay", re: /action\s*replay|actionreplay|\bar\s*[456]|\bar[456]|replay\s*mk/i },
   { kind: "final-cartridge-3", re: /final\s*cartridge\s*(iii|3|\+)|fc\s*3/i },
   { kind: "final-cartridge-2", re: /final\s*cartridge\s*(ii|2)(?!\s*[+3])/i },
-  { kind: "final-cartridge-1", re: /final\s*cartridge\s*(i|1)(?!\s*[i2-9+])/i },
+  { kind: "final-cartridge-1", re: /final\s*cartridge\s*(?![i2-9+])\s*(i|1)\b/i },
+  { kind: "other-fastload", re: /retro\s*replay|superfluid.*\brr\b|mmcreplay/i },
   { kind: "kcs-power", re: /kcs\s*power/i },
   { kind: "warp-speed", re: /warpspeed|warp\s*speed/i },
   { kind: "epyx-fastload", re: /epyx|epyx_fast|fast_?load.*epyx/i },
@@ -112,8 +113,13 @@ const DETECT: { kind: FastLoadCartKind; re: RegExp }[] = [
  * Classify a CRT for **Settings / Jiffy pairing UI only** (hardware matrix).
  * Emulation attach uses VICE CRT detection — do not branch game logic on this.
  */
+/** Underscores/hyphens in CRT filenames (IA dumps) → spaces for DETECT regexes. */
+function cartDetectHay(name: string, title?: string | null): string {
+  return `${name} ${title ?? ""}`.replace(/[_-]+/g, " ");
+}
+
 export function detectFastLoadCart(name: string, title?: string | null): FastLoadCartKind | null {
-  const hay = `${name} ${title ?? ""}`;
+  const hay = cartDetectHay(name, title);
   if (!/\.(crt|bin)$/i.test(name) && !/(cart|cartridge|replay|snapshot|fast\s*load|epyx)/i.test(hay)) {
     return null;
   }
