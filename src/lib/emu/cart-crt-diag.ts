@@ -34,6 +34,7 @@ const HW_TYPE_NAMES: Record<number, string> = {
   25: "IDE64",
   26: "SUPER_SNAPSHOT_V5",
   27: "C64_MAX",
+  80: "SUPER_SNAPSHOT_V5",
   28: "EASYFLASH",
   29: "GMOD2",
 };
@@ -176,7 +177,7 @@ export function validateCartForPlay(
 
 /** Block saving obvious bad CRTs into IndexedDB (same rules as Play, without IDB size check). */
 export function validateCrtImport(data: Uint8Array, fileName: string): string | null {
-  if (!/\.(crt|bin)$/i.test(fileName)) return null;
+  if (!isCartridgePayload(data, fileName)) return null;
   const v = validateCartForPlay(data, fileName, null);
   return v.ok ? null : v.userMessage;
 }

@@ -50,4 +50,6 @@ test("validateCrtImport rejects bad CRT on import", () => {
   assert.match(validateCrtImport(fakeCrt().subarray(0, 100), "x.crt") ?? "", /truncated/i);
   assert.equal(validateCrtImport(fakeCrt(), "x.crt"), null);
   assert.equal(validateCrtImport(fakeCrt(), "game.d64"), null);
+  assert.equal(validateCrtImport(fakeCrt(), "saved-ss5-dump"), null);
+  assert.match(validateCrtImport(fakeCrt().subarray(0, 100), "saved-ss5-dump") ?? "", /truncated/i);
 });

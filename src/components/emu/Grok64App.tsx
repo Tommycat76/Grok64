@@ -57,6 +57,7 @@ import {
   cancelSuperSnapshotVicFix,
   scheduleSuperSnapshotVicFix,
   isSuperSnapshotCartHint,
+  ss5TurboBasicWithoutMenu,
   cartMountedOnCore,
   cartReset,
   repaintAfterCartFreeze,
@@ -331,6 +332,7 @@ export function Grok64App() {
   const libIdRef = useRef(null);
   const persistTimer = useRef(null);
   const playBufferRef = useRef(async () => {});
+  const playLocalRef = useRef(async (_item) => {});
   const bootHoldRef = useRef(false);
   const bootKickRef = useRef(false);
   const recoverOnceRef = useRef(false);
@@ -770,6 +772,13 @@ export function Grok64App() {
       openSoftware: () => useEmu.getState().setLibraryOpen(true),
       closeSoftware: () => useEmu.getState().setLibraryOpen(false),
       libraryCount: async () => (await listLibrary()).length,
+      listLibraryItems: () => listLibrary(),
+      playLibraryByName: async (name) => {
+        const items = await listLibrary();
+        const item = items.find((i) => i.name === name);
+        if (!item) throw new Error(`On this device has no file named “${name}”.`);
+        await playLocalRef.current(item);
+      },
       importLibraryBytes: async (name, bytes) => {
         const u8 =
           bytes instanceof Uint8Array
@@ -1903,8 +1912,14 @@ export function Grok64App() {
           vice_drive_true_emulation: "enabled",
           vice_virtual_device_traps: "disabled",
         });
-        hardReset(emu);
+        cartBootReset(emu);
         await flushEmuFs(emu, isIosPhone() ? 800 : 400);
+        if (isSuperSnapshotCartHint(ssCart) && ss5TurboBasicWithoutMenu(emu)) {
+          glog("cart-ss5-turbo-basic-recover", { phase: "settle" });
+          disarmAutostart(emu, "cart");
+          cartBootReset(emu);
+          await flushEmuFs(emu, isIosPhone() ? 800 : 400);
+        }
         scheduleSuperSnapshotVicFix(emu, ssCart);
         if (ssCart) stabilizeFreezerScreen(emu, ssCart);
         dismissEjsPrompts(document.getElementById("grok64-player"));
@@ -3101,6 +3116,23 @@ export function Grok64App() {
         } else {
           cartLiveRef.current = true;
           setCartLive(true);
+          const ssCart = useEmu.getState().fastLoadCart;
+          if (isSuperSnapshotCartHint(ssCart) && emuRef.current) {
+            const emuSnap = emuRef.current;
+            window.setTimeout(() => {
+              const live = emuRef.current;
+              if (!live || live !== emuSnap) return;
+              if (!ss5TurboBasicWithoutMenu(live)) return;
+              glog("cart-ss5-turbo-recover-post-play", {});
+              disarmAutostart(live, "cart");
+              cartBootReset(live);
+              void flushEmuFs(live, 600).then(() => {
+                scheduleSuperSnapshotVicFix(live, ssCart);
+                stabilizeFreezerScreen(live, ssCart);
+                bumpCrtPaint(live);
+              });
+            }, 3200);
+          }
         }
       }
       notePlayMarker();
@@ -3153,6 +3185,7 @@ export function Grok64App() {
     },
     [playBuffer, s, endPlayLock],
   );
+  playLocalRef.current = playLocal;
   const insertDisk = useCallback(async (item) => {
     const file = await getFile(item.id);
     if (!file) {

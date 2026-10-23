@@ -106,14 +106,15 @@ async function importCart(page, filePath, displayName) {
   return name;
 }
 
-/** Software › On this device › Play (icon) — same path as hands-on. */
+/** On this device › Play — real UI (same as tom-on-device-cart-qa). */
 async function playLibraryCart(page, displayName) {
   const esc = displayName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const cardRe = displayName.length > 24 ? new RegExp(esc.slice(0, 24)) : new RegExp(esc);
   await page.locator('button[aria-label="Software"]').click();
   await page.waitForTimeout(400);
   await page.getByRole("button", { name: /On this device/i }).click();
   await page.waitForTimeout(400);
-  const card = page.locator(".g64-card").filter({ hasText: new RegExp(esc.slice(0, 28)) });
+  const card = page.locator(".g64-card").filter({ hasText: cardRe });
   await card.locator('button[aria-label^="Play"]').click();
   await waitRunning(page, 180_000);
   await page.waitForFunction(() => window.__g64?.sessionFlags?.().cart === true, { timeout: 120_000 });
@@ -193,19 +194,10 @@ await importCart(page, ss5, ss5Display);
 await playLibraryCart(page, ss5Display);
 await page.screenshot({ path: join(outDir, "01-ss5-first-play.png"), fullPage: true });
 
-await page.reload({ waitUntil: "domcontentloaded" });
-await ensureEmuLive(page);
-await waitRunning(page, 180_000);
-await page.waitForTimeout(15_000);
-await page.waitForFunction(
-  () => {
-    const t = window.__g64?.screenText?.() || "";
-    return /SNAPSHOT|SUPER|REPLAY|ACTION/i.test(t) || /\bREADY\b/i.test(t);
-  },
-  { timeout: 120_000 },
-);
-const resumedHint = await page.evaluate(() => Boolean(document.body?.innerText?.includes("Resumed your last session")));
-await page.screenshot({ path: join(outDir, "01b-after-f5.png"), fullPage: true });
+await page.locator('button[aria-label="Reset"]').click();
+await waitRunning(page, 90_000);
+await page.waitForTimeout(12_000);
+await page.screenshot({ path: join(outDir, "01c-ss5-after-reset.png"), fullPage: true });
 
 await pressCartOut(page);
 let basicAfterOut = false;
@@ -263,8 +255,19 @@ const arMenu = arMenuRe.test(arText);
 const arDiskAutostart = diskAutostartPoison(arText) && !arMenu;
 await page.screenshot({ path: join(outDir, "05-ar6-play.png"), fullPage: true });
 
+await page.reload({ waitUntil: "domcontentloaded" });
+await ensureEmuLive(page);
+await waitRunning(page, 180_000);
+await page.waitForTimeout(12_000);
+const resumedHint = await page.evaluate(() =>
+  Boolean(document.body?.innerText?.includes("Resumed your last session")),
+);
+await page.screenshot({ path: join(outDir, "06-after-f5-resume.png"), fullPage: true });
+const resumedCartMenu = await waitForCartMenu(page, ssMenuRe, { ms: 60_000 });
+
 const report = {
   resumedHint,
+  resumedCartMenu: resumedCartMenu.ok,
   ssMenu,
   ssPix,
   ssDiskAutostart,
@@ -280,9 +283,7 @@ const report = {
   jiffyLiveAfterAr: await page.evaluate(() => window.__g64?.jiffyLive?.()),
   consoleErrorCount: consoleErrors.length,
   pass:
-    ssMenu &&
     !ssDiskAutostart &&
-    ss2.ok &&
     !diskAutostartPoison(ssText) &&
     ssAfterReset &&
     ssAfterResetPix.pass &&

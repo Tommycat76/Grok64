@@ -1609,6 +1609,16 @@ export function isSuperSnapshotCartHint(cartHint?: string | null): boolean {
   return h.includes("super-snapshot") || /^ss\d|snapshot\s*v/i.test(h) || /^ss/i.test(h);
 }
 
+/** SS5 sometimes lands in turbo-enhanced BASIC (TURBO V5 + READY) instead of the freezer menu. */
+export function ss5TurboBasicWithoutMenu(emu: EjsInstance | null, screenText?: string): boolean {
+  const t = screenText ?? readScreenText(emu);
+  return (
+    /TURBO\s*V5/i.test(t) &&
+    /\bREADY\b/i.test(t) &&
+    !/SUPER SNAPSHOT|SELECT OPTION|SNAPSHOT BY/i.test(t)
+  );
+}
+
 export function stabilizeFreezerScreen(emu: EjsInstance | null, cartHint?: string | null) {
   if (!emu || !isSuperSnapshotCartHint(cartHint)) return;
   writeC64Bytes(emu, 0xd011, new Uint8Array([0x1b]));
