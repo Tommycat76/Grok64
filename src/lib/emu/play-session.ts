@@ -1,6 +1,13 @@
 import type { IecDrive, IecMap, IecSlot, IecUnit, MediaKind } from "./types";
 import { IEC_UNITS } from "./types";
-import { floppyPlayCanHotSwap, iecForAutostart, isFsWorkDisk, kindOf, needsTypedBoot } from "./formats";
+import {
+  floppyPlayCanHotSwap,
+  iecForAutostart,
+  isCartridgePayload,
+  isFsWorkDisk,
+  kindOf,
+  needsTypedBoot,
+} from "./formats";
 
 /**
  * One play / IEC state machine.
@@ -48,8 +55,9 @@ export interface PlayPlan {
   status: string;
 }
 
-export function playKindOf(filename: string, work: boolean): PlayKind {
+export function playKindOf(filename: string, work: boolean, data?: Uint8Array | null): PlayKind {
   if (work) return "basic";
+  if (data && isCartridgePayload(data, filename)) return "cart";
   const kind = kindOf(filename);
   if (needsTypedBoot(kind)) return "floppy";
   if (kind === "t64" || kind === "tap") return "tape";
@@ -457,6 +465,7 @@ export function floppyNeedsRecycle(
 export function planPlay(input: {
   filename: string;
   work?: boolean;
+  payload?: Uint8Array | null;
   userIec: IecDrive;
   userUnit: IecUnit;
   liveIec: IecDrive;
@@ -467,7 +476,7 @@ export function planPlay(input: {
   jiffyLive?: boolean;
 }): PlayPlan {
   const work = !!input.work;
-  const kind = playKindOf(input.filename, work);
+  const kind = playKindOf(input.filename, work, input.payload);
   const user: DriveAttach = { iec: input.userIec, unit: input.userUnit };
   const attach = work ? null : iecForAutostart(kindOf(input.filename));
   const autostart = input.autostart !== false && kind !== "basic";

@@ -870,3 +870,28 @@ test("boot recover must not replace a live floppy session with BASIC", () => {
     true,
   );
 });
+
+test("CRT payloads never plan as floppy autostart", async () => {
+  const { isCartridgePayload } = await server.ssrLoadModule("/src/lib/emu/formats.ts");
+  const { readFileSync, existsSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const crtPath = join(process.cwd(), "fixtures/carts/Action_Replay_V6.0.crt");
+  if (!existsSync(crtPath)) {
+    console.log("skip CRT fixture");
+    return;
+  }
+  const ar = readFileSync(crtPath);
+  const bytes = new Uint8Array(ar);
+  assert.equal(isCartridgePayload(bytes, "Action_Replay_V6.0.crt"), true);
+  const plan = planPlay({
+    filename: "Action_Replay_V6.0.crt",
+    payload: bytes,
+    userIec: "1541",
+    userUnit: 8,
+    liveIec: "1541",
+    liveWorkDisk: "8_d64",
+    autostart: true,
+  });
+  assert.equal(plan.kind, "cart");
+  assert.equal(plan.attach, null);
+});

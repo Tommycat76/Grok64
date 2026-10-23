@@ -39,7 +39,10 @@ import {
   wireGrok64ViceHost,
 } from "./grok64-vice-bridge";
 import { grok64RetroKeyboardAvailable } from "./grok64-keyboard";
+import { writeC64Bytes } from "./c64-memory";
+import { isCartridgePayload } from "./formats";
 import { readScreenText } from "./screen-text";
+import { setSessionCart } from "./session-media";
 import type { SdPartition } from "./sd2iec";
 import type { Sd2iecVolume } from "./sd2iec-volume";
 import type {
@@ -1588,6 +1591,45 @@ export function repaintAfterCartFreeze(emu: EjsInstance | null) {
   window.setTimeout(() => bumpCrtPaint(emu), 900);
 }
 
+/**
+ * Super Snapshot / freezer menus expect standard text-mode VIC banking.
+ * Wrong $d011/$d018 after freeze shows repeated header bands on the CRT.
+ */
+export function stabilizeFreezerScreen(emu: EjsInstance | null, cartHint?: string | null) {
+  if (!emu || !cartHint || !/^ss/i.test(cartHint)) return;
+  writeC64Bytes(emu, 0xd011, new Uint8Array([0x1b]));
+  writeC64Bytes(emu, 0xd016, new Uint8Array([0x08]));
+  writeC64Bytes(emu, 0xd018, new Uint8Array([0x14]));
+  bumpCrtPaint(emu);
+}
+
+/** Attach a .crt/.bin on the live core — never through floppy autostart / WORK DISK. */
+export async function attachCartridgeInPlace(
+  emu: EjsInstance | null,
+  data: Uint8Array,
+  fileName: string,
+): Promise<boolean> {
+  if (!emu || !coreHasFs(emu) || !isCartridgePayload(data, fileName)) return false;
+  const base = fileName.replace(/^\//, "");
+  disarmAutostart(emu, "cart");
+  if (!writeBootFile(emu, data, base)) return false;
+  emu.fileName = base;
+  unitMounts.delete(8);
+  setSessionCart(base, data);
+  applyRuntimeOptions(emu, {
+    ...CART_PLAY_UNLOCK_VICE_OPTS,
+    vice_drive_true_emulation: "enabled",
+    vice_virtual_device_traps: "disabled",
+    vice_work_disk: "disabled",
+  });
+  await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
+  autostartAfterReady(emu, false, { autoloadWarp: true });
+  resetEmu(emu);
+  await flushEmuFs(emu, 600);
+  bumpCrtPaint(emu);
+  return true;
+}
+
 /** Remove a CRT that was loaded as content and return to the work disk. */
 export function cartEject(emu: EjsInstance | null, workDisk?: Uint8Array | null): boolean {
   if (!emu || !coreHasFs(emu)) return false;
@@ -1961,20 +2003,61 @@ export function bootFileOf(emu: EjsInstance | null): string | null {
 const unitMounts = new Map<IecUnit, string>();
 const WORK_DISK_NAMES = new Set(["WORK DISK.D64", "work disk.d64"]);
 
-/** Mirror the mounted GEOS/game .d64 into VICE libretro work-disk paths (unit 8). */
-function syncViceWorkD64(emu: EjsInstance | null, data: Uint8Array) {
+/**
+ * Mirror a .d64 into paths VICE libretro reads for `vice_work_disk` (see update_work_disk in libretro-core.c).
+ * RetroArch save dir is `/data/saves` → `vice_work.d64` is what file_system_attach_disk(8,…) opens.
+ */
+export function syncViceWorkD64(emu: EjsInstance | null, data: Uint8Array) {
   const FS = fsOf(emu);
   if (!FS?.writeFile || data.byteLength < 174848) return;
-  const roots = ["/vice_work", "/data/vice_work", "/home/web_user/retroarch/userdata/saves/vice_work"];
-  for (const root of roots) {
+  const targets = [
+    "/data/saves/vice_work.d64",
+    "/home/web_user/retroarch/userdata/saves/vice_work.d64",
+  ];
+  for (const path of targets) {
     try {
-      FS.mkdir?.(root);
-      FS.writeFile(`${root}/vice_work.d64`, data);
-      FS.writeFile(`${root}/8.d64`, data);
+      const dir = path.slice(0, path.lastIndexOf("/"));
+      FS.mkdir?.(dir);
+      FS.writeFile(path, data);
     } catch {
-      /* optional path */
+      /* optional */
     }
   }
+}
+
+/** Force libretro to detach/reattach the work disk image after MEMFS/IDBFS bytes change. */
+export async function refreshViceWorkDisk(emu: EjsInstance | null, unit: IecUnit = 8): Promise<void> {
+  if (!emu) return;
+  const slot = `${unit}_d64`;
+  const disarm = {
+    vice_autostart: "disabled",
+    vice_autostart_warp: "disabled",
+    vice_autoloadwarp: "disabled",
+  };
+  applyRuntimeOptions(emu, { ...disarm, vice_work_disk: "disabled", vice_reset: "hard" });
+  resetEmu(emu);
+  await flushEmuFs(emu, 800);
+  applyRuntimeOptions(emu, { ...disarm, vice_work_disk: slot, vice_reset: "hard" });
+  resetEmu(emu);
+  await flushEmuFs(emu, 1500);
+  bumpCrtPaint(emu);
+  await new Promise((r) => setTimeout(r, 250));
+}
+
+/** QA: bytes on MEMFS path VICE opens for `8_d64` work disk attach. */
+export function viceWorkD64ByteLength(emu: EjsInstance | null): number {
+  const FS = fsOf(emu);
+  if (!FS?.readFile) return 0;
+  for (const path of ["/data/saves/vice_work.d64", "/home/web_user/retroarch/userdata/saves/vice_work.d64"]) {
+    try {
+      const raw = FS.readFile(path);
+      if (raw instanceof Uint8Array) return raw.byteLength;
+      if (typeof raw === "string") return raw.length;
+    } catch {
+      /* try next */
+    }
+  }
+  return 0;
 }
 
 export function clearUnitMounts() {
@@ -2192,11 +2275,18 @@ export async function bootGeosFloppy(
   wireGrok64ViceHost(emu);
   detachGrok64Sd2iec(emu, unit);
   await tickGrok64Iec(emu);
-  const viceMap = iecMap
-    ? viceMapFromIecMap({ ...iecMap, [unit]: "1541" })
-    : { [unit]: "1541" as IecDrive };
+  disarmAutostart(emu, "disk");
+  const mounted = bootFileOf(emu) ?? "WORK DISK.D64";
+  if (!writeBootFile(emu, data, mounted)) return false;
+  emu.fileName = mounted.replace(/^\//, "");
+  unitMounts.set(unit, emu.fileName);
+  setSessionDisk(fileName.replace(/^\//, ""), data, unit);
+  syncViceWorkD64(emu, data);
+
+  const flushed = await flushEmuFs(emu, 3000);
+  if (!flushed) return false;
+
   applyRuntimeOptions(emu, {
-    ...viceDriveTypeVars(viceMap),
     ...viceGeosFloppyOptions(unit),
     [`vice_drive${unit}_type`]: "1542",
     vice_work_disk: `${unit}_d64`,
@@ -2205,39 +2295,10 @@ export async function bootGeosFloppy(
     emu,
     ["[C64]", `Drive${unit}Type=1542`, "DriveTrueEmulation=1", "VirtualDevices=0"].join("\n") + "\n",
   );
-  applyIecUnit(emu, "1541", unit);
-  disarmAutostart(emu, "disk");
-
+  await refreshViceWorkDisk(emu, unit);
   applyRuntimeOptions(emu, {
     ...viceGeosFloppyOptions(unit),
     [`vice_drive${unit}_type`]: "1542",
-    vice_work_disk: `${unit}_d64`,
-  });
-  applyIecUnit(emu, "1541", unit);
-
-  const attached = attachAutostartDisk(emu, data, fileName, "1541", unit);
-  if (!attached) {
-    const target = "WORK DISK.D64";
-    if (!swapBootDisk(emu, data, target) && !writeBootFile(emu, data, target)) return false;
-    emu.fileName = target;
-    unitMounts.set(unit, target);
-  }
-  setSessionDisk(fileName.replace(/^\//, ""), data, unit);
-  syncViceWorkD64(emu, data);
-
-  const flushed = await flushEmuFs(emu, 3000);
-  if (!flushed) return false;
-  applyRuntimeOptions(emu, {
-    ...viceGeosFloppyOptions(unit),
-    [`vice_drive${unit}_type`]: "1542",
-    vice_work_disk: `${unit}_d64`,
-  });
-  resetEmu(emu);
-  await flushEmuFs(emu, 1200);
-  applyRuntimeOptions(emu, {
-    ...viceGeosFloppyOptions(unit),
-    [`vice_drive${unit}_type`]: "1542",
-    vice_work_disk: `${unit}_d64`,
   });
   return await waitForC64Ready(emu, 45_000);
 }
@@ -2249,6 +2310,7 @@ export function attachAutostartDisk(
   iec: IecDrive = "1541",
   unit: IecUnit = 8,
 ): boolean {
+  if (isCartridgePayload(data, _fallbackName ?? bootFileOf(emu))) return false;
   applyIecUnit(emu, iec, unit);
   // Only overwrite the mounted boot image. A new filename leaves unit 8
   // as the blank work disk — LOAD"*",8,1 then FILE NOT FOUND (#60/#61).
@@ -2261,6 +2323,9 @@ export function attachAutostartDisk(
     applyIecUnit(emu, iec, unit);
     const label = (_fallbackName || mounted).replace(/^\//, "");
     setSessionDisk(label, data, unit);
+    if (data.byteLength >= 174848 && /\.d64$/i.test(mounted)) {
+      syncViceWorkD64(emu, data);
+    }
   }
   return wrote;
 }

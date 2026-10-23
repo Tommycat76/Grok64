@@ -131,6 +131,8 @@ interface SessionSlice {
   bootMsg: string;
   bootProgress: number;
   libraryOpen: boolean;
+  libraryTab: "catalog" | "library";
+  sessionRestoreHint: string | null;
   settingsOpen: boolean;
   mapperOpen: boolean;
   aboutOpen: boolean;
@@ -150,6 +152,8 @@ interface SessionSlice {
   setMuted: (v: boolean) => void;
   setBooting: (v: boolean, msg?: string, progress?: number) => void;
   setLibraryOpen: (v: boolean) => void;
+  setLibraryTab: (tab: "catalog" | "library") => void;
+  setSessionRestoreHint: (hint: string | null) => void;
   setSettingsOpen: (v: boolean) => void;
   setMapperOpen: (v: boolean) => void;
   setAboutOpen: (v: boolean) => void;
@@ -267,6 +271,8 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       bootMsg: "",
       bootProgress: 0,
       libraryOpen: false,
+      libraryTab: "catalog",
+      sessionRestoreHint: null,
       settingsOpen: false,
       mapperOpen: false,
       aboutOpen: false,
@@ -296,6 +302,8 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       setBooting: (booting, bootMsg = "", bootProgress = booting ? 8 : 0) =>
         set({ booting, bootMsg, bootProgress: booting ? bootProgress : 0 }),
       setLibraryOpen: (libraryOpen) => set({ libraryOpen }),
+      setLibraryTab: (libraryTab) => set({ libraryTab }),
+      setSessionRestoreHint: (sessionRestoreHint) => set({ sessionRestoreHint }),
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
       setMapperOpen: (mapperOpen) => set({ mapperOpen }),
       setAboutOpen: (aboutOpen) => set({ aboutOpen }),

@@ -40,6 +40,16 @@ export function isBasicPrg(data: Uint8Array): boolean {
   return data.byteLength >= 2 && data[0] === 0x01 && data[1] === 0x08;
 }
 
+/** True when bytes/name are a C64 cartridge (CRT header or cart slot extension). */
+export function isCartridgePayload(data: Uint8Array, name?: string | null): boolean {
+  if (name && /\.(crt|bin)$/i.test(name)) return true;
+  if (data.byteLength >= 16) {
+    const head = new TextDecoder("ascii", { fatal: false }).decode(data.subarray(0, 16));
+    if (/^C64 CARTRIDGE/.test(head) || /^C128 CARTRIDGE/.test(head)) return true;
+  }
+  return false;
+}
+
 export function kindOf(name: string): MediaKind {
   const e = extOf(name);
   const map: Record<string, MediaKind> = {

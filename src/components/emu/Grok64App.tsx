@@ -48,8 +48,10 @@ import {
   mountDiskOnUnit,
   applyIecUnit,
   attachAutostartDisk,
+  attachCartridgeInPlace,
   cartEject,
   cartFreeze,
+  stabilizeFreezerScreen,
   cartReset,
   repaintAfterCartFreeze,
   writeCompanionMedia,
@@ -59,6 +61,7 @@ import {
   lastAppliedWorkDisk,
   runtimeViceOpts,
   swapBootDisk,
+  viceWorkD64ByteLength,
   writeBootFile,
   sd2iecFreeze,
   sd2iecSwapDevice,
@@ -70,6 +73,7 @@ import {
   readMountedMediaForUi,
   applyReal1541Timing,
   recycleCore,
+  refreshViceWorkDisk,
   remountSd2iecFromParts,
   restoreState,
   resetEmu,
@@ -204,6 +208,7 @@ import {
   driveForPlay,
   d64DiskName,
   isBasicPrg,
+  isCartridgePayload,
   isDiskKind,
   isWorkDiskImage,
   kindOf,
@@ -786,6 +791,39 @@ export function Grok64App() {
       iecOpenDollarChannel: (unit = 8) => iecOpenDollarChannel(emuRef.current, unit as 8 | 9 | 10 | 11 | 12),
       feedBasic: (line) => feedBasicLine(emuRef.current, line),
       printTi: async () => readPrintTi(emuRef.current, () => readScreenText(emuRef.current)),
+      geosMountAndDir: async (name, bytes) => {
+        let buf: ArrayBuffer;
+        if (bytes instanceof ArrayBuffer) buf = bytes;
+        else if (bytes instanceof Uint8Array) {
+          buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+        } else buf = new Uint8Array(bytes as ArrayLike<number>).buffer;
+        const stGeos = useEmu.getState();
+        const reu = reuForGeosFamilyDisk(name, stGeos.reuSize);
+        if (reu !== stGeos.reuSize) {
+          stGeos.setReuSize(reu);
+          applyRuntimeOptions(emuRef.current, { vice_ram_expansion_unit: reu });
+        }
+        stGeos.setIecSlot(8, "1541");
+        sessionIecRef.current = "1541";
+        sessionUnitRef.current = 8;
+        const geosMap = { ...stGeos.iecMap, 8: "1541" as const };
+        disarmAutostart(emuRef.current, "disk");
+        const mountOk = await bootGeosFloppy(
+          emuRef.current,
+          new Uint8Array(buf),
+          name,
+          8,
+          geosMap,
+        );
+        const workBytes = viceWorkD64ByteLength(emuRef.current);
+        const opts = runtimeViceOpts();
+        if (mountOk) {
+          await feedBasicLine(emuRef.current, 'LOAD"$",8');
+          await new Promise((r) => window.setTimeout(r, 10_000));
+        }
+        const dir = readScreenText(emuRef.current);
+        return { mountOk, workBytes, opts, dir };
+      },
       bootGeos: async (name, bytes) => {
         let buf: ArrayBuffer;
         if (bytes instanceof ArrayBuffer) buf = bytes;
@@ -803,13 +841,7 @@ export function Grok64App() {
         sessionIecRef.current = "1541";
         sessionUnitRef.current = 8;
         const geosMap = { ...stGeos.iecMap, 8: "1541" as const };
-        applyIecUnit(emuRef.current, "1541", 8);
         setMouseAnalog(emuRef.current, true);
-        applyRuntimeOptions(emuRef.current, {
-          ...viceGeosFloppyOptions(8),
-          ...viceJoyOptions(stGeos.joyPort),
-          vice_ram_expansion_unit: reu,
-        });
         disarmAutostart(emuRef.current, "disk");
         const ok = await bootGeosFloppy(emuRef.current, new Uint8Array(buf), name, 8, geosMap);
         if (!ok) return false;
@@ -1249,6 +1281,14 @@ export function Grok64App() {
       }, 400),
     );
   }, []);
+  const endPlayLock = useCallback(() => {
+    playLockGen.current += 1;
+    playLockRef.current = false;
+    bootHoldRef.current = false;
+    muteC64Space(false);
+    clearBootTimers();
+    useEmu.getState().setBooting(false);
+  }, []);
   const beginPlayLock = useCallback(
     (ms, msg) => {
       playLockGen.current += 1;
@@ -1354,10 +1394,12 @@ export function Grok64App() {
   );
   const resetReady = useCallback(() => {
     const emu = emuRef.current;
+    if (emu) hardReset(emu);
     glog("user-reset-ready", { prev: playModeRef.current, title: useEmu.getState().currentTitle });
     playModeRef.current = "basic";
     clearLivePlay();
     clearPlayMarker();
+    useEmu.getState().setSessionRestoreHint(null);
     markSessionReady();
     cracktroOnceRef.current = "";
     cartLiveRef.current = false;
@@ -1508,7 +1550,7 @@ export function Grok64App() {
             vice_virtual_device_traps: "disabled",
           });
         }
-        autostartAfterReady(emu, true, {
+        autostartAfterReady(emu, !cartBoot, {
           autoloadWarp: autoloadWarpForPlay(playModeRef.current, spec.title),
         });
         applyIecUnit(emu, spec.live.iec, spec.live.unit);
@@ -1946,9 +1988,12 @@ export function Grok64App() {
       const liveWork = lastAppliedWorkDisk();
       const jiffyWantSetting = useEmu.getState().jiffyDos;
       const jiffyLive = lastAppliedJiffy();
+      const payloadView = new Uint8Array(safe);
+      const forceCart = isCartridgePayload(payloadView, bootName);
       const plan = planPlay({
         filename: bootName,
         work,
+        payload: payloadView,
         userIec,
         userUnit,
         liveIec,
@@ -1958,6 +2003,7 @@ export function Grok64App() {
         jiffyWant: jiffyWantSetting,
         jiffyLive,
       });
+      if (forceCart || plan.kind === "cart") playModeRef.current = "cart";
       const playTitle = opts.title ?? filename;
       const hadCartBefore = cartLiveRef.current;
       const keepCartAcrossDiskEarly = hadCartBefore && plan.kind === "floppy" && !work;
@@ -2172,7 +2218,27 @@ export function Grok64App() {
       }
       const wrapped = wrapForDiskSwap(origKind, media, bootName);
       const diskBytes = wrapped ?? (isDiskKind(origKind) ? media : null);
-      if ((((live && (canHotSwap || keepLiveCrt)) || floppyKeep) && emuRef.current && diskBytes)) {
+      if (
+        live &&
+        emuRef.current &&
+        !work &&
+        (plan.kind === "cart" || forceCart)
+      ) {
+        s.setBooting(true, plan.status, 35);
+        const attached = await attachCartridgeInPlace(emuRef.current, payloadView, bootName);
+        if (attached) {
+          s.setCurrentTitle(title);
+          if (!work) markSessionPlay(title);
+          notePlayMarker();
+          s.setRunning(true);
+          beginPlayLock(playLockDuration("cart", title), `Loading ${title}…`);
+          return;
+        }
+        useEmu.getState().setBooting(false);
+        toast.error("Could not attach that cartridge on the live C64.");
+        return;
+      }
+      if ((((live && (canHotSwap || keepLiveCrt)) || floppyKeep) && emuRef.current && diskBytes && plan.kind === "floppy" && !forceCart)) {
         const payloadDisk = diskBytes;
         const playIec = attach?.iec ?? plan.live.iec;
         const playAttachUnit = attach?.unit ?? plan.live.unit;
@@ -2266,6 +2332,9 @@ export function Grok64App() {
           });
           if (attach) applyIecUnit(emuRef.current, playIec, playAttachUnit);
           const flushed = await flushEmuFs(emuRef.current, isIosPhone() ? 2000 : 800);
+          if (attach && plan.kind === "floppy") {
+            await refreshViceWorkDisk(emuRef.current, playAttachUnit);
+          }
           glog("play-mount", { flushed, workDisk: lastAppliedWorkDisk(), ios: isIosPhone() });
           await prepareCore(emuRef.current, {
             live: plan.live,
@@ -2299,7 +2368,7 @@ export function Grok64App() {
               }, 800),
             );
           } else {
-            autostartAfterReady(emuRef.current, true, {
+            autostartAfterReady(emuRef.current, plan.kind !== "cart", {
               autoloadWarp: autoloadWarpForPlay(playModeRef.current, bootName),
             });
             applyIecUnit(emuRef.current, playIec, playAttachUnit);
@@ -2323,15 +2392,22 @@ export function Grok64App() {
       }
       if (mustKeep && live && iosInPlaceMediaKind(plan.kind) && emuRef.current) {
         s.setBooting(true, plan.status, 35);
-        const wrote = writeBootFile(emuRef.current, media, bootName);
+        const attached =
+          plan.kind === "cart" || forceCart
+            ? await attachCartridgeInPlace(emuRef.current, payloadView, bootName)
+            : false;
+        const wrote =
+          attached ||
+          (plan.kind !== "cart" && !forceCart && writeBootFile(emuRef.current, media, bootName));
         if (wrote) {
-          emuRef.current.fileName = bootName.replace(/^\//, "");
+          if (!attached) emuRef.current.fileName = bootName.replace(/^\//, "");
           glog("play-recycle-inplace", {
             filename,
             title,
             kind: origKind,
             media: plan.kind,
             keepLiveCrt: true,
+            cart: attached,
           });
           persistGateRef.current = false;
           inGameplayRef.current = false;
@@ -2342,9 +2418,11 @@ export function Grok64App() {
           markSessionPlay(title);
           notePlayMarker();
           s.setRunning(true);
-          autostartAfterReady(emuRef.current, true, {
-            autoloadWarp: autoloadWarpForPlay(playModeRef.current, bootName),
-          });
+          if (!attached) {
+            autostartAfterReady(emuRef.current, plan.kind !== "cart", {
+              autoloadWarp: autoloadWarpForPlay(playModeRef.current, bootName),
+            });
+          }
           if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, "play-recycle");
           scheduleFit(true);
           beginPlayLock(playLockDuration(playModeRef.current, title), `Loading ${title}…`);
@@ -2436,17 +2514,12 @@ export function Grok64App() {
         sessionIecRef.current = "1541";
         sessionUnitRef.current = 8;
         const geosMap = { ...stGeos.iecMap, 8: "1541" as const };
-        applyIecUnit(emuRef.current, "1541", 8);
-        applyRuntimeOptions(emuRef.current, {
-          ...viceGeosFloppyOptions(8),
-          ...viceJoyOptions(stGeos.joyPort),
-          vice_ram_expansion_unit: reu,
-        });
         setMouseAnalog(emuRef.current, true);
         disarmAutostart(emuRef.current, "disk");
         const raw = new Uint8Array(file.data);
         const ok = await bootGeosFloppy(emuRef.current, raw, file.name, 8, geosMap);
         if (!ok) {
+          endPlayLock();
           toast.error(isWheelsDiskName(file.name) ? "Could not mount Wheels disk" : "Could not mount GEOS disk");
           return;
         }
@@ -2460,6 +2533,7 @@ export function Grok64App() {
         await flushEmuFs(emuRef.current, 3000);
         applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
         if (!(await feedBasicLine(emuRef.current, 'LOAD"*",8,1'))) {
+          endPlayLock();
           toast.error(isWheelsDiskName(file.name) ? "Wheels LOAD failed" : "GEOS LOAD failed");
           return;
         }
@@ -2467,6 +2541,7 @@ export function Grok64App() {
         while (Date.now() < loadEnd) {
           const mid = readScreenText(emuRef.current);
           if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(mid)) {
+            endPlayLock();
             toast.error("GEOS disk not found on unit 8");
             return;
           }
@@ -2478,6 +2553,7 @@ export function Grok64App() {
         await new Promise((r) => window.setTimeout(r, 15_000));
         const screen = readScreenText(emuRef.current);
         if (!geosBootSucceeded(screen, file.name)) {
+          endPlayLock();
           toast.error(
             geosBootStuckAtBasic(screen)
               ? "GEOS returned to BASIC — stock KERNAL and 1541-II are required"
@@ -2487,6 +2563,7 @@ export function Grok64App() {
           );
           return;
         }
+        endPlayLock();
         await touchPlayed(item.id);
         return;
       }
@@ -2506,7 +2583,7 @@ export function Grok64App() {
       });
       await touchPlayed(item.id);
     },
-    [playBuffer, s],
+    [playBuffer, s, endPlayLock],
   );
   const insertDisk = useCallback(async (item) => {
     const file = await getFile(item.id);
@@ -2648,6 +2725,7 @@ export function Grok64App() {
     clearUnitMounts();
     releaseBlob();
     st.powerOff();
+    st.setSessionRestoreHint(null);
     setPictureHold(false);
     if (pictureHoldTimer.current) window.clearTimeout(pictureHoldTimer.current);
     toast.message("Powered off");
@@ -2772,6 +2850,7 @@ export function Grok64App() {
         // Attach success re-saves the marker (powerOn cleared it). If the
         // attach failed, say so honestly instead of claiming a restore.
         if (readPlayMarker()) {
+          useEmu.getState().setSessionRestoreHint(marker.title);
           toast.message(`Restored ${marker.title} — tap for sound`);
         } else {
           clearLivePlay();
@@ -3122,6 +3201,7 @@ export function Grok64App() {
       }
       const ok = cartFreeze(emuRef.current);
       repaintAfterCartFreeze(emuRef.current);
+      stabilizeFreezerScreen(emuRef.current, useEmu.getState().fastLoadCart);
       glog("cart-freeze", { ok });
       toast.message(ok ? "Cart freeze" : "Cart freeze not ready");
       return;
@@ -3549,6 +3629,11 @@ export function Grok64App() {
                 : "Tap the power button. The C64 boots to READY with a blank work disk. Grab games from Software."}
           </p>
           <BuildId />
+        </div>
+      ) : null}
+      {s.powered && s.sessionRestoreHint ? (
+        <div className="g64-restore-banner" role="status">
+          Resumed your last session — <strong>{s.sessionRestoreHint}</strong>. Reset clears the cartridge and returns to BASIC.
         </div>
       ) : null}
       <header className="g64-top" hidden={!s.powered}>

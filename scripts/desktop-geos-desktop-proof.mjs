@@ -64,6 +64,11 @@ await waitRunning(page, 120_000);
 await assertGrok64WasmCore(page, { timeoutMs: 120_000 });
 
 const geosBytes = [...readFileSync(geosPath)];
+const mountProbe = await page.evaluate(
+  async ({ name, bytes }) => window.__g64?.geosMountAndDir?.(name, bytes),
+  { name: "GEOS64_2.0.d64", bytes: geosBytes },
+);
+const dirProbe = mountProbe?.dir ?? "";
 const bootOk = await page.evaluate(
   async ({ name, bytes }) => Boolean(await window.__g64?.bootGeos?.(name, bytes)),
   { name: "GEOS64_2.0.d64", bytes: geosBytes },
@@ -91,8 +96,12 @@ const opts = await page.evaluate(() => window.__g64?.runtimeViceOpts?.() ?? {});
 const jiffyLive = await page.evaluate(() => window.__g64?.jiffyLive?.());
 await page.screenshot({ path: join(outDir, "geos-after-mouse.png"), fullPage: true });
 
+const dirListsGeos = /GEOS|DESK|GEOB|RBOOT|0\s+"/i.test(dirProbe);
 const report = {
   bootOk,
+  mountProbe,
+  dirProbeHead: dirProbe.slice(0, 200),
+  dirListsGeos,
   jiffyLive,
   drive8: opts.vice_drive8_type,
   trueEmu: opts.vice_drive_true_emulation,
@@ -100,7 +109,15 @@ const report = {
   before,
   after,
   stats,
-  pass: bootOk && after.pass && !jiffyLive,
+  pass:
+    bootOk &&
+    mountProbe?.mountOk &&
+    mountProbe?.workBytes >= 174848 &&
+    mountProbe?.opts?.vice_drive8_type === "1542" &&
+    mountProbe?.opts?.vice_drive_true_emulation === "enabled" &&
+    dirListsGeos &&
+    after.pass &&
+    !jiffyLive,
 };
 writeFileSync(join(artDir, "results.json"), JSON.stringify(report, null, 2));
 console.log(report.pass ? "PASS geos-desktop-proof" : "FAIL geos-desktop-proof", JSON.stringify(report));

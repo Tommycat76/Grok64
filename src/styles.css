@@ -364,7 +364,7 @@ html, body, #app {
     inset 0 1px 0 rgb(255 255 255 / 0.07),
     0 1px 0 rgb(0 0 0 / 0.35);
   font-family: var(--font-mono);
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -390,7 +390,7 @@ html, body, #app {
   border-color: color-mix(in oklab, var(--color-phosphor) 38%, var(--g64-toolbar-fill));
 }
 .g64-app[data-device="desktop"] .g64-top-rail .g64-chip {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 700;
   color: #f0f0f4;
   padding: 6px 11px;
@@ -2416,6 +2416,14 @@ html[data-g64os="ios"] .g64-scan {
   color: var(--color-fg);
 }
 
+.g64-toaster[data-sonner-toaster] {
+  top: auto !important;
+  bottom: 76px !important;
+  pointer-events: none;
+}
+.g64-toaster[data-sonner-toaster] [data-sonner-toast] {
+  pointer-events: auto;
+}
 [data-sonner-toaster] [data-sonner-toast] {
   background: #101014 !important;
   border: 2px solid color-mix(in oklab, var(--color-fg) 45%, transparent) !important;
@@ -2423,6 +2431,17 @@ html[data-g64os="ios"] .g64-scan {
   font-weight: 600 !important;
   font-size: 14px !important;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55) !important;
+}
+.g64-restore-banner {
+  margin: 0 12px 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--color-phosphor) 18%, #1a1a22);
+  border: 1px solid color-mix(in oklab, var(--color-phosphor) 35%, transparent);
+  color: #f4f4f6;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
 }
 [data-sonner-toaster] [data-sonner-toast] [data-description] {
   color: #e4e4e7 !important;
