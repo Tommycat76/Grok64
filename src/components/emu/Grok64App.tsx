@@ -235,6 +235,13 @@ import { explodeArchive, pickBootFile, toArrayBuffer } from "@/lib/emu/archive";
 import { BuildId } from "@/components/emu/BuildId";
 import { debugQueryOn, glog, glogFire, setDebugUi, subscribeLog } from "@/lib/emu/debug";
 import { readBuildId } from "@/lib/emu/build-id";
+import {
+  cartAttachResultCode,
+  getLastCartPlayDiagnostic,
+  publishCartAttachDiag,
+  recordLastCartPlayDiagnostic,
+  validateCartForPlay,
+} from "@/lib/emu/cart-crt-diag";
 import { createMenuJoyGate, menuJoyStep, resetMenuJoyGate } from "@/lib/emu/menu-joy.mjs";
 import { applyStickPrecision, createStickPrecision, resetStickPrecision } from "@/lib/emu/stick-precision.mjs";
 import { publicUrl } from "@/lib/public-url";
@@ -595,6 +602,8 @@ export function Grok64App() {
       mirrorPainted: () => isIosMirrorPainted(),
       mirrorActive: () => isIosMirrorActive(),
       buildId: () => readBuildId(),
+      lastCartPlay: () => getLastCartPlayDiagnostic(),
+      grok64Core: () => grok64CoreStatus(emuRef.current),
       crt: () => {
         const root = document.getElementById("grok64-player");
         const c = root?.querySelector("canvas:not(.g64-ios-present)") as HTMLCanvasElement | null;
@@ -1899,7 +1908,22 @@ export function Grok64App() {
         scheduleFit(true);
         applyIecUnit(emu, spec.live.iec, spec.live.unit);
         if (isIosPhone()) kickIosAfterEmuAction(emu, "settle", gen);
-        if (cartMountedOnCore(emu)) {
+        const mounted = cartMountedOnCore(emu);
+        if (spec.playKind === "cart" || cartBootSettle) {
+          const boot = (bootFileOf(emu) || spec.bootName || spec.title || "").replace(/^\//, "");
+          const prev = getLastCartPlayDiagnostic();
+          recordLastCartPlayDiagnostic({
+            fileName: boot || prev?.fileName || spec.title,
+            writeBootOk: prev?.writeBootOk ?? true,
+            attachCode: cartAttachResultCode(prev?.writeBootOk ?? true, mounted, prev?.hwTypeId ?? null),
+            bootFileAfter: bootFileOf(emu),
+            cartMountedOnCore: mounted,
+            playMode: playModeRef.current,
+            fastLoadCart: useEmu.getState().fastLoadCart,
+            viceCoreKind: grok64CoreStatus(emu).kind,
+          });
+        }
+        if (mounted) {
           cartLiveRef.current = true;
           setCartLive(true);
         }
@@ -2407,6 +2431,27 @@ export function Grok64App() {
         jiffyWant: jiffyWantSetting,
         jiffyLive,
       });
+      if (!work && (plan.kind === "cart" || forceCart)) {
+        const cartValidation = validateCartForPlay(
+          payloadView,
+          bootName,
+          opts.libraryStoredSize ?? null,
+        );
+        publishCartAttachDiag({
+          fileName: bootName,
+          libraryId: opts.libraryId ?? null,
+          idbStoredSize: opts.libraryStoredSize ?? null,
+          payload: payloadView,
+          validation: cartValidation,
+          viceCoreKind: grok64CoreStatus(emuRef.current).kind,
+          playMode: playModeRef.current,
+        });
+        if (!cartValidation.ok) {
+          toast.error(cartValidation.userMessage, { duration: 12_000 });
+          s.setBooting(false);
+          return;
+        }
+      }
       const bootBeforeCartPlay = bootFileOf(emuRef.current) || "";
       const cartNeedsWasmRecycle =
         (forceCart || plan.kind === "cart") &&
@@ -2854,7 +2899,19 @@ export function Grok64App() {
           bootName,
           { jiffyDos: jiffyWantSetting, fastCart },
         );
-        if (attached) {
+        publishCartAttachDiag({
+          fileName: bootName,
+          libraryId: opts.libraryId ?? null,
+          idbStoredSize: opts.libraryStoredSize ?? null,
+          payload: payloadView,
+          writeBootOk: attached.writeBoot,
+          mounted: attached.mounted,
+          bootFileAfter: bootFileOf(emuRef.current),
+          playMode: "cart",
+          fastLoadCart: fastCart,
+          viceCoreKind: grok64CoreStatus(emuRef.current).kind,
+        });
+        if (attached.ok) {
           playModeRef.current = "cart";
           cartLiveRef.current = true;
           setCartLive(true);
@@ -2987,13 +3044,29 @@ export function Grok64App() {
         userIec: plan.user.iec,
         userUnit: plan.user.unit,
       });
-      if (
-        (plan.kind === "cart" || forceCart) &&
-        emuRef.current &&
-        cartMountedOnCore(emuRef.current)
-      ) {
-        cartLiveRef.current = true;
-        setCartLive(true);
+      if (plan.kind === "cart" || forceCart) {
+        const mounted = Boolean(emuRef.current && cartMountedOnCore(emuRef.current));
+        publishCartAttachDiag({
+          fileName: bootName,
+          libraryId: opts.libraryId ?? null,
+          idbStoredSize: opts.libraryStoredSize ?? null,
+          payload: payloadView,
+          writeBootOk: true,
+          mounted,
+          bootFileAfter: bootFileOf(emuRef.current),
+          playMode: playModeRef.current,
+          fastLoadCart: useEmu.getState().fastLoadCart,
+          viceCoreKind: grok64CoreStatus(emuRef.current).kind,
+        });
+        if (!mounted) {
+          toast.error(
+            "Cartridge did not attach in VICE (CRT may be corrupt or the wrong build). Open About → Last cart Play for header bytes and attach code.",
+            { duration: 14_000 },
+          );
+        } else {
+          cartLiveRef.current = true;
+          setCartLive(true);
+        }
       }
       notePlayMarker();
     },
@@ -3038,6 +3111,7 @@ export function Grok64App() {
         autostart: !mountOnlyDisk,
         title: meta?.title ?? item.catalogTitle ?? item.name,
         libraryId: item.id,
+        libraryStoredSize: file.size,
         iecUnit: item.iecUnit,
       });
       await touchPlayed(item.id);

@@ -4,6 +4,8 @@ import { Drawer } from "vaul";
 import { ExpansionPanel } from "@/components/emu/ExpansionPanel";
 import { detectLine, MACHINES, type ResolvedMachine } from "@/lib/emu/machines";
 import { ACTION_LABEL, useEmu } from "@/lib/emu/store";
+import { getLastCartPlayDiagnostic } from "@/lib/emu/cart-crt-diag";
+import { BuildId } from "@/components/emu/BuildId";
 import { setDebugUi } from "@/lib/emu/debug";
 import type {
   ActionId,
@@ -472,10 +474,44 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
             <p className="text-sm leading-6 text-fg-muted">
               PAL vs NTSC follows the title, not your timezone. SuperCPU uses the xscpu64 core when the WASM build is present; otherwise it falls back to C64. JiffyDOS and CMD HD Boot ROM 2.80 are yours to upload — Grok64 never bundles them. C128 dual-screen (VIC-II + VDC) is available by selecting C128.
             </p>
+            <p className="mt-4 text-sm text-fg-muted">
+              Build <BuildId className="font-mono text-fg" /> — hard reload if this does not match the release you expect.
+            </p>
+            <LastCartPlayDiagPanel />
           </Drawer.Content>
         </Drawer.Portal>
       </Drawer.Root>
     </>
+  );
+}
+
+function LastCartPlayDiagPanel() {
+  const [diag, setDiag] = useState(() => getLastCartPlayDiagnostic());
+  useEffect(() => {
+    const sync = () => setDiag(getLastCartPlayDiagnostic());
+    sync();
+    const t = window.setInterval(sync, 1500);
+    window.addEventListener("focus", sync);
+    return () => {
+      window.clearInterval(t);
+      window.removeEventListener("focus", sync);
+    };
+  }, []);
+  return (
+    <div className="mt-4 rounded-lg border border-border/60 bg-bg/40 p-3">
+      <h3 className="mb-2 text-sm font-medium text-fg">Last cartridge Play</h3>
+      <p className="mb-2 text-xs leading-5 text-fg-muted">
+        Shown after each cart Play — also logged as <code className="text-fg">[grok64] lastCartPlay</code> in the
+        browser console. attachCode: -1 write failed, 0 not mounted, &gt;0 CRT hw type id when known.
+      </p>
+      {diag ? (
+        <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-snug text-fg-muted">
+          {JSON.stringify(diag, null, 2)}
+        </pre>
+      ) : (
+        <p className="text-xs text-fg-muted">No cartridge Play recorded yet this session.</p>
+      )}
+    </div>
   );
 }
 

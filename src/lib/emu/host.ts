@@ -1648,16 +1648,20 @@ export function cartMountedOnCore(emu: EjsInstance | null): boolean {
 }
 
 /** Attach a .crt/.bin on the live core — never through floppy autostart / WORK DISK. */
+export type CartInPlaceAttachResult = { ok: boolean; writeBoot: boolean; mounted: boolean };
+
 export async function attachCartridgeInPlace(
   emu: EjsInstance | null,
   data: Uint8Array,
   fileName: string,
   opts?: { jiffyDos?: boolean; fastCart?: FastLoadCartKind | null },
-): Promise<boolean> {
-  if (!emu || !coreHasFs(emu) || !isCartridgePayload(data, fileName)) return false;
+): Promise<CartInPlaceAttachResult> {
+  if (!emu || !coreHasFs(emu) || !isCartridgePayload(data, fileName)) {
+    return { ok: false, writeBoot: false, mounted: false };
+  }
   const base = fileName.replace(/^\//, "");
   disarmAutostart(emu, "cart");
-  if (!writeBootFile(emu, data, base)) return false;
+  if (!writeBootFile(emu, data, base)) return { ok: false, writeBoot: false, mounted: false };
   emu.fileName = base;
   unitMounts.delete(8);
   setSessionCart(base, data);
@@ -1674,7 +1678,8 @@ export async function attachCartridgeInPlace(
   cartBootReset(emu);
   await flushEmuFs(emu, 600);
   bumpCrtPaint(emu);
-  return true;
+  const mounted = cartMountedOnCore(emu);
+  return { ok: mounted, writeBoot: true, mounted };
 }
 
 /** Remove a CRT that was loaded as content and return to the work disk. */
