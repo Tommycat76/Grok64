@@ -217,6 +217,12 @@ export function resolveMachine(
   let standard = resolveVideo(prefs.videoStandard, software);
   let videoSource: VideoSource =
     prefs.videoStandard === "auto" ? (software ? "software" : "default") : "override";
+  // Explicit PAL/NTSC in the CRT/disk filename must win over a manual video
+  // override — freezer carts (AR, SS) brick on the wrong refresh + palette.
+  if (software && prefs.videoStandard !== "auto" && prefs.videoStandard !== software) {
+    standard = software;
+    videoSource = "software";
+  }
   if (prefs.machineId === "c64-pal" && prefs.videoStandard === "auto") {
     standard = "pal";
     videoSource = "override";

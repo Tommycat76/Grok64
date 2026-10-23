@@ -1611,7 +1611,16 @@ export function stabilizeFreezerScreen(emu: EjsInstance | null, cartHint?: strin
   writeC64Bytes(emu, 0xd011, new Uint8Array([0x1b]));
   writeC64Bytes(emu, 0xd016, new Uint8Array([0x08]));
   writeC64Bytes(emu, 0xd018, new Uint8Array([0x14]));
+  writeC64Bytes(emu, 0xd020, new Uint8Array([0x14]));
   bumpCrtPaint(emu);
+}
+
+/** SS5 menu: repeated LMS header bands when VIC-II text matrix is wrong. */
+export function scheduleSuperSnapshotVicFix(emu: EjsInstance | null, cartHint?: string | null) {
+  if (!emu || !isSuperSnapshotCartHint(cartHint)) return;
+  for (const ms of [0, 120, 400, 900, 1800, 3500]) {
+    window.setTimeout(() => stabilizeFreezerScreen(emu, cartHint), ms);
+  }
 }
 
 /** True when the live core booted from (or still has) a CRT in MEMFS. */

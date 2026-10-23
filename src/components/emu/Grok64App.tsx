@@ -21,6 +21,7 @@ import {
   ensureWorkDisk,
   isWorkDisk,
   removeFile,
+  putFile,
 } from "@/lib/emu/library";
 import { useEmu } from "@/lib/emu/store";
 import {
@@ -51,6 +52,7 @@ import {
   cartEject,
   cartFreeze,
   stabilizeFreezerScreen,
+  scheduleSuperSnapshotVicFix,
   isSuperSnapshotCartHint,
   cartMountedOnCore,
   cartReset,
@@ -746,6 +748,17 @@ export function Grok64App() {
       openSoftware: () => useEmu.getState().setLibraryOpen(true),
       closeSoftware: () => useEmu.getState().setLibraryOpen(false),
       libraryCount: async () => (await listLibrary()).length,
+      importLibraryBytes: async (name, bytes) => {
+        const buf =
+          bytes instanceof ArrayBuffer
+            ? bytes
+            : bytes instanceof Uint8Array
+              ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+              : new Uint8Array(bytes).buffer;
+        const item = await putFile(name, buf as ArrayBuffer, "local");
+        useEmu.getState().setLibrary(await listLibrary());
+        return { id: item.id, name: item.name };
+      },
       fireTap: () => {
         joyRef.current.fire = true;
         emitJoyRef.current(true);
@@ -1333,7 +1346,7 @@ export function Grok64App() {
           if (playModeRef.current === "cart" || cartLiveRef.current) {
             const ssCart = useEmu.getState().fastLoadCart;
             if (isSuperSnapshotCartHint(ssCart)) {
-              stabilizeFreezerScreen(emuRef.current, ssCart);
+              scheduleSuperSnapshotVicFix(emuRef.current, ssCart);
             }
             bumpCrtPaint(emuRef.current);
           }
@@ -1506,10 +1519,7 @@ export function Grok64App() {
       });
       hardReset(emu);
       const ssCart = st.fastLoadCart;
-      if (isSuperSnapshotCartHint(ssCart)) {
-        stabilizeFreezerScreen(emu, ssCart);
-        window.setTimeout(() => stabilizeFreezerScreen(emu, ssCart), 500);
-      }
+      scheduleSuperSnapshotVicFix(emu, ssCart);
       bumpCrtPaint(emu);
       markSessionPlay(st.currentTitle);
       inGameplayRef.current = true;
@@ -1606,16 +1616,32 @@ export function Grok64App() {
       }
       const st = useEmu.getState();
       const cartBoot = /\.(crt|bin)$/i.test(bootFileOf(emu) || spec.title || "");
+      const jiffyForCart = resolveJiffyWant(st.jiffyDos, st.fastLoadCart);
       const prep = await prepareCore(emu, {
         live: spec.live,
         user: spec.user,
-        jiffyWant: resolveJiffyWant(st.jiffyDos, st.fastLoadCart),
+        jiffyWant: jiffyForCart,
         sdParts: parts,
         driveMap: st.iecMap,
       });
       if (loadGenRef.current !== gen) return;
-      glog("core-ready", { ...prep, live: spec.live, user: spec.user, reu: st.reuSize });
+      glog("core-ready", { ...prep, live: spec.live, user: spec.user, reu: st.reuSize, jiffyForCart });
       applyIecUnit(emu, spec.live.iec, spec.live.unit);
+      const swStd = softwareStdRef.current;
+      if (swStd) {
+        applyRuntimeOptions(
+          emu,
+          videoStandardOptions(
+            {
+              machineId: st.machineId,
+              videoStandard: st.videoStandard,
+              coreMode: st.coreMode,
+              driveMode: st.driveMode,
+            },
+            swStd,
+          ),
+        );
+      }
       applyRuntimeOptions(emu, {
         ...viceJoyOptions(st.joyPort),
         vice_ram_expansion_unit: st.reuSize === "none" && wantsLargeReu(spec.title || "") ? C64OS_REU : st.reuSize,
@@ -1659,6 +1685,10 @@ export function Grok64App() {
         if (loadGenRef.current !== gen) return;
         const cartBoot = playModeRef.current === "cart";
         if (cartBoot) {
+          if (st.jiffyDos && !jiffyForCart) {
+            await applyJiffyDos(emu, false);
+            await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
+          }
           disarmAutostart(emu, "cart");
           applyRuntimeOptions(emu, {
             ...CART_PLAY_UNLOCK_VICE_OPTS,
@@ -1672,10 +1702,7 @@ export function Grok64App() {
         applyIecUnit(emu, spec.live.iec, spec.live.unit);
         if (cartBoot) {
           const ssCart = useEmu.getState().fastLoadCart;
-          if (isSuperSnapshotCartHint(ssCart)) {
-            stabilizeFreezerScreen(emu, ssCart);
-            window.setTimeout(() => stabilizeFreezerScreen(emu, ssCart), 500);
-          }
+          scheduleSuperSnapshotVicFix(emu, ssCart);
           dismissEjsPrompts(document.getElementById("grok64-player"));
           bumpCrtPaint(emu);
           window.setTimeout(() => bumpCrtPaint(emu), 400);
