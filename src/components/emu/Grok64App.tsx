@@ -49,6 +49,7 @@ import {
   mountDiskOnUnit,
   applyIecUnit,
   attachAutostartDisk,
+  attachCartridgeInPlace,
   cartEject,
   cartFreeze,
   stabilizeFreezerScreen,
@@ -155,6 +156,7 @@ import {
   iosPlayKeepsLiveCrt,
   inPlaceAutostartTarget,
   isColdBasicStart,
+  isCartMediaBoot,
   liveCoreReadyToAttach,
   livePlayTitle,
   mapHasDrive,
@@ -1713,9 +1715,17 @@ export function Grok64App() {
         /* optional card */
       }
       const st = useEmu.getState();
-      const cartBoot = playModeRef.current === "cart";
+      const bootFile = bootFileOf(emu);
+      const cartBoot = isCartMediaBoot({
+        playMode: playModeRef.current,
+        bootFile,
+        title: spec.bootName ?? spec.title,
+      });
       const jiffyForCart = resolveJiffyWant(st.jiffyDos, st.fastLoadCart);
-      const crtBootName = cartBoot ? bootFileOf(emu) : null;
+      const crtBootName =
+        cartBoot && emu
+          ? (bootFile || spec.bootName || spec.title || "").replace(/^\//, "")
+          : null;
       const swStd = softwareStdRef.current;
       if (swStd) {
         applyRuntimeOptions(
@@ -1742,7 +1752,7 @@ export function Grok64App() {
       });
       if (loadGenRef.current !== gen) return;
       if (crtBootName && emu && !/\.(crt|bin)$/i.test(bootFileOf(emu) || "")) {
-        emu.fileName = crtBootName.replace(/^\//, "");
+        emu.fileName = crtBootName;
         glog("cart-boot-restore", { file: emu.fileName });
       }
       if (cartBoot && emu) {
@@ -1791,8 +1801,17 @@ export function Grok64App() {
         setBusy(`Loading ${spec.title}…`, 78);
         if (isIosPhone()) await new Promise((r) => setTimeout(r, 140));
         if (loadGenRef.current !== gen) return;
-        const cartBoot = playModeRef.current === "cart";
-        if (cartBoot) {
+        const cartBootNow = isCartMediaBoot({
+          playMode: playModeRef.current,
+          bootFile: bootFileOf(emu),
+          title: spec.bootName ?? spec.title,
+        });
+        if (cartBootNow) {
+          const crt = (bootFileOf(emu) || crtBootName || spec.bootName || spec.title || "").replace(
+            /^\//,
+            "",
+          );
+          if (crt && emu && /\.(crt|bin)$/i.test(crt)) emu.fileName = crt;
           disarmAutostart(emu, "cart");
           applyRuntimeOptions(emu, {
             ...CART_PLAY_UNLOCK_VICE_OPTS,
@@ -1800,15 +1819,10 @@ export function Grok64App() {
             vice_drive_true_emulation: "enabled",
             vice_virtual_device_traps: "disabled",
           });
-        }
-        autostartAfterReady(emu, !cartBoot, {
-          autoloadWarp: autoloadWarpForPlay(playModeRef.current, spec.title),
-        });
-        applyIecUnit(emu, spec.live.iec, spec.live.unit);
-        if (cartBoot) {
-          if (jiffyForCart) {
-            await applyJiffyDos(emu, true);
-          }
+          autostartAfterReady(emu, false, {
+            autoloadWarp: autoloadWarpForPlay(playModeRef.current, spec.title),
+          });
+          if (jiffyForCart) await applyJiffyDos(emu, true);
           const ssCart = useEmu.getState().fastLoadCart;
           scheduleSuperSnapshotVicFix(emu, ssCart);
           dismissEjsPrompts(document.getElementById("grok64-player"));
@@ -1816,7 +1830,12 @@ export function Grok64App() {
           window.setTimeout(() => bumpCrtPaint(emu), 400);
           window.setTimeout(() => bumpCrtPaint(emu), 1200);
           scheduleFit(true);
+        } else {
+          autostartAfterReady(emu, true, {
+            autoloadWarp: autoloadWarpForPlay(playModeRef.current, spec.title),
+          });
         }
+        applyIecUnit(emu, spec.live.iec, spec.live.unit);
         if (isIosPhone())     kickIosAfterEmuAction(emu, "settle", gen);
         beginPlayLock(playLockDuration(playModeRef.current, spec.title), `Loading ${spec.title}…`);
       } else {
@@ -2117,6 +2136,7 @@ export function Grok64App() {
             });
             void settleAfterStart(emu, gen, {
               title: opts.title ?? gameName,
+              bootName: gameName,
               autostartAfterReady: opts.autostart !== false && playModeRef.current !== "basic",
               coldBasicAfterCart: Boolean(opts.coldBasicAfterCart),
               live: {
@@ -2689,6 +2709,43 @@ export function Grok64App() {
         useEmu.getState().setBooting(false);
         toast.error("Play stayed on the live CRT — cartridge did not attach.");
         return;
+      }
+      if (
+        (plan.kind === "cart" || forceCart) &&
+        emuRef.current &&
+        coreHasFs(emuRef.current) &&
+        cartMountedOnCore(emuRef.current)
+      ) {
+        s.setBooting(true, plan.status, 35);
+        const fastCart = detectFastLoadCart(bootName, playTitle);
+        useEmu.getState().setFastLoadCart(fastCart);
+        const attached = await attachCartridgeInPlace(emuRef.current, new Uint8Array(safe), bootName);
+        if (attached) {
+          playModeRef.current = "cart";
+          cartLiveRef.current = true;
+          setCartLive(true);
+          await applyJiffyDos(
+            emuRef.current,
+            resolveJiffyWant(jiffyWantSetting, fastCart),
+          );
+          scheduleSuperSnapshotVicFix(emuRef.current, fastCart);
+          persistGateRef.current = true;
+          inGameplayRef.current = true;
+          pendingKickRef.current = false;
+          setAwaitingStart(false);
+          clearBootTimers();
+          s.setCurrentTitle(title);
+          markSessionPlay(title);
+          notePlayMarker();
+          s.setRunning(true);
+          s.setBooting(false);
+          dismissEjsPrompts(document.getElementById("grok64-player"));
+          bumpCrtPaint(emuRef.current);
+          beginPlayLock(playLockDuration("cart", title), `Loading ${title}…`);
+          glog("cart-inplace", { bootName, fastCart });
+          return;
+        }
+        glog("cart-inplace-fail-recycle", { bootName });
       }
       const stayLive =
         waitLive ||

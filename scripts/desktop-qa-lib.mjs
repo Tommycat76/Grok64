@@ -142,7 +142,7 @@ export async function canvasPixelStats(page) {
     const stats = await decodePngStats(page, shotWrap.b64, shotWrap.src);
     if (stats?.ok) return stats;
   }
-  const canvas = page.locator("#grok64-player canvas").first();
+  const canvas = page.locator("#grok64-player canvas:not(.g64-ios-present)").first();
   if (await canvas.count()) {
     const buf = await canvas.screenshot({ type: "png" });
     const b64 = buf.toString("base64");

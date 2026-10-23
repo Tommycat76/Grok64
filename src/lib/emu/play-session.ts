@@ -55,6 +55,18 @@ export interface PlayPlan {
   status: string;
 }
 
+/** WASM settle / autostart must not treat a CRT boot like a floppy LOAD"*",8,1. */
+export function isCartMediaBoot(input: {
+  playMode?: string | null;
+  bootFile?: string | null;
+  title?: string | null;
+}): boolean {
+  if (input.playMode === "cart") return true;
+  const boot = input.bootFile ?? "";
+  const title = input.title ?? "";
+  return /\.(crt|bin)$/i.test(boot) || /\.(crt|bin)$/i.test(title);
+}
+
 export function playKindOf(filename: string, work: boolean, data?: Uint8Array | null): PlayKind {
   if (work) return "basic";
   if (data && isCartridgePayload(data, filename)) return "cart";
