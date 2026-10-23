@@ -1615,11 +1615,24 @@ export function stabilizeFreezerScreen(emu: EjsInstance | null, cartHint?: strin
   bumpCrtPaint(emu);
 }
 
+let superSnapshotVicFixGen = 0;
+
+/** Drop pending SS5 VIC poke timers before WASM recycle (stale timers corrupt the next core). */
+export function cancelSuperSnapshotVicFix() {
+  superSnapshotVicFixGen += 1;
+}
+
 /** SS5 menu: repeated LMS header bands when VIC-II text matrix is wrong. */
 export function scheduleSuperSnapshotVicFix(emu: EjsInstance | null, cartHint?: string | null) {
   if (!emu || !isSuperSnapshotCartHint(cartHint)) return;
+  cancelSuperSnapshotVicFix();
+  const gen = superSnapshotVicFixGen;
   for (const ms of [0, 120, 400, 900, 1800, 3500]) {
-    window.setTimeout(() => stabilizeFreezerScreen(emu, cartHint), ms);
+    window.setTimeout(() => {
+      if (gen !== superSnapshotVicFixGen) return;
+      if (!emu?.gameManager) return;
+      stabilizeFreezerScreen(emu, cartHint);
+    }, ms);
   }
 }
 

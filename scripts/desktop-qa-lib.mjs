@@ -88,13 +88,11 @@ export async function canvasHasSignal(page) {
   });
 }
 
-/** Decode __g64 shot PNG and sample pixels — catches blank VICE blue vs real GEOS/cart UI. */
-export async function canvasPixelStats(page) {
-  return page.evaluate(async () => {
-    const shot = await window.__g64?.shot?.();
-    if (!shot?.b64 || shot.b64.length < 1200) return { ok: false, reason: "no-shot" };
+function decodePngStats(page, b64, src) {
+  return page.evaluate(async ({ b64, src }) => {
+    if (!b64 || b64.length < 800) return { ok: false, reason: "no-b64" };
     try {
-      const blob = await (await fetch(`data:image/png;base64,${shot.b64}`)).blob();
+      const blob = await (await fetch(`data:image/png;base64,${b64}`)).blob();
       const bmp = await createImageBitmap(blob);
       const c = document.createElement("canvas");
       c.width = bmp.width;
@@ -125,12 +123,32 @@ export async function canvasPixelStats(page) {
         geosDesk: geosDesk / pixels,
         viceBlank: viceBlank / pixels,
         ink: ink / pixels,
-        src: shot.src,
+        src,
       };
     } catch (e) {
       return { ok: false, reason: String(e) };
     }
+  }, { b64, src });
+}
+
+/** Decode __g64 shot PNG and sample pixels — catches blank VICE blue vs real GEOS/cart UI. */
+export async function canvasPixelStats(page) {
+  const shotWrap = await page.evaluate(async () => {
+    const shot = await window.__g64?.shot?.();
+    return shot?.b64 && shot.b64.length >= 1200 ? { b64: shot.b64, src: shot.src ?? "vice" } : null;
   });
+  if (shotWrap) {
+    const stats = await decodePngStats(page, shotWrap.b64, shotWrap.src);
+    if (stats?.ok) return stats;
+  }
+  const canvas = page.locator("#grok64-player canvas").first();
+  if (await canvas.count()) {
+    const buf = await canvas.screenshot({ type: "png" });
+    const b64 = buf.toString("base64");
+    const stats = await decodePngStats(page, b64, "playwright");
+    if (stats?.ok) return stats;
+  }
+  return { ok: false, reason: "no-shot" };
 }
 
 export async function canvasLooksLikeGeosDesktop(page) {
@@ -158,11 +176,14 @@ export async function canvasLooksLikeCartMenu(page, { minBuckets = 40 } = {}) {
 }
 
 export function isBasicReadyScreen(text) {
-  return (
-    /COMMODORE 64 BASIC/i.test(text) &&
-    /\bREADY\b/i.test(text) &&
-    text.replace(/\s+/g, "").length < 220
-  );
+  if (/TURBO|SNAPSHOT|REPLAY|ACTION|FINAL|FAST\s*LOAD|KCS|WARP|CARTRIDGE|EPYX/i.test(text)) return false;
+  const compact = text.replace(/\s+/g, "").length;
+  if (compact >= 280) return false;
+  const ready = /\bREADY\b/i.test(text);
+  if (!ready) return false;
+  if (/COMMODORE 64 BASIC/i.test(text)) return true;
+  // JiffyDOS KERNAL after CART OUT — still idle BASIC, not a freezer menu.
+  return /JIFFY/i.test(text) && !/LOAD"\*"/i.test(text) && !/SEARCHING/i.test(text);
 }
 
 export async function noPowerSplash(page) {

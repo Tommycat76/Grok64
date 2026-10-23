@@ -28,6 +28,8 @@
     "test:desktop-xdotool-cart-matrix": "NODE_OPTIONS=--max-old-space-size=6144 node scripts/desktop-xdotool-cart-matrix.mjs",
     "test:desktop-cart-reset-sequence": "NODE_OPTIONS=--max-old-space-size=6144 node scripts/desktop-cart-reset-sequence.mjs",
     "test:desktop-xdotool-ar6-library": "NODE_OPTIONS=--max-old-space-size=6144 node scripts/desktop-xdotool-ar6-library.mjs",
+    "test:desktop-cart-jiffy-ui-gate": "NODE_OPTIONS=--max-old-space-size=6144 node scripts/desktop-cart-jiffy-ui-gate.mjs",
+    "prepush": "npm run test:desktop-cart-jiffy-ui-gate",
     "test:native-vice-ss5-compare": "node scripts/native-vice-ss5-compare.mjs",
     "test:desktop-xdotool-extended": "NODE_OPTIONS=--max-old-space-size=6144 node scripts/desktop-xdotool-extended-qa.mjs",
     "test:desktop-os-keyboard": "node scripts/desktop-os-keyboard-qa.mjs",
