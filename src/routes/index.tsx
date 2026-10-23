@@ -10,7 +10,7 @@ function Home() {
   return (
     <>
       <Grok64App />
-      <Toaster theme="dark" position="top-center" richColors={false} />
+      <Toaster theme="dark" position="bottom-center" richColors={false} className="g64-toaster" />
     </>
   );
 }

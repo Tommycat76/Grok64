@@ -165,7 +165,7 @@ test("BASIC / C64 OS kit keeps user IEC (SD2IEC or CMD)", () => {
   assert.equal(cmd.trueDrive, true);
 });
 
-test("live drive options: CMD is real (no 8_fs traps); SD2IEC is VICE FS card", () => {
+test("live drive options: CMD is real; SD2IEC is Grok64 IEC (no VICE drive)", () => {
   assert.deepEqual(liveDriveOptions({ iec: "cmdhd", unit: 9 }), {
     vice_work_disk: "disabled",
     vice_virtual_device_traps: "disabled",
@@ -173,9 +173,9 @@ test("live drive options: CMD is real (no 8_fs traps); SD2IEC is VICE FS card", 
     vice_drive9_type: "CMD HD",
   });
   assert.deepEqual(liveDriveOptions({ iec: "sd2iec", unit: 8 }), {
-    vice_work_disk: "8_fs",
-    vice_virtual_device_traps: "enabled",
-    vice_drive_true_emulation: "disabled",
+    vice_work_disk: "disabled",
+    vice_virtual_device_traps: "disabled",
+    vice_drive_true_emulation: "enabled",
     vice_drive8_type: "None",
   });
   assert.deepEqual(liveDriveOptions({ iec: "1541", unit: 8 }), {
@@ -185,7 +185,7 @@ test("live drive options: CMD is real (no 8_fs traps); SD2IEC is VICE FS card", 
     vice_drive8_type: "1541",
   });
   assert.equal(workDiskFor("cmdhd", 9), "disabled");
-  assert.equal(workDiskFor("sd2iec", 8), "8_fs");
+  assert.equal(workDiskFor("sd2iec", 8), "disabled");
   assert.equal(workDiskFor("1541", 8), "8_d64");
 });
 
@@ -254,6 +254,25 @@ test("SD2IEC SWAP 8/9 and disk-change wrap", () => {
   assert.equal(sd2iecSwapUnit(10), 8);
 });
 
+test("grok64 vice core data leaf names match EmulatorJS", () => {
+  const isCoreData = (leaf) => /^vice_.*-wasm\.data$/i.test(leaf);
+  assert.ok(isCoreData("vice_x64sc-legacy-wasm.data"));
+  assert.ok(isCoreData("vice_x64sc-wasm.data"));
+  assert.ok(!isCoreData("vice_x64sc.json"));
+  assert.ok(!isCoreData("extract7z.js"));
+});
+
+test("catalog gibberish heuristic", () => {
+  const skipIa = (q) => {
+    const t = q.trim();
+    if (!t) return true;
+    if (t.length >= 7 && !/[aeiouy]/i.test(t)) return true;
+    return false;
+  };
+  assert.equal(skipIa("xqzjwqmvklpp"), true);
+  assert.equal(skipIa("Boulder Dash"), false);
+});
+
 test("hardware buttons: short/long map matches real devices", () => {
   assert.equal(classifyPress(200), "short");
   assert.equal(classifyPress(HW_LONG_MS), "long");
@@ -270,10 +289,12 @@ test("hardware buttons: short/long map matches real devices", () => {
   assert.equal(actionForPress(sd89, "long"), "sd2iec-unit8");
   assert.equal(actionForPress(cmd, "short"), "cmd-swap");
   assert.equal(actionForPress(cmd, "long"), "cmd-unswap");
+  const cartOut = hwButtonById("cart-out");
+  assert.equal(actionForPress(cartOut, "short"), "cart-eject");
   const ids = visibleHwButtons({ cart: true, sd2iec: true, cmdhd: true, scpu: true }).map((b) => b.id);
-  assert.deepEqual(ids, ["cart-fz", "sd-disk", "sd-swap", "cmd-swap", "scpu-rst"]);
+  assert.deepEqual(ids, ["cart-fz", "cart-out", "sd-disk", "sd-swap", "cmd-swap", "scpu-rst"]);
   const noCmd = visibleHwButtons({ cart: true, sd2iec: true, cmdhd: false, scpu: false }).map((b) => b.id);
-  assert.deepEqual(noCmd, ["cart-fz", "sd-disk", "sd-swap"]);
+  assert.deepEqual(noCmd, ["cart-fz", "cart-out", "sd-disk", "sd-swap"]);
   assert.deepEqual(visibleHwButtons({}).map((b) => b.id), []);
   assert.deepEqual(visibleHwButtons({ cart: false, sd2iec: false }).map((b) => b.id), []);
   assert.ok(HW_BUTTONS.every((b) => b.shortAction));
@@ -848,4 +869,29 @@ test("boot recover must not replace a live floppy session with BASIC", () => {
     }),
     true,
   );
+});
+
+test("CRT payloads never plan as floppy autostart", async () => {
+  const { isCartridgePayload } = await server.ssrLoadModule("/src/lib/emu/formats.ts");
+  const { readFileSync, existsSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const crtPath = join(process.cwd(), "fixtures/carts/Action_Replay_V6.0.crt");
+  if (!existsSync(crtPath)) {
+    console.log("skip CRT fixture");
+    return;
+  }
+  const ar = readFileSync(crtPath);
+  const bytes = new Uint8Array(ar);
+  assert.equal(isCartridgePayload(bytes, "Action_Replay_V6.0.crt"), true);
+  const plan = planPlay({
+    filename: "Action_Replay_V6.0.crt",
+    payload: bytes,
+    userIec: "1541",
+    userUnit: 8,
+    liveIec: "1541",
+    liveWorkDisk: "8_d64",
+    autostart: true,
+  });
+  assert.equal(plan.kind, "cart");
+  assert.equal(plan.attach, null);
 });

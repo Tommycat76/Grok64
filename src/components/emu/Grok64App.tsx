@@ -3,18 +3,33 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Disc3, FolderOpen, Gamepad2, Info, Keyboard as KeyboardIcon, MoreHorizontal, Pause, Play, Power, RotateCcw, Settings, Volume2, VolumeX } from "lucide-react";
 import { toast } from "sonner";
 import { C64Keyboard } from "@/components/emu/Keyboard";
+import { QuickDock } from "@/components/emu/QuickDock";
 import { TouchControls } from "@/components/emu/Joystick";
 import { LibrarySheet } from "@/components/emu/LibrarySheet";
 import { DiskMountSheet } from "@/components/emu/DiskMountSheet";
 import { SettingsSheet } from "@/components/emu/SettingsSheet";
 import { applyRecipe, saveSnapshot, SnapshotsSheet } from "@/components/emu/SnapshotsSheet";
-import { copyBuffer, getFile, listLibrary, putSaveState, deleteSaveState, touchPlayed, updateFileData, ensureWorkDisk, isWorkDisk, removeFile } from "@/lib/emu/library";
+import { freezeSlot, listSnapshots } from "@/lib/emu/snapshots";
+import {
+  copyBuffer,
+  getFile,
+  listLibrary,
+  putSaveState,
+  deleteSaveState,
+  touchPlayed,
+  updateFileData,
+  ensureWorkDisk,
+  isWorkDisk,
+  removeFile,
+  putFile,
+} from "@/lib/emu/library";
 import { useEmu } from "@/lib/emu/store";
 import {
   applyRuntimeOptions,
   applyJiffyDos,
   autostartAfterReady,
   bootEmulator,
+  bootGeosFloppy,
   bootFileOf,
   captureState,
   clearRetroSaves,
@@ -26,6 +41,7 @@ import {
   ensureRuntime,
   prefetchViceCores,
   fitEmu,
+  grok64CoreStatus,
   hardReset,
   hasRealGamepad,
   joyInput,
@@ -33,13 +49,24 @@ import {
   mountDiskOnUnit,
   applyIecUnit,
   attachAutostartDisk,
+  attachCartridgeInPlace,
+  cartEject,
   cartFreeze,
+  stabilizeFreezerScreen,
+  cancelSuperSnapshotVicFix,
+  scheduleSuperSnapshotVicFix,
+  isSuperSnapshotCartHint,
+  cartMountedOnCore,
   cartReset,
+  repaintAfterCartFreeze,
+  writeCompanionMedia,
   cmdHdSwap,
   flushEmuFs,
   lastAppliedJiffy,
   lastAppliedWorkDisk,
+  runtimeViceOpts,
   swapBootDisk,
+  viceWorkD64ByteLength,
   writeBootFile,
   sd2iecFreeze,
   sd2iecSwapDevice,
@@ -48,7 +75,11 @@ import {
   prepareCore,
   probeCore,
   readMountedMedia,
+  readMountedMediaForUi,
+  applyReal1541Timing,
   recycleCore,
+  refreshViceWorkDisk,
+  remountSd2iecFromParts,
   restoreState,
   resetEmu,
   setJoyVector,
@@ -61,10 +92,58 @@ import {
   suspendAudio,
   viceJoyOptions,
   waitForCoreFs,
+  injectViceRc,
+  bumpCrtPaint,
+  tryGeosDiskAutostart,
 } from "@/lib/emu/host";
 import { hasCmdRom, hasJiffyPair, prefetchBundledRoms } from "@/lib/emu/roms";
-import { listPartitions, partitionsForMount, setIecDevice } from "@/lib/emu/sd2iec";
+import {
+  addSdFile,
+  exportSdImage,
+  formatPartition,
+  listPartitions,
+  mountDirectFatImage,
+  mountHostSdFolder,
+  partitionsForMount,
+  debugWasmIec,
+  iecOpenDollarChannel,
+  kernalIecTrapActive,
+  resetSd2iecSession,
+  runSdCommand,
+  setIecDevice,
+  setSd2iecJiffyFast,
+  attachSd2iecBus,
+  setSd2iecWasmIecOnly,
+} from "@/lib/emu/sd2iec";
+import {
+  clearSd2iecCardMount,
+  getSd2iecCardSourceMeta,
+  hostDirectoryPickerReason,
+  supportsHostDirectoryPicker,
+} from "@/lib/emu/sd2iec-card-source";
+import {
+  grok64KeyboardDrain,
+  grok64KeyboardReleaseAll,
+  grok64RetroKeyboardAvailable,
+  grok64RetroKeyboardFromDom,
+  setGrok64KeyboardPaintHook,
+} from "@/lib/emu/grok64-keyboard";
+import { attachGrok64Sd2iec, tickGrok64Iec, wireGrok64ViceHost } from "@/lib/emu/grok64-vice-bridge";
+import { readC64Byte, readC64Bytes, writeC64Byte, writeC64Bytes } from "@/lib/emu/c64-memory";
 import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor } from "@/lib/emu/vice-extras";
+import {
+  geosBootSucceeded,
+  geosBootStuckAtBasic,
+  geosBootLoadCandidates,
+  geosBootLoadLine,
+  geosBootLooksLaunched,
+  geosFamilyDesktopOk,
+  geosFamilyLoadMs,
+  geosFamilyPlayLockMs,
+  isGeosFamilyDiskName,
+  isWheelsDiskName,
+  reuForGeosFamilyDisk,
+} from "@/lib/emu/geos-boot";
 import { HwHoldChip } from "@/components/emu/HwHoldChip";
 import {
   beginColdSession,
@@ -77,6 +156,7 @@ import {
   iosPlayKeepsLiveCrt,
   inPlaceAutostartTarget,
   isColdBasicStart,
+  isCartMediaBoot,
   liveCoreReadyToAttach,
   livePlayTitle,
   mapHasDrive,
@@ -84,6 +164,8 @@ import {
   markSessionPlay,
   markSessionReady,
   planPlay,
+  CART_PLAY_UNLOCK_VICE_OPTS,
+  viceGeosFloppyOptions,
   readPlayMarker,
   savePlayMarker,
   sessionCanAttach,
@@ -96,6 +178,9 @@ import {
   shouldWaitForLiveCore,
   unitOfDrive,
   userAttachFromMap,
+  viceDriveTypeVars,
+  viceMapFromIecMap,
+  viceRcForDrives,
 } from "@/lib/emu/play-session";
 import {
   actionForPress,
@@ -105,22 +190,50 @@ import {
   visibleHwButtons,
   type HwPress,
 } from "@/lib/emu/hw-buttons";
-import { detectLine, resolveMachine, videoStandardOptions } from "@/lib/emu/machines";
+import { detectLine, resolveMachine, sidOptions, videoStandardOptions } from "@/lib/emu/machines";
+import { BUNDLED } from "@/lib/emu/software";
+import { putRom, removeRom } from "@/lib/emu/roms";
 import { snapshotDevice, readViewport, applyViewport, detectDevice, isIos, isIosPhone, isTouchMobile } from "@/lib/emu/detect";
 import { applyTabletContainFit, tabletBezelAvail, tabletGlassFillsBezel } from "@/lib/emu/tablet-fit";
 import { detectJoyPort, detectSoftwareStandard } from "@/lib/emu/region";
 import { RETRO_BTN } from "@/lib/emu/types";
-import { dispatchC64Key, isJoyFireKey, muteC64Space, onBeforeC64Space } from "@/lib/emu/keys";
-import { bootFileName, driveForPlay, d64DiskName, isDiskKind, isWorkDiskImage, kindOf, needsTypedBoot } from "@/lib/emu/formats";
-import { wrapForDiskSwap, prepareAutostartDisk, wantsCracktroNudge } from "@/lib/emu/d64";
+import { feedBasicLine, readPrintTi } from "@/lib/emu/c64-keyboard";
+import { removeSessionCart, setSessionCart, setSessionDisk } from "@/lib/emu/session-media";
+import { focusGrok64Player } from "@/lib/emu/focus-player";
+import {
+  dispatchC64Key,
+  isJoyFireKey,
+  muteC64Space,
+  onBeforeC64Space,
+  setC64HardwareKeySink,
+  typeC64,
+} from "@/lib/emu/keys";
+import {
+  detectFastLoadCart,
+  jiffyCartCompat,
+  resolveJiffyWant,
+} from "@/lib/emu/jiffy-cart-compat";
+import {
+  bootFileName,
+  driveForPlay,
+  d64DiskName,
+  isBasicPrg,
+  isCartridgePayload,
+  isDiskKind,
+  isWorkDiskImage,
+  kindOf,
+  needsTypedBoot,
+} from "@/lib/emu/formats";
+import { wrapForDiskSwap, prepareAutostartDisk, screenInvitesCracktroInput } from "@/lib/emu/d64";
 import { isSid, psidToPrg } from "@/lib/emu/psid";
-import { toArrayBuffer } from "@/lib/emu/archive";
+import { explodeArchive, pickBootFile, toArrayBuffer } from "@/lib/emu/archive";
 import { BuildId } from "@/components/emu/BuildId";
 import { debugQueryOn, glog, glogFire, setDebugUi, subscribeLog } from "@/lib/emu/debug";
 import { readBuildId } from "@/lib/emu/build-id";
 import { createMenuJoyGate, menuJoyStep, resetMenuJoyGate } from "@/lib/emu/menu-joy.mjs";
 import { applyStickPrecision, createStickPrecision, resetStickPrecision } from "@/lib/emu/stick-precision.mjs";
 import { publicUrl } from "@/lib/public-url";
+import { readScreenText } from "@/lib/emu/screen-text";
 import { applyEmuVolume, gestureUnlockAudio, pokeAudioUnlock } from "@/lib/emu/audio-unlock";
 import {
   forceIosMirrorBlit,
@@ -145,9 +258,18 @@ function frameMsForStandard(standard: string) {
   return standard === "ntsc" ? 1000 / 60 : 20;
 }
 
-function playLockDuration(mode: string): number {
-  if (isTouchMobile()) return mode === "disk" ? 4500 : 1400;
-  return mode === "disk" ? 12_000 : 3500;
+function playLockDuration(mode: string, _title?: string | null): number {
+  if (isTouchMobile()) return mode === "disk" ? 4500 : mode === "cart" ? 900 : 1400;
+  if (mode === "cart") return 1400;
+  /* True 1541 timing — one window for all floppies, not per-game title lists. */
+  if (mode === "disk") return 48_000;
+  return 3500;
+}
+
+function autoloadWarpForPlay(mode: string, filename?: string | null): boolean | undefined {
+  if (mode === "disk" || mode === "cart") return false;
+  if (filename && /\.(crt|bin)$/i.test(filename)) return false;
+  return undefined;
 }
 
 function gameplayReadyDelay(lockMs: number): number {
@@ -162,7 +284,13 @@ function playerCanvasReady(root?: HTMLElement | null) {
 }
 
 const PlayerMount = memo(function PlayerMount() {
-  return <div id="grok64-player" />;
+  return (
+    <div
+      id="grok64-player"
+      tabIndex={0}
+      onPointerDown={() => focusGrok64Player()}
+    />
+  );
 });
 
 let fitTimers: number[] = [];
@@ -196,6 +324,8 @@ export function Grok64App() {
   const splashRef = useRef(null);
   const loadGenRef = useRef(0);
   const playModeRef = useRef("basic");
+  const basicRunAfterLoadRef = useRef(false);
+  const diskRunAfterLoadRef = useRef(false);
   const persistGateRef = useRef(true);
   const inGameplayRef = useRef(false);
   const cracktroOnceRef = useRef("");
@@ -206,6 +336,7 @@ export function Grok64App() {
   const playLockRef = useRef(false);
   const playLockGen = useRef(0);
   const pendingSnapshotRef = useRef(null);
+  const pendingCompanionRef = useRef<{ name: string; data: Uint8Array }[]>([]);
   const playPayloadRef = useRef(null);
   const sessionIecRef = useRef(s.iecDrive);
   const sessionUnitRef = useRef(s.iecUnit);
@@ -232,6 +363,10 @@ export function Grok64App() {
   const [cartLive, setCartLive] = useState(false);
   const cartLiveRef = useRef(false);
   const resetReadyRef = useRef(() => {});
+  const startWithUrlRef = useRef(async () => {});
+  const powerOffRef = useRef(() => {});
+  const swapJoyPortRef = useRef(() => {});
+  const toggleWarpRef = useRef(() => {});
   const [softwareStd, setSoftwareStd] = useState(null);
   const softwareStdRef = useRef(null);
   const [snap, setSnap] = useState({
@@ -389,6 +524,14 @@ export function Grok64App() {
     return () => timers.forEach((id) => window.clearTimeout(id));
   }, [s.showKeyboard, view.orient, cartLive]);
   useEffect(() => {
+    if (!s.showKeyboard || !s.running) return;
+    const t = window.setTimeout(() => {
+      scheduleFit(true);
+      bumpCrtPaint(emuRef.current);
+    }, 60);
+    return () => window.clearTimeout(t);
+  }, [s.showKeyboard, s.running]);
+  useEffect(() => {
     const onFit = () => scheduleFit(true);
     window.addEventListener("g64-fit", onFit);
     return () => window.removeEventListener("g64-fit", onFit);
@@ -404,6 +547,9 @@ export function Grok64App() {
         }
       })
       .catch(() => undefined);
+    void import("@/lib/emu/sd2iec-card-source").then((m) =>
+      m.setSd2iecWriteEnabled(useEmu.getState().sd2iecWriteEnabled),
+    );
   }, []);
   useEffect(() => {
     installIosPaintHooks(() => ({
@@ -425,6 +571,8 @@ export function Grok64App() {
       reu: () => useEmu.getState().reuSize,
       workDisk: () => lastAppliedWorkDisk(),
       jiffyLive: () => lastAppliedJiffy(),
+      fastLoadCart: () => useEmu.getState().fastLoadCart,
+      cartLive: () => cartLiveRef.current,
       title: () => useEmu.getState().currentTitle,
       bootPath: () => bootPathRef.current,
       hasFs: () => coreHasFs(emuRef.current),
@@ -474,11 +622,22 @@ export function Grok64App() {
         };
       },
       media: () =>
-        readMountedMedia(emuRef.current).map((m) => ({
+        readMountedMediaForUi(emuRef.current, useEmu.getState().insertedDiskName).map((m) => ({
           name: m.name,
           size: m.data.byteLength,
           disk: d64DiskName(m.data),
         })),
+      setWarp: (on) => {
+        useEmu.getState().setWarped(!!on);
+        setWarp(emuRef.current, !!on);
+      },
+      prepareReal1541Timing: () => {
+        const unit = useEmu.getState().iecUnit;
+        applyReal1541Timing(emuRef.current, unit);
+        useEmu.getState().setWarped(false);
+        setWarp(emuRef.current, false);
+        return true;
+      },
       fire: (down) => {
         if (playLockRef.current || useEmu.getState().booting) return;
         joyRef.current.fire = down;
@@ -503,6 +662,8 @@ export function Grok64App() {
       pad: () => useEmu.getState().padName,
       cartFreeze: () => cartFreeze(emuRef.current),
       cartReset: () => cartReset(emuRef.current),
+      cartEject: () => cartEject(emuRef.current, workDiskBytesRef.current),
+      grok64CoreStatus: () => grok64CoreStatus(emuRef.current),
       scpuReset: () => scpuReset(emuRef.current),
       cmdSwapped: () => cmdSwappedRef.current,
       cmdSwap: (next) => hwActionRef.current("cmd-swap", next === false ? "long" : "short"),
@@ -515,9 +676,34 @@ export function Grok64App() {
           cmdhd: mapHasDrive(useEmu.getState().iecMap, "cmdhd"),
           scpu: useEmu.getState().machineId === "scpu",
         }).map((b) => b.id),
-      setIecSlot: (unit, slot) => useEmu.getState().setIecSlot(unit, slot),
+      setIecSlot: (unit, slot) => {
+        useEmu.getState().setIecSlot(unit, slot);
+        const emu = emuRef.current;
+        if (!emu || !useEmu.getState().running) return;
+        const iecMap = useEmu.getState().iecMap;
+        applyRuntimeOptions(emu, viceDriveTypeVars(iecMap));
+        injectViceRc(emu, viceRcForDrives(iecMap, false));
+        if (slot === "sd2iec") {
+          wireGrok64ViceHost(emu);
+          attachGrok64Sd2iec(emu, unit);
+          applyIecUnit(emu, "sd2iec", unit);
+          void partitionsForMount().then((parts) => remountSd2iecFromParts(emu, unit, parts));
+        } else if (slot === "1541" || slot === "1581") {
+          applyIecUnit(emu, slot, unit);
+          applyRuntimeOptions(emu, {
+            [`vice_drive${unit}_type`]: slot === "1581" ? "1581" : "1541",
+          });
+        }
+      },
+      typeC64: (text, opts) => typeC64(text, opts),
+      typeBasic: async (text, opts) => {
+        await typeC64(text, { delayMs: opts?.delayMs ?? 55 });
+        dispatchC64Key("Enter", "Enter", true);
+        dispatchC64Key("Enter", "Enter", false);
+      },
       iecMap: () => useEmu.getState().iecMap,
       resetReady: () => resetReadyRef.current?.(),
+      powerOff: () => powerOffRef.current?.(),
       setCartLive: (v) => {
         cartLiveRef.current = !!v;
         setCartLive(!!v);
@@ -563,6 +749,29 @@ export function Grok64App() {
           })(),
         };
       },
+      runtimeViceOpts: () => runtimeViceOpts(),
+      openSoftware: () => useEmu.getState().setLibraryOpen(true),
+      closeSoftware: () => useEmu.getState().setLibraryOpen(false),
+      libraryCount: async () => (await listLibrary()).length,
+      importLibraryBytes: async (name, bytes) => {
+        const buf =
+          bytes instanceof ArrayBuffer
+            ? bytes
+            : bytes instanceof Uint8Array
+              ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
+              : new Uint8Array(bytes).buffer;
+        const item = await putFile(name, buf as ArrayBuffer, "local");
+        useEmu.getState().setLibrary(await listLibrary());
+        return { id: item.id, name: item.name };
+      },
+      fireTap: () => {
+        joyRef.current.fire = true;
+        emitJoyRef.current(true);
+        setTimeout(() => {
+          joyRef.current.fire = false;
+          emitJoyRef.current(false);
+        }, 100);
+      },
       opts: () => {
         try {
           const raw = emuRef.current?.gameManager?.getCoreOptions?.() ?? null;
@@ -588,6 +797,401 @@ export function Grok64App() {
           return { b64, w: c.width, h: c.height, bytes: b64.length, mirror: c.classList.contains("g64-ios-mirror") };
         } catch {
           return null;
+        }
+      },
+      screenText: () => readScreenText(emuRef.current),
+      workD64Bytes: () => viceWorkD64ByteLength(emuRef.current),
+      kbdDrain: () => grok64KeyboardDrain(),
+      readC64Byte: (addr) => readC64Byte(emuRef.current, addr),
+      writeC64Byte: (addr, v) => writeC64Byte(emuRef.current, addr, v),
+      readC64Bytes: (addr, len) => {
+        const u = readC64Bytes(emuRef.current, addr, len);
+        return u ? Array.from(u) : null;
+      },
+      writeC64Bytes: (addr, arr) => writeC64Bytes(emuRef.current, addr, new Uint8Array(arr)),
+      setSd2iecUnit: (unit) => setIecDevice(unit),
+      kernalIecTrapActive: () => kernalIecTrapActive(emuRef.current),
+      debugWasmIec: (dev, sec) => debugWasmIec(dev, sec),
+      iecOpenDollarChannel: (unit = 8) => iecOpenDollarChannel(emuRef.current, unit as 8 | 9 | 10 | 11 | 12),
+      feedBasic: (line) => feedBasicLine(emuRef.current, line),
+      printTi: async () => readPrintTi(emuRef.current, () => readScreenText(emuRef.current)),
+      geosMountAndDir: async (name, bytes) => {
+        let buf: ArrayBuffer;
+        if (bytes instanceof ArrayBuffer) buf = bytes;
+        else if (bytes instanceof Uint8Array) {
+          buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+        } else buf = new Uint8Array(bytes as ArrayLike<number>).buffer;
+        const stGeos = useEmu.getState();
+        const reu = reuForGeosFamilyDisk(name, stGeos.reuSize);
+        if (reu !== stGeos.reuSize) {
+          stGeos.setReuSize(reu);
+          applyRuntimeOptions(emuRef.current, { vice_ram_expansion_unit: reu });
+        }
+        stGeos.setIecSlot(8, "1541");
+        sessionIecRef.current = "1541";
+        sessionUnitRef.current = 8;
+        const geosMap = { ...stGeos.iecMap, 8: "1541" as const };
+        disarmAutostart(emuRef.current, "disk");
+        const mountOk = await bootGeosFloppy(
+          emuRef.current,
+          new Uint8Array(buf),
+          name,
+          8,
+          geosMap,
+        );
+        const workBytes = viceWorkD64ByteLength(emuRef.current);
+        const opts = runtimeViceOpts();
+        if (mountOk) {
+          await feedBasicLine(emuRef.current, 'LOAD"$",8');
+          await new Promise((r) => window.setTimeout(r, 10_000));
+        }
+        const dir = readScreenText(emuRef.current);
+        return { mountOk, workBytes, opts, dir };
+      },
+      bootGeos: async (name, bytes) => {
+        let buf: ArrayBuffer;
+        if (bytes instanceof ArrayBuffer) buf = bytes;
+        else if (bytes instanceof Uint8Array) {
+          buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+        } else buf = new Uint8Array(bytes as ArrayLike<number>).buffer;
+        const stGeos = useEmu.getState();
+        const reu = reuForGeosFamilyDisk(name, stGeos.reuSize);
+        if (reu !== stGeos.reuSize) {
+          stGeos.setReuSize(reu);
+          applyRuntimeOptions(emuRef.current, { vice_ram_expansion_unit: reu });
+        }
+        stGeos.setIecSlot(8, "1541");
+        stGeos.setMouseMode(true);
+        sessionIecRef.current = "1541";
+        sessionUnitRef.current = 8;
+        const geosMap = { ...stGeos.iecMap, 8: "1541" as const };
+        setMouseAnalog(emuRef.current, true);
+        disarmAutostart(emuRef.current, "disk");
+        const ok = await bootGeosFloppy(emuRef.current, new Uint8Array(buf), name, 8, geosMap);
+        if (!ok) return false;
+        setSessionDisk(name, new Uint8Array(buf), 8);
+        await flushEmuFs(emuRef.current, 3000);
+        applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
+        setPaused(emuRef.current, false);
+        if (await tryGeosDiskAutostart(emuRef.current, 8)) {
+          await feedBasicLine(emuRef.current, "RUN", { runcmd: true });
+          const autoEnd = Date.now() + 120_000;
+          while (Date.now() < autoEnd) {
+            const screen = readScreenText(emuRef.current);
+            if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen)) break;
+            if (geosBootSucceeded(screen, name) || geosBootLooksLaunched(screen)) {
+              bumpCrtPaint(emuRef.current);
+              return true;
+            }
+            const pix = await (async () => {
+              const el = document.getElementById("grok64-player");
+              const c = shotDisplayCanvas(el);
+              const ctx = c?.getContext?.("2d");
+              if (!c || !ctx) return 0;
+              const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height);
+              let geosDesk = 0;
+              for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                if (g > 85 && b > 85 && r > 85 && r < 210) geosDesk += 1;
+              }
+              return geosDesk / (width * height);
+            })();
+            if (pix >= 0.1) {
+              bumpCrtPaint(emuRef.current);
+              return true;
+            }
+            bumpCrtPaint(emuRef.current);
+            fitEmu(document.getElementById("grok64-player"), emuRef.current);
+            await new Promise((r) => window.setTimeout(r, 800));
+          }
+        }
+        const loadCandidates = geosBootLoadCandidates(name);
+        for (const loadLine of loadCandidates) {
+          if (!(await feedBasicLine(emuRef.current, loadLine))) continue;
+          const loadEnd = Date.now() + geosFamilyLoadMs(name);
+          let loadFailed = false;
+          while (Date.now() < loadEnd) {
+            const mid = readScreenText(emuRef.current);
+            if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(mid)) {
+              loadFailed = true;
+              break;
+            }
+            if (/LOADING/i.test(mid)) {
+              await new Promise((r) => window.setTimeout(r, 1200));
+              continue;
+            }
+            if (/\bREADY\b/i.test(mid) && /LOADING|GEOS|\*"/i.test(mid)) break;
+            await new Promise((r) => window.setTimeout(r, 500));
+          }
+          if (loadFailed) {
+            await feedBasicLine(emuRef.current, "NEW", { runcmd: true });
+            await new Promise((r) => window.setTimeout(r, 400));
+            continue;
+          }
+          applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
+          await flushEmuFs(emuRef.current, 800);
+          setPaused(emuRef.current, false);
+          try {
+            emuRef.current.paused = false;
+            emuRef.current.gameManager?.toggleMainLoop(1);
+          } catch {
+            /* optional */
+          }
+          await feedBasicLine(emuRef.current, "RUN", { runcmd: true });
+          const runEnd = Date.now() + 120_000;
+          while (Date.now() < runEnd) {
+            const screen = readScreenText(emuRef.current);
+            if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen)) break;
+            if (geosBootSucceeded(screen, name) || geosBootLooksLaunched(screen)) {
+              bumpCrtPaint(emuRef.current);
+              return true;
+            }
+            bumpCrtPaint(emuRef.current);
+            fitEmu(document.getElementById("grok64-player"), emuRef.current);
+            await new Promise((r) => window.setTimeout(r, 800));
+          }
+          const screen = readScreenText(emuRef.current);
+          if (geosBootSucceeded(screen, name) || geosBootLooksLaunched(screen)) {
+            bumpCrtPaint(emuRef.current);
+            return true;
+          }
+          await feedBasicLine(emuRef.current, "NEW", { runcmd: true });
+          await new Promise((r) => window.setTimeout(r, 400));
+        }
+        return false;
+      },
+      geosDesktopPixels: async () => {
+        const el = document.getElementById("grok64-player");
+        const c = shotDisplayCanvas(el);
+        if (!c || c.width < 8) return { ok: false };
+        const ctx = c.getContext("2d");
+        if (!ctx) return { ok: false };
+        const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height);
+        let geosDesk = 0;
+        const pixels = width * height;
+        for (let i = 0; i < data.length; i += 4) {
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          if (g > 85 && b > 85 && r > 85 && r < 210) geosDesk += 1;
+        }
+        return { ok: true, geosDesk: geosDesk / pixels, w: width, h: height };
+      },
+      settings: () => {
+        const st = useEmu.getState();
+        return {
+          sidEngine: st.sidEngine,
+          sidModel: st.sidModel,
+          sid2Address: st.sid2Address,
+          sid2Model: st.sid2Model,
+          sid3Address: st.sid3Address,
+          sid3Model: st.sid3Model,
+          jiffyDos: st.jiffyDos,
+          reuSize: st.reuSize,
+          iecMap: st.iecMap,
+          joyPort: st.joyPort,
+          mouseMode: st.mouseMode,
+        };
+      },
+      setShowKeyboard: (on) => useEmu.getState().setShowKeyboard(!!on),
+      setSettingsOpen: (on) => useEmu.getState().setSettingsOpen(!!on),
+      setJiffyDos: (on) => useEmu.getState().setJiffyDos(!!on),
+      setSidAddresses: (patch) => {
+        const st = useEmu.getState();
+        if (patch.sid2 !== undefined) st.setSid2Address(patch.sid2);
+        if (patch.sid2Model !== undefined) st.setSid2Model(patch.sid2Model);
+        if (patch.sid3 !== undefined) st.setSid3Address(patch.sid3);
+        if (patch.sid3Model !== undefined) st.setSid3Model(patch.sid3Model);
+        const cur = useEmu.getState();
+        applyRuntimeOptions(
+          emuRef.current,
+          sidOptions({
+            engine: cur.sidEngine,
+            model: cur.sidModel,
+            sid2: cur.sid2Address,
+            sid2Model: cur.sid2Model,
+            sid3: cur.sid3Address,
+            sid3Model: cur.sid3Model,
+          }),
+        );
+      },
+      putRomBytes: async (id, name, bytes) => {
+        let buf: ArrayBuffer;
+        if (bytes instanceof ArrayBuffer) buf = bytes;
+        else if (Array.isArray(bytes)) buf = new Uint8Array(bytes).buffer;
+        else if (bytes instanceof Uint8Array) {
+          buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+        } else {
+          buf = new Uint8Array(bytes as ArrayLike<number>).buffer;
+        }
+        await putRom(id, name, buf);
+      },
+      removeRomSlot: (id) => removeRom(id),
+      applySidLayout: () => {
+        const st = useEmu.getState();
+        applyRuntimeOptions(emuRef.current, sidOptions({
+          engine: st.sidEngine,
+          model: st.sidModel,
+          sid2: st.sid2Address,
+          sid2Model: st.sid2Model,
+          sid3: st.sid3Address,
+          sid3Model: st.sid3Model,
+        }));
+      },
+      playBundled: async (id) => {
+        const item = BUNDLED.find((b) => b.id === id);
+        if (!item) throw new Error(`Unknown bundled id: ${id}`);
+        const res = await fetch(item.path);
+        const buf = await res.arrayBuffer();
+        await playBufferRef.current(item.name, buf, { autostart: true, title: item.name });
+        return item.id;
+      },
+      playBytes: async (name, bytes, opts?: { autostart?: boolean }) => {
+        let buf: ArrayBuffer;
+        if (bytes instanceof ArrayBuffer) buf = bytes;
+        else if (Array.isArray(bytes)) buf = new Uint8Array(bytes).buffer;
+        else if (bytes instanceof Uint8Array) {
+          buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+        } else {
+          buf = new Uint8Array(bytes as ArrayLike<number>).buffer;
+        }
+        const autostart = opts?.autostart !== false;
+        await playBufferRef.current(name, buf, { autostart, title: name });
+        return true;
+      },
+      /** Nuvie: zip `base.prg` + `base.reu` so libretro VICE pairs the REU image. */
+      playNuvie: async (prgBytes, reuBytes, base = "nuvie-play") => {
+        const { zipSync } = await import("fflate");
+        const prg = prgBytes instanceof Uint8Array ? prgBytes : new Uint8Array(prgBytes);
+        const reu = reuBytes instanceof Uint8Array ? reuBytes : new Uint8Array(reuBytes);
+        const boot = `${base}.prg`;
+        const zip = zipSync({ [boot]: prg, [`${base}.reu`]: reu });
+        useEmu.getState().setReuSize(C64OS_REU);
+        if (emuRef.current) {
+          applyRuntimeOptions(emuRef.current, { vice_ram_expansion_unit: C64OS_REU });
+          if (useEmu.getState().running) {
+            hardReset(emuRef.current);
+            await new Promise((r) => window.setTimeout(r, 2500));
+          }
+        }
+        await playBufferRef.current(`${base}.zip`, toArrayBuffer(zip), {
+          autostart: true,
+          title: boot,
+          bootName: boot,
+        });
+        return true;
+      },
+      setReuSize: (size) => {
+        useEmu.getState().setReuSize(size);
+        applyRuntimeOptions(emuRef.current, { vice_ram_expansion_unit: size });
+      },
+      setJoyPort: (port) => {
+        useEmu.getState().setJoyPort(port === 1 ? 1 : 2);
+        plugJoysticks(emuRef.current, port === 1 ? 1 : 2);
+        applyRuntimeOptions(emuRef.current, viceJoyOptions(port === 1 ? 1 : 2));
+      },
+      swapJoy: () => swapJoyPortRef.current?.(),
+      toggleWarp: () => toggleWarpRef.current?.(),
+      setMuted: (on) => {
+        useEmu.getState().setMuted(!!on);
+        applyEmuVolume(emuRef.current, !!on, useEmu.getState().volume);
+      },
+      setPaused: (on) => {
+        useEmu.getState().setPaused(!!on);
+        setPaused(emuRef.current, !!on);
+      },
+      openSnaps: () => useEmu.getState().setSnapsOpen(true),
+      saveFreezeSlot: async (slot) => {
+        const id = freezeSlot(slot);
+        const st = await captureState(emuRef.current);
+        if (!st || st.byteLength < 16) return false;
+        await saveSnapshot("hardware", id, st, useEmu.getState().currentTitle || "Freeze");
+        return true;
+      },
+      snapshotCount: async () => (await listSnapshots()).length,
+      sessionFlags: () => {
+        const st = useEmu.getState();
+        return {
+          warped: st.warped,
+          muted: st.muted,
+          paused: st.paused,
+          joyPort: st.joyPort,
+          reuSize: st.reuSize,
+          showKeyboard: st.showKeyboard,
+          mouseMode: st.mouseMode,
+          cart: cartLiveRef.current,
+        };
+      },
+      runDos: (cmd) => runSdCommand(cmd),
+      resetDos: () => resetSd2iecSession(),
+      sd2iecCardMeta: () => getSd2iecCardSourceMeta(),
+      sd2iecHostFolderSupport: () => ({
+        ok: supportsHostDirectoryPicker(),
+        reason: hostDirectoryPickerReason(),
+      }),
+      setSd2iecWrites: (on) => useEmu.getState().setSd2iecWriteEnabled(!!on),
+      clearSd2iecMount: () => clearSd2iecCardMount(),
+      exportSdImage: () => exportSdImage(),
+      mountSdFatImage: async (bytes, label) => {
+        const data =
+          bytes instanceof Uint8Array
+            ? bytes
+            : new Uint8Array(bytes instanceof ArrayBuffer ? bytes : (bytes as ArrayLike<number>));
+        await mountDirectFatImage(data, label);
+        const emu = emuRef.current;
+        const st = useEmu.getState();
+        if (emu && st.running && mapHasDrive(st.iecMap, "sd2iec")) {
+          const unit = Number(Object.entries(st.iecMap).find(([, v]) => v === "sd2iec")?.[0] ?? 8) as
+            | 8
+            | 9
+            | 10
+            | 11;
+          wireGrok64ViceHost(emu);
+          attachGrok64Sd2iec(emu, unit);
+          applyIecUnit(emu, "sd2iec", unit);
+          const parts = await partitionsForMount();
+          remountSd2iecFromParts(emu, unit, parts);
+          attachSd2iecBus(emu, unit);
+        }
+        return getSd2iecCardSourceMeta();
+      },
+      mountSdHostFolder: async (handle: FileSystemDirectoryHandle) => {
+        await mountHostSdFolder(handle);
+        const emu = emuRef.current;
+        const st = useEmu.getState();
+        if (emu && st.running && mapHasDrive(st.iecMap, "sd2iec")) {
+          const unit = Number(Object.entries(st.iecMap).find(([, v]) => v === "sd2iec")?.[0] ?? 8) as
+            | 8
+            | 9
+            | 10
+            | 11;
+          wireGrok64ViceHost(emu);
+          attachGrok64Sd2iec(emu, unit);
+          applyIecUnit(emu, "sd2iec", unit);
+          const parts = await partitionsForMount();
+          remountSd2iecFromParts(emu, unit, parts);
+          attachSd2iecBus(emu, unit);
+        }
+        return getSd2iecCardSourceMeta();
+      },
+      seedSd: async (files) => {
+        clearSd2iecCardMount();
+        await formatPartition(0);
+        for (const f of files) {
+          const buf = f.data instanceof ArrayBuffer ? f.data : f.data.buffer.slice(f.data.byteOffset, f.data.byteOffset + f.data.byteLength);
+          await addSdFile(0, f.name, buf, f.path ?? "");
+        }
+        const emu = emuRef.current;
+        const st = useEmu.getState();
+        if (emu && st.running && mapHasDrive(st.iecMap, "sd2iec")) {
+          const unit = Number(Object.entries(st.iecMap).find(([, v]) => v === "sd2iec")?.[0] ?? 8) as 8 | 9 | 10 | 11;
+          wireGrok64ViceHost(emu);
+          remountSd2iecFromParts(emu, unit);
+          const mod = emu.Module as { _grok64_sd2iec_attach?: unknown } | undefined;
+          if (typeof mod?._grok64_sd2iec_attach !== "function") setSd2iecWasmIecOnly(false);
+          attachSd2iecBus(emu, unit);
         }
       },
       shot: async () => {
@@ -770,15 +1374,16 @@ export function Grok64App() {
       },
     });
   }, []);
-  const scheduleCracktroNudge = useCallback((title) => {
-    if (!wantsCracktroNudge(title || "")) return;
-    if (cracktroOnceRef.current === title) return;
-    cracktroOnceRef.current = title || "";
+  const scheduleCracktroNudge = useCallback((sessionKey: string) => {
+    if (cracktroOnceRef.current === sessionKey) return;
+    cracktroOnceRef.current = sessionKey || "";
     // After Autostart is disarmed — Space is a C64 key only (#32 / #41).
-    // Once per title so a later play-unlock cannot Space the transfer UI.
+    // Once per play-unlock; only if the CRT text asks for Space/fire (any title).
     bootTimersRef.current.push(
       window.setTimeout(() => {
-        glog("cracktro-nudge", { title, disarmed: true });
+        const screen = readScreenText(emuRef.current);
+        if (!screenInvitesCracktroInput(screen)) return;
+        glog("cracktro-nudge", { sessionKey, disarmed: true, head: screen.slice(0, 48) });
         dispatchC64Key("Space", " ", true);
         window.setTimeout(() => dispatchC64Key("Space", " ", false), 90);
         window.setTimeout(() => {
@@ -792,11 +1397,21 @@ export function Grok64App() {
       }, 400),
     );
   }, []);
+  const endPlayLock = useCallback(() => {
+    playLockGen.current += 1;
+    playLockRef.current = false;
+    bootHoldRef.current = false;
+    muteC64Space(false);
+    clearBootTimers();
+    useEmu.getState().setBooting(false);
+  }, []);
   const beginPlayLock = useCallback(
     (ms, msg) => {
       playLockGen.current += 1;
       const gen = playLockGen.current;
-      const lockMs = isTouchMobile() ? playLockDuration(playModeRef.current) : ms;
+      const lockMs = isTouchMobile()
+        ? playLockDuration(playModeRef.current, useEmu.getState().currentTitle)
+        : ms;
       playLockRef.current = true;
       bootHoldRef.current = false;
       persistGateRef.current = false;
@@ -816,7 +1431,17 @@ export function Grok64App() {
           playLockRef.current = false;
           fireArmedAt.current = Date.now() + 300;
           setWarp(emuRef.current, false);
-          disarmAutostart(emuRef.current);
+          disarmAutostart(
+            emuRef.current,
+            playModeRef.current === "cart" || cartLiveRef.current ? "cart" : undefined,
+          );
+          if (playModeRef.current === "cart" || cartLiveRef.current) {
+            const ssCart = useEmu.getState().fastLoadCart;
+            if (isSuperSnapshotCartHint(ssCart)) {
+              scheduleSuperSnapshotVicFix(emuRef.current, ssCart);
+            }
+            bumpCrtPaint(emuRef.current);
+          }
           muteC64Space(false);
           s.setBooting(false);
           s.setRunning(true);
@@ -831,6 +1456,34 @@ export function Grok64App() {
           applyEmuVolume(emuRef.current, vol.muted, vol.volume);
           gestureUnlockAudio(emuRef.current);
           scheduleCracktroNudge(unlockedTitle);
+          const wantRun =
+            basicRunAfterLoadRef.current ||
+            (diskRunAfterLoadRef.current && (playModeRef.current === "disk" || playModeRef.current === "auto"));
+          basicRunAfterLoadRef.current = false;
+          diskRunAfterLoadRef.current = false;
+          if (wantRun && playModeRef.current !== "cart") {
+            const screen = readScreenText(emuRef.current);
+            const trimmed = screen.trim();
+            const atBasicReady = /^READY\.?$/m.test(trimmed) || /\bREADY\b/.test(screen);
+            const needsRun =
+              atBasicReady &&
+              !/NOT FOUND|SYNTAX ERROR|FILE NOT OPEN/i.test(screen) &&
+              screen.trim().length < 120 &&
+              !screenInvitesCracktroInput(screen);
+            if (!needsRun) {
+              glog("play-skip-run", { head: screen.slice(0, 60) });
+            } else {
+              const runGen = playLockGen.current;
+              window.setTimeout(() => {
+                if (playLockGen.current !== runGen) return;
+                void typeC64("RUN", { delayMs: 55, cancelled: () => playLockGen.current !== runGen }).then(() => {
+                  if (playLockGen.current !== runGen) return;
+                  dispatchC64Key("Enter", "Enter", true);
+                  window.setTimeout(() => dispatchC64Key("Enter", "Enter", false), 90);
+                });
+              }, 700);
+            }
+          }
           if (isIosPhone()) {
             const playerEl = document.getElementById("grok64-player");
             presentIosCrt(emuRef.current, playerEl, "play-unlock");
@@ -852,37 +1505,147 @@ export function Grok64App() {
     async (emu: typeof emuRef.current, reset: "hard" | "soft" | "none" = "none") => {
       if (!emu) return false;
       const st = useEmu.getState();
-      const on = await applyJiffyDos(emu, st.jiffyDos);
+      const on = await applyJiffyDos(emu, resolveJiffyWant(st.jiffyDos, st.fastLoadCart));
       if (reset === "hard") hardReset(emu);
       else if (reset === "soft") resetEmu(emu);
       return on;
     },
     [],
   );
-  const resetReady = useCallback(() => {
+  const ejectCartToBasic = useCallback(async () => {
     const emu = emuRef.current;
-    glog("user-reset-ready", { prev: playModeRef.current, title: useEmu.getState().currentTitle });
+    const st = useEmu.getState();
+    if (!st.powered) {
+      toast.message("Power on first — CART OUT");
+      return;
+    }
+    playLockGen.current += 1;
+    clearBootTimers();
+    cancelSuperSnapshotVicFix();
+    glog("cart-out-recycle", { title: st.currentTitle, boot: bootFileOf(emu) });
     playModeRef.current = "basic";
+    softwareStdRef.current = null;
+    setSoftwareStd(null);
     clearLivePlay();
     clearPlayMarker();
-    markSessionReady();
+    st.setSessionRestoreHint(null);
     cracktroOnceRef.current = "";
     cartLiveRef.current = false;
     setCartLive(false);
+    st.setFastLoadCart(null);
+    removeSessionCart();
     persistGateRef.current = false;
     pendingKickRef.current = false;
     playLockRef.current = false;
     bootHoldRef.current = false;
     muteC64Space(false);
-    inGameplayRef.current = true;
+    basicRunAfterLoadRef.current = false;
+    diskRunAfterLoadRef.current = false;
     setAwaitingStart(false);
-    useEmu.getState().setCurrentTitle("BASIC");
-    useEmu.getState().setBooting(false);
-    applyRuntimeOptions(emu, {
-      vice_autostart: "disabled",
-      vice_autostart_warp: "disabled",
-      vice_autoloadwarp: "disabled",
+    inGameplayRef.current = false;
+    bootKickRef.current = true;
+    beginColdSession();
+    st.setCurrentTitle("BASIC");
+    st.setBooting(true, "Ejecting cartridge…", 20);
+    st.setInsertedDiskName(null);
+    // Full WASM recycle follows — in-place cartEject hard-resets the dying core and
+    // often leaves a black CRT when Jiffy + freezer carts were live (#67).
+    const plan = planPlay({
+      filename: "WORK DISK.D64",
+      work: true,
+      userIec: st.iecDrive,
+      userUnit: st.iecUnit,
+      liveIec: sessionIecRef.current,
+      liveWorkDisk: lastAppliedWorkDisk(),
+      autostart: false,
     });
+    sessionIecRef.current = plan.live.iec;
+    sessionUnitRef.current = plan.live.unit;
+    try {
+      await startWithUrlRef.current(publicUrl("/software/blank.d64"), "WORK DISK.D64", {
+        autostart: false,
+        title: "BASIC",
+        iec: plan.live.iec,
+        iecUnit: plan.live.unit,
+        userIec: plan.user.iec,
+        userUnit: plan.user.unit,
+      });
+      markSessionReady();
+      st.setBooting(false);
+      inGameplayRef.current = true;
+      toast.message("Cartridge out — BASIC READY");
+    } catch (err) {
+      glog("cart-out-recycle-fail", { m: err instanceof Error ? err.message : String(err) });
+      st.setBooting(false);
+      toast.error(err instanceof Error ? err.message : "Could not eject cartridge");
+    }
+  }, []);
+
+  const resetReady = useCallback(() => {
+    const emu = emuRef.current;
+    const st = useEmu.getState();
+    const hadCart =
+      cartLiveRef.current ||
+      playModeRef.current === "cart" ||
+      Boolean(st.fastLoadCart) ||
+      cartMountedOnCore(emu);
+    playLockGen.current += 1;
+    clearBootTimers();
+    glog("user-reset-ready", {
+      prev: playModeRef.current,
+      title: st.currentTitle,
+      hadCart,
+      boot: bootFileOf(emu),
+    });
+    persistGateRef.current = false;
+    pendingKickRef.current = false;
+    playLockRef.current = false;
+    bootHoldRef.current = false;
+    muteC64Space(false);
+    basicRunAfterLoadRef.current = false;
+    diskRunAfterLoadRef.current = false;
+    setAwaitingStart(false);
+    st.setBooting(false);
+    focusGrok64Player();
+    if (hadCart && emu && st.powered) {
+      playModeRef.current = "cart";
+      cartLiveRef.current = true;
+      setCartLive(true);
+      disarmAutostart(emu, "cart");
+      applyRuntimeOptions(emu, {
+        ...CART_PLAY_UNLOCK_VICE_OPTS,
+        vice_drive_true_emulation: "enabled",
+        vice_virtual_device_traps: "disabled",
+      });
+      hardReset(emu);
+      const ssCart = st.fastLoadCart;
+      scheduleSuperSnapshotVicFix(emu, ssCart);
+      bumpCrtPaint(emu);
+      markSessionPlay(st.currentTitle);
+      inGameplayRef.current = true;
+      persistGateRef.current = true;
+      toast.message("Reset — cartridge restarted");
+      return;
+    }
+    playModeRef.current = "basic";
+    clearLivePlay();
+    clearPlayMarker();
+    cracktroOnceRef.current = "";
+    cartLiveRef.current = false;
+    setCartLive(false);
+    st.setFastLoadCart(null);
+    st.setCurrentTitle("BASIC");
+    if (emu) {
+      disarmAutostart(emu, "disk");
+      hardReset(emu);
+      applyRuntimeOptions(emu, {
+        vice_autostart: "disabled",
+        vice_autostart_warp: "disabled",
+        vice_autoloadwarp: "disabled",
+      });
+    }
+    markSessionReady();
+    inGameplayRef.current = true;
     void (async () => {
       await syncJiffy(emu, "hard");
       if (isIosPhone()) {
@@ -945,20 +1708,57 @@ export function Grok64App() {
       try {
         if (spec.user.iec === "sd2iec" || spec.live.iec === "sd2iec") {
           parts = await partitionsForMount();
+          attachGrok64Sd2iec(emu, spec.live.unit);
+          setSd2iecJiffyFast(st.jiffyDos);
         }
       } catch {
         /* optional card */
       }
       const st = useEmu.getState();
+      const bootFile = bootFileOf(emu);
+      const cartBoot = isCartMediaBoot({
+        playMode: playModeRef.current,
+        bootFile,
+        title: spec.bootName ?? spec.title,
+      });
+      const jiffyForCart = resolveJiffyWant(st.jiffyDos, st.fastLoadCart);
+      const crtBootName =
+        cartBoot && emu
+          ? (bootFile || spec.bootName || spec.title || "").replace(/^\//, "")
+          : null;
+      const swStd = softwareStdRef.current;
+      if (swStd) {
+        applyRuntimeOptions(
+          emu,
+          videoStandardOptions(
+            {
+              machineId: st.machineId,
+              videoStandard: st.videoStandard,
+              coreMode: st.coreMode,
+              driveMode: st.driveMode,
+            },
+            swStd,
+          ),
+        );
+      }
+      const coldBasicAfterCart = Boolean(spec.coldBasicAfterCart);
       const prep = await prepareCore(emu, {
         live: spec.live,
         user: spec.user,
-        jiffyWant: st.jiffyDos,
+        jiffyWant: coldBasicAfterCart ? false : jiffyForCart,
         sdParts: parts,
         driveMap: st.iecMap,
+        skipJiffy: cartBoot || coldBasicAfterCart,
       });
       if (loadGenRef.current !== gen) return;
-      glog("core-ready", { ...prep, live: spec.live, user: spec.user, reu: st.reuSize });
+      if (crtBootName && emu && !/\.(crt|bin)$/i.test(bootFileOf(emu) || "")) {
+        emu.fileName = crtBootName;
+        glog("cart-boot-restore", { file: emu.fileName });
+      }
+      if (cartBoot && emu) {
+        applyRuntimeOptions(emu, { vice_jiffydos: jiffyForCart ? "enabled" : "disabled" });
+      }
+      glog("core-ready", { ...prep, live: spec.live, user: spec.user, reu: st.reuSize, jiffyForCart, cartBoot });
       applyIecUnit(emu, spec.live.iec, spec.live.unit);
       applyRuntimeOptions(emu, {
         ...viceJoyOptions(st.joyPort),
@@ -991,19 +1791,62 @@ export function Grok64App() {
       pendingKickRef.current = false;
       setAwaitingStart(false);
       spec.onStarted?.(emu);
+      if (pendingCompanionRef.current.length) {
+        writeCompanionMedia(emu, pendingCompanionRef.current);
+        pendingCompanionRef.current = [];
+      }
       if (spec.autostartAfterReady) {
         bootHoldRef.current = false;
         s.setRunning(true);
         setBusy(`Loading ${spec.title}…`, 78);
         if (isIosPhone()) await new Promise((r) => setTimeout(r, 140));
         if (loadGenRef.current !== gen) return;
-        autostartAfterReady(emu, true, { autoloadWarp: playModeRef.current === "disk" ? false : undefined });
+        const cartBootNow = isCartMediaBoot({
+          playMode: playModeRef.current,
+          bootFile: bootFileOf(emu),
+          title: spec.bootName ?? spec.title,
+        });
+        if (cartBootNow) {
+          const crt = (bootFileOf(emu) || crtBootName || spec.bootName || spec.title || "").replace(
+            /^\//,
+            "",
+          );
+          if (crt && emu && /\.(crt|bin)$/i.test(crt)) emu.fileName = crt;
+          disarmAutostart(emu, "cart");
+          applyRuntimeOptions(emu, {
+            ...CART_PLAY_UNLOCK_VICE_OPTS,
+            vice_work_disk: "disabled",
+            vice_drive_true_emulation: "enabled",
+            vice_virtual_device_traps: "disabled",
+          });
+          autostartAfterReady(emu, false, {
+            autoloadWarp: autoloadWarpForPlay(playModeRef.current, spec.title),
+          });
+          if (jiffyForCart) await applyJiffyDos(emu, true);
+          const ssCart = useEmu.getState().fastLoadCart;
+          scheduleSuperSnapshotVicFix(emu, ssCart);
+          dismissEjsPrompts(document.getElementById("grok64-player"));
+          bumpCrtPaint(emu);
+          window.setTimeout(() => bumpCrtPaint(emu), 400);
+          window.setTimeout(() => bumpCrtPaint(emu), 1200);
+          scheduleFit(true);
+        } else {
+          autostartAfterReady(emu, true, {
+            autoloadWarp: autoloadWarpForPlay(playModeRef.current, spec.title),
+          });
+        }
         applyIecUnit(emu, spec.live.iec, spec.live.unit);
         if (isIosPhone())     kickIosAfterEmuAction(emu, "settle", gen);
-        beginPlayLock(playLockDuration(playModeRef.current), `Loading ${spec.title}…`);
+        beginPlayLock(playLockDuration(playModeRef.current, spec.title), `Loading ${spec.title}…`);
       } else {
         if (prep.jiffy) setBusy("Applying JiffyDOS…", 72);
         hardReset(emu);
+        if (coldBasicAfterCart && st.jiffyDos) {
+          setBusy("Applying JiffyDOS…", 72);
+          await applyJiffyDos(emu, true);
+          hardReset(emu);
+          bumpCrtPaint(emu);
+        }
         applyIecUnit(emu, spec.live.iec, spec.live.unit);
         s.setRunning(true);
         // Drive cold BASIC to an observably sized + presented READY.
@@ -1016,26 +1859,30 @@ export function Grok64App() {
         // gesture-path present (canvas focus — the tap-to-show-READY path),
         // until the canvas is observably sized or the budget runs out.
         // Bounded: at cap the boot proceeds exactly as before.
-        if (isIosPhone()) {
+        {
           const playerEl = document.getElementById("grok64-player");
           const screen = playerEl?.closest?.(".g64-screen") as HTMLElement | null;
           const t0 = Date.now();
+          const budget = isIosPhone() ? 12000 : 4000;
           let nudge = false;
           let gesturedAt = 0;
-          while (Date.now() - t0 < 12000) {
+          while (Date.now() - t0 < budget) {
             if (loadGenRef.current !== gen) return;
             void playerEl?.offsetWidth;
             if (screen) void screen.offsetWidth;
             fitEmu(playerEl, emu);
+            bumpCrtPaint(emu);
             const now = Date.now();
-            if (now - gesturedAt > 2000) {
-              gesturedAt = now;
-              presentIosCrt(emu, playerEl, { tag: "cold-gesture", fromUserGesture: true });
-            } else {
-              presentIosCrt(emu, playerEl, "booting");
+            if (isIosPhone()) {
+              if (now - gesturedAt > 2000) {
+                gesturedAt = now;
+                presentIosCrt(emu, playerEl, { tag: "cold-gesture", fromUserGesture: true });
+              } else {
+                presentIosCrt(emu, playerEl, "booting");
+              }
+              nudge = !nudge;
+              if (playerEl) playerEl.style.minHeight = nudge ? "0px" : "";
             }
-            nudge = !nudge;
-            if (playerEl) playerEl.style.minHeight = nudge ? "0px" : "";
             if (playerCanvasReady(playerEl) && useEmu.getState().running && coreHasFs(emu)) break;
             await new Promise((r) => setTimeout(r, 150));
           }
@@ -1044,6 +1891,7 @@ export function Grok64App() {
             ms: Date.now() - t0,
             canvas: playerCanvasReady(playerEl),
             running: useEmu.getState().running,
+            ios: isIosPhone(),
           });
         }
         bootHoldRef.current = false;
@@ -1104,6 +1952,7 @@ export function Grok64App() {
         persistGateRef.current = true;
         throw new Error("Stay on the live CRT — Play must not remount the splash.");
       }
+      cancelSuperSnapshotVicFix();
       loadGenRef.current += 1;
       const gen = loadGenRef.current;
       persistGateRef.current = false;
@@ -1189,7 +2038,17 @@ export function Grok64App() {
       resolvedRef.current = res;
       pendingKickRef.current = false;
       setAwaitingStart(false);
-      const playDrive = driveForPlay(res.drive, { typedDisk: !!opts.diskLoad || playModeRef.current === "disk" });
+      const cartStart = playModeRef.current === "cart" || /\.(crt|bin)$/i.test(gameName);
+      if (cartStart) {
+        const jf = resolveJiffyWant(st.jiffyDos, st.fastLoadCart);
+        res.options = {
+          ...res.options,
+          vice_jiffydos: jf ? "enabled" : "disabled",
+        };
+      }
+      const playDrive = driveForPlay(res.drive, {
+        typedDisk: (opts.diskLoad || playModeRef.current === "disk") && !cartStart,
+      });
       const hz = res.standard === "ntsc" ? "NTSC 60" : "PAL 50";
       s.setBooting(true, opts.autostart === false ? `Cold start · ${hz}…` : `Loading ${opts.title ?? gameName} · ${hz}…`, 10);
       glog("boot-begin", {
@@ -1245,6 +2104,10 @@ export function Grok64App() {
           machineOptions: res.options,
           sidEngine: st.sidEngine,
           sidModel: st.sidModel,
+          sid2: st.sid2Address,
+          sid2Model: st.sid2Model,
+          sid3: st.sid3Address,
+          sid3Model: st.sid3Model,
           driveMode: playDrive,
           joyPort: st.joyPort,
           volume: st.muted ? 0 : st.volume,
@@ -1273,7 +2136,9 @@ export function Grok64App() {
             });
             void settleAfterStart(emu, gen, {
               title: opts.title ?? gameName,
+              bootName: gameName,
               autostartAfterReady: opts.autostart !== false && playModeRef.current !== "basic",
+              coldBasicAfterCart: Boolean(opts.coldBasicAfterCart),
               live: {
                 iec: opts.iec ?? sessionIecRef.current ?? useEmu.getState().iecDrive,
                 unit: opts.iecUnit ?? sessionUnitRef.current ?? useEmu.getState().iecUnit,
@@ -1309,17 +2174,19 @@ export function Grok64App() {
     },
     [s, beginPlayLock, settleAfterStart],
   );
+  startWithUrlRef.current = startWithUrl;
   const playBuffer = useCallback(
     async (filename, data, opts = {}) => {
       await persistNow();
+      let mediaName = filename;
       libIdRef.current = opts.libraryId ?? null;
-      playPayloadRef.current = { filename, data, opts };
+      playPayloadRef.current = { filename: mediaName, data, opts };
       const playUnit = opts.iecUnit ?? useEmu.getState().iecUnit;
       setIecDevice(playUnit);
       let payload = data;
-      let bootName = bootFileName(filename, kindOf(filename));
+      let bootName = opts.bootName ?? bootFileName(mediaName, kindOf(mediaName));
       const raw = new Uint8Array(data);
-      const work = isWorkDisk(filename) || opts.title === "BASIC" || opts.title === "BASIC READY";
+      const work = isWorkDisk(mediaName) || opts.title === "BASIC" || opts.title === "BASIC READY";
       if (!work && isWorkDiskImage(raw)) {
         if (opts.libraryId) {
           await removeFile(opts.libraryId);
@@ -1328,7 +2195,7 @@ export function Grok64App() {
         toast.error("That copy is empty. Grab the game again from Catalog.");
         return;
       }
-      const detected = work ? null : detectSoftwareStandard({ names: [filename, opts.title], data: raw });
+      const detected = work ? null : detectSoftwareStandard({ names: [mediaName, opts.title], data: raw });
       softwareStdRef.current = detected;
       setSoftwareStd(detected);
       if (kindOf(filename) === "sid" || isSid(raw)) {
@@ -1340,6 +2207,63 @@ export function Grok64App() {
           toast.error(err instanceof Error ? err.message : "Could not play SID");
           return;
         }
+      }
+      if (/\.(reu|nuv)$/i.test(mediaName)) {
+        try {
+          const base = mediaName.replace(/\.(reu|nuv)$/i, "") || "nuvie-play";
+          const playerUrl = publicUrl("/system/vice/nuvieplayer1.0.prg");
+          let playerBuf: ArrayBuffer | null = null;
+          try {
+            const res = await fetch(playerUrl);
+            if (res.ok) playerBuf = await res.arrayBuffer();
+          } catch {
+            /* optional bundled player */
+          }
+          if (!playerBuf || playerBuf.byteLength < 64) {
+            const res = await fetch(
+              "http://csdb.dk/getinternalfile.php/110242/nuvieplayer1.0.prg",
+            );
+            if (!res.ok) throw new Error("NUVIE player missing");
+            playerBuf = await res.arrayBuffer();
+          }
+          useEmu.getState().setReuSize(C64OS_REU);
+          if (emuRef.current) {
+            applyRuntimeOptions(emuRef.current, { vice_ram_expansion_unit: C64OS_REU });
+            if (useEmu.getState().running) {
+              hardReset(emuRef.current);
+            }
+          }
+          const { zipSync } = await import("fflate");
+          const boot = `${base}.prg`;
+          const zip = zipSync({
+            [boot]: new Uint8Array(playerBuf),
+            [`${base}.reu`]: raw,
+          });
+          payload = toArrayBuffer(zip);
+          bootName = boot;
+          mediaName = `${base}.zip`;
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : "Could not open REU / NUVIE");
+          return;
+        }
+      }
+      pendingCompanionRef.current = [];
+      if (kindOf(filename) === "zip") {
+        const parts = explodeArchive(filename, new Uint8Array(payload));
+        const bootPick = opts.bootName
+          ? parts.find((p) => p.name.toLowerCase() === opts.bootName!.toLowerCase()) ??
+            pickBootFile(parts, opts.title)
+          : pickBootFile(parts, opts.title);
+        if (!bootPick) {
+          toast.error("No playable file in that archive.");
+          return;
+        }
+        pendingCompanionRef.current = parts
+          .filter((p) => p.name !== bootPick.name)
+          .map((p) => ({ name: p.name, data: p.data }));
+        payload = toArrayBuffer(bootPick.data);
+        bootName = bootPick.name;
+        mediaName = bootPick.name;
       }
       releaseBlob();
       let safe;
@@ -1354,26 +2278,55 @@ export function Grok64App() {
         return;
       }
       const origKind = kindOf(bootName);
+      basicRunAfterLoadRef.current =
+        !work && opts.autostart !== false && (origKind === "prg" || origKind === "p00") && isBasicPrg(new Uint8Array(safe));
       const diskLoad = !work && needsTypedBoot(origKind) && opts.autostart === false;
       const user = userAttachFromMap(useEmu.getState().iecMap);
       const userIec = user.iec;
       const userUnit = user.unit;
       const liveIec = sessionIecRef.current;
       const liveWork = lastAppliedWorkDisk();
-      const jiffyWant = useEmu.getState().jiffyDos;
+      const jiffyWantSetting = useEmu.getState().jiffyDos;
       const jiffyLive = lastAppliedJiffy();
+      const payloadView = new Uint8Array(safe);
+      const forceCart = isCartridgePayload(payloadView, bootName);
       const plan = planPlay({
         filename: bootName,
         work,
+        payload: payloadView,
         userIec,
         userUnit,
         liveIec,
         liveWorkDisk: liveWork,
         autostart: opts.autostart !== false,
         iosPhone: isIosPhone(),
-        jiffyWant,
+        jiffyWant: jiffyWantSetting,
         jiffyLive,
       });
+      if (forceCart || plan.kind === "cart") playModeRef.current = "cart";
+      const playTitle = opts.title ?? filename;
+      const hadCartBefore = cartLiveRef.current;
+      const keepCartAcrossDiskEarly = hadCartBefore && plan.kind === "floppy" && !work;
+      let sessionFastCart = useEmu.getState().fastLoadCart;
+      if (plan.kind === "cart") {
+        sessionFastCart = detectFastLoadCart(bootName, playTitle);
+        useEmu.getState().setFastLoadCart(sessionFastCart);
+        if (sessionFastCart && jiffyWantSetting) {
+          const compat = jiffyCartCompat(sessionFastCart, true);
+          if (compat.suppressJiffy) {
+            toast.message(compat.summary, { duration: 9000 });
+          } else if (compat.warnIfJiffyOn) {
+            toast.message(compat.title, { description: compat.summary, duration: 9000 });
+          }
+        }
+      } else if (!keepCartAcrossDiskEarly) {
+        sessionFastCart = null;
+        useEmu.getState().setFastLoadCart(null);
+      }
+      const jiffyWant = resolveJiffyWant(jiffyWantSetting, sessionFastCart);
+      // Freezer/fast-load carts (e.g. Super Snapshot) handle LOAD/RUN — extra RUN → READY (#QA).
+      diskRunAfterLoadRef.current =
+        !work && plan.autostartAfterReady && plan.kind === "floppy" && !sessionFastCart;
       const attach = plan.attach;
       // Hard lock: CriOS never logs `hot-swap` (Tom #35 / #37 → DNP).
       // After READY, recycle is in-place on the live canvas (#18/#30).
@@ -1498,9 +2451,21 @@ export function Grok64App() {
         toast.error("Play stayed on the live CRT — C64 is still starting.");
         return;
       }
-      playModeRef.current = plan.kind === "floppy" ? "disk" : plan.kind === "basic" ? "basic" : "auto";
-      cartLiveRef.current = plan.kind === "cart";
-      setCartLive(plan.kind === "cart");
+      playModeRef.current =
+        plan.kind === "floppy"
+          ? "disk"
+          : plan.kind === "basic"
+            ? "basic"
+            : plan.kind === "cart"
+              ? "cart"
+              : "auto";
+      if (plan.kind === "cart") {
+        setSessionCart(bootName, new Uint8Array(safe));
+      }
+      const hadCart = cartLiveRef.current;
+      cartLiveRef.current = plan.kind === "cart" || (hadCart && plan.kind === "floppy");
+      setCartLive(cartLiveRef.current);
+      const keepCartAcrossDisk = hadCart && plan.kind === "floppy" && !work;
       sessionIecRef.current = plan.live.iec;
       sessionUnitRef.current = plan.live.unit;
       setPictureHold(false);
@@ -1553,7 +2518,7 @@ export function Grok64App() {
       }
       const wrapped = wrapForDiskSwap(origKind, media, bootName);
       const diskBytes = wrapped ?? (isDiskKind(origKind) ? media : null);
-      if ((((live && (canHotSwap || keepLiveCrt)) || floppyKeep) && emuRef.current && diskBytes)) {
+      if ((((live && (canHotSwap || keepLiveCrt)) || floppyKeep) && emuRef.current && diskBytes && plan.kind === "floppy" && !forceCart)) {
         const payloadDisk = diskBytes;
         const playIec = attach?.iec ?? plan.live.iec;
         const playAttachUnit = attach?.unit ?? plan.live.unit;
@@ -1563,11 +2528,20 @@ export function Grok64App() {
         const mounted = inPlaceAutostartTarget(bootFileOf(emuRef.current), bootName);
         const wrote = mounted
           ? attach
-            ? attachAutostartDisk(emuRef.current, payloadDisk, mounted, playIec, playAttachUnit)
+            ? attachAutostartDisk(
+                emuRef.current,
+                payloadDisk,
+                filename || bootName || mounted,
+                playIec,
+                playAttachUnit,
+              )
             : swapBootDisk(emuRef.current, payloadDisk, mounted)
           : false;
         if (wrote) {
           emuRef.current.fileName = mounted;
+          if (plan.kind === "floppy" && !work) {
+            useEmu.getState().setInsertedDiskName(filename);
+          }
           if (canHotSwap) {
             glog("hot-swap", {
               filename,
@@ -1606,6 +2580,10 @@ export function Grok64App() {
             detected,
           );
           resolvedRef.current = resNow;
+          if (pendingCompanionRef.current.length) {
+            writeCompanionMedia(emuRef.current, pendingCompanionRef.current);
+            pendingCompanionRef.current = [];
+          }
           applyRuntimeOptions(emuRef.current, {
             ...videoStandardOptions(
               {
@@ -1619,11 +2597,13 @@ export function Grok64App() {
             vice_autostart: "disabled",
             vice_autostart_warp: "disabled",
             vice_autoloadwarp: "disabled",
-            vice_reset: "hard",
+            vice_reset: keepCartAcrossDisk ? "autostart" : "hard",
             vice_ram_expansion_unit: stNow.reuSize,
-            ...(attach
+            ...(plan.trueDrive || attach
               ? {
-                  vice_work_disk: workDiskFor(playIec, playAttachUnit),
+                  ...(attach
+                    ? { vice_work_disk: workDiskFor(playIec, playAttachUnit) }
+                    : {}),
                   vice_drive_true_emulation: "enabled",
                   vice_virtual_device_traps: "disabled",
                 }
@@ -1632,14 +2612,21 @@ export function Grok64App() {
           });
           if (attach) applyIecUnit(emuRef.current, playIec, playAttachUnit);
           const flushed = await flushEmuFs(emuRef.current, isIosPhone() ? 2000 : 800);
+          if (attach && plan.kind === "floppy") {
+            await refreshViceWorkDisk(emuRef.current, playAttachUnit);
+          }
           glog("play-mount", { flushed, workDisk: lastAppliedWorkDisk(), ios: isIosPhone() });
           await prepareCore(emuRef.current, {
             live: plan.live,
             user: plan.user,
-            jiffyWant: stNow.jiffyDos,
+            jiffyWant: resolveJiffyWant(stNow.jiffyDos, stNow.fastLoadCart),
             skipJiffy: true,
             driveMap: stNow.iecMap,
           });
+          await applyJiffyDos(emuRef.current, resolveJiffyWant(stNow.jiffyDos, stNow.fastLoadCart));
+          if (plan.kind === "floppy" && !work) {
+            useEmu.getState().setInsertedDiskName(filename);
+          }
           applyIecUnit(emuRef.current, playIec, playAttachUnit);
           plugJoysticks(emuRef.current, useEmu.getState().joyPort);
           // #13: never reset paint / wipe the live canvas on in-place Play.
@@ -1661,10 +2648,12 @@ export function Grok64App() {
               }, 800),
             );
           } else {
-            autostartAfterReady(emuRef.current, true, { autoloadWarp: false });
+            autostartAfterReady(emuRef.current, true, {
+              autoloadWarp: autoloadWarpForPlay(playModeRef.current, bootName),
+            });
             applyIecUnit(emuRef.current, playIec, playAttachUnit);
             if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, keepLiveCrt || floppyKeep ? "play-recycle" : "hot-swap");
-            beginPlayLock(playLockDuration(playModeRef.current), `Loading ${title}…`);
+            beginPlayLock(playLockDuration(playModeRef.current, title), `Loading ${title}…`);
           }
           return;
         }
@@ -1702,10 +2691,12 @@ export function Grok64App() {
           markSessionPlay(title);
           notePlayMarker();
           s.setRunning(true);
-          autostartAfterReady(emuRef.current, true, { autoloadWarp: false });
+          autostartAfterReady(emuRef.current, true, {
+            autoloadWarp: autoloadWarpForPlay(playModeRef.current, bootName),
+          });
           if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, "play-recycle");
           scheduleFit(true);
-          beginPlayLock(playLockDuration(playModeRef.current), `Loading ${title}…`);
+          beginPlayLock(playLockDuration(playModeRef.current, title), `Loading ${title}…`);
           return;
         }
         glog("play-inplace-failed", { filename, title, kind: origKind, mustKeep, media: plan.kind });
@@ -1718,6 +2709,43 @@ export function Grok64App() {
         useEmu.getState().setBooting(false);
         toast.error("Play stayed on the live CRT — cartridge did not attach.");
         return;
+      }
+      if (
+        (plan.kind === "cart" || forceCart) &&
+        emuRef.current &&
+        coreHasFs(emuRef.current) &&
+        cartMountedOnCore(emuRef.current)
+      ) {
+        s.setBooting(true, plan.status, 35);
+        const fastCart = detectFastLoadCart(bootName, playTitle);
+        useEmu.getState().setFastLoadCart(fastCart);
+        const attached = await attachCartridgeInPlace(emuRef.current, new Uint8Array(safe), bootName);
+        if (attached) {
+          playModeRef.current = "cart";
+          cartLiveRef.current = true;
+          setCartLive(true);
+          await applyJiffyDos(
+            emuRef.current,
+            resolveJiffyWant(jiffyWantSetting, fastCart),
+          );
+          scheduleSuperSnapshotVicFix(emuRef.current, fastCart);
+          persistGateRef.current = true;
+          inGameplayRef.current = true;
+          pendingKickRef.current = false;
+          setAwaitingStart(false);
+          clearBootTimers();
+          s.setCurrentTitle(title);
+          markSessionPlay(title);
+          notePlayMarker();
+          s.setRunning(true);
+          s.setBooting(false);
+          dismissEjsPrompts(document.getElementById("grok64-player"));
+          bumpCrtPaint(emuRef.current);
+          beginPlayLock(playLockDuration("cart", title), `Loading ${title}…`);
+          glog("cart-inplace", { bootName, fastCart });
+          return;
+        }
+        glog("cart-inplace-fail-recycle", { bootName });
       }
       const stayLive =
         waitLive ||
@@ -1742,7 +2770,7 @@ export function Grok64App() {
       blobRef.current = url;
       await startWithUrl(url, bootName, {
         autostart: plan.autostartAfterReady,
-        diskLoad: plan.kind === "floppy" || diskLoad,
+        diskLoad: (plan.kind === "floppy" || diskLoad) && !forceCart && plan.kind !== "cart",
         title,
         iec: plan.live.iec,
         iecUnit: plan.live.unit,
@@ -1770,22 +2798,106 @@ export function Grok64App() {
     [playBuffer, s],
   );
   const playLocal = useCallback(
-    async (item) => {
+    async (item, meta?: { catalogKey?: string; title?: string }) => {
       s.setLibraryOpen(false);
       const file = await getFile(item.id);
       if (!file) {
         toast.error("That file is missing.");
         return;
       }
+      if (isGeosFamilyDiskName(file.name) && emuRef.current && useEmu.getState().running) {
+        const stGeos = useEmu.getState();
+        if (stGeos.jiffyDos) {
+          toast.message("Stock KERNAL for GEOS", { duration: 6000 });
+        }
+        const reu = reuForGeosFamilyDisk(file.name, stGeos.reuSize);
+        if (reu !== stGeos.reuSize) {
+          stGeos.setReuSize(reu);
+          if (isWheelsDiskName(file.name)) {
+            toast.message("REU on for Wheels (512K+)");
+          }
+        }
+        stGeos.setIecSlot(8, "1541");
+        stGeos.setMouseMode(true);
+        sessionIecRef.current = "1541";
+        sessionUnitRef.current = 8;
+        const geosMap = { ...stGeos.iecMap, 8: "1541" as const };
+        setMouseAnalog(emuRef.current, true);
+        disarmAutostart(emuRef.current, "disk");
+        const raw = new Uint8Array(file.data);
+        const ok = await bootGeosFloppy(emuRef.current, raw, file.name, 8, geosMap);
+        if (!ok) {
+          endPlayLock();
+          toast.error(isWheelsDiskName(file.name) ? "Could not mount Wheels disk" : "Could not mount GEOS disk");
+          return;
+        }
+        setSessionDisk(file.name, raw, 8);
+        useEmu.getState().setInsertedDiskName(file.name);
+        focusGrok64Player();
+        beginPlayLock(
+          geosFamilyPlayLockMs(file.name),
+          isWheelsDiskName(file.name) ? "Loading Wheels…" : "Loading GEOS…",
+        );
+        await flushEmuFs(emuRef.current, 3000);
+        applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
+        const loadLine = geosBootLoadLine(file.name);
+        if (!(await feedBasicLine(emuRef.current, loadLine))) {
+          endPlayLock();
+          toast.error(isWheelsDiskName(file.name) ? "Wheels LOAD failed" : "GEOS LOAD failed");
+          return;
+        }
+        const loadEnd = Date.now() + geosFamilyLoadMs(file.name);
+        while (Date.now() < loadEnd) {
+          const mid = readScreenText(emuRef.current);
+          if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(mid)) {
+            endPlayLock();
+            toast.error("GEOS disk not found on unit 8");
+            return;
+          }
+          if (/LOADING/i.test(mid) || (!geosBootStuckAtBasic(mid) && mid.replace(/\s+/g, "").length > 60)) break;
+          await new Promise((r) => window.setTimeout(r, 500));
+        }
+        applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
+        await feedBasicLine(emuRef.current, "RUN", { runcmd: true });
+        const runEnd = Date.now() + 75_000;
+        let screen = readScreenText(emuRef.current);
+        while (Date.now() < runEnd) {
+          screen = readScreenText(emuRef.current);
+          if (geosBootSucceeded(screen, file.name) || geosBootLooksLaunched(screen)) break;
+          await new Promise((r) => window.setTimeout(r, 800));
+        }
+        if (!geosBootSucceeded(screen, file.name) && !geosBootLooksLaunched(screen)) {
+          endPlayLock();
+          toast.error(
+            geosBootStuckAtBasic(screen)
+              ? "GEOS returned to BASIC — stock KERNAL and 1541-II are required"
+              : isWheelsDiskName(file.name)
+                ? "Wheels did not reach the desktop"
+                : "GEOS did not reach the deskTop",
+          );
+          return;
+        }
+        endPlayLock();
+        await touchPlayed(item.id);
+        return;
+      }
+      if (
+        meta?.catalogKey &&
+        file.catalogKey &&
+        file.catalogKey !== meta.catalogKey
+      ) {
+        toast.error("That file doesn't match the catalog title you picked. Search again and tap Play.");
+        return;
+      }
       await playBuffer(file.name, file.data, {
         autostart: true,
-        title: item.name,
+        title: meta?.title ?? item.catalogTitle ?? item.name,
         libraryId: item.id,
         iecUnit: item.iecUnit,
       });
       await touchPlayed(item.id);
     },
-    [playBuffer, s],
+    [playBuffer, s, endPlayLock],
   );
   const insertDisk = useCallback(async (item) => {
     const file = await getFile(item.id);
@@ -1806,13 +2918,35 @@ export function Grok64App() {
     }
     const unit = item.iecUnit ?? useEmu.getState().iecUnit;
     const iec = useEmu.getState().iecDrive;
-    const ok = mountDiskOnUnit(emuRef.current, unit, media, bootFileName(file.name, kind), iec);
+    const boot = bootFileName(file.name, kind);
+    const mounted = bootFileOf(emuRef.current);
+    const ok = mounted
+      ? attachAutostartDisk(emuRef.current, media, mounted, iec, unit)
+      : mountDiskOnUnit(emuRef.current, unit, media, boot, iec);
     if (!ok) {
       toast.error("Could not mount that disk");
       return;
     }
+    bootPathRef.current = mounted ?? boot;
+    if (mounted) emuRef.current.fileName = mounted.replace(/^\//, "");
+    const FS = emuRef.current?.Module?.FS ?? emuRef.current?.gameManager?.FS;
+    for (const stale of ["blank.d64", "/blank.d64", "BLANK.D64"]) {
+      try {
+        FS?.unlink?.(stale);
+      } catch {
+        /* missing */
+      }
+    }
+    applyRuntimeOptions(emuRef.current, {
+      vice_drive_true_emulation: "enabled",
+      vice_virtual_device_traps: "disabled",
+    });
+    await flushEmuFs(emuRef.current, 600);
     await touchPlayed(item.id);
     const label = d64DiskName(media) ?? item.name.replace(/\.[a-z0-9]{2,4}$/i, "");
+    setSessionDisk(item.name, media, unit);
+    useEmu.getState().setInsertedDiskName(item.name);
+    focusGrok64Player();
     toast.success(`Inserted ${label} on drive ${unit}`);
   }, []);
   const toggleWarp = useCallback(() => {
@@ -1820,6 +2954,7 @@ export function Grok64App() {
     useEmu.getState().setWarped(next);
     setWarp(emuRef.current, next);
   }, []);
+  toggleWarpRef.current = toggleWarp;
   const powerOn = useCallback(() => {
     const st = useEmu.getState();
     if (st.powered && (coreHasFs(emuRef.current) || bootKickRef.current)) {
@@ -1832,7 +2967,9 @@ export function Grok64App() {
     playLockRef.current = false;
     cartLiveRef.current = false;
     setCartLive(false);
+    useEmu.getState().setFastLoadCart(null);
     beginColdSession();
+    useEmu.getState().setInsertedDiskName(null);
     cracktroOnceRef.current = "";
     pokeAudioUnlock();
     gestureUnlockAudio(emuRef.current);
@@ -1880,7 +3017,35 @@ export function Grok64App() {
         toast.error(err instanceof Error ? err.message : "Boot failed");
       });
   }, [startWithUrl, resumePlayback]);
+  const powerOff = useCallback(() => {
+    const st = useEmu.getState();
+    if (!st.powered && !st.booting) return;
+    glog("power-off");
+    playLockRef.current = false;
+    bootHoldRef.current = false;
+    bootKickRef.current = false;
+    clearLivePlay();
+    clearPlayMarker();
+    clearSession();
+    beginColdSession();
+    playModeRef.current = "basic";
+    cartLiveRef.current = false;
+    setCartLive(false);
+    st.setFastLoadCart(null);
+    muteC64Space(false);
+    const el = document.getElementById("grok64-player");
+    destroyEmu(emuRef.current, el);
+    emuRef.current = null;
+    clearUnitMounts();
+    releaseBlob();
+    st.powerOff();
+    st.setSessionRestoreHint(null);
+    setPictureHold(false);
+    if (pictureHoldTimer.current) window.clearTimeout(pictureHoldTimer.current);
+    toast.message("Powered off");
+  }, []);
   powerOnRef.current = powerOn;
+  powerOffRef.current = powerOff;
   const recoverBoot = useCallback(() => {
     const st = useEmu.getState();
     if (
@@ -1999,6 +3164,7 @@ export function Grok64App() {
         // Attach success re-saves the marker (powerOn cleared it). If the
         // attach failed, say so honestly instead of claiming a restore.
         if (readPlayMarker()) {
+          useEmu.getState().setSessionRestoreHint(marker.title);
           toast.message(`Restored ${marker.title} — tap for sound`);
         } else {
           clearLivePlay();
@@ -2116,6 +3282,51 @@ export function Grok64App() {
       window.clearTimeout(b);
     };
   }, [s.running, cartLive]);
+  useEffect(() => {
+    setGrok64KeyboardPaintHook((emu) => bumpCrtPaint(emu ?? emuRef.current));
+    setC64HardwareKeySink((code, key, down, mods) =>
+      grok64RetroKeyboardFromDom(emuRef.current, code, key, down, mods),
+    );
+    return () => {
+      setGrok64KeyboardPaintHook(null);
+      setC64HardwareKeySink(null);
+    };
+  }, []);
+  useEffect(() => {
+    if (!s.running) return;
+    const onHostKey = (e: KeyboardEvent) => {
+      if (!useEmu.getState().running) return;
+      const freezerFn = /^F[1-8]$/.test(e.code) && (cartLiveRef.current || useEmu.getState().fastLoadCart);
+      if (playLockRef.current && !freezerFn) return;
+      if (!grok64RetroKeyboardAvailable(emuRef.current)) return;
+      const target = e.target;
+      if (target instanceof Element && target.closest(".g64-kb, .g64-sheet")) return;
+      if (target instanceof HTMLElement) {
+        const tag = target.tagName;
+        if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      }
+      if (isJoyFireKey(e.code)) return;
+      const down = e.type === "keydown";
+      if (down && e.repeat) return;
+      const handled = grok64RetroKeyboardFromDom(emuRef.current, e.code, e.key, down, {
+        shift: e.shiftKey,
+        ctrl: e.ctrlKey,
+        alt: e.altKey,
+      });
+      if (!handled) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    const onBlur = () => grok64KeyboardReleaseAll(emuRef.current);
+    window.addEventListener("keydown", onHostKey, true);
+    window.addEventListener("keyup", onHostKey, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      window.removeEventListener("keydown", onHostKey, true);
+      window.removeEventListener("keyup", onHostKey, true);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [s.running]);
   useEffect(() => {
     if (
       !shouldDismissPictureHold({
@@ -2260,8 +3471,10 @@ export function Grok64App() {
       raf = requestAnimationFrame(tick);
       const emu = emuRef.current;
       if (!emu) return;
-      /* Real SD2IEC/CMD — no KERNAL SoftIEC hooks. */
       const st = useEmu.getState();
+      if (mapHasDrive(st.iecMap, "sd2iec") && st.running && !playLockRef.current) {
+        void tickGrok64Iec(emu);
+      }
       if (st.mouseMode && !playLockRef.current && !st.booting && st.running) {
         const v = mouseVelRef.current;
         const b = mouseBtnRef.current;
@@ -2301,6 +3514,8 @@ export function Grok64App() {
         return;
       }
       const ok = cartFreeze(emuRef.current);
+      repaintAfterCartFreeze(emuRef.current);
+      stabilizeFreezerScreen(emuRef.current, useEmu.getState().fastLoadCart);
       glog("cart-freeze", { ok });
       toast.message(ok ? "Cart freeze" : "Cart freeze not ready");
       return;
@@ -2313,6 +3528,10 @@ export function Grok64App() {
       const ok = cartReset(emuRef.current);
       glog("cart-reset", { ok });
       toast.message(ok ? "Cart RESET" : "Cart RESET not ready");
+      return;
+    }
+    if (action === "cart-eject") {
+      await ejectCartToBasic();
       return;
     }
     if (action === "scpu-reset") {
@@ -2332,11 +3551,16 @@ export function Grok64App() {
       }
       const dir = action === "sd2iec-prev" ? -1 : 1;
       const parts = await listPartitions();
-      const disks = parts.flatMap((p) =>
-        p.files
-          .filter((f) => /\.(d64|d71|d81|g64|g71)$/i.test(f.name))
-          .map((f) => ({ name: f.name, data: new Uint8Array(f.data) })),
-      );
+      const disks = parts.flatMap((p) => {
+        const d64ish = p.files.filter((f) => /\.(d64|d71|d81|g64|g71)$/i.test(f.name));
+        if (d64ish.length) {
+          return d64ish.map((f) => ({ name: f.name, data: new Uint8Array(f.data) }));
+        }
+        if (p.files.length) {
+          return [];
+        }
+        return [];
+      });
       const result = sd2iecFreeze(emuRef.current, disks, dir, sessionUnitRef.current);
       glog("sd2iec-freeze", { ...result, dir });
       if (result.ok && result.count > 1) {
@@ -2401,6 +3625,7 @@ export function Grok64App() {
     glog("port-swap", { next, mouse: st.mouseMode });
     toast.message(st.mouseMode ? `Mouse → Port ${next}` : `Joystick → Port ${next}`);
   }, [expansionOpts]);
+  swapJoyPortRef.current = swapJoyPort;
   useEffect(() => {
     if (playModeRef.current === "disk") return;
     const plan = planPlay({
@@ -2434,6 +3659,36 @@ export function Grok64App() {
     void syncJiffy(emu, "none");
     if (s.mouseMode) plugJoysticks(emu, s.joyPort);
   }, [s.reuSize, s.iecDrive, s.iecUnit, s.mouseMode, s.joyPort, s.machineId, s.scpuSimm, s.scpuTurbo, expansionOpts, syncJiffy]);
+  useEffect(() => {
+    const emu = emuRef.current;
+    if (!emu || !s.running || playLockRef.current) return;
+    if (!mapHasDrive(s.iecMap, "sd2iec")) return;
+    const unit = Number(Object.entries(s.iecMap).find(([, v]) => v === "sd2iec")?.[0] ?? 8) as 8 | 9 | 10 | 11;
+    void (async () => {
+      const parts = await partitionsForMount();
+      const ok = remountSd2iecFromParts(emu, unit, parts);
+      if (ok) {
+        glog("sd2iec-live-remount", {
+          unit,
+          files: parts.reduce((n, p) => n + p.files.length, 0),
+        });
+      }
+    })();
+  }, [s.iecMap, s.running]);
+  useEffect(() => {
+    const emu = emuRef.current;
+    if (!emu || !s.running || playLockRef.current) return;
+    if (!mapHasDrive(s.iecMap, "sd2iec")) return;
+    const unit = Number(Object.entries(s.iecMap).find(([, v]) => v === "sd2iec")?.[0] ?? 8) as 8 | 9 | 10 | 11;
+    const onCard = () => {
+      void partitionsForMount().then((parts) => {
+        remountSd2iecFromParts(emu, unit, parts);
+        attachSd2iecBus(emu, unit);
+      });
+    };
+    window.addEventListener("g64-sd2iec-card", onCard);
+    return () => window.removeEventListener("g64-sd2iec-card", onCard);
+  }, [s.iecMap, s.running]);
   useEffect(() => {
     if (!emuRef.current || !useEmu.getState().running) return;
     if (playLockRef.current || playModeRef.current === "disk" || inGameplayRef.current) return;
@@ -2605,6 +3860,16 @@ export function Grok64App() {
   useEffect(() => {
     if (s.libraryOpen || s.settingsOpen || s.aboutOpen || diskOpen) setRailMoreOpen(false);
   }, [s.libraryOpen, s.settingsOpen, s.aboutOpen, diskOpen]);
+
+  useEffect(() => {
+    const anyOverlay =
+      s.libraryOpen || s.settingsOpen || s.aboutOpen || diskOpen || s.mapperOpen || s.snapsOpen;
+    if (!anyOverlay && s.powered) {
+      const id = window.requestAnimationFrame(() => focusGrok64Player());
+      return () => window.cancelAnimationFrame(id);
+    }
+    return undefined;
+  }, [s.libraryOpen, s.settingsOpen, s.aboutOpen, diskOpen, s.mapperOpen, s.snapsOpen, s.powered]);
   const tapPower = useCallback((e) => {
     if (e && typeof e.preventDefault === "function") e.preventDefault();
     glog("power-tap", { t: e?.type ?? "ui" });
@@ -2669,6 +3934,11 @@ export function Grok64App() {
                 : "Tap the power button. The C64 boots to READY with a blank work disk. Grab games from Software."}
           </p>
           <BuildId />
+        </div>
+      ) : null}
+      {s.powered && s.sessionRestoreHint ? (
+        <div className="g64-restore-banner" role="status">
+          Resumed your last session — <strong>{s.sessionRestoreHint}</strong>. Use <strong>CART OUT</strong> to eject; Reset restarts the cartridge.
         </div>
       ) : null}
       <header className="g64-top" hidden={!s.powered}>
@@ -2769,7 +4039,7 @@ export function Grok64App() {
                       ? cmdSwapped
                       : spec.id === "scpu-rst"
                         ? s.machineId === "scpu"
-                        : spec.id === "cart-fz"
+                        : spec.id === "cart-fz" || spec.id === "cart-out"
                           ? cartLive
                           : false
               }
@@ -2839,11 +4109,23 @@ export function Grok64App() {
           ) : null}
         </div>
         <div className="g64-top-pin">
+        <button
+          type="button"
+          className="g64-iconbtn g64-power-toggle g64-power-pin"
+          aria-label="Power off"
+          title="Power off"
+          onClick={() => powerOff()}
+        >
+          <Power className="size-5 g64-iconbtn-icon" aria-hidden="true" />
+          <span className="g64-iconbtn-label">Power</span>
+        </button>
         <button type="button" className="g64-iconbtn g64-software" data-on={s.libraryOpen} aria-label="Software" title="Software" onClick={() => s.setLibraryOpen(true)}>
-          <FolderOpen className="size-5" />
+          <FolderOpen className="size-5 g64-iconbtn-icon" aria-hidden="true" />
+          <span className="g64-iconbtn-label">Software</span>
         </button>
         <button type="button" className="g64-iconbtn g64-disk" data-on={diskOpen} aria-label="Insert disk" title="Load disk" onClick={() => setDiskOpen(true)}>
-          <Disc3 className="size-5" />
+          <Disc3 className="size-5 g64-iconbtn-icon" aria-hidden="true" />
+          <span className="g64-iconbtn-label">Load disk</span>
         </button>
         {railMoreOpen ? (
           <button
@@ -2867,7 +4149,8 @@ export function Grok64App() {
         </button>
         <div className="g64-top-icons">
         <button type="button" className="g64-iconbtn g64-rail-dup" data-on={s.showKeyboard} aria-label="Keyboard" onClick={() => { setRailMoreOpen(false); s.setShowKeyboard(!s.showKeyboard); }}>
-          <KeyboardIcon className="size-5" />
+          <KeyboardIcon className="size-5 g64-iconbtn-icon" aria-hidden="true" />
+          <span className="g64-iconbtn-label">Keyboard</span>
         </button>
         <button
           type="button"
@@ -2880,7 +4163,21 @@ export function Grok64App() {
             setPaused(emuRef.current, next);
           }}
         >
-          {s.paused ? <Play className="size-5" /> : <Pause className="size-5" />}
+          {s.paused ? <Play className="size-5 g64-iconbtn-icon" aria-hidden="true" /> : <Pause className="size-5 g64-iconbtn-icon" aria-hidden="true" />}
+          <span className="g64-iconbtn-label">{s.paused ? "Resume" : "Pause"}</span>
+        </button>
+        <button
+          type="button"
+          className="g64-iconbtn extra g64-power-toggle"
+          aria-label="Power off"
+          title="Power off"
+          onClick={() => {
+            setRailMoreOpen(false);
+            powerOff();
+          }}
+        >
+          <Power className="size-5 g64-iconbtn-icon" aria-hidden="true" />
+          <span className="g64-iconbtn-label">Power</span>
         </button>
         <button
           type="button"
@@ -2904,16 +4201,20 @@ export function Grok64App() {
             resetReady();
           }}
         >
-          <RotateCcw className="size-5" />
+          <RotateCcw className="size-5 g64-iconbtn-icon" aria-hidden="true" />
+          <span className="g64-iconbtn-label">Reset</span>
         </button>
         <button type="button" className="g64-iconbtn extra g64-rail-dup" data-on={s.muted} aria-label={s.muted ? "Unmute" : "Mute"} onClick={() => { setRailMoreOpen(false); s.setMuted(!s.muted); }}>
-          {s.muted ? <VolumeX className="size-5" /> : <Volume2 className="size-5" />}
+          {s.muted ? <VolumeX className="size-5 g64-iconbtn-icon" aria-hidden="true" /> : <Volume2 className="size-5 g64-iconbtn-icon" aria-hidden="true" />}
+          <span className="g64-iconbtn-label">{s.muted ? "Unmute" : "Mute"}</span>
         </button>
         <button type="button" className="g64-iconbtn" aria-label="Settings" onClick={() => { setRailMoreOpen(false); s.setSettingsOpen(true); }}>
-          <Settings className="size-5" />
+          <Settings className="size-5 g64-iconbtn-icon" aria-hidden="true" />
+          <span className="g64-iconbtn-label">Settings</span>
         </button>
         <button type="button" className="g64-iconbtn extra" aria-label="About" onClick={() => { setRailMoreOpen(false); s.setAboutOpen(true); }}>
-          <Info className="size-5" />
+          <Info className="size-5 g64-iconbtn-icon" aria-hidden="true" />
+          <span className="g64-iconbtn-label">About</span>
         </button>
         </div>
         </div>
@@ -2931,6 +4232,7 @@ export function Grok64App() {
           <div
             className={s.running || s.powered ? "g64-screen is-on" : "g64-screen"}
             onPointerDown={(e) => {
+              focusGrok64Player();
               pokeAudioUnlock();
               gestureUnlockAudio(emuRef.current);
               unlockAudio(emuRef.current);
@@ -2998,6 +4300,21 @@ export function Grok64App() {
           ) : null}
         </div>
       </div>
+      {s.powered && (resolved.device === "phone" || resolved.device === "tablet") ? (
+        <QuickDock
+          paused={s.paused}
+          onDisk={() => setDiskOpen(true)}
+          onReset={() => resetReady()}
+          onSnapshot={() => s.setSnapsOpen(true)}
+          onPauseToggle={() => {
+            const next = !s.paused;
+            s.setPaused(next);
+            setPaused(emuRef.current, next);
+          }}
+          onWarp={toggleWarp}
+          onSwapJoy={swapJoyPort}
+        />
+      ) : null}
       <TouchControls
         onVector={onVector}
         stickHoldRef={stickCenterHoldRef}
@@ -3040,7 +4357,7 @@ export function Grok64App() {
       <DiskMountSheet
         open={diskOpen}
         onOpenChange={setDiskOpen}
-        onPlay={(i) => void playLocal(i)}
+        onPlay={(i, meta) => void playLocal(i, meta)}
         onInsert={(i) => void insertDisk(i)}
         onBrowse={() => s.setLibraryOpen(true)}
       />

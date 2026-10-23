@@ -1,10 +1,25 @@
 import { detectDevice, detectOs, isIos, isIosPhone, isTouchMobile } from "./detect";
 import { sidOptions } from "./machines";
-import { catalogFiles, hasCmdRom, hasJiffyPair, romFileMap, romsHaveJiffyPair } from "./roms";
+import {
+  catalogFiles,
+  hasCmdRom,
+  hasJiffyPair,
+  jiffyRomPayload,
+  romFileMap,
+  romsHaveJiffyPair,
+} from "./roms";
+import {
+  clearSessionMedia,
+  removeSessionCart,
+  sessionMediaList,
+  setSessionDisk,
+  type SessionMediaSlot,
+} from "./session-media";
 import { buildViceExtras, workDiskFor } from "./vice-extras";
 import {
   iecMapFromLegacy,
   liveDriveOptions,
+  CART_PLAY_UNLOCK_VICE_OPTS,
   PLAY_UNLOCK_VICE_OPTS,
   viceDriveTypeVars,
   viceMapFromIecMap,
@@ -12,13 +27,139 @@ import {
   withLiveFloppy,
   type DriveAttach,
 } from "./play-session";
+import { viceGeosFloppyOptions } from "./vice-geos";
+import { viceReal1541TimingOptions } from "./vice-timing";
 import { cmdDriveMap, cmdSwapUnits, sd2iecSwapUnit } from "./hw-buttons";
-import type { DriveMode, IecDrive, IecMap, IecUnit, JoyPort, ReuSize, ScpuSimm, SidEngine, SidModel } from "./types";
+import {
+  attachGrok64Sd2iec,
+  bindGrok64WasmExports,
+  detachGrok64Sd2iec,
+  ensureGrok64WasmExports,
+  tickGrok64Iec,
+  wireGrok64ViceHost,
+} from "./grok64-vice-bridge";
+import { grok64RetroKeyboardAvailable } from "./grok64-keyboard";
+import { writeC64Bytes } from "./c64-memory";
+import { isCartridgePayload } from "./formats";
+import { readScreenText } from "./screen-text";
+import { setSessionCart } from "./session-media";
+import type { SdPartition } from "./sd2iec";
+import type { Sd2iecVolume } from "./sd2iec-volume";
+import type {
+  DriveMode,
+  IecDrive,
+  IecMap,
+  IecUnit,
+  JoyPort,
+  ReuSize,
+  ScpuSimm,
+  SidChipModel,
+  SidEngine,
+  SidExtraAddress,
+  SidModel,
+} from "./types";
+import type { SidLayout } from "./machines";
 import { RETRO_BTN } from "./types";
 import { glog } from "./debug";
 import { stopIosPresent, stripIosPresent } from "./ios-present";
 
-const DATA = "https://cdn.emulatorjs.org/stable/data/";
+const CDN_DATA = "https://cdn.emulatorjs.org/stable/data/";
+
+/** Local Grok64 VICE core tree (usually only `cores/vice_x64sc-wasm.data`). */
+export function grok64ViceCoreRoot(): string | null {
+  if (typeof import.meta !== "undefined" && import.meta.env?.VITE_GROK64_VICE_DATAPATH) {
+    return String(import.meta.env.VITE_GROK64_VICE_DATAPATH).replace(/\/$/, "");
+  }
+  if (typeof window !== "undefined") {
+    const w = window as unknown as { __GROK64_VICE_DATA?: string };
+    if (w.__GROK64_VICE_DATA) return w.__GROK64_VICE_DATA.replace(/\/$/, "");
+  }
+  return null;
+}
+
+/** EmulatorJS data root — CDN runtime; Grok64 blobs overridden via `filePaths`. */
+export function emulatorDataPath(): string {
+  return CDN_DATA;
+}
+
+export const GROK64_IEC_CORE_BLOB = "vice_x64sc-grok64-iec-wasm.data";
+
+/** Absolute URL of the Grok64 IEC 7z core (when configured). */
+export function grok64CoreBlobUrl(): string | null {
+  const root = grok64ViceCoreRoot();
+  if (!root) return null;
+  const rel = `${root.startsWith("/") ? root : `/${root}`}/cores/${GROK64_IEC_CORE_BLOB}`;
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return `${window.location.origin}${rel}`;
+  }
+  return rel;
+}
+
+function grok64LocalDataUrl(rel: string): string | null {
+  const root = grok64ViceCoreRoot();
+  if (!root || typeof window === "undefined" || !window.location?.origin) return null;
+  const base = root.startsWith("/") ? root : `/${root}`;
+  return `${window.location.origin}${base}/${rel.replace(/^\//, "")}`;
+}
+
+/** EmulatorJS `filePaths` keys are bare filenames (see emulator.js downloadFile). */
+const GROK64_VICE_CORE_DATA_NAMES = [
+  "vice_x64sc-wasm.data",
+  "vice_x64sc-legacy-wasm.data",
+  "vice_x64sc-thread-wasm.data",
+  "vice_x64sc-thread-legacy-wasm.data",
+] as const;
+
+export function isGrok64ViceCoreDataLeaf(leaf: string): boolean {
+  return /^vice_.*-wasm\.data$/i.test(leaf);
+}
+
+/** Per-file overrides (custom vice_x64sc WASM + shipped compression/reports). */
+export function grok64EmulatorFilePaths(): Record<string, string> | undefined {
+  const out: Record<string, string> = {};
+  const core = grok64CoreBlobUrl();
+  if (core) {
+    for (const name of GROK64_VICE_CORE_DATA_NAMES) out[name] = core;
+  }
+  for (const name of ["extract7z.js", "extractzip.js", "libunrar.js", "libunrar.wasm"]) {
+    const local = grok64LocalDataUrl(`compression/${name}`);
+    if (local) out[name] = local;
+  }
+  const report = grok64LocalDataUrl("cores/reports/vice_x64sc.json");
+  if (report) out["vice_x64sc.json"] = report;
+  return Object.keys(out).length ? out : undefined;
+}
+
+export type Grok64CoreLoadRecord = { leaf: string; url: string; action: string; at: number };
+
+export type Grok64CoreStatus = {
+  kind: string;
+  blobUrl: string | null;
+  datapath: string | null;
+  loads: Grok64CoreLoadRecord[];
+  blockedStock: string[];
+  attach: boolean;
+  c64read: boolean;
+  iecBackend: string;
+};
+
+export function grok64CoreStatus(emu: EjsInstance | null): Grok64CoreStatus {
+  const w = typeof window !== "undefined" ? (window as unknown as Record<string, unknown>) : {};
+  const mod = emu?.Module as { _grok64_sd2iec_attach?: unknown; _grok64_c64_read?: unknown } | undefined;
+  if (emu?.Module) bindGrok64WasmExports(emu.Module as Parameters<typeof bindGrok64WasmExports>[0]);
+  return {
+    kind: "vice_x64sc-grok64-iec",
+    blobUrl: grok64CoreBlobUrl(),
+    datapath: grok64ViceCoreRoot(),
+    loads: (w.__GROK64_CORE_LOADS__ as Grok64CoreLoadRecord[]) ?? [],
+    blockedStock: (w.__GROK64_STOCK_CORE_BLOCKED__ as string[]) ?? [],
+    attach: typeof mod?._grok64_sd2iec_attach === "function",
+    c64read: typeof mod?._grok64_c64_read === "function",
+    iecBackend: grok64ViceCoreRoot() ? "grok64-datapath" : "cdn-stock",
+  };
+}
+
+const DATA = CDN_DATA;
 
 const SCRIPTS = [
   "nipplejs.js",
@@ -228,6 +369,10 @@ export function guardCore(emu: EjsInstance | null) {
       glog("abort-blocked");
     };
   }
+  if (grok64ViceCoreRoot()) {
+    ensureGrok64WasmExports(emu);
+    wireGrok64ViceHost(emu);
+  }
 }
 
 function btn(i: number, on: boolean) {
@@ -404,7 +549,17 @@ function loadCss(href: string) {
 /** Warm the VICE WASM payload so power-on is not a ~39s blank on first paint. */
 export function prefetchViceCores() {
   if (typeof fetch === "undefined") return;
-  const names = isIosPhone() ? ["vice_x64sc"] : ["vice_x64sc", "vice_x64"];
+  if (grok64ViceCoreRoot()) {
+    const blob = grok64CoreBlobUrl();
+    if (blob) void fetch(blob, { mode: "cors", credentials: "omit", cache: "no-store" }).catch(() => undefined);
+    return;
+  }
+  const blob = grok64CoreBlobUrl();
+  if (blob) {
+    void fetch(blob, { mode: "cors", credentials: "omit", cache: "no-store" }).catch(() => undefined);
+    return;
+  }
+  const names = isIosPhone() ? ["vice_x64sc"] : ["vice_x64sc"];
   for (const n of names) {
     for (const ext of ["-wasm.js", "-wasm.data"] as const) {
       void fetch(`${DATA}cores/${n}${ext}`, { mode: "cors", credentials: "omit" }).catch(() => undefined);
@@ -424,11 +579,79 @@ export function ensureRuntime(): Promise<void> {
     }
     if (!window.EmulatorJS) throw new Error("EmulatorJS failed to initialize");
     patchEjsInput();
+    patchEjsGrok64CoreDownload();
   })().catch((err) => {
     scriptsReady = null;
     throw err;
   });
   return scriptsReady;
+}
+
+function recordGrok64CoreLoad(leaf: string, url: string, action: string) {
+  if (typeof window === "undefined") return;
+  const w = window as unknown as { __GROK64_CORE_LOADS__?: Grok64CoreLoadRecord[] };
+  if (!w.__GROK64_CORE_LOADS__) w.__GROK64_CORE_LOADS__ = [];
+  w.__GROK64_CORE_LOADS__.push({ leaf, url, action, at: Date.now() });
+}
+
+function recordBlockedStockCore(url: string) {
+  if (typeof window === "undefined") return;
+  const w = window as unknown as { __GROK64_STOCK_CORE_BLOCKED__?: string[] };
+  if (!w.__GROK64_STOCK_CORE_BLOCKED__) w.__GROK64_STOCK_CORE_BLOCKED__ = [];
+  w.__GROK64_STOCK_CORE_BLOCKED__.push(url);
+}
+
+/** EmulatorJS core path includes `?v=` — force single Grok64 blob; never CDN-fallback stock vice cores. */
+function patchEjsGrok64CoreDownload() {
+  const url = grok64CoreBlobUrl();
+  if (!url) return;
+  const EJS = (window as unknown as {
+    EmulatorJS?: { prototype: { downloadFile?: (...a: unknown[]) => unknown; __g64Core?: boolean } };
+  }).EmulatorJS;
+  const proto = EJS?.prototype;
+  if (!proto?.downloadFile || proto.__g64Core) return;
+  proto.__g64Core = true;
+  const orig = proto.downloadFile;
+  proto.downloadFile = function patchedDownload(...args: unknown[]) {
+    const path = String(args[0] ?? "");
+    const leaf = path.split("?")[0].split("/").pop() ?? "";
+    const isViceCoreData = isGrok64ViceCoreDataLeaf(leaf);
+    const filePaths = (this as { config?: { filePaths?: Record<string, string> } }).config?.filePaths;
+    if (isViceCoreData) {
+      recordGrok64CoreLoad(leaf, filePaths?.[leaf] ?? url, filePaths?.[leaf] ? "filePaths" : "redirect");
+      // Prefer config.filePaths (bare filename keys). Only rewrite path when unmapped.
+      if (!filePaths?.[leaf]) {
+        args[0] = url;
+        if (args.length > 3) args[3] = true;
+      }
+    }
+    if (/cdn\.emulatorjs\.org/i.test(path) && /\/cores\/vice_.*wasm\.data/i.test(path)) {
+      recordBlockedStockCore(path);
+      recordGrok64CoreLoad(leaf || path, url, "blocked-cdn");
+      args[0] = url;
+      if (args.length > 3) args[3] = true;
+    }
+    const dt = (this as { downloadType?: { core?: { cdnFallback?: boolean } } }).downloadType;
+    let prevFb: boolean | undefined;
+    if (isViceCoreData && dt?.core) {
+      prevFb = dt.core.cdnFallback;
+      dt.core.cdnFallback = false;
+    }
+    try {
+      const out = orig.apply(this, args);
+      if (out && typeof (out as Promise<unknown>).then === "function") {
+        return (out as Promise<unknown>).then((res) => {
+          if (res === -1 && isViceCoreData) {
+            throw new Error(`Grok64 core download failed for ${leaf}`);
+          }
+          return res;
+        });
+      }
+      return out;
+    } finally {
+      if (prevFb !== undefined && dt?.core) dt.core.cdnFallback = prevFb;
+    }
+  };
 }
 
 function patchEjsInput() {
@@ -542,6 +765,10 @@ export interface BootConfig {
   machineOptions: Record<string, string>;
   sidEngine: SidEngine;
   sidModel: SidModel;
+  sid2?: SidExtraAddress;
+  sid2Model?: SidChipModel;
+  sid3?: SidExtraAddress;
+  sid3Model?: SidChipModel;
   driveMode: Exclude<DriveMode, "auto">;
   joyPort: JoyPort;
   volume: number;
@@ -563,7 +790,14 @@ function coreOptions(cfg: BootConfig): Record<string, string> {
   const trueDrive = cfg.driveMode === "true";
   return {
     ...cfg.machineOptions,
-    ...sidOptions(cfg.sidEngine, cfg.sidModel),
+    ...sidOptions({
+      engine: cfg.sidEngine,
+      model: cfg.sidModel,
+      sid2: cfg.sid2 ?? "disabled",
+      sid2Model: cfg.sid2Model ?? "default",
+      sid3: cfg.sid3 ?? "disabled",
+      sid3Model: cfg.sid3Model ?? "default",
+    }),
     vice_drive_true_emulation: trueDrive ? "enabled" : "disabled",
     vice_virtual_device_traps: trueDrive ? "disabled" : "enabled",
     vice_autostart: cfg.autostart === false ? "disabled" : "enabled",
@@ -573,7 +807,7 @@ function coreOptions(cfg: BootConfig): Record<string, string> {
     vice_statusbar: "disabled",
     vice_vkbd: "disabled",
     vice_keyboard_input: "enabled",
-    vice_physical_keyboard_pass_through: "enabled",
+    vice_physical_keyboard_pass_through: "disabled",
     ...viceJoyOptions(cfg.joyPort),
     ...buildViceExtras({
       reu: cfg.reu ?? "none",
@@ -592,19 +826,25 @@ function coreOptions(cfg: BootConfig): Record<string, string> {
 
 export async function bootEmulator(el: HTMLElement, cfg: BootConfig): Promise<EjsInstance> {
   await ensureRuntime();
+  patchEjsGrok64CoreDownload();
   preserveWebglBuffer();
   keyboardArmed = false;
+  clearRuntimeViceOpts();
   const defaults = coreOptions(cfg);
   rememberWorkDisk(defaults.vice_work_disk);
+  const dataPath = emulatorDataPath();
+  const filePaths = grok64EmulatorFilePaths();
   const config: Record<string, unknown> = {
     gameUrl: cfg.gameUrl,
-    dataPath: DATA,
+    dataPath,
+    ...(filePaths ? { filePaths } : {}),
     system: cfg.core,
     gameName: (cfg.gameName || "GROK64").replace(/[#<$+%>!`&*'|{}/\\?"=@:^\r\n]/g, "").trim() || "GROK64",
     color: "#c8ccd4",
     backgroundColor: "#0a0a0b",
     volume: cfg.volume,
     startOnLoad: true,
+    webgl2: true,
     threads: false,
     noAutoFocus: false,
     disableAutoLang: true,
@@ -729,7 +969,7 @@ export function suspendAudio(emu: EjsInstance | null) {
 }
 
 export function dismissEjsPrompts(root: HTMLElement | null, mode: "boot" | "play" = "play") {
-  if (!root) return;
+  if (!root || typeof (root as HTMLElement).querySelectorAll !== "function") return;
   const nodes = root.querySelectorAll("button, a, .ejs_menu_button, .ejs_popup_container");
   for (const el of nodes) {
     const t = (el.textContent || "").replace(/\s+/g, " ").trim();
@@ -793,15 +1033,18 @@ export function plugJoysticks(emu: EjsInstance | null, _port: JoyPort = 2) {
   if (!emu) return;
   userJoyPort = _port;
   guardCore(emu);
+  const grokKbd = grok64RetroKeyboardAvailable(emu);
+  const grokDatapath = Boolean(grok64ViceCoreRoot());
+  applyRuntimeOptions(emu, {
+    vice_physical_keyboard_pass_through: grokDatapath ? "disabled" : "enabled",
+    vice_keyboard_input: "enabled",
+  });
   try {
-    emu.gameManager?.setKeyboardEnabled?.(true);
+    // Single keyboard path: libretro export OR EmulatorJS rwebinput — never both.
+    emu.gameManager?.setKeyboardEnabled?.(!grokKbd);
   } catch {
     /* ignore */
   }
-  applyRuntimeOptions(emu, {
-    vice_physical_keyboard_pass_through: "enabled",
-    vice_keyboard_input: "enabled",
-  });
   keyboardArmed = true;
   bindVirtualPad(emu);
   window.setTimeout(() => ensureValue2(emu), 250);
@@ -997,6 +1240,29 @@ let lastFitBox = { pw: 0, ph: 0, bw: 0, bh: 0 };
 
 export function resetFitCache() {
   lastFitBox = { pw: 0, ph: 0, bw: 0, bh: 0 };
+}
+
+/** Desktop/Chromium: nudge compositor so the CRT repaints without a mouse move. */
+export function bumpCrtPaint(emu: EjsInstance | null) {
+  const canvas =
+    (emu?.Module?.canvas as HTMLCanvasElement | undefined) ??
+    (document.querySelector("#grok64-player canvas:not(.g64-ios-present)") as HTMLCanvasElement | null);
+  if (!canvas) return;
+  try {
+    const prev = canvas.style.getPropertyValue("transform");
+    canvas.style.setProperty("transform", "translateZ(0.001px)");
+    void canvas.offsetWidth;
+    requestAnimationFrame(() => {
+      canvas.style.setProperty("transform", prev || "none");
+    });
+  } catch {
+    /* ignore */
+  }
+  try {
+    emu?.gameManager?.toggleMainLoop?.(1);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function fitEmu(el: HTMLElement | null, emu: EjsInstance | null, force = false) {
@@ -1201,6 +1467,15 @@ export async function recycleCore(emu: EjsInstance | null, el: HTMLElement | nul
 
 let lastWorkDisk: string | null = null;
 let lastJiffy = false;
+const lastRuntimeViceOpts: Record<string, string> = {};
+
+export function runtimeViceOpts(): Record<string, string> {
+  return { ...lastRuntimeViceOpts };
+}
+
+export function clearRuntimeViceOpts() {
+  for (const k of Object.keys(lastRuntimeViceOpts)) delete lastRuntimeViceOpts[k];
+}
 
 export function lastAppliedWorkDisk(): string | null {
   return lastWorkDisk;
@@ -1223,6 +1498,7 @@ export function applyRuntimeOptions(emu: EjsInstance | null, opts: Record<string
   for (const [k, v] of Object.entries(opts)) {
     try {
       emu.gameManager.setVariable(k, v);
+      if (k.startsWith("vice_")) lastRuntimeViceOpts[k] = v;
       if (k === "vice_work_disk") rememberWorkDisk(v);
     } catch {
       /* option may not exist on this core */
@@ -1275,14 +1551,162 @@ export function hardReset(emu: EjsInstance | null) {
  */
 export function cartFreeze(emu: EjsInstance | null): boolean {
   if (!emu?.gameManager?.setVariable && !emu?.gameManager?.restart) return false;
-  applyRuntimeOptions(emu, { vice_reset: "freeze" });
+  const mod = emu.Module as {
+    cwrap?: (name: string, ret: string | null, args: string[]) => () => void;
+    _grok64_cartridge_trigger_freeze?: () => void;
+  };
+  try {
+    const direct = mod._grok64_cartridge_trigger_freeze;
+    if (typeof direct === "function") {
+      direct();
+      repaintAfterCartFreeze(emu);
+      return true;
+    }
+    const freeze =
+      mod.cwrap?.("grok64_cartridge_trigger_freeze", null, []) ??
+      mod.cwrap?.("cartridge_trigger_freeze", null, []);
+    if (typeof freeze === "function") {
+      freeze();
+      repaintAfterCartFreeze(emu);
+      return true;
+    }
+  } catch {
+    /* stock core */
+  }
+  applyRuntimeOptions(emu, {
+    vice_reset: "freeze",
+    vice_autostart: "disabled",
+    vice_autostart_warp: "disabled",
+    vice_autoloadwarp: "disabled",
+  });
   resetEmu(emu);
-  joyInput(emu, RETRO_BTN.R3, true);
-  window.setTimeout(() => {
-    joyInput(emu, RETRO_BTN.R3, false);
-    applyRuntimeOptions(emu, { vice_reset: "soft" });
-  }, 80);
+  repaintAfterCartFreeze(emu);
   return true;
+}
+
+/** Freezer UIs (SS/AR/FC) need an extra compositor nudge after vice_reset=freeze. */
+export function repaintAfterCartFreeze(emu: EjsInstance | null) {
+  bumpCrtPaint(emu);
+  try {
+    emu?.gameManager?.toggleMainLoop?.(1);
+  } catch {
+    /* ignore */
+  }
+  window.setTimeout(() => bumpCrtPaint(emu), 350);
+  window.setTimeout(() => bumpCrtPaint(emu), 900);
+}
+
+/**
+ * Super Snapshot / freezer menus expect standard text-mode VIC banking.
+ * Wrong $d011/$d018 after freeze shows repeated header bands on the CRT.
+ */
+export function isSuperSnapshotCartHint(cartHint?: string | null): boolean {
+  if (!cartHint) return false;
+  const h = cartHint.toLowerCase();
+  return h.includes("super-snapshot") || /^ss\d|snapshot\s*v/i.test(h) || /^ss/i.test(h);
+}
+
+export function stabilizeFreezerScreen(emu: EjsInstance | null, cartHint?: string | null) {
+  if (!emu || !isSuperSnapshotCartHint(cartHint)) return;
+  writeC64Bytes(emu, 0xd011, new Uint8Array([0x1b]));
+  writeC64Bytes(emu, 0xd016, new Uint8Array([0x08]));
+  writeC64Bytes(emu, 0xd018, new Uint8Array([0x14]));
+  writeC64Bytes(emu, 0xd020, new Uint8Array([0x14]));
+  bumpCrtPaint(emu);
+}
+
+let superSnapshotVicFixGen = 0;
+
+/** Drop pending SS5 VIC poke timers before WASM recycle (stale timers corrupt the next core). */
+export function cancelSuperSnapshotVicFix() {
+  superSnapshotVicFixGen += 1;
+}
+
+/** SS5 menu: repeated LMS header bands when VIC-II text matrix is wrong. */
+export function scheduleSuperSnapshotVicFix(emu: EjsInstance | null, cartHint?: string | null) {
+  if (!emu || !isSuperSnapshotCartHint(cartHint)) return;
+  cancelSuperSnapshotVicFix();
+  const gen = superSnapshotVicFixGen;
+  for (const ms of [0, 120, 400, 900, 1800, 3500]) {
+    window.setTimeout(() => {
+      if (gen !== superSnapshotVicFixGen) return;
+      if (!emu?.gameManager) return;
+      stabilizeFreezerScreen(emu, cartHint);
+    }, ms);
+  }
+}
+
+/** True when the live core booted from (or still has) a CRT in MEMFS. */
+export function cartMountedOnCore(emu: EjsInstance | null): boolean {
+  if (!emu) return false;
+  const boot = bootFileOf(emu);
+  if (boot && /\.(crt|bin)$/i.test(boot)) return true;
+  return readMountedMedia(emu).some((m) => /\.(crt|bin)$/i.test(m.name));
+}
+
+/** Attach a .crt/.bin on the live core — never through floppy autostart / WORK DISK. */
+export async function attachCartridgeInPlace(
+  emu: EjsInstance | null,
+  data: Uint8Array,
+  fileName: string,
+): Promise<boolean> {
+  if (!emu || !coreHasFs(emu) || !isCartridgePayload(data, fileName)) return false;
+  const base = fileName.replace(/^\//, "");
+  disarmAutostart(emu, "cart");
+  if (!writeBootFile(emu, data, base)) return false;
+  emu.fileName = base;
+  unitMounts.delete(8);
+  setSessionCart(base, data);
+  applyRuntimeOptions(emu, {
+    ...CART_PLAY_UNLOCK_VICE_OPTS,
+    vice_drive_true_emulation: "enabled",
+    vice_virtual_device_traps: "disabled",
+    vice_work_disk: "disabled",
+  });
+  await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
+  autostartAfterReady(emu, false, { autoloadWarp: true });
+  resetEmu(emu);
+  await flushEmuFs(emu, 600);
+  bumpCrtPaint(emu);
+  return true;
+}
+
+/** Remove a CRT that was loaded as content and return to the work disk. */
+export function cartEject(emu: EjsInstance | null, workDisk?: Uint8Array | null): boolean {
+  if (!emu || !coreHasFs(emu)) return false;
+  const FS = fsOf(emu);
+  if (!FS?.writeFile) return false;
+  const boot = bootFileOf(emu);
+  const isCartBoot = boot && /\.(crt|bin)$/i.test(boot);
+  for (const m of readMountedMedia(emu)) {
+    if (/\.(crt|bin)$/i.test(m.name)) {
+      try {
+        FS.unlink?.(m.name.startsWith("/") ? m.name : `/${m.name}`);
+      } catch {
+        /* missing */
+      }
+      try {
+        FS.unlink?.(m.name.replace(/^\//, ""));
+      } catch {
+        /* missing */
+      }
+    }
+  }
+  const workName = "WORK DISK.D64";
+  if (workDisk && workDisk.byteLength > 0) writeBootFile(emu, workDisk, workName);
+  emu.fileName = workName;
+  applyRuntimeOptions(emu, {
+    vice_autostart: "disabled",
+    vice_autostart_warp: "disabled",
+    vice_autoloadwarp: "disabled",
+    vice_reset: "hard",
+  });
+  resetEmu(emu);
+  removeSessionCart();
+  disarmAutostart(emu, "disk");
+  hardReset(emu);
+  bumpCrtPaint(emu);
+  return Boolean(isCartBoot || workDisk);
 }
 
 /** Retro Replay / freezer-cart RESET button (long-press on CART FZ). */
@@ -1451,6 +1875,17 @@ export function jiffyPairLanded(emu: EjsInstance | null): boolean {
     const has1541 = d41.some((n) => fsFileExists(FS, `${root}/${n}`));
     if (hasC64 && has1541) return true;
   }
+  if (!FS.readdir) return false;
+  for (const root of VICE_SYSTEM_ROOTS) {
+    try {
+      const names = FS.readdir(root);
+      const hasC64 = names.some((n) => /JIFFYDOS_C64/i.test(n) && fsFileExists(FS, `${root}/${n}`));
+      const has1541 = names.some((n) => /JIFFYDOS_1541/i.test(n) && fsFileExists(FS, `${root}/${n}`));
+      if (hasC64 && has1541) return true;
+    } catch {
+      /* next */
+    }
+  }
   return false;
 }
 
@@ -1498,7 +1933,7 @@ export async function applyJiffyDos(emu: EjsInstance | null, want: boolean): Pro
   if (!romsHaveJiffyPair(roms)) {
     return finalizeJiffyOption(emu, false);
   }
-  injectRoms(emu, roms);
+  injectRoms(emu, jiffyRomPayload(roms));
   await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
   return finalizeJiffyOption(emu, jiffyPairLanded(emu));
 }
@@ -1511,7 +1946,7 @@ export function applyJiffyFromRoms(
 ): boolean {
   if (!emu) return false;
   if (!want || !romsHaveJiffyPair(roms)) return finalizeJiffyOption(emu, false);
-  injectRoms(emu, roms);
+  injectRoms(emu, jiffyRomPayload(roms));
   return finalizeJiffyOption(emu, jiffyPairLanded(emu));
 }
 
@@ -1612,8 +2047,68 @@ export function bootFileOf(emu: EjsInstance | null): string | null {
 const unitMounts = new Map<IecUnit, string>();
 const WORK_DISK_NAMES = new Set(["WORK DISK.D64", "work disk.d64"]);
 
+/**
+ * Mirror a .d64 into paths VICE libretro reads for `vice_work_disk` (see update_work_disk in libretro-core.c).
+ * RetroArch save dir is `/data/saves` → `vice_work.d64` is what file_system_attach_disk(8,…) opens.
+ */
+export function syncViceWorkD64(emu: EjsInstance | null, data: Uint8Array) {
+  const FS = fsOf(emu);
+  if (!FS?.writeFile || data.byteLength < 174848) return;
+  const targets = [
+    "/data/saves/vice_work.d64",
+    "/home/web_user/retroarch/userdata/saves/vice_work.d64",
+    "/vice_work/vice_work.d64",
+    "/home/web_user/retroarch/userdata/saves/vice_work/vice_work.d64",
+  ];
+  for (const path of targets) {
+    try {
+      const dir = path.slice(0, path.lastIndexOf("/"));
+      mkdirFs(FS, dir);
+      FS.writeFile(path, data);
+    } catch {
+      /* optional */
+    }
+  }
+}
+
+/** Force libretro to detach/reattach the work disk image after MEMFS/IDBFS bytes change. */
+export async function refreshViceWorkDisk(emu: EjsInstance | null, unit: IecUnit = 8): Promise<void> {
+  if (!emu) return;
+  const slot = `${unit}_d64`;
+  const disarm = {
+    vice_autostart: "disabled",
+    vice_autostart_warp: "disabled",
+    vice_autoloadwarp: "disabled",
+  };
+  applyRuntimeOptions(emu, { ...disarm, vice_work_disk: "disabled", vice_reset: "hard" });
+  resetEmu(emu);
+  await flushEmuFs(emu, 800);
+  applyRuntimeOptions(emu, { ...disarm, vice_work_disk: slot, vice_reset: "hard" });
+  resetEmu(emu);
+  await flushEmuFs(emu, 1500);
+  bumpCrtPaint(emu);
+  await new Promise((r) => setTimeout(r, 250));
+}
+
+/** QA: bytes on MEMFS path VICE opens for `8_d64` work disk attach. */
+export function viceWorkD64ByteLength(emu: EjsInstance | null): number {
+  const FS = fsOf(emu);
+  if (!FS?.readFile) return 0;
+  for (const path of ["/data/saves/vice_work.d64", "/home/web_user/retroarch/userdata/saves/vice_work.d64"]) {
+    try {
+      const raw = FS.readFile(path);
+      if (raw instanceof Uint8Array) return raw.byteLength;
+      if (typeof raw === "string") return raw.length;
+    } catch {
+      /* try next */
+    }
+  }
+  return 0;
+}
+
 export function clearUnitMounts() {
   unitMounts.clear();
+  clearSessionMedia();
 }
 
 export function applyIecUnit(emu: EjsInstance | null, iec: IecDrive, unit: IecUnit) {
@@ -1658,7 +2153,7 @@ export async function prepareCore(
     live: DriveAttach;
     user: DriveAttach;
     jiffyWant: boolean;
-    sdParts?: { id: number; files: { name: string; data: Uint8Array }[] }[];
+    sdParts?: SdPartition[];
     /** Hot-swap must not flip vice_jiffydos — that reset drops unit 8 on CriOS. */
     skipJiffy?: boolean;
     driveMap?: IecMap;
@@ -1669,7 +2164,7 @@ export async function prepareCore(
   let cmd = false;
   try {
     const files = await romFileMap();
-    if (Object.keys(files).length) roms = injectRoms(emu, files);
+    if (Object.keys(files).length) roms = injectRoms(emu, jiffyRomPayload(files));
     const wantsCmd =
       opts.user.iec === "cmdhd" || Object.values(opts.driveMap ?? {}).includes("cmdhd");
     cmd = wantsCmd && (await hasCmdRom());
@@ -1684,9 +2179,10 @@ export async function prepareCore(
       if (viceMap[unit] === "cmdhd") delete viceMap[unit];
     }
   }
-  injectViceRc(emu, viceRcForDrives(viceMap, opts.live.iec === "sd2iec"));
-  if (opts.live.iec === "sd2iec" && opts.sdParts?.length) {
-    injectSdWork(emu, opts.sdParts);
+  injectViceRc(emu, viceRcForDrives(viceMap, false));
+  if (opts.live.iec === "sd2iec") {
+    wireGrok64ViceHost(emu);
+    attachGrok64Sd2iec(emu, opts.live.unit);
   }
   applyRuntimeOptions(emu, viceDriveTypeVars(viceMap));
   applyIecUnit(emu, opts.live.iec, opts.live.unit);
@@ -1722,9 +2218,9 @@ export function autostartAfterReady(
  * Stop Autostart / autoload-warp after LOAD has been typed. Does not restart
  * the core, recycle WASM, or touch unit 8.
  */
-export function disarmAutostart(emu: EjsInstance | null) {
-  applyRuntimeOptions(emu, { ...PLAY_UNLOCK_VICE_OPTS });
-  glog("autostart-disarmed");
+export function disarmAutostart(emu: EjsInstance | null, mode?: "cart" | "disk") {
+  applyRuntimeOptions(emu, mode === "cart" ? { ...CART_PLAY_UNLOCK_VICE_OPTS } : { ...PLAY_UNLOCK_VICE_OPTS });
+  glog("autostart-disarmed", { mode: mode ?? "disk" });
 }
 
 function removeMediaFile(FS: EmscriptenFS, name: string) {
@@ -1758,6 +2254,7 @@ export function mountDiskOnUnit(
   const wrote = writeBootFile(emu, data, base);
   if (wrote) {
     unitMounts.set(unit, base);
+    setSessionDisk(base, data, unit);
     pruneExtraDisks(emu);
   }
   return wrote;
@@ -1792,6 +2289,107 @@ export function swapBootDisk(emu: EjsInstance | null, data: Uint8Array, fallback
  * #60 wrote a *new* filename instead of this overwrite — unit 8 stayed
  * the blank work disk and Autostart typed FILE NOT FOUND (not DNP).
  */
+/** Wait until KERNAL prints READY (after hard reset / GEOS mount). */
+export async function waitForC64Ready(emu: EjsInstance | null, timeoutMs = 45_000): Promise<boolean> {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    const text = readScreenText(emu);
+    if (/READY/i.test(text)) return true;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return /READY/i.test(readScreenText(emu));
+}
+
+/** GEOS / Wheels need the stock KERNAL — JiffyDOS ROM breaks LOAD/RUN into the deskTop. */
+export async function ensureStockKernal(emu: EjsInstance | null): Promise<boolean> {
+  if (!emu) return false;
+  await applyJiffyDos(emu, false);
+  await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
+  return true;
+}
+
+/** Mount a GEOS (or other) system disk on unit 8 as true 1541-II, no autostart PRG sniff. */
+export async function bootGeosFloppy(
+  emu: EjsInstance | null,
+  data: Uint8Array,
+  fileName: string,
+  unit: IecUnit = 8,
+  iecMap?: IecMap,
+): Promise<boolean> {
+  if (!emu || !coreHasFs(emu)) return false;
+  await ensureStockKernal(emu);
+  wireGrok64ViceHost(emu);
+  detachGrok64Sd2iec(emu, unit);
+  await tickGrok64Iec(emu);
+  const viceMap = iecMap
+    ? viceMapFromIecMap({ ...iecMap, [unit]: "1541" })
+    : { [unit]: "1541" as IecDrive };
+  applyRuntimeOptions(emu, {
+    ...viceDriveTypeVars(viceMap),
+    ...viceGeosFloppyOptions(unit),
+    [`vice_drive${unit}_type`]: "1542",
+    vice_work_disk: `${unit}_d64`,
+  });
+  injectViceRc(
+    emu,
+    ["[C64]", `Drive${unit}Type=1542`, "DriveTrueEmulation=1", "VirtualDevices=0"].join("\n") + "\n",
+  );
+  applyIecUnit(emu, "1541", unit);
+  disarmAutostart(emu, "disk");
+
+  applyRuntimeOptions(emu, {
+    ...viceGeosFloppyOptions(unit),
+    [`vice_drive${unit}_type`]: "1542",
+    vice_work_disk: `${unit}_d64`,
+  });
+  applyIecUnit(emu, "1541", unit);
+
+  const target = "WORK DISK.D64";
+  if (!writeBootFile(emu, data, target)) return false;
+  emu.fileName = target.replace(/^\//, "");
+  unitMounts.set(unit, target);
+  setSessionDisk(fileName.replace(/^\//, ""), data, unit);
+  syncViceWorkD64(emu, data);
+  if (viceWorkD64ByteLength(emu) < 174848) {
+    glog("geos-work-mirror-miss", { bytes: viceWorkD64ByteLength(emu) });
+  }
+
+  const flushed = await flushEmuFs(emu, 3000);
+  if (!flushed) return false;
+  await refreshViceWorkDisk(emu, unit);
+  applyRuntimeOptions(emu, {
+    ...viceGeosFloppyOptions(unit),
+    [`vice_drive${unit}_type`]: "1542",
+    vice_work_disk: `${unit}_d64`,
+  });
+  resetEmu(emu);
+  await flushEmuFs(emu, 1200);
+  applyRuntimeOptions(emu, {
+    ...viceGeosFloppyOptions(unit),
+    [`vice_drive${unit}_type`]: "1542",
+    vice_work_disk: `${unit}_d64`,
+  });
+  return await waitForC64Ready(emu, 45_000);
+}
+
+/** VICE autostart LOAD"*",8,1 — fallback when typed LOAD"GEOS" returns to BASIC. */
+export async function tryGeosDiskAutostart(emu: EjsInstance | null, unit: IecUnit = 8): Promise<boolean> {
+  if (!emu) return false;
+  disarmAutostart(emu, "disk");
+  applyRuntimeOptions(emu, {
+    ...viceGeosFloppyOptions(unit),
+    [`vice_drive${unit}_type`]: "1542",
+    vice_autostart: "enabled",
+    vice_autostart_warp: "enabled",
+    vice_autoloadwarp: "enabled",
+    vice_reset: "autostart",
+  });
+  resetEmu(emu);
+  await flushEmuFs(emu, 2000);
+  bumpCrtPaint(emu);
+  return await waitForC64Ready(emu, 60_000);
+}
+
 export function attachAutostartDisk(
   emu: EjsInstance | null,
   data: Uint8Array,
@@ -1799,6 +2397,7 @@ export function attachAutostartDisk(
   iec: IecDrive = "1541",
   unit: IecUnit = 8,
 ): boolean {
+  if (isCartridgePayload(data, _fallbackName ?? bootFileOf(emu))) return false;
   applyIecUnit(emu, iec, unit);
   // Only overwrite the mounted boot image. A new filename leaves unit 8
   // as the blank work disk — LOAD"*",8,1 then FILE NOT FOUND (#60/#61).
@@ -1809,6 +2408,11 @@ export function attachAutostartDisk(
     unitMounts.set(unit, mounted);
     if (emu) emu.fileName = mounted;
     applyIecUnit(emu, iec, unit);
+    const label = (_fallbackName || mounted).replace(/^\//, "");
+    setSessionDisk(label, data, unit);
+    if (data.byteLength >= 174848 && /\.d64$/i.test(mounted)) {
+      syncViceWorkD64(emu, data);
+    }
   }
   return wrote;
 }
@@ -1816,6 +2420,50 @@ export function attachAutostartDisk(
 export function coreHasFs(emu: EjsInstance | null): boolean {
   const FS = fsOf(emu);
   return Boolean(FS?.writeFile && FS.readFile);
+}
+
+export function mountSd2iecD64(emu: EjsInstance | null, unit: IecUnit, data: Uint8Array): boolean {
+  const format = data.byteLength >= 819200 ? "d81" : "d64";
+  const driveType = format === "d81" ? "1581" : "1541";
+  return mountSd2iecVolume(emu, unit, { data, format, driveType, blocksUsed: 0 });
+}
+
+export function mountSd2iecVolume(emu: EjsInstance | null, unit: IecUnit, vol: Sd2iecVolume): boolean {
+  const min = vol.format === "d81" ? 819200 : 174848;
+  if (!emu || vol.data.byteLength < min) return false;
+  const ext = vol.format === "d81" ? "D81" : "D64";
+  const name = `SD2IEC${unit}.${ext}`;
+  const wrote = writeBootFile(emu, vol.data, name);
+  if (wrote) {
+    emu.fileName = name;
+    unitMounts.set(unit, name);
+    glog("sd2iec-volume-mount", { unit, name, format: vol.format, bytes: vol.data.byteLength });
+  }
+  return wrote;
+}
+
+export function remountSd2iecFromParts(
+  emu: EjsInstance | null,
+  unit: IecUnit,
+  _parts?: SdPartition[],
+): boolean {
+  if (!emu) return false;
+  wireGrok64ViceHost(emu);
+  attachGrok64Sd2iec(emu, unit);
+  applyIecUnit(emu, "sd2iec", unit);
+  return true;
+}
+
+/** Write sidecar files (e.g. `.reu` next to a `.prg`) before VICE autostart. */
+export function writeCompanionMedia(
+  emu: EjsInstance | null,
+  files: { name: string; data: Uint8Array }[],
+): number {
+  let n = 0;
+  for (const f of files) {
+    if (writeBootFile(emu, f.data, f.name.replace(/^\//, ""))) n += 1;
+  }
+  return n;
 }
 
 export function writeBootFile(emu: EjsInstance | null, data: Uint8Array, preferred?: string | null): boolean {
@@ -1843,6 +2491,54 @@ export function writeBootFile(emu: EjsInstance | null, data: Uint8Array, preferr
 
 const MEDIA_EXT = /\.(d64|d71|d81|g64|g71|crt|tap|t64)$/i;
 const SKIP_DIR = new Set(["dev", "proc", "core", "tmp"]);
+
+/** UI / QA list — hide stale blank.d64; label work disk after Insert. */
+function mergeSessionMedia(
+  fsMedia: { name: string; data: Uint8Array }[],
+  displayName?: string | null,
+): { name: string; data: Uint8Array }[] {
+  const session = sessionMediaList();
+  if (!session.length) {
+    const out: { name: string; data: Uint8Array }[] = [];
+    for (const m of fsMedia) {
+      if (/^blank\.d64$/i.test(m.name)) continue;
+      const isWork = WORK_DISK_NAMES.has(m.name.toUpperCase()) || /^work\s*disk/i.test(m.name);
+      if (isWork && displayName) {
+        out.push({ name: displayName, data: m.data });
+        continue;
+      }
+      out.push(m);
+    }
+    if (!out.length && displayName) {
+      const work = fsMedia.find(
+        (m) => WORK_DISK_NAMES.has(m.name.toUpperCase()) || /work\s*disk/i.test(m.name),
+      );
+      if (work) out.push({ name: displayName, data: work.data });
+    }
+    return out;
+  }
+  const out: SessionMediaSlot[] = [...session];
+  for (const m of fsMedia) {
+    if (/^blank\.d64$/i.test(m.name)) continue;
+    if (WORK_DISK_NAMES.has(m.name.toUpperCase())) continue;
+    if (out.some((s) => s.name === m.name)) continue;
+    out.push({ name: m.name, bytes: m.data, kind: /\.(crt|bin)$/i.test(m.name) ? "cart" : "disk" });
+  }
+  return out.map((s) => ({ name: s.name, data: s.bytes }));
+}
+
+export function readMountedMediaForUi(
+  emu: EjsInstance | null,
+  displayName?: string | null,
+): { name: string; data: Uint8Array }[] {
+  return mergeSessionMedia(readMountedMedia(emu), displayName);
+}
+
+export function applyReal1541Timing(emu: EjsInstance | null, unit: IecUnit = 8): void {
+  if (!emu) return;
+  applyRuntimeOptions(emu, viceReal1541TimingOptions(unit));
+  setWarp(emu, false);
+}
 
 export function readMountedMedia(emu: EjsInstance | null): { name: string; data: Uint8Array }[] {
   const FS = fsOf(emu);

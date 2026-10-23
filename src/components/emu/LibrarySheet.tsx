@@ -28,14 +28,19 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<"catalog" | "library">("catalog");
+  const tab = useEmu((st) => st.libraryTab);
+  const setTab = useEmu((st) => st.setLibraryTab);
 
   async function refresh() {
     setLibrary(await listLibrary());
   }
 
   function runSaved(items: LibraryItem[]) {
-    const boot = pickBootFile(items.filter((i) => !isWorkDisk(i.name)));
+    const pool = items.filter((i) => !isWorkDisk(i.name));
+    const geos =
+      pool.find((i) => /wheels/i.test(i.name) && /\.d64$/i.test(i.name)) ??
+      pool.find((i) => /geos/i.test(i.name) && /\.d64$/i.test(i.name));
+    const boot = geos ?? pickBootFile(pool);
     if (!boot) return false;
     setOpen(false);
     onPlayLocal(boot);
@@ -100,10 +105,28 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
           <p className="lead">Search Assembly64 for games, carts, disks and SID — no links to paste. Tap Play and the file stays on this device so SAVE works.</p>
 
           <div className="g64-seg mb-3">
-            <button type="button" data-on={tab === "catalog"} onClick={() => setTab("catalog")}>
+            <button
+              type="button"
+              data-on={tab === "catalog"}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setTab("catalog");
+              }}
+            >
               Catalog
             </button>
-            <button type="button" data-on={tab === "library"} onClick={() => setTab("library")}>
+            <button
+              type="button"
+              data-on={tab === "library"}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setTab("library");
+              }}
+            >
               On this device{library.length ? ` · ${library.length}` : ""}
             </button>
           </div>

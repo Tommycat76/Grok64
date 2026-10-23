@@ -21,18 +21,21 @@ import { useEmu } from "@/lib/emu/store";
 import type { LibraryItem } from "@/lib/emu/types";
 
 interface Props {
-  onPlay: (item: LibraryItem) => void;
+  onPlay: (item: LibraryItem, meta?: { catalogKey: string; title: string }) => void;
   onInsert?: (item: LibraryItem) => void;
 }
 
-async function fetchRemote(file: CatalogFile): Promise<{ name: string; data: Uint8Array }> {
+async function fetchRemote(
+  file: CatalogFile,
+  signal?: AbortSignal,
+): Promise<{ name: string; data: Uint8Array }> {
   const payload = {
     name: file.name,
     ...(file.url ? { url: file.url } : {}),
     ...(file.a64 ? { a64: file.a64 } : {}),
   };
   try {
-    const res = await downloadCatalogFileClient(payload);
+    const res = await downloadCatalogFileClient(payload, { signal });
     return { name: res.name || file.name, data: b64ToU8(res.base64) };
   } catch {
     /* static Plex hosts have no serverFn — try legacy path when client fetch fails */
@@ -56,24 +59,43 @@ export function CatalogPanel({ onPlay, onInsert }: Props) {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [openKey, setOpenKey] = useState<string | null>(null);
   const [files, setFiles] = useState<Record<string, CatalogFile[]>>({});
-  const timer = useRef<number | null>(null);
   const boot = useRef(false);
+  const downloadAbort = useRef<AbortController | null>(null);
+  const searchAbort = useRef<AbortController | null>(null);
+  const searchGen = useRef(0);
+  const libraryOpen = useEmu((s) => s.libraryOpen);
+
+  useEffect(() => {
+    if (!libraryOpen) {
+      downloadAbort.current?.abort();
+      downloadAbort.current = null;
+    }
+  }, [libraryOpen]);
 
   async function runSearch(q: string, k: CatalogKind) {
+    const gen = ++searchGen.current;
+    searchAbort.current?.abort();
+    searchAbort.current = new AbortController();
     setSearching(true);
+    setHits([]);
+    setOpenKey(null);
     try {
       let res;
       try {
         res = await searchCatalog({ data: { query: q, kind: k } });
       } catch {
-        res = await searchCatalogClient({ query: q, kind: k });
+        res = await searchCatalogClient({ query: q, kind: k }, { signal: searchAbort.current.signal });
       }
+      if (gen !== searchGen.current) return;
       setHits(res.hits);
       setA64(res.a64);
     } catch (err) {
+      if (gen !== searchGen.current) return;
+      if (err instanceof Error && err.name === "AbortError") return;
       toast.error(err instanceof Error ? err.message : "Search failed");
+      setHits([]);
     } finally {
-      setSearching(false);
+      if (gen === searchGen.current) setSearching(false);
     }
   }
 
@@ -84,33 +106,48 @@ export function CatalogPanel({ onPlay, onInsert }: Props) {
     }
   }, []);
 
+  const scheduleRef = useRef<number | null>(null);
   function schedule(q: string, k: CatalogKind) {
-    if (timer.current) window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => void runSearch(q, k), 380);
+    if (scheduleRef.current) window.clearTimeout(scheduleRef.current);
+    setHits([]);
+    setSearching(true);
+    scheduleRef.current = window.setTimeout(() => void runSearch(q, k), 380);
   }
 
   async function refresh() {
     setLibrary(await listLibrary());
   }
 
-  async function ingest(file: CatalogFile, mode: "play" | "save" | "insert") {
-    const got = await fetchRemote(file);
+  async function ingest(
+    file: CatalogFile,
+    mode: "play" | "save" | "insert",
+    catalogKey: string,
+    catalogTitle: string,
+  ) {
+    downloadAbort.current?.abort();
+    downloadAbort.current = new AbortController();
+    const signal = downloadAbort.current.signal;
+    const got = await fetchRemote(file, signal);
     const parts = explodeArchive(got.name, got.data);
-    const chosen = pickBootFile(parts, file.name) ?? parts[0];
+    const chosen = pickBootFile(parts, catalogTitle || file.name) ?? parts[0];
     if (!chosen) throw new Error("No C64 file in that download.");
     let first: LibraryItem | null = null;
     for (const part of parts) {
-      const item = await putFile(part.name, toArrayBuffer(part.data), "catalog");
+      const item = await putFile(part.name, toArrayBuffer(part.data), "catalog", {
+        catalogKey,
+        catalogTitle,
+      });
       if (!first || part.name === chosen.name) first = item;
     }
     await refresh();
     toast.success(parts.length > 1 ? `Saved ${parts.length} files on this device` : `Saved ${chosen.name} on this device`);
-    if (mode === "play" && first) onPlay(first);
+    if (mode === "play" && first) onPlay(first, { catalogKey, title: catalogTitle });
     if (mode === "insert" && first) onInsert?.(first);
     return first;
   }
 
   async function grabHit(hit: CatalogHit, mode: "play" | "save" | "insert") {
+    const token = hit.key;
     setBusyKey(hit.key);
     try {
       let list = files[hit.key];
@@ -129,8 +166,9 @@ export function CatalogPanel({ onPlay, onInsert }: Props) {
       const bootFile = pickBootFile(list, hit.title);
       if (!bootFile) throw new Error("No disk, cart or SID in that release.");
       if (list.length > 1) setOpenKey(hit.key);
-      await ingest(bootFile, mode);
+      await ingest(bootFile, mode, token, hit.title);
     } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
       toast.error(err instanceof Error ? err.message : "Download failed");
     } finally {
       setBusyKey(null);
@@ -140,8 +178,9 @@ export function CatalogPanel({ onPlay, onInsert }: Props) {
   async function grabFile(hit: CatalogHit, file: CatalogFile, mode: "play" | "save" | "insert") {
     setBusyKey(`${hit.key}:${file.name}`);
     try {
-      await ingest(file, mode);
+      await ingest(file, mode, hit.key, hit.title);
     } catch (err) {
+      if (err instanceof Error && err.name === "AbortError") return;
       toast.error(err instanceof Error ? err.message : "Download failed");
     } finally {
       setBusyKey(null);
@@ -185,6 +224,7 @@ export function CatalogPanel({ onPlay, onInsert }: Props) {
             data-on={kind === c.id}
             onClick={() => {
               setKind(c.id);
+              setHits([]);
               void runSearch(query, c.id);
             }}
           >
@@ -198,6 +238,10 @@ export function CatalogPanel({ onPlay, onInsert }: Props) {
           ? "Assembly64, HVSC and the Internet Archive. Tap Play — the file stays on this device so disks can SAVE."
           : "Searching HVSC and the Internet Archive. Assembly64 joins when the network allows."}
       </p>
+
+      {searching && hits.length === 0 ? (
+        <p className="px-1 text-sm text-fg-muted">Searching…</p>
+      ) : null}
 
       <div className="g64-list">
         {hits.length === 0 && !searching ? (

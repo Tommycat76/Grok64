@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { createServer } from "vite";
 
@@ -103,7 +106,9 @@ test("does not use locale-like names as a signal", () => {
 
 test("work disk BAM name is detected so it cannot replace a game", async () => {
   const { readFileSync } = await import("node:fs");
-  const blank = new Uint8Array(readFileSync("/workspace/public/software/blank.d64"));
+  const blank = new Uint8Array(
+    readFileSync(join(fileURLToPath(new URL(".", import.meta.url)), "..", "public", "software", "blank.d64")),
+  );
   assert.equal(d64DiskName(blank), "WORK DISK");
   assert.equal(isWorkDiskImage(blank), true);
   const other = blank.slice();
