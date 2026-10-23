@@ -130,6 +130,38 @@ export function detectFastLoadCart(name: string, title?: string | null): FastLoa
   return null;
 }
 
+/** IndexedDB basenames often omit .crt — sniff CRT payload when filename detection fails. */
+export function detectFastLoadCartFromPayload(
+  data: Uint8Array,
+  name: string,
+  title?: string | null,
+): FastLoadCartKind | null {
+  const byName = detectFastLoadCart(name, title);
+  if (byName && byName !== "other-fastload") return byName;
+  if (data.byteLength < 64) return byName;
+  const head = new TextDecoder("latin1", { fatal: false }).decode(
+    data.subarray(0, Math.min(2048, data.byteLength)),
+  );
+  const hay = `${head} ${cartDetectHay(name, title)}`;
+  for (const { kind, re } of DETECT) {
+    if (re.test(hay)) return kind;
+  }
+  return byName;
+}
+
+/**
+ * Freezer / fast-load carts need stock KERNAL during boot when Jiffy would clash.
+ * Unknown CRT + Jiffy ON → stock KERNAL (safe default for IndexedDB mystery names).
+ */
+export function jiffyAllowedDuringCartBoot(
+  jiffyDosSetting: boolean,
+  fastCart: FastLoadCartKind | null,
+): boolean {
+  if (!jiffyDosSetting) return false;
+  if (!fastCart) return false;
+  return resolveJiffyWant(jiffyDosSetting, fastCart) && !jiffyCartCompat(fastCart, true).suppressJiffy;
+}
+
 function superSnapshotJiffy(levelLabel: string): JiffyCartCompat {
   return {
     level: "incompatible",

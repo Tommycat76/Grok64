@@ -41,6 +41,8 @@ import {
 import { grok64RetroKeyboardAvailable } from "./grok64-keyboard";
 import { writeC64Bytes } from "./c64-memory";
 import { isCartridgePayload } from "./formats";
+import type { FastLoadCartKind } from "./jiffy-cart-compat";
+import { jiffyAllowedDuringCartBoot } from "./jiffy-cart-compat";
 import { readScreenText } from "./screen-text";
 import { setSessionCart } from "./session-media";
 import type { SdPartition } from "./sd2iec";
@@ -1649,6 +1651,7 @@ export async function attachCartridgeInPlace(
   emu: EjsInstance | null,
   data: Uint8Array,
   fileName: string,
+  opts?: { jiffyDos?: boolean; fastCart?: FastLoadCartKind | null },
 ): Promise<boolean> {
   if (!emu || !coreHasFs(emu) || !isCartridgePayload(data, fileName)) return false;
   const base = fileName.replace(/^\//, "");
@@ -1664,6 +1667,9 @@ export async function attachCartridgeInPlace(
     vice_work_disk: "disabled",
   });
   await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
+  if (opts?.jiffyDos !== undefined) {
+    await applyJiffyDos(emu, jiffyAllowedDuringCartBoot(opts.jiffyDos, opts.fastCart ?? null));
+  }
   cartBootReset(emu);
   await flushEmuFs(emu, 600);
   bumpCrtPaint(emu);

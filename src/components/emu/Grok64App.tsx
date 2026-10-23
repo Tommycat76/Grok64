@@ -212,6 +212,8 @@ import {
 } from "@/lib/emu/keys";
 import {
   detectFastLoadCart,
+  detectFastLoadCartFromPayload,
+  jiffyAllowedDuringCartBoot,
   jiffyCartCompat,
   resolveJiffyWant,
 } from "@/lib/emu/jiffy-cart-compat";
@@ -1643,11 +1645,17 @@ export function Grok64App() {
         ...CART_PLAY_UNLOCK_VICE_OPTS,
         vice_drive_true_emulation: "enabled",
         vice_virtual_device_traps: "disabled",
+        vice_work_disk: "disabled",
       });
-      hardReset(emu);
       const ssCart = st.fastLoadCart;
-      scheduleSuperSnapshotVicFix(emu, ssCart);
-      bumpCrtPaint(emu);
+      void (async () => {
+        await applyJiffyDos(emu, jiffyAllowedDuringCartBoot(st.jiffyDos, ssCart));
+        cartBootReset(emu);
+        await flushEmuFs(emu, isIosPhone() ? 800 : 400);
+        scheduleSuperSnapshotVicFix(emu, ssCart);
+        if (ssCart) stabilizeFreezerScreen(emu, ssCart);
+        bumpCrtPaint(emu);
+      })();
       markSessionPlay(st.currentTitle);
       inGameplayRef.current = true;
       persistGateRef.current = true;
@@ -1850,9 +1858,7 @@ export function Grok64App() {
           vice_virtual_device_traps: "disabled",
         });
         const ssCart = useEmu.getState().fastLoadCart;
-        const jiffyOnCart =
-          jiffyForCart && !(ssCart && jiffyCartCompat(ssCart, true).suppressJiffy);
-        await applyJiffyDos(emu, jiffyOnCart);
+        await applyJiffyDos(emu, jiffyAllowedDuringCartBoot(st.jiffyDos, ssCart));
         disarmAutostart(emu, "cart");
         applyRuntimeOptions(emu, {
           ...CART_PLAY_UNLOCK_VICE_OPTS,
@@ -2373,7 +2379,7 @@ export function Grok64App() {
       const keepCartAcrossDiskEarly = hadCartBefore && plan.kind === "floppy" && !work;
       let sessionFastCart = useEmu.getState().fastLoadCart;
       if (plan.kind === "cart") {
-        sessionFastCart = detectFastLoadCart(bootName, playTitle);
+        sessionFastCart = detectFastLoadCartFromPayload(payloadView, bootName, playTitle);
         useEmu.getState().setFastLoadCart(sessionFastCart);
         if (sessionFastCart && jiffyWantSetting) {
           const compat = jiffyCartCompat(sessionFastCart, true);
@@ -2527,8 +2533,13 @@ export function Grok64App() {
         setSessionCart(bootName, new Uint8Array(safe));
       }
       const hadCart = cartLiveRef.current;
-      cartLiveRef.current = plan.kind === "cart" || (hadCart && plan.kind === "floppy");
-      setCartLive(cartLiveRef.current);
+      if (plan.kind === "cart" || forceCart) {
+        cartLiveRef.current = false;
+        setCartLive(false);
+      } else {
+        cartLiveRef.current = hadCart && plan.kind === "floppy";
+        setCartLive(cartLiveRef.current);
+      }
       const keepCartAcrossDisk = hadCart && plan.kind === "floppy" && !work;
       sessionIecRef.current = plan.live.iec;
       sessionUnitRef.current = plan.live.unit;
@@ -2795,17 +2806,18 @@ export function Grok64App() {
         !cartNeedsWasmRecycle
       ) {
         s.setBooting(true, plan.status, 35);
-        const fastCart = detectFastLoadCart(bootName, playTitle);
+        const fastCart = detectFastLoadCartFromPayload(payloadView, bootName, playTitle);
         useEmu.getState().setFastLoadCart(fastCart);
-        const attached = await attachCartridgeInPlace(emuRef.current, new Uint8Array(safe), bootName);
+        const attached = await attachCartridgeInPlace(
+          emuRef.current,
+          new Uint8Array(safe),
+          bootName,
+          { jiffyDos: jiffyWantSetting, fastCart },
+        );
         if (attached) {
           playModeRef.current = "cart";
           cartLiveRef.current = true;
           setCartLive(true);
-          await applyJiffyDos(
-            emuRef.current,
-            resolveJiffyWant(jiffyWantSetting, fastCart),
-          );
           scheduleSuperSnapshotVicFix(emuRef.current, fastCart);
           persistGateRef.current = true;
           inGameplayRef.current = true;
@@ -2829,10 +2841,11 @@ export function Grok64App() {
         cartNeedsWasmRecycle &&
         (plan.kind === "cart" || forceCart) &&
         emuRef.current &&
-        coreHasFs(emuRef.current)
+        coreHasFs(emuRef.current) &&
+        isIosPhone()
       ) {
         s.setBooting(true, plan.status, 35);
-        const fastCart = detectFastLoadCart(bootName, playTitle);
+        const fastCart = detectFastLoadCartFromPayload(payloadView, bootName, playTitle);
         useEmu.getState().setFastLoadCart(fastCart);
         const emu = emuRef.current;
         const cartBytes = new Uint8Array(safe);
@@ -2849,11 +2862,10 @@ export function Grok64App() {
             vice_drive_true_emulation: "enabled",
             vice_virtual_device_traps: "disabled",
           });
-          const jiffyOnCart =
-            resolveJiffyWant(jiffyWantSetting, fastCart) &&
-            !(fastCart && jiffyCartCompat(fastCart, true).suppressJiffy);
+          const jiffyOnCart = jiffyAllowedDuringCartBoot(jiffyWantSetting, fastCart);
           await applyJiffyDos(emu, jiffyOnCart);
-          hardReset(emu);
+          await flushEmuFs(emu, isIosPhone() ? 800 : 400);
+          cartBootReset(emu);
           await flushEmuFs(emu, isIosPhone() ? 800 : 400);
           scheduleSuperSnapshotVicFix(emu, fastCart);
           if (fastCart) stabilizeFreezerScreen(emu, fastCart);
