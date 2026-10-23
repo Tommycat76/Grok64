@@ -10,9 +10,14 @@
 
 export type FastLoadCartKind =
   | "action-replay"
+  | "final-cartridge-1"
+  | "final-cartridge-2"
   | "final-cartridge-3"
+  | "super-snapshot-4"
   | "super-snapshot-5"
   | "epyx-fastload"
+  | "kcs-power"
+  | "warp-speed"
   | "other-fastload";
 
 export type JiffyCompatLevel = "compatible" | "redundant" | "caution" | "incompatible";
@@ -53,6 +58,14 @@ export const JIFFY_FASTLOAD_CART_MATRIX: {
     reference: "Lemon64 JiffyDOS + FC3 combination posts",
   },
   {
+    id: "super-snapshot-4",
+    label: "Super Snapshot V4",
+    stockKernal: "Snapshot fast load and freezer menu (earlier SS UI).",
+    jiffyKernal:
+      "Same as V5 on hardware — third-party KERNALs (JiffyDOS) conflict; use stock KERNAL with the cart.",
+    reference: "Super Snapshot hardware notes; 1541 Ultimate manual",
+  },
+  {
     id: "super-snapshot-5",
     label: "Super Snapshot V5",
     stockKernal: "Snapshot fast load and freezer menu.",
@@ -79,15 +92,26 @@ export const JIFFY_FASTLOAD_CART_MATRIX: {
 
 const DETECT: { kind: FastLoadCartKind; re: RegExp }[] = [
   {
-    kind: "super-snapshot-5",
-    re: /super\s*snapshot|supersnapshot|\bss[45]\b|snapshot\s*v\s*[45]/i,
+    kind: "super-snapshot-4",
+    re: /super\s*snapshot\s*v\s*4|supersnapshot\s*v\s*4|\bss4\b|snapshot\s*v\s*4|_v4\.0_/i,
   },
-  { kind: "action-replay", re: /action\s*replay|actionreplay|\bar\s*[456]|\bar[456]/i },
-  { kind: "final-cartridge-3", re: /final\s*cartridge\s*(iii|3|\+)/i },
-  { kind: "epyx-fastload", re: /epyx|fast\s*load/i },
+  {
+    kind: "super-snapshot-5",
+    re: /super\s*snapshot|supersnapshot|\bss5\b|snapshot\s*v\s*5|_v5\./i,
+  },
+  { kind: "action-replay", re: /action\s*replay|actionreplay|\bar\s*[456]|\bar[456]|replay\s*mk/i },
+  { kind: "final-cartridge-3", re: /final\s*cartridge\s*(iii|3|\+)|fc\s*3/i },
+  { kind: "final-cartridge-2", re: /final\s*cartridge\s*(ii|2)(?!\s*[+3])/i },
+  { kind: "final-cartridge-1", re: /final\s*cartridge\s*(i|1)(?!\s*[i2-9+])/i },
+  { kind: "kcs-power", re: /kcs\s*power/i },
+  { kind: "warp-speed", re: /warpspeed|warp\s*speed/i },
+  { kind: "epyx-fastload", re: /epyx|epyx_fast|fast_?load.*epyx/i },
 ];
 
-/** Classify a CRT/bin from filename or catalog title. */
+/**
+ * Classify a CRT for **Settings / Jiffy pairing UI only** (hardware matrix).
+ * Emulation attach uses VICE CRT detection — do not branch game logic on this.
+ */
 export function detectFastLoadCart(name: string, title?: string | null): FastLoadCartKind | null {
   const hay = `${name} ${title ?? ""}`;
   if (!/\.(crt|bin)$/i.test(name) && !/(cart|cartridge|replay|snapshot|fast\s*load|epyx)/i.test(hay)) {
@@ -100,18 +124,24 @@ export function detectFastLoadCart(name: string, title?: string | null): FastLoa
   return null;
 }
 
+function superSnapshotJiffy(levelLabel: string): JiffyCartCompat {
+  return {
+    level: "incompatible",
+    title: `${levelLabel} + JiffyDOS`,
+    summary: "Super Snapshot needs the stock C64 KERNAL. JiffyDOS is turned off while this cart is loaded.",
+    realHardware:
+      "Hardware manuals warn Super Snapshot against third-party KERNALs (including JiffyDOS). Use the cart alone or stock KERNAL.",
+    suppressJiffy: true,
+    warnIfJiffyOn: true,
+  };
+}
+
 export function jiffyCartCompat(cart: FastLoadCartKind, jiffyOn: boolean): JiffyCartCompat {
   switch (cart) {
+    case "super-snapshot-4":
+      return superSnapshotJiffy("Super Snapshot V4");
     case "super-snapshot-5":
-      return {
-        level: "incompatible",
-        title: "Super Snapshot V5 + JiffyDOS",
-        summary: "Super Snapshot needs the stock C64 KERNAL. JiffyDOS is turned off while this cart is loaded.",
-        realHardware:
-          "Hardware manuals warn Super Snapshot against third-party KERNALs (including JiffyDOS). Use the cart alone or stock KERNAL.",
-        suppressJiffy: true,
-        warnIfJiffyOn: true,
-      };
+      return superSnapshotJiffy("Super Snapshot V5");
     case "action-replay":
       return {
         level: "caution",
@@ -138,6 +168,26 @@ export function jiffyCartCompat(cart: FastLoadCartKind, jiffyOn: boolean): Jiffy
         title: "Epyx FastLoad + JiffyDOS",
         summary: "JiffyDOS already accelerates loads; Epyx adds little. You can leave either on — timing matches Jiffy-only on many disks.",
         realHardware: "Epyx is not a KERNAL replacement; combining with Jiffy is redundant, not broken.",
+        suppressJiffy: false,
+        warnIfJiffyOn: jiffyOn,
+      };
+    case "final-cartridge-1":
+    case "final-cartridge-2":
+      return {
+        level: "caution",
+        title: "Final Cartridge I/II + JiffyDOS",
+        summary: "Older Final Cartridge images may conflict with JiffyDOS KERNAL hooks — test loads on stock KERNAL first.",
+        realHardware: "Community reports vary; FC3 is the well-tested Jiffy pairing.",
+        suppressJiffy: false,
+        warnIfJiffyOn: jiffyOn,
+      };
+    case "kcs-power":
+    case "warp-speed":
+      return {
+        level: "caution",
+        title: "Turbo cart + JiffyDOS",
+        summary: "IEC acceleration carts can clash with JiffyDOS on some operations — same caution as Action Replay.",
+        realHardware: "Treat like AR until verified on your disk images.",
         suppressJiffy: false,
         warnIfJiffyOn: jiffyOn,
       };

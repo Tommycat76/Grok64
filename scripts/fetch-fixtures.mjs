@@ -73,10 +73,18 @@ async function fetchWheelsOptional() {
 }
 
 const CART_WANT = [
-  { pattern: /Action_Replay_V6\.0/i, label: "ar6" },
-  { pattern: /Final_Cartridge_3_1987-09_v1/i, label: "fc3" },
-  { pattern: /Super_Snapshot_v4/i, label: "ss4" },
-  { pattern: /Super_Snapshot_v5\.00_1990_NTSC/i, label: "ss5" },
+  { pattern: /Action_Replay_V6\.0_6\.0_1989_PAL/i, label: "ar6", out: "ar6.crt" },
+  { pattern: /Action_Replay_V5\.0_5\.0_1988_PAL\.crt$/i, label: "ar5", out: "ar5.crt" },
+  { pattern: /Action_Replay_MK4_1988_PAL/i, label: "ar4", out: "ar4.crt" },
+  { pattern: /Final_Cartridge_3_1987-09_v1/i, label: "fc3", out: "fc3.crt" },
+  { pattern: /Final_Cartridge_2_1987\.crt$/i, label: "fc2", out: "fc2.crt" },
+  { pattern: /Final_Cartridge_1_v1_1986/i, label: "fc1", out: "fc1.crt" },
+  { pattern: /Super_Snapshot_v4\.0_1989_NTSC/i, label: "ss4", out: "ss4.crt" },
+  { pattern: /Super_Snapshot_v5\.00_1990_NTSC/i, label: "ss5", out: "ss5.crt" },
+  { pattern: /Epyx_FastLoad_1984_v1/i, label: "epyx-fastload", out: "epyx-fastload.crt" },
+  { pattern: /KCS_Power_Cartridge_1985_v1/i, label: "kcs-power", out: "kcs-power.crt" },
+  { pattern: /WarpSpeed_v1_1987/i, label: "warp-speed", out: "warp-speed.crt" },
+  { pattern: /macks-easyflash/i, label: "easyflash", out: "easyflash.crt" },
 ];
 
 async function fetchCarts() {
@@ -94,9 +102,9 @@ async function fetchCarts() {
       console.warn("cart missing", want.label, "in zip");
       continue;
     }
-    const dest = join(dirs.carts, `${want.label}.crt`);
+    const dest = join(dirs.carts, want.out ?? `${want.label}.crt`);
     writeFileSync(dest, files[hit]);
-    writeFileSync(join(dirs.carts, `${want.label}.source.txt`), hit);
+    writeFileSync(dest.replace(/\.crt$/i, ".source.txt"), hit);
     console.log("ok", dest, "from", hit);
   }
 }

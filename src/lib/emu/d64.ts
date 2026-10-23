@@ -344,8 +344,15 @@ export function prepareAutostartDisk(data: Uint8Array, filename: string, title?:
   return promoteD64Entry(data, pick.slot, first.slot);
 }
 
-export function wantsCracktroNudge(title: string): boolean {
-  return /paradroid|commando|turrican/i.test(title);
+/** Cracktro / loader screens that wait for Space or fire — not tied to a game title. */
+export function screenInvitesCracktroInput(screen: string): boolean {
+  const s = screen.replace(/\s+/g, " ").toLowerCase();
+  return (
+    /press\s+(space|fire|button|key|any\s+key)/.test(s) ||
+    /hit\s+space/.test(s) ||
+    /space\s+to\s+(continue|start|play|run)/.test(s) ||
+    /press\s+play/.test(s)
+  );
 }
 
 export function wrapForDiskSwap(kind: MediaKind, data: Uint8Array, name: string): Uint8Array | null {

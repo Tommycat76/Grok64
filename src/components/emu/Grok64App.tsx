@@ -195,7 +195,7 @@ import {
   kindOf,
   needsTypedBoot,
 } from "@/lib/emu/formats";
-import { wrapForDiskSwap, prepareAutostartDisk, wantsCracktroNudge } from "@/lib/emu/d64";
+import { wrapForDiskSwap, prepareAutostartDisk, screenInvitesCracktroInput } from "@/lib/emu/d64";
 import { isSid, psidToPrg } from "@/lib/emu/psid";
 import { explodeArchive, pickBootFile, toArrayBuffer } from "@/lib/emu/archive";
 import { BuildId } from "@/components/emu/BuildId";
@@ -229,13 +229,11 @@ function frameMsForStandard(standard: string) {
   return standard === "ntsc" ? 1000 / 60 : 20;
 }
 
-function playLockDuration(mode: string, title?: string | null): number {
+function playLockDuration(mode: string, _title?: string | null): number {
   if (isTouchMobile()) return mode === "disk" ? 4500 : mode === "cart" ? 900 : 1400;
   if (mode === "cart") return 1400;
-  if (mode === "disk") {
-    const longLoad = /paradroid|turrican|boulder|commando|geos|wheels/i.test(title || "");
-    return longLoad ? 58_000 : 12_000;
-  }
+  /* True 1541 timing — one window for all floppies, not per-game title lists. */
+  if (mode === "disk") return 48_000;
   return 3500;
 }
 
@@ -540,6 +538,7 @@ export function Grok64App() {
       reu: () => useEmu.getState().reuSize,
       workDisk: () => lastAppliedWorkDisk(),
       jiffyLive: () => lastAppliedJiffy(),
+      fastLoadCart: () => useEmu.getState().fastLoadCart,
       title: () => useEmu.getState().currentTitle,
       bootPath: () => bootPathRef.current,
       hasFs: () => coreHasFs(emuRef.current),
@@ -1147,15 +1146,16 @@ export function Grok64App() {
       },
     });
   }, []);
-  const scheduleCracktroNudge = useCallback((title) => {
-    if (!wantsCracktroNudge(title || "")) return;
-    if (cracktroOnceRef.current === title) return;
-    cracktroOnceRef.current = title || "";
+  const scheduleCracktroNudge = useCallback((sessionKey: string) => {
+    if (cracktroOnceRef.current === sessionKey) return;
+    cracktroOnceRef.current = sessionKey || "";
     // After Autostart is disarmed — Space is a C64 key only (#32 / #41).
-    // Once per title so a later play-unlock cannot Space the transfer UI.
+    // Once per play-unlock; only if the CRT text asks for Space/fire (any title).
     bootTimersRef.current.push(
       window.setTimeout(() => {
-        glog("cracktro-nudge", { title, disarmed: true });
+        const screen = readScreenText(emuRef.current);
+        if (!screenInvitesCracktroInput(screen)) return;
+        glog("cracktro-nudge", { sessionKey, disarmed: true, head: screen.slice(0, 48) });
         dispatchC64Key("Space", " ", true);
         window.setTimeout(() => dispatchC64Key("Space", " ", false), 90);
         window.setTimeout(() => {
@@ -1216,13 +1216,6 @@ export function Grok64App() {
           applyEmuVolume(emuRef.current, vol.muted, vol.volume);
           gestureUnlockAudio(emuRef.current);
           scheduleCracktroNudge(unlockedTitle);
-          if (useEmu.getState().fastLoadCart === "super-snapshot-5" && playModeRef.current === "disk") {
-            const ssGen = playLockGen.current;
-            window.setTimeout(() => {
-              if (playLockGen.current !== ssGen) return;
-              void feedBasicLine(emuRef.current, 'LOAD"*",8,1', { runcmd: true });
-            }, 1200);
-          }
           const wantRun =
             basicRunAfterLoadRef.current ||
             (diskRunAfterLoadRef.current && (playModeRef.current === "disk" || playModeRef.current === "auto"));
@@ -1235,7 +1228,8 @@ export function Grok64App() {
             const needsRun =
               atBasicReady &&
               !/NOT FOUND|SYNTAX ERROR|FILE NOT OPEN/i.test(screen) &&
-              !/paradroid|turrican|commando|boulder|press play/i.test(screen.toLowerCase());
+              screen.trim().length < 120 &&
+              !screenInvitesCracktroInput(screen);
             if (!needsRun) {
               glog("play-skip-run", { head: screen.slice(0, 60) });
             } else {
@@ -1377,10 +1371,7 @@ export function Grok64App() {
       const prep = await prepareCore(emu, {
         live: spec.live,
         user: spec.user,
-        jiffyWant:
-          cartBoot && st.fastLoadCart === "action-replay"
-            ? false
-            : resolveJiffyWant(st.jiffyDos, st.fastLoadCart),
+        jiffyWant: resolveJiffyWant(st.jiffyDos, st.fastLoadCart),
         sdParts: parts,
         driveMap: st.iecMap,
       });
@@ -2201,12 +2192,7 @@ export function Grok64App() {
             skipJiffy: true,
             driveMap: stNow.iecMap,
           });
-          await applyJiffyDos(
-            emuRef.current,
-            plan.kind === "cart" && sessionFastCart === "action-replay"
-              ? false
-              : resolveJiffyWant(stNow.jiffyDos, stNow.fastLoadCart),
-          );
+          await applyJiffyDos(emuRef.current, resolveJiffyWant(stNow.jiffyDos, stNow.fastLoadCart));
           if (plan.kind === "floppy" && !work) {
             useEmu.getState().setInsertedDiskName(filename);
           }

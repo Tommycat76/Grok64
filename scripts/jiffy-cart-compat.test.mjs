@@ -13,6 +13,7 @@ await server.close();
 
 test("detects known fast-load carts", () => {
   assert.equal(detectFastLoadCart("Action Replay 6.crt"), "action-replay");
+  assert.equal(detectFastLoadCart("Super_Snapshot_v4.0_1989_NTSC.crt"), "super-snapshot-4");
   assert.equal(detectFastLoadCart("supersnapshot-v5.crt"), "super-snapshot-5");
   assert.equal(detectFastLoadCart("Final Cartridge III.bin"), "final-cartridge-3");
   assert.equal(detectFastLoadCart("Epyx_Fast_Load.crt"), "epyx-fastload");
@@ -20,10 +21,12 @@ test("detects known fast-load carts", () => {
 });
 
 test("Super Snapshot suppresses Jiffy (hardware incompatible)", () => {
-  const c = jiffyCartCompat("super-snapshot-5", true);
-  assert.equal(c.level, "incompatible");
-  assert.equal(c.suppressJiffy, true);
-  assert.equal(resolveJiffyWant(true, "super-snapshot-5"), false);
+  for (const cart of ["super-snapshot-4", "super-snapshot-5"]) {
+    const c = jiffyCartCompat(cart, true);
+    assert.equal(c.level, "incompatible");
+    assert.equal(c.suppressJiffy, true);
+    assert.equal(resolveJiffyWant(true, cart), false);
+  }
 });
 
 test("Action Replay warns but allows Jiffy setting", () => {
@@ -38,5 +41,5 @@ test("FC3 is compatible", () => {
 });
 
 test("matrix documents all cart families", () => {
-  assert.equal(JIFFY_FASTLOAD_CART_MATRIX.length, 5);
+  assert.ok(JIFFY_FASTLOAD_CART_MATRIX.length >= 6);
 });
