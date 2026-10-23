@@ -29,6 +29,10 @@ _Last run: 2026-10-23T12:58:35.946Z_
 | Simons' BASIC | PASS | PASS | compatible | ok | ok |
 | Magic Desk | PASS | PASS | compatible | ok | ok |
 
+## Grok64 autostart vs cart boot-sector
+
+Floppy Play uses VICE `LOAD"*",8,1`; **cart Play must not**. Some carts (e.g. **Super Snapshot v5** §11) perform their own **track 1 / sector 0** auto-boot via IEC — that is real hardware behavior and is **not** a Grok64 regression. See **`docs/CART_BOOT_AUTOSTART.md`**.
+
 ## Checks (each row)
 
 | Check | Meaning |

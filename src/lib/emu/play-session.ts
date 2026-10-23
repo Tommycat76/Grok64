@@ -55,7 +55,13 @@ export interface PlayPlan {
   status: string;
 }
 
-/** WASM settle / autostart must not treat a CRT boot like a floppy LOAD"*",8,1. */
+/**
+ * WASM settle / autostart must not treat a CRT boot like floppy Play.
+ *
+ * Grok64 must never arm VICE LOAD"*",8,1 while a cart is booting. That is separate
+ * from cart-native boot-sector logic (e.g. Super Snapshot v5 §11 — track 1 sector 0);
+ * VICE must still allow IEC/drive access for the cart. See docs/CART_BOOT_AUTOSTART.md.
+ */
 export function isCartMediaBoot(input: {
   playMode?: string | null;
   bootFile?: string | null;

@@ -176,6 +176,18 @@ export async function canvasLooksLikeCartMenu(page, { minBuckets = 40 } = {}) {
   return { pass, stats, textHead: text.slice(0, 100) };
 }
 
+/**
+ * CRT shows Grok64/VICE floppy autostart (typed LOAD"*",8,1), not cart boot-sector IEC.
+ * Super Snapshot v5 §11 reads track 1 sector 0 without this KERNAL sequence — see
+ * docs/CART_BOOT_AUTOSTART.md.
+ */
+export function grok64FloppyAutostartPoison(text) {
+  if (!text) return false;
+  if (/LOAD"\*",8,1/i.test(text)) return true;
+  if (/LOAD"\*"/i.test(text) && /SEARCHING FOR \*|FILE NOT FOUND/i.test(text)) return true;
+  return false;
+}
+
 export function isBasicReadyScreen(text) {
   if (/TURBO|SNAPSHOT|REPLAY|ACTION|FINAL|FAST\s*LOAD|KCS|WARP|CARTRIDGE|EPYX/i.test(text)) return false;
   const compact = text.replace(/\s+/g, "").length;

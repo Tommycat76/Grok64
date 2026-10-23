@@ -2,6 +2,7 @@
 /**
  * REQUIRED pre-push gate — Jiffy ON, real Software library UI, SS5 + Reset + AR6.
  * Mirrors hands-on: play cart → F5 resume → CART OUT → Software › On this device › Play.
+ * Fails on Grok64 LOAD"*",8,1 autostart only — not SS5 §11 boot-sector IEC (see docs/CART_BOOT_AUTOSTART.md).
  *   npm run test:desktop-cart-jiffy-ui-gate
  */
 import { spawn } from "node:child_process";
@@ -10,6 +11,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   canvasLooksLikeCartMenu,
+  grok64FloppyAutostartPoison,
   isBasicReadyScreen,
   patchLocalStorage,
   powerOnDesktop,
@@ -118,22 +120,21 @@ async function playLibraryCart(page, displayName) {
   await page.waitForFunction(
     () => {
       const t = window.__g64?.screenText?.() || "";
-      return !/LOAD"\*"|SEARCHING FOR \*/i.test(t);
+      const t = window.__g64?.screenText?.() || "";
+      return !/LOAD"\*",8,1/i.test(t) && !(/LOAD"\*"/i.test(t) && /SEARCHING FOR \*/i.test(t));
     },
     { timeout: 120_000 },
   );
   await page.waitForTimeout(8_000);
 }
 
-function diskAutostartPoison(text) {
-  return /SEARCHING FOR \*|LOAD"\*"|FILE NOT FOUND/i.test(text);
-}
+const diskAutostartPoison = grok64FloppyAutostartPoison;
 
 function basicAfterCartOut(snap) {
   if (snap.cartLive) return false;
   if (!(snap.running && !snap.booting && snap.title === "BASIC")) return false;
   if (isBasicReadyScreen(snap.text)) return true;
-  return !/SNAPSHOT|REPLAY|ACTION|TURBO|SEARCHING|LOAD"\*"/i.test(snap.text);
+  return !/SNAPSHOT|REPLAY|ACTION|TURBO/i.test(snap.text) && !grok64FloppyAutostartPoison(snap.text);
 }
 
 async function waitCartPixels(page, { minBuckets = 3 } = {}) {
