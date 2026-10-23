@@ -88,8 +88,11 @@ import {
 import { hasCmdRom, hasJiffyPair, prefetchBundledRoms } from "@/lib/emu/roms";
 import {
   addSdFile,
+  exportSdImage,
   formatPartition,
   listPartitions,
+  mountDirectFatImage,
+  mountHostSdFolder,
   partitionsForMount,
   debugWasmIec,
   iecOpenDollarChannel,
@@ -101,6 +104,12 @@ import {
   attachSd2iecBus,
   setSd2iecWasmIecOnly,
 } from "@/lib/emu/sd2iec";
+import {
+  clearSd2iecCardMount,
+  getSd2iecCardSourceMeta,
+  hostDirectoryPickerReason,
+  supportsHostDirectoryPicker,
+} from "@/lib/emu/sd2iec-card-source";
 import {
   grok64KeyboardDrain,
   grok64KeyboardReleaseAll,
@@ -517,6 +526,9 @@ export function Grok64App() {
         }
       })
       .catch(() => undefined);
+    void import("@/lib/emu/sd2iec-card-source").then((m) =>
+      m.setSd2iecWriteEnabled(useEmu.getState().sd2iecWriteEnabled),
+    );
   }, []);
   useEffect(() => {
     installIosPaintHooks(() => ({
@@ -949,7 +961,58 @@ export function Grok64App() {
       },
       runDos: (cmd) => runSdCommand(cmd),
       resetDos: () => resetSd2iecSession(),
+      sd2iecCardMeta: () => getSd2iecCardSourceMeta(),
+      sd2iecHostFolderSupport: () => ({
+        ok: supportsHostDirectoryPicker(),
+        reason: hostDirectoryPickerReason(),
+      }),
+      setSd2iecWrites: (on) => useEmu.getState().setSd2iecWriteEnabled(!!on),
+      clearSd2iecMount: () => clearSd2iecCardMount(),
+      exportSdImage: () => exportSdImage(),
+      mountSdFatImage: async (bytes, label) => {
+        const data =
+          bytes instanceof Uint8Array
+            ? bytes
+            : new Uint8Array(bytes instanceof ArrayBuffer ? bytes : (bytes as ArrayLike<number>));
+        await mountDirectFatImage(data, label);
+        const emu = emuRef.current;
+        const st = useEmu.getState();
+        if (emu && st.running && mapHasDrive(st.iecMap, "sd2iec")) {
+          const unit = Number(Object.entries(st.iecMap).find(([, v]) => v === "sd2iec")?.[0] ?? 8) as
+            | 8
+            | 9
+            | 10
+            | 11;
+          wireGrok64ViceHost(emu);
+          attachGrok64Sd2iec(emu, unit);
+          applyIecUnit(emu, "sd2iec", unit);
+          const parts = await partitionsForMount();
+          remountSd2iecFromParts(emu, unit, parts);
+          attachSd2iecBus(emu, unit);
+        }
+        return getSd2iecCardSourceMeta();
+      },
+      mountSdHostFolder: async (handle: FileSystemDirectoryHandle) => {
+        await mountHostSdFolder(handle);
+        const emu = emuRef.current;
+        const st = useEmu.getState();
+        if (emu && st.running && mapHasDrive(st.iecMap, "sd2iec")) {
+          const unit = Number(Object.entries(st.iecMap).find(([, v]) => v === "sd2iec")?.[0] ?? 8) as
+            | 8
+            | 9
+            | 10
+            | 11;
+          wireGrok64ViceHost(emu);
+          attachGrok64Sd2iec(emu, unit);
+          applyIecUnit(emu, "sd2iec", unit);
+          const parts = await partitionsForMount();
+          remountSd2iecFromParts(emu, unit, parts);
+          attachSd2iecBus(emu, unit);
+        }
+        return getSd2iecCardSourceMeta();
+      },
       seedSd: async (files) => {
+        clearSd2iecCardMount();
         await formatPartition(0);
         for (const f of files) {
           const buf = f.data instanceof ArrayBuffer ? f.data : f.data.buffer.slice(f.data.byteOffset, f.data.byteOffset + f.data.byteLength);
@@ -3180,6 +3243,20 @@ export function Grok64App() {
         });
       }
     })();
+  }, [s.iecMap, s.running]);
+  useEffect(() => {
+    const emu = emuRef.current;
+    if (!emu || !s.running || playLockRef.current) return;
+    if (!mapHasDrive(s.iecMap, "sd2iec")) return;
+    const unit = Number(Object.entries(s.iecMap).find(([, v]) => v === "sd2iec")?.[0] ?? 8) as 8 | 9 | 10 | 11;
+    const onCard = () => {
+      void partitionsForMount().then((parts) => {
+        remountSd2iecFromParts(emu, unit, parts);
+        attachSd2iecBus(emu, unit);
+      });
+    };
+    window.addEventListener("g64-sd2iec-card", onCard);
+    return () => window.removeEventListener("g64-sd2iec-card", onCard);
   }, [s.iecMap, s.running]);
   useEffect(() => {
     if (!emuRef.current || !useEmu.getState().running) return;

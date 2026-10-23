@@ -160,7 +160,35 @@ async function removeDirTree(partId: number, dirPath: string): Promise<void> {
   await savePartition(part);
 }
 
+export function buildVirtualPartitionsFromFatImage(image: Uint8Array): SdPartition[] {
+  const parsed = parseSdImage(image);
+  return parsed.map((part, idx) => {
+    const files: SdFile[] = part.files.map((f) => ({
+      id: `fat-${idx}-${f.name}`,
+      name: f.name,
+      size: f.data.byteLength,
+      data: f.data.buffer.slice(
+        f.data.byteOffset,
+        f.data.byteOffset + f.data.byteLength,
+      ) as ArrayBuffer,
+      path: "",
+    }));
+    return {
+      id: idx,
+      label: part.label || `PART${idx}`,
+      files,
+      dirs: [],
+    };
+  });
+}
+
 export async function listPartitions(): Promise<SdPartition[]> {
+  const { getVirtualSdPartitions } = await import("./sd2iec-card-source");
+  const virtual = getVirtualSdPartitions();
+  if (virtual) {
+    syncParts = virtual;
+    return virtual;
+  }
   const db = await openExpansionDb();
   return new Promise((resolve, reject) => {
     const req = db.transaction(STORES.sdpart, "readonly").objectStore(STORES.sdpart).getAll();
@@ -185,6 +213,19 @@ async function savePartition(part: SdPartition): Promise<void> {
 }
 
 export async function addSdFile(partId: number, name: string, data: ArrayBuffer, path = ""): Promise<void> {
+  const { getVirtualSdPartitions, getHostDirectoryMount, isSd2iecWriteEnabled, refreshHostDirectoryPartitions } =
+    await import("./sd2iec-card-source");
+  const { writeHostDirectoryFile } = await import("./sd2iec-host-directory");
+  const mount = getHostDirectoryMount();
+  if (getVirtualSdPartitions() && mount) {
+    if (!isSd2iecWriteEnabled()) return;
+    const rel = path ? `${path}/${name}` : name;
+    await writeHostDirectoryFile(mount, rel, new Uint8Array(data));
+    const virtual = await refreshHostDirectoryPartitions();
+    if (virtual) syncParts = virtual;
+    return;
+  }
+  if (getVirtualSdPartitions()) return;
   const part = (await listPartitions()).find((p) => p.id === partId) ?? { id: partId, label: `PART${partId}`, files: [] };
   part.files = [
     ...part.files,
@@ -194,6 +235,8 @@ export async function addSdFile(partId: number, name: string, data: ArrayBuffer,
 }
 
 export async function removeSdFile(partId: number, fileId: string): Promise<void> {
+  const { getVirtualSdPartitions } = await import("./sd2iec-card-source");
+  if (getVirtualSdPartitions()) return;
   const part = (await listPartitions()).find((p) => p.id === partId);
   if (!part) return;
   part.files = part.files.filter((f) => f.id !== fileId);
@@ -201,6 +244,8 @@ export async function removeSdFile(partId: number, fileId: string): Promise<void
 }
 
 export async function formatPartition(partId: number): Promise<void> {
+  const { getVirtualSdPartitions } = await import("./sd2iec-card-source");
+  if (getVirtualSdPartitions()) return;
   await savePartition({ id: partId, label: `PART${partId}`, files: [], dirs: [] });
 }
 
@@ -459,7 +504,10 @@ export function parseSdImage(data: Uint8Array): { label: string; files: { name: 
   return parts.length ? parts : [{ label: "PART0", files: readFatFiles(data) }];
 }
 
+/** Legacy: explode image into IndexedDB (copy). Prefer mountDirectFatImage for IEC-faithful mount. */
 export async function importSdImage(data: Uint8Array): Promise<void> {
+  const { clearSd2iecCardMount, notifySd2iecCardChanged } = await import("./sd2iec-card-source");
+  clearSd2iecCardMount();
   const parts = parseSdImage(data);
   for (let i = 0; i < parts.length && i < 4; i++) {
     await formatPartition(i);
@@ -471,6 +519,27 @@ export async function importSdImage(data: Uint8Array): Promise<void> {
       await addSdFile(i, p00?.name ?? file.name, copy.buffer);
     }
   }
+  notifySd2iecCardChanged();
+}
+
+/** Mount .img for SD2IEC firmware — FAT read from image bytes, not repacked into IDB. */
+export async function mountDirectFatImage(data: Uint8Array, label?: string): Promise<SdPartition[]> {
+  const { mountDirectFatImage: mount, clearSd2iecCardMount } = await import("./sd2iec-card-source");
+  clearSd2iecCardMount();
+  const virtual = buildVirtualPartitionsFromFatImage(data);
+  mount(data, label ?? "SD.IMG", virtual);
+  syncParts = virtual;
+  resetSd2iecSession();
+  return virtual;
+}
+
+export async function mountHostSdFolder(handle: FileSystemDirectoryHandle): Promise<SdPartition[]> {
+  const { mountHostDirectory, clearSd2iecCardMount } = await import("./sd2iec-card-source");
+  clearSd2iecCardMount();
+  const virtual = await mountHostDirectory(handle);
+  syncParts = virtual;
+  resetSd2iecSession();
+  return virtual;
 }
 
 function basename(f: SdFile): string {

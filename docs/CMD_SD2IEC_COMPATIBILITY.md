@@ -17,7 +17,7 @@ Last reviewed: Grok64 branch `cursor/cmd-sd2iec-ui-f650`.
 
 | Layer | Grok64 behavior |
 |-------|-----------------|
-| **SD2IEC** | IndexedDB card / FAT `.img` import → Grok64 software IEC device (`attachSd2iecBus` + `tickSd2iec` in `sd2iec.ts`). VICE has **no** drive on that unit (`DriveNType=0`). See `docs/SD2IEC_IEC_BUS.md`. |
+| **SD2IEC** | Card source A/B/C (`docs/SD2IEC_CARD_SOURCES.md`) → Grok64 software IEC device (`attachSd2iecBus` + `tickSd2iec`). VICE has **no** packed work disk on that unit (`DriveNType=0`; `remountSd2iecFromParts` attach-only). See `docs/SD2IEC_IEC_BUS.md`. |
 | **CMD HD** | VICE true drive + CMD HD DOS ROM (`dosCMDHD.bin`); `vice_work_disk=disabled`; SWAP button via `cmdHdSwap()` |
 | **JiffyDOS** | User-supplied ROMs injected into VICE FS; `vice_jiffydos=enabled` when C64+1541 pair present |
 

@@ -15,7 +15,7 @@ The shipped WASM (`vice_x64sc` via EmulatorJS) does **not** export hooks to snoo
 
 ## What we built
 
-1. **Card backing** — IndexedDB partitions (`sd2iec.ts`), import/export of MBR + FAT16 `.img` (`parseSdImage` / `exportSdImage`), folder paths on files (`path` + virtual `dirs`).
+1. **Card backing** — Three paths, one firmware layer (`sd2iec.ts` + `sd2iec-card-source.ts`): **(A)** direct `.img` mount (FAT in memory, not repacked to IndexedDB), **(B)** host SD folder via File System Access API (writes behind a toggle), **(C)** legacy IndexedDB import/export. Details: `docs/SD2IEC_CARD_SOURCES.md`.
 2. **Firmware command set** — `runSdCommand` / command channel 15: `CD`, `CP`, `MD`, `RD`, `S:`, `N:`, `X`, `$`, `$=P`, wildcards, etc. (see `docs/CMD_SD2IEC_COMPATIBILITY.md`).
 3. **IEC attachment** — `installSd2iecHooks` patches KERNAL vectors (`READ`, `OPEN`, `CLOSE`, `TALK`, …) for `deviceUnit`; `tickSd2iec` services the handshake mailbox each frame when SD2IEC is on the IEC map.
 4. **CD into disk images** — `CD:FOO.D64` mounts the image in software; `$` / `LOAD` read PRGs from the D64 (`readD64Prg`). D81/DNP: partial / planned (D81 stays a normal 1581 disk feature elsewhere).

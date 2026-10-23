@@ -18,6 +18,7 @@
     "test": "node scripts/run-unit-tests.mjs",
     "test:cmd-sd2iec": "node scripts/cmd-sd2iec-e2e.mjs",
     "test:desktop-sd2iec-iec": "node scripts/desktop-sd2iec-iec-e2e.mjs",
+    "test:desktop-sd2iec-card-sources": "node scripts/desktop-sd2iec-card-sources.mjs",
     "test:desktop-grok64-core": "node scripts/desktop-grok64-core-e2e.mjs",
     "test:desktop-custom-matrix": "NODE_OPTIONS=--max-old-space-size=6144 node scripts/desktop-custom-core-matrix.mjs",
     "test:desktop-a1bacdc": "NODE_OPTIONS=--max-old-space-size=6144 node scripts/desktop-a1bacdc-qa.mjs",

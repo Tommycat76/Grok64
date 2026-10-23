@@ -80,6 +80,8 @@ interface SettingsSlice {
   scpuSimm: ScpuSimm;
   scpuTurbo: boolean;
   jiffyDos: boolean;
+  /** Host folder / mounted .img writes (off by default). */
+  sd2iecWriteEnabled: boolean;
   debugLog: boolean;
   volume: number;
   binds: ControlBinding[];
@@ -112,6 +114,7 @@ interface SettingsSlice {
   setScpuSimm: (v: ScpuSimm) => void;
   setScpuTurbo: (v: boolean) => void;
   setJiffyDos: (v: boolean) => void;
+  setSd2iecWriteEnabled: (v: boolean) => void;
   setDebugLog: (v: boolean) => void;
   setVolume: (v: number) => void;
   setBind: (action: ActionId, patch: Partial<ControlBinding>) => void;
@@ -194,6 +197,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       scpuSimm: "16",
       scpuTurbo: true,
       jiffyDos: false,
+      sd2iecWriteEnabled: false,
       debugLog: false,
       volume: 0.7,
       binds: DEFAULT_BINDS,
@@ -242,6 +246,10 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       setScpuSimm: (scpuSimm) => set({ scpuSimm }),
       setScpuTurbo: (scpuTurbo) => set({ scpuTurbo }),
       setJiffyDos: (jiffyDos) => set({ jiffyDos }),
+      setSd2iecWriteEnabled: (sd2iecWriteEnabled) => {
+        set({ sd2iecWriteEnabled });
+        void import("./sd2iec-card-source").then((m) => m.setSd2iecWriteEnabled(sd2iecWriteEnabled));
+      },
       setDebugLog: (debugLog) => set({ debugLog }),
       setVolume: (volume) => set({ volume }),
       setBind: (action, patch) =>
@@ -337,6 +345,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         scpuSimm: s.scpuSimm,
         scpuTurbo: s.scpuTurbo,
         jiffyDos: s.jiffyDos,
+        sd2iecWriteEnabled: s.sd2iecWriteEnabled,
         debugLog: s.debugLog,
         volume: s.volume,
         binds: s.binds,
@@ -370,6 +379,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
           "scpuSimm",
           "scpuTurbo",
           "jiffyDos",
+          "sd2iecWriteEnabled",
           "debugLog",
           "volume",
           "binds",
@@ -433,6 +443,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
           if (!["0", "1", "2", "4", "8", "16"].includes(p.scpuSimm as string)) p.scpuSimm = "16";
           if (typeof p.scpuTurbo !== "boolean") p.scpuTurbo = true;
           if (typeof p.jiffyDos !== "boolean") p.jiffyDos = false;
+          if (typeof p.sd2iecWriteEnabled !== "boolean") p.sd2iecWriteEnabled = false;
         }
         delete p.powered;
         delete p.running;
