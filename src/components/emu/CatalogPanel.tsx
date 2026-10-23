@@ -15,6 +15,7 @@ import {
   type CatalogKind,
 } from "@/lib/emu/catalog";
 import { explodeArchive, pickBootFile, toArrayBuffer, b64ToU8 } from "@/lib/emu/archive";
+import { validateCrtImport } from "@/lib/emu/cart-crt-diag";
 import { listLibrary, putFile } from "@/lib/emu/library";
 import { regionBadge } from "@/lib/emu/region";
 import { useEmu } from "@/lib/emu/store";
@@ -133,6 +134,11 @@ export function CatalogPanel({ onPlay, onInsert }: Props) {
     if (!chosen) throw new Error("No C64 file in that download.");
     let first: LibraryItem | null = null;
     for (const part of parts) {
+      const reject = validateCrtImport(part.data, part.name);
+      if (reject) {
+        toast.error(reject, { duration: 12_000 });
+        continue;
+      }
       const item = await putFile(part.name, toArrayBuffer(part.data), "catalog", {
         catalogKey,
         catalogTitle,

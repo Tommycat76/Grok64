@@ -52,6 +52,7 @@ When **Play** lands on stock BASIC but QA passes elsewhere, compare **data** (li
 | **Browser console** | `[grok64] lastCartPlay` on each update |
 | **`__g64.lastCartPlay()`** | Same object in DevTools |
 | **Play gate** | Invalid CRT header, &lt;4096 bytes, or library `size` ≠ loaded bytes → **error toast**, boot aborted |
+| **Import gate** | Same CRT rules when saving to **On this device** (re-import if an old row was truncated) |
 
 **`attachCode`:** `-1` = boot file write failed; `0` = CRT not visible as mounted boot/media; `>0` = CRT hardware type byte from the header (e.g. `2` = Super Snapshot v5) when attach succeeded.
 

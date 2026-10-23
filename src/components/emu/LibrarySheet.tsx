@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { CatalogPanel } from "./CatalogPanel";
 import { BUNDLED } from "@/lib/emu/software";
 import { ACCEPT_EXT, KIND_LABEL, isDiskKind } from "@/lib/emu/formats";
+import { validateCrtImport } from "@/lib/emu/cart-crt-diag";
 import { isWorkDisk, listLibrary, putFile, removeFile, updateFileUnit } from "@/lib/emu/library";
 import { importFromUrl } from "@/lib/emu/import-url";
 import { b64ToU8, explodeArchive, pickBootFile, toArrayBuffer } from "@/lib/emu/archive";
@@ -57,6 +58,11 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
         const buf = new Uint8Array(await f.arrayBuffer());
         const parts = explodeArchive(f.name, buf);
         for (const part of parts) {
+          const reject = validateCrtImport(part.data, part.name);
+          if (reject) {
+            toast.error(reject, { duration: 12_000 });
+            continue;
+          }
           saved.push(await putFile(part.name, toArrayBuffer(part.data), source));
         }
       }
@@ -80,6 +86,11 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
       const parts = explodeArchive(res.name, bin);
       const saved: LibraryItem[] = [];
       for (const part of parts) {
+        const reject = validateCrtImport(part.data, part.name);
+        if (reject) {
+          toast.error(reject, { duration: 12_000 });
+          continue;
+        }
         saved.push(await putFile(part.name, toArrayBuffer(part.data), "cloud"));
       }
       await refresh();

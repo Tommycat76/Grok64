@@ -241,6 +241,7 @@ import {
   publishCartAttachDiag,
   recordLastCartPlayDiagnostic,
   validateCartForPlay,
+  validateCrtImport,
 } from "@/lib/emu/cart-crt-diag";
 import { createMenuJoyGate, menuJoyStep, resetMenuJoyGate } from "@/lib/emu/menu-joy.mjs";
 import { applyStickPrecision, createStickPrecision, resetStickPrecision } from "@/lib/emu/stick-precision.mjs";
@@ -768,13 +769,16 @@ export function Grok64App() {
       closeSoftware: () => useEmu.getState().setLibraryOpen(false),
       libraryCount: async () => (await listLibrary()).length,
       importLibraryBytes: async (name, bytes) => {
-        const buf =
-          bytes instanceof ArrayBuffer
+        const u8 =
+          bytes instanceof Uint8Array
             ? bytes
-            : bytes instanceof Uint8Array
-              ? bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength)
-              : new Uint8Array(bytes).buffer;
-        const item = await putFile(name, buf as ArrayBuffer, "local");
+            : bytes instanceof ArrayBuffer
+              ? new Uint8Array(bytes)
+              : new Uint8Array(bytes);
+        const reject = validateCrtImport(u8, name);
+        if (reject) throw new Error(reject);
+        const buf = u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
+        const item = await putFile(name, buf, "local");
         useEmu.getState().setLibrary(await listLibrary());
         return { id: item.id, name: item.name };
       },

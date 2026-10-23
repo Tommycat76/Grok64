@@ -172,6 +172,13 @@ export function validateCartForPlay(
   return { ok: true, userMessage: "", header, headerHex64 };
 }
 
+/** Block saving obvious bad CRTs into IndexedDB (same rules as Play, without IDB size check). */
+export function validateCrtImport(data: Uint8Array, fileName: string): string | null {
+  if (!/\.(crt|bin)$/i.test(fileName)) return null;
+  const v = validateCartForPlay(data, fileName, null);
+  return v.ok ? null : v.userMessage;
+}
+
 export function recordLastCartPlayDiagnostic(
   patch: Partial<LastCartPlayDiagnostic> & Pick<LastCartPlayDiagnostic, "fileName">,
 ): LastCartPlayDiagnostic {

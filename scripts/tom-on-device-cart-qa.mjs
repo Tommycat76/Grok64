@@ -70,7 +70,24 @@ await page.evaluate(async ({ name, bytes }) => window.__g64?.importLibraryBytes?
 });
 let t = await playLibrary(page, /Super_Snapshot/i, ssMenuRe);
 await page.screenshot({ path: join(out, "tom-qa-01-ss5-play.png"), fullPage: true });
-const ss1 = { poison: grok64FloppyAutostartPoison(t), menu: ssMenuRe.test(t) };
+const ss5Diag = await page.evaluate(() => window.__g64?.lastCartPlay?.() ?? null);
+const ss1 = {
+  poison: grok64FloppyAutostartPoison(t),
+  menu: ssMenuRe.test(t),
+  diag: ss5Diag
+    ? {
+        validationOk: ss5Diag.validationOk,
+        payloadBytes: ss5Diag.payloadBytes,
+        attachCode: ss5Diag.attachCode,
+        cartMountedOnCore: ss5Diag.cartMountedOnCore,
+        hwTypeLabel: ss5Diag.hwTypeLabel,
+      }
+    : null,
+  diagOk:
+    Boolean(ss5Diag?.validationOk) &&
+    Boolean(ss5Diag?.cartMountedOnCore) &&
+    (ss5Diag?.attachCode ?? 0) > 0,
+};
 
 await page.locator('button[aria-label="Reset"]').click();
 await page.waitForTimeout(12_000);
@@ -114,6 +131,7 @@ const report = {
   pass:
     ss1.menu &&
     !ss1.poison &&
+    ss1.diagOk &&
     ss2.menu &&
     !ss2.poison &&
     cartOut.basic &&

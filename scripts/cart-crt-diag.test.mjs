@@ -3,7 +3,8 @@ import test from "node:test";
 import { createServer } from "vite";
 
 const server = await createServer({ server: { middlewareMode: true }, appType: "custom" });
-const { parseCrtHeader, validateCartForPlay, formatHeaderHex64 } = await server.ssrLoadModule(
+const { parseCrtHeader, validateCartForPlay, validateCrtImport, formatHeaderHex64 } =
+  await server.ssrLoadModule(
   "/src/lib/emu/cart-crt-diag.ts",
 );
 await server.close();
@@ -43,4 +44,10 @@ test("validateCartForPlay rejects IDB size mismatch", () => {
 test("formatHeaderHex64 returns 64 bytes hex", () => {
   const hex = formatHeaderHex64(fakeCrt());
   assert.equal(hex.split(" ").length, 64);
+});
+
+test("validateCrtImport rejects bad CRT on import", () => {
+  assert.match(validateCrtImport(fakeCrt().subarray(0, 100), "x.crt") ?? "", /truncated/i);
+  assert.equal(validateCrtImport(fakeCrt(), "x.crt"), null);
+  assert.equal(validateCrtImport(fakeCrt(), "game.d64"), null);
 });
