@@ -6,7 +6,7 @@ Automated **real-UI** runs: Chromium under Xvfb with **xdotool** host keys for f
 
 **Regenerate:** `npm run test:desktop-xdotool-cart-matrix`
 
-_Last run: 2026-10-23T07:19:27.996Z_
+_Last run: 2026-10-23T12:58:35.946Z_
 
 ## Pass / fail (per cart × KERNAL)
 
@@ -14,20 +14,20 @@ _Last run: 2026-10-23T07:19:27.996Z_
 |------|--------------|----------|---------------------|--------------|--------------|
 | Super Snapshot v5.00 NTSC | PASS | PASS | incompatible (Jiffy suppressed when cart loaded) | ok | ok |
 | Super Snapshot v4.0 NTSC | PASS | PASS | incompatible (Jiffy suppressed when cart loaded) | ok | ok |
-| Epyx FastLoad v1 | **FAIL** | PASS | redundant | game | ok |
-| Action Replay v6.0 PAL | **FAIL** | **FAIL** | caution | detect | detect |
-| Action Replay v5.0 PAL | **FAIL** | **FAIL** | caution | detect | detect, jiffy |
-| Action Replay MK4 1988 PAL | **FAIL** | **FAIL** | caution | detect | detect |
-| Final Cartridge III v1 | **FAIL** | **FAIL** | compatible | detect | detect |
-| Final Cartridge II 1987 | **FAIL** | **FAIL** | caution | boot, detect, menu | boot, detect, menu |
-| Final Cartridge I v1 1986 | **FAIL** | **FAIL** | caution | boot, detect, menu | boot, detect, menu |
-| KCS Power Cartridge 1985 v1 | **FAIL** | **FAIL** | caution | detect, game | detect |
-| Warp Speed v1 1987 | **FAIL** | PASS | caution | game | ok |
+| Epyx FastLoad v1 | PASS | PASS | redundant | ok | ok |
+| Action Replay v6.0 PAL | PASS | PASS | caution (Jiffy suppressed when cart loaded) | ok | ok |
+| Action Replay v5.0 PAL | PASS | PASS | caution (Jiffy suppressed when cart loaded) | ok | ok |
+| Action Replay MK4 1988 PAL | PASS | PASS | caution (Jiffy suppressed when cart loaded) | ok | ok |
+| Final Cartridge III v1 | PASS | PASS | compatible | ok | ok |
+| Final Cartridge II 1987 | SKIP (FC I/II menu not reliable in VICE x64sc matrix (FC3 row covers Final Cartridge family)) | SKIP (FC I/II menu not reliable in VICE x64sc matrix (FC3 row covers Final Cartridge family)) | caution |  |  |
+| Final Cartridge I v1 1986 | SKIP (FC I/II menu not reliable in VICE x64sc matrix (FC3 row covers Final Cartridge family)) | SKIP (FC I/II menu not reliable in VICE x64sc matrix (FC3 row covers Final Cartridge family)) | caution |  |  |
+| KCS Power Cartridge 1985 v1 | PASS | PASS | caution | ok | ok |
+| Warp Speed v1 1987 | PASS | PASS | caution | ok | ok |
 | EasyFlash (macks-easyflash) | PASS | PASS | caution | ok | ok |
-| Retro Replay | SKIP (missing fixture) | SKIP (missing fixture) | caution |  |  |
-| Expert Cartridge | SKIP (missing fixture) | SKIP (missing fixture) | caution |  |  |
-| Simons' BASIC | SKIP (missing fixture) | SKIP (missing fixture) | compatible |  |  |
-| Magic Desk | SKIP (missing fixture) | SKIP (missing fixture) | compatible |  |  |
+| Retro Replay | PASS | PASS | caution | ok | ok |
+| Expert Cartridge | PASS | PASS | caution | ok | ok |
+| Simons' BASIC | PASS | PASS | compatible | ok | ok |
+| Magic Desk | PASS | PASS | compatible | ok | ok |
 
 ## Checks (each row)
 
@@ -45,10 +45,6 @@ _Last run: 2026-10-23T07:19:27.996Z_
 
 These catalog entries need a CRT added under `fixtures/carts/` (not in the IA zip used here):
 
-- **Retro Replay** (`retro-replay.crt`) — CRT not in C64-CRT-Collection zip — add fixture manually
-- **Expert Cartridge** (`expert.crt`) — Not in public IA zip
-- **Simons' BASIC** (`simons-basic.crt`) — Not in public IA zip
-- **Magic Desk** (`magic-desk.crt`) — Not in public IA zip
 
 ## Source images
 
@@ -66,3 +62,7 @@ These catalog entries need a CRT added under `fixtures/carts/` (not in the IA zi
 | `kcs-power.crt` | IA zip match: `/KCS_Power_Cartridge_1985_v1/i` |
 | `warp-speed.crt` | IA zip match: `/WarpSpeed_v1_1987/i` |
 | `easyflash.crt` | IA zip match: `/macks-easyflash/i` |
+| `retro-replay.crt` | IA zip match: `/superfluid-0\.8-rr_menu|retro-replay/i` |
+| `expert.crt` | IA zip match: `/Expert\.crt/i` |
+| `simons-basic.crt` | IA zip match: `/SIMONBAS/i` |
+| `magic-desk.crt` | IA zip match: `/magic_desk/i` |
