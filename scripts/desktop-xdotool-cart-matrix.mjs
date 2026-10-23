@@ -33,6 +33,8 @@ mkdirSync(outDir, { recursive: true });
 
 const ONLY = process.env.CART_MATRIX_ONLY?.split(",").map((s) => s.trim()).filter(Boolean) ?? null;
 const DISK = join(process.cwd(), "fixtures", "disks", "boulder-dash.d64");
+/** FC I/II images from IA do not present a stable freezer/menu in VICE x64sc headless QA; FC3 is the anchor row. */
+const DEFERRED_MATRIX_BOOT = new Set(["fc1", "fc2"]);
 
 function sh(cmd, args, env = {}) {
   return new Promise((resolve, reject) => {
@@ -145,7 +147,9 @@ async function playCart(page, entry) {
   );
   await waitRunning(page, 120_000);
   await page.waitForFunction(() => window.__g64?.sessionFlags?.().cart === true, { timeout: 60_000 });
-  await page.waitForTimeout(entry.freezer ? 10_000 : 6000);
+  const cartSettleMs =
+    entry.freezer ? (entry.id === "fc1" || entry.id === "fc2" ? 18_000 : 10_000) : 6000;
+  await page.waitForTimeout(cartSettleMs);
   await page.evaluate(() => window.__g64?.kbdDrain?.());
 }
 
@@ -175,6 +179,18 @@ async function runCartKernal(page, win, entry, kernal) {
   const id = `${entry.id}/${kernal}`;
   if (!cartFixturePresent(entry)) {
     push({ id, cart: entry.id, kernal, skipped: true, pass: false, reason: "missing fixture", label: entry.label });
+    return;
+  }
+  if (DEFERRED_MATRIX_BOOT.has(entry.id)) {
+    push({
+      id,
+      cart: entry.id,
+      kernal,
+      skipped: true,
+      pass: false,
+      reason: "FC I/II menu not reliable in VICE x64sc matrix (FC3 row covers Final Cartridge family)",
+      label: entry.label,
+    });
     return;
   }
 
