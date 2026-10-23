@@ -894,4 +894,5 @@ test("CRT payloads never plan as floppy autostart", async () => {
   });
   assert.equal(plan.kind, "cart");
   assert.equal(plan.attach, null);
+  assert.equal(plan.autostartAfterReady, false);
 });

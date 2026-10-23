@@ -1664,8 +1664,7 @@ export async function attachCartridgeInPlace(
     vice_work_disk: "disabled",
   });
   await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
-  autostartAfterReady(emu, false, { autoloadWarp: true });
-  resetEmu(emu);
+  cartBootReset(emu);
   await flushEmuFs(emu, 600);
   bumpCrtPaint(emu);
   return true;
@@ -2194,16 +2193,41 @@ export async function prepareCore(
   return { jiffy, roms, cmd };
 }
 
+/** CRT boot: autostart-style reset without typing LOAD"*",8,1. */
+export function cartBootReset(emu: EjsInstance | null) {
+  applyRuntimeOptions(emu, {
+    vice_autostart: "disabled",
+    vice_autostart_warp: "disabled",
+    vice_autoloadwarp: "disabled",
+    vice_reset: "autostart",
+    vice_work_disk: "disabled",
+    vice_drive_true_emulation: "enabled",
+    vice_virtual_device_traps: "disabled",
+  });
+  resetEmu(emu);
+}
+
 export function autostartAfterReady(
   emu: EjsInstance | null,
   trueDrive = true,
-  opts?: { autoloadWarp?: boolean },
+  opts?: { autoloadWarp?: boolean; /** When false, hard-reset only — never type LOAD"*",8,1 (cart boot). */ arm?: boolean },
 ) {
+  const arm = opts?.arm !== false;
+  const base = arm
+    ? {
+        vice_autostart: "enabled",
+        vice_autostart_warp: "enabled",
+        vice_autoloadwarp: opts?.autoloadWarp === false ? "disabled" : "enabled",
+        vice_reset: "autostart",
+      }
+    : {
+        vice_autostart: "disabled",
+        vice_autostart_warp: "disabled",
+        vice_autoloadwarp: "disabled",
+        vice_reset: "hard",
+      };
   applyRuntimeOptions(emu, {
-    vice_autostart: "enabled",
-    vice_autostart_warp: "enabled",
-    vice_autoloadwarp: opts?.autoloadWarp === false ? "disabled" : "enabled",
-    vice_reset: "autostart",
+    ...base,
     ...(trueDrive
       ? {
           vice_drive_true_emulation: "enabled",

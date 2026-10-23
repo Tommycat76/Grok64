@@ -503,7 +503,8 @@ export function planPlay(input: {
   const kind = playKindOf(input.filename, work, input.payload);
   const user: DriveAttach = { iec: input.userIec, unit: input.userUnit };
   const attach = work ? null : iecForAutostart(kindOf(input.filename));
-  const autostart = input.autostart !== false && kind !== "basic" && kind !== "floppy";
+  const autostart =
+    input.autostart !== false && kind !== "basic" && kind !== "floppy" && kind !== "cart";
 
   if (kind === "floppy" && attach) {
     const recycle = floppyNeedsRecycle(input.liveIec, input.liveWorkDisk, user, {
