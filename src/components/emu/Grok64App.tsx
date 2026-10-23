@@ -51,6 +51,7 @@ import {
   cartEject,
   cartFreeze,
   cartReset,
+  repaintAfterCartFreeze,
   writeCompanionMedia,
   cmdHdSwap,
   flushEmuFs,
@@ -121,6 +122,8 @@ import { attachGrok64Sd2iec, tickGrok64Iec, wireGrok64ViceHost } from "@/lib/emu
 import { readC64Byte, readC64Bytes, writeC64Byte, writeC64Bytes } from "@/lib/emu/c64-memory";
 import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor } from "@/lib/emu/vice-extras";
 import {
+  geosBootSucceeded,
+  geosBootStuckAtBasic,
   geosFamilyDesktopOk,
   geosFamilyLoadMs,
   geosFamilyPlayLockMs,
@@ -148,6 +151,7 @@ import {
   markSessionReady,
   planPlay,
   CART_PLAY_UNLOCK_VICE_OPTS,
+  viceGeosFloppyOptions,
   readPlayMarker,
   savePlayMarker,
   sessionCanAttach,
@@ -802,7 +806,7 @@ export function Grok64App() {
         applyIecUnit(emuRef.current, "1541", 8);
         setMouseAnalog(emuRef.current, true);
         applyRuntimeOptions(emuRef.current, {
-          ...viceDriveTypeVars(viceMapFromIecMap(geosMap)),
+          ...viceGeosFloppyOptions(8),
           ...viceJoyOptions(stGeos.joyPort),
           vice_ram_expansion_unit: reu,
         });
@@ -810,16 +814,22 @@ export function Grok64App() {
         const ok = await bootGeosFloppy(emuRef.current, new Uint8Array(buf), name, 8, geosMap);
         if (!ok) return false;
         setSessionDisk(name, new Uint8Array(buf), 8);
-        const loaded = await feedBasicLine(emuRef.current, 'LOAD"*",8,1');
-        if (!loaded) return false;
-        await new Promise((r) => window.setTimeout(r, geosFamilyLoadMs(name)));
-        const ran = await feedBasicLine(emuRef.current, "RUN", { runcmd: true });
-        if (!ran) return false;
-        await new Promise((r) => window.setTimeout(r, 8000));
+        await flushEmuFs(emuRef.current, 3000);
+        applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
+        if (!(await feedBasicLine(emuRef.current, 'LOAD"*",8,1'))) return false;
+        const loadEnd = Date.now() + geosFamilyLoadMs(name);
+        while (Date.now() < loadEnd) {
+          const mid = readScreenText(emuRef.current);
+          if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(mid)) return false;
+          if (!geosBootStuckAtBasic(mid) && mid.replace(/\s+/g, "").length > 60) break;
+          await new Promise((r) => window.setTimeout(r, 500));
+        }
+        applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
+        if (!(await feedBasicLine(emuRef.current, "RUN", { runcmd: true }))) return false;
+        await new Promise((r) => window.setTimeout(r, 15_000));
         const screen = readScreenText(emuRef.current);
         if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen)) return false;
-        if (/^\s*READY\.?\s*$/m.test(screen.trim()) && screen.length < 120) return false;
-        return geosFamilyDesktopOk(screen, name) || screen.replace(/\s+/g, "").length > 40;
+        return geosBootSucceeded(screen, name);
       },
       settings: () => {
         const st = useEmu.getState();
@@ -1505,6 +1515,8 @@ export function Grok64App() {
         if (cartBoot) {
           dismissEjsPrompts(document.getElementById("grok64-player"));
           bumpCrtPaint(emu);
+          window.setTimeout(() => bumpCrtPaint(emu), 400);
+          window.setTimeout(() => bumpCrtPaint(emu), 1200);
           scheduleFit(true);
         }
         if (isIosPhone())     kickIosAfterEmuAction(emu, "settle", gen);
@@ -2409,6 +2421,9 @@ export function Grok64App() {
       }
       if (isGeosFamilyDiskName(file.name) && emuRef.current && useEmu.getState().running) {
         const stGeos = useEmu.getState();
+        if (stGeos.jiffyDos) {
+          toast.message("Stock KERNAL for GEOS", { duration: 6000 });
+        }
         const reu = reuForGeosFamilyDisk(file.name, stGeos.reuSize);
         if (reu !== stGeos.reuSize) {
           stGeos.setReuSize(reu);
@@ -2423,7 +2438,7 @@ export function Grok64App() {
         const geosMap = { ...stGeos.iecMap, 8: "1541" as const };
         applyIecUnit(emuRef.current, "1541", 8);
         applyRuntimeOptions(emuRef.current, {
-          ...viceDriveTypeVars(viceMapFromIecMap(geosMap)),
+          ...viceGeosFloppyOptions(8),
           ...viceJoyOptions(stGeos.joyPort),
           vice_ram_expansion_unit: reu,
         });
@@ -2442,13 +2457,36 @@ export function Grok64App() {
           geosFamilyPlayLockMs(file.name),
           isWheelsDiskName(file.name) ? "Loading Wheels…" : "Loading GEOS…",
         );
-        const loaded = await feedBasicLine(emuRef.current, 'LOAD"*",8,1');
-        if (!loaded) {
+        await flushEmuFs(emuRef.current, 3000);
+        applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
+        if (!(await feedBasicLine(emuRef.current, 'LOAD"*",8,1'))) {
           toast.error(isWheelsDiskName(file.name) ? "Wheels LOAD failed" : "GEOS LOAD failed");
           return;
         }
-        await new Promise((r) => window.setTimeout(r, geosFamilyLoadMs(file.name)));
+        const loadEnd = Date.now() + geosFamilyLoadMs(file.name);
+        while (Date.now() < loadEnd) {
+          const mid = readScreenText(emuRef.current);
+          if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(mid)) {
+            toast.error("GEOS disk not found on unit 8");
+            return;
+          }
+          if (!geosBootStuckAtBasic(mid) && mid.replace(/\s+/g, "").length > 60) break;
+          await new Promise((r) => window.setTimeout(r, 500));
+        }
+        applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
         await feedBasicLine(emuRef.current, "RUN", { runcmd: true });
+        await new Promise((r) => window.setTimeout(r, 15_000));
+        const screen = readScreenText(emuRef.current);
+        if (!geosBootSucceeded(screen, file.name)) {
+          toast.error(
+            geosBootStuckAtBasic(screen)
+              ? "GEOS returned to BASIC — stock KERNAL and 1541-II are required"
+              : isWheelsDiskName(file.name)
+                ? "Wheels did not reach the desktop"
+                : "GEOS did not reach the deskTop",
+          );
+          return;
+        }
         await touchPlayed(item.id);
         return;
       }
@@ -3083,6 +3121,7 @@ export function Grok64App() {
         return;
       }
       const ok = cartFreeze(emuRef.current);
+      repaintAfterCartFreeze(emuRef.current);
       glog("cart-freeze", { ok });
       toast.message(ok ? "Cart freeze" : "Cart freeze not ready");
       return;

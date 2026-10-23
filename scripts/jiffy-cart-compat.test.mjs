@@ -29,11 +29,11 @@ test("Super Snapshot suppresses Jiffy (hardware incompatible)", () => {
   }
 });
 
-test("Action Replay warns but allows Jiffy setting", () => {
+test("Action Replay suppresses Jiffy for reliable freezer boot", () => {
   const c = jiffyCartCompat("action-replay", true);
   assert.equal(c.level, "caution");
-  assert.equal(c.suppressJiffy, false);
-  assert.equal(resolveJiffyWant(true, "action-replay"), true);
+  assert.equal(c.suppressJiffy, true);
+  assert.equal(resolveJiffyWant(true, "action-replay"), false);
 });
 
 test("FC3 is compatible", () => {

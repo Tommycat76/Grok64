@@ -40,6 +40,16 @@ export function geosFamilyPlayLockMs(fileName: string): number {
 }
 
 /** Text heuristics for desktop QA (Wheels is mostly graphical). */
+/** BASIC READY after a GEOS boot attempt means the OS did not stay up. */
+export function geosBootStuckAtBasic(screen: string): boolean {
+  const compact = screen.replace(/\s+/g, " ").trim();
+  return (
+    /COMMODORE 64 BASIC/i.test(screen) &&
+    /\bREADY\b/i.test(screen) &&
+    (/^READY\.?$/i.test(compact) || compact.length < 240)
+  );
+}
+
 export function geosFamilyDesktopOk(screen: string, fileName?: string): boolean {
   const bad = /FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen);
   if (bad) return false;
@@ -47,5 +57,10 @@ export function geosFamilyDesktopOk(screen: string, fileName?: string): boolean 
     if (/REU|RAM\s*EXPANS|NO\s*REU|EXPANSION\s*NOT/i.test(screen)) return false;
     return /WHEELS|DASH\s*BOARD|DASHBOARD|TOOL\s*BOX|CLICK\s*HERE|GEOS/i.test(screen);
   }
-  return /GEOS|DESK|INFO|DISK|DIRECTORY|GEODISC|GEOSDISK|64\s*K/i.test(screen);
+  return /GEOS|DESK|INFO|DISK|DIRECTORY|GEODISC|GEOSDISK|64\s*K|deskTop/i.test(screen);
+}
+
+export function geosBootSucceeded(screen: string, fileName?: string): boolean {
+  if (geosBootStuckAtBasic(screen)) return false;
+  return geosFamilyDesktopOk(screen, fileName);
 }

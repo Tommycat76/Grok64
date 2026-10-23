@@ -34,6 +34,7 @@
     "test:desktop-catalog": "node scripts/desktop-catalog-e2e.mjs",
     "test:desktop-catalog-play": "node scripts/desktop-catalog-play.mjs",
     "test:desktop-geos": "node scripts/desktop-geos-e2e.mjs",
+    "test:desktop-geos-proof": "node scripts/desktop-geos-desktop-proof.mjs",
     "test:desktop-demo": "node scripts/desktop-demo-e2e.mjs",
     "test:vice-sid-probe": "node scripts/vice-sid-probe.mjs",
     "test:desktop-regression": "node scripts/desktop-regression-e2e.mjs",

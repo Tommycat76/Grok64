@@ -8,6 +8,8 @@ const server = await createServer({
   logLevel: "error",
 });
 const {
+  geosBootStuckAtBasic,
+  geosBootSucceeded,
   geosFamilyDesktopOk,
   isGeosFamilyDiskName,
   isWheelsDiskName,
@@ -39,5 +41,12 @@ describe("geos-boot", () => {
     assert.equal(geosFamilyDesktopOk("WHEELS DASHBOARD", "Wheels64.d64"), true);
     assert.equal(geosFamilyDesktopOk("FILE NOT FOUND", "Wheels64.d64"), false);
     assert.equal(geosFamilyDesktopOk("NO REU PRESENT", "Wheels64.d64"), false);
+  });
+
+  it("rejects BASIC READY after failed GEOS boot", () => {
+    const basic = "**** COMMODORE 64 BASIC V2 ****\n\nREADY.";
+    assert.equal(geosBootStuckAtBasic(basic), true);
+    assert.equal(geosBootSucceeded(basic, "GEOS64_2.0.d64"), false);
+    assert.equal(geosBootSucceeded("deskTop V2.0", "GEOS64_2.0.d64"), true);
   });
 });

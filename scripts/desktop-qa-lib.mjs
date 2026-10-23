@@ -88,6 +88,83 @@ export async function canvasHasSignal(page) {
   });
 }
 
+/** Decode __g64 shot PNG and sample pixels — catches blank VICE blue vs real GEOS/cart UI. */
+export async function canvasPixelStats(page) {
+  return page.evaluate(async () => {
+    const shot = await window.__g64?.shot?.();
+    if (!shot?.b64 || shot.b64.length < 1200) return { ok: false, reason: "no-shot" };
+    try {
+      const blob = await (await fetch(`data:image/png;base64,${shot.b64}`)).blob();
+      const bmp = await createImageBitmap(blob);
+      const c = document.createElement("canvas");
+      c.width = bmp.width;
+      c.height = bmp.height;
+      const ctx = c.getContext("2d");
+      if (!ctx) return { ok: false, reason: "no-2d" };
+      ctx.drawImage(bmp, 0, 0);
+      const { data, width, height } = ctx.getImageData(0, 0, c.width, c.height);
+      const pixels = width * height;
+      let geosDesk = 0;
+      let viceBlank = 0;
+      let ink = 0;
+      const buckets = new Set();
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        buckets.add(`${r >> 4},${g >> 4},${b >> 4}`);
+        if (g > 110 && b > 140 && r < 150) geosDesk += 1;
+        if (b > 170 && r < 90 && g < 130) viceBlank += 1;
+        if (r + g + b < 80) ink += 1;
+      }
+      return {
+        ok: true,
+        w: width,
+        h: height,
+        buckets: buckets.size,
+        geosDesk: geosDesk / pixels,
+        viceBlank: viceBlank / pixels,
+        ink: ink / pixels,
+        src: shot.src,
+      };
+    } catch (e) {
+      return { ok: false, reason: String(e) };
+    }
+  });
+}
+
+export async function canvasLooksLikeGeosDesktop(page) {
+  const stats = await canvasPixelStats(page);
+  if (!stats?.ok) return { pass: false, stats };
+  const text = await page.evaluate(() => window.__g64?.screenText?.() || "");
+  const basicReady =
+    /COMMODORE 64 BASIC/i.test(text) && /\bREADY\b/i.test(text) && text.replace(/\s+/g, "").length < 220;
+  const pass =
+    !basicReady &&
+    stats.buckets >= 48 &&
+    stats.geosDesk >= 0.12 &&
+    stats.viceBlank < 0.72 &&
+    stats.ink >= 0.002;
+  return { pass, stats, textTail: text.slice(-120) };
+}
+
+export async function canvasLooksLikeCartMenu(page, { minBuckets = 40 } = {}) {
+  const stats = await canvasPixelStats(page);
+  if (!stats?.ok) return { pass: false, stats };
+  const text = await page.evaluate(() => window.__g64?.screenText?.() || "");
+  const basicOnly = /^\s*READY\.?\s*$/m.test(text.trim()) && text.length < 80;
+  const pass = !basicOnly && stats.buckets >= minBuckets && stats.ink >= 0.004 && stats.viceBlank < 0.9;
+  return { pass, stats, textHead: text.slice(0, 100) };
+}
+
+export function isBasicReadyScreen(text) {
+  return (
+    /COMMODORE 64 BASIC/i.test(text) &&
+    /\bREADY\b/i.test(text) &&
+    text.replace(/\s+/g, "").length < 220
+  );
+}
+
 export async function noPowerSplash(page) {
   return (await page.locator(".g64-splash[data-on='true']").count()) === 0;
 }

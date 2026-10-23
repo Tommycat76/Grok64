@@ -1551,6 +1551,7 @@ export function cartFreeze(emu: EjsInstance | null): boolean {
     const direct = mod._grok64_cartridge_trigger_freeze;
     if (typeof direct === "function") {
       direct();
+      repaintAfterCartFreeze(emu);
       return true;
     }
     const freeze =
@@ -1558,6 +1559,7 @@ export function cartFreeze(emu: EjsInstance | null): boolean {
       mod.cwrap?.("cartridge_trigger_freeze", null, []);
     if (typeof freeze === "function") {
       freeze();
+      repaintAfterCartFreeze(emu);
       return true;
     }
   } catch {
@@ -1570,7 +1572,20 @@ export function cartFreeze(emu: EjsInstance | null): boolean {
     vice_autoloadwarp: "disabled",
   });
   resetEmu(emu);
+  repaintAfterCartFreeze(emu);
   return true;
+}
+
+/** Freezer UIs (SS/AR/FC) need an extra compositor nudge after vice_reset=freeze. */
+export function repaintAfterCartFreeze(emu: EjsInstance | null) {
+  bumpCrtPaint(emu);
+  try {
+    emu?.gameManager?.toggleMainLoop?.(1);
+  } catch {
+    /* ignore */
+  }
+  window.setTimeout(() => bumpCrtPaint(emu), 350);
+  window.setTimeout(() => bumpCrtPaint(emu), 900);
 }
 
 /** Remove a CRT that was loaded as content and return to the work disk. */
@@ -1946,6 +1961,22 @@ export function bootFileOf(emu: EjsInstance | null): string | null {
 const unitMounts = new Map<IecUnit, string>();
 const WORK_DISK_NAMES = new Set(["WORK DISK.D64", "work disk.d64"]);
 
+/** Mirror the mounted GEOS/game .d64 into VICE libretro work-disk paths (unit 8). */
+function syncViceWorkD64(emu: EjsInstance | null, data: Uint8Array) {
+  const FS = fsOf(emu);
+  if (!FS?.writeFile || data.byteLength < 174848) return;
+  const roots = ["/vice_work", "/data/vice_work", "/home/web_user/retroarch/userdata/saves/vice_work"];
+  for (const root of roots) {
+    try {
+      FS.mkdir?.(root);
+      FS.writeFile(`${root}/vice_work.d64`, data);
+      FS.writeFile(`${root}/8.d64`, data);
+    } catch {
+      /* optional path */
+    }
+  }
+}
+
 export function clearUnitMounts() {
   unitMounts.clear();
   clearSessionMedia();
@@ -2140,6 +2171,14 @@ export async function waitForC64Ready(emu: EjsInstance | null, timeoutMs = 45_00
   return /READY/i.test(readScreenText(emu));
 }
 
+/** GEOS / Wheels need the stock KERNAL — JiffyDOS ROM breaks LOAD/RUN into the deskTop. */
+export async function ensureStockKernal(emu: EjsInstance | null): Promise<boolean> {
+  if (!emu) return false;
+  await applyJiffyDos(emu, false);
+  await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
+  return true;
+}
+
 /** Mount a GEOS (or other) system disk on unit 8 as true 1541-II, no autostart PRG sniff. */
 export async function bootGeosFloppy(
   emu: EjsInstance | null,
@@ -2149,6 +2188,7 @@ export async function bootGeosFloppy(
   iecMap?: IecMap,
 ): Promise<boolean> {
   if (!emu || !coreHasFs(emu)) return false;
+  await ensureStockKernal(emu);
   wireGrok64ViceHost(emu);
   detachGrok64Sd2iec(emu, unit);
   await tickGrok64Iec(emu);
@@ -2159,7 +2199,7 @@ export async function bootGeosFloppy(
     ...viceDriveTypeVars(viceMap),
     ...viceGeosFloppyOptions(unit),
     [`vice_drive${unit}_type`]: "1542",
-    vice_work_disk: "disabled",
+    vice_work_disk: `${unit}_d64`,
   });
   injectViceRc(
     emu,
@@ -2171,7 +2211,7 @@ export async function bootGeosFloppy(
   applyRuntimeOptions(emu, {
     ...viceGeosFloppyOptions(unit),
     [`vice_drive${unit}_type`]: "1542",
-    vice_work_disk: "disabled",
+    vice_work_disk: `${unit}_d64`,
   });
   applyIecUnit(emu, "1541", unit);
 
@@ -2183,11 +2223,22 @@ export async function bootGeosFloppy(
     unitMounts.set(unit, target);
   }
   setSessionDisk(fileName.replace(/^\//, ""), data, unit);
+  syncViceWorkD64(emu, data);
 
   const flushed = await flushEmuFs(emu, 3000);
   if (!flushed) return false;
+  applyRuntimeOptions(emu, {
+    ...viceGeosFloppyOptions(unit),
+    [`vice_drive${unit}_type`]: "1542",
+    vice_work_disk: `${unit}_d64`,
+  });
   resetEmu(emu);
   await flushEmuFs(emu, 1200);
+  applyRuntimeOptions(emu, {
+    ...viceGeosFloppyOptions(unit),
+    [`vice_drive${unit}_type`]: "1542",
+    vice_work_disk: `${unit}_d64`,
+  });
   return await waitForC64Ready(emu, 45_000);
 }
 

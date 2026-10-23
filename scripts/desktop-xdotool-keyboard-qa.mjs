@@ -6,7 +6,14 @@ import { spawn } from "node:child_process";
 import { chromium } from "playwright";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { patchLocalStorage, powerOnDesktop, waitRunning } from "./desktop-qa-lib.mjs";
+import {
+  canvasLooksLikeCartMenu,
+  canvasLooksLikeGeosDesktop,
+  isBasicReadyScreen,
+  patchLocalStorage,
+  powerOnDesktop,
+  waitRunning,
+} from "./desktop-qa-lib.mjs";
 import { assertGrok64WasmCore, clearEmulatorJsCache, grok64DatapathFromEnv } from "./desktop-grok64-core.mjs";
 
 const base = process.env.GROK64_BASE_URL || "http://127.0.0.1:8080/";
@@ -100,7 +107,7 @@ try {
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   await page.goto(base, { waitUntil: "domcontentloaded" });
   await clearEmulatorJsCache(page);
-  await patchLocalStorage(page, { video: "ntsc", jiffy: false });
+  await patchLocalStorage(page, { video: "ntsc", jiffy: true, mouse: true, reu: "2048kB" });
   await page.reload();
   await powerOnDesktop(page, base, { navigate: false });
   await waitRunning(page, 120000);
@@ -238,22 +245,25 @@ try {
     await page.waitForTimeout(52_000);
     let geosText = await page.evaluate(() => window.__g64?.screenText?.() || "");
     const geosOpts = await page.evaluate(() => window.__g64?.runtimeViceOpts?.() ?? {});
-    const geosDesktop = await page.evaluate((screen) => {
-      const opts = window.__g64?.runtimeViceOpts?.() ?? {};
-      const bad = /FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen);
-      const ok =
-        !bad &&
-        (/GEOS|DESK|INFO|DISK|DIRECTORY|GEODISC|GEOSDISK|64\s*K/i.test(screen) ||
-          (window.__g64?.crt?.().w ?? 0) > 200);
-      return { bad, ok, drive8: opts.vice_drive8_type, workDisk: opts.vice_work_disk };
-    }, geosText);
+    const geosCanvas = await canvasLooksLikeGeosDesktop(page);
+    const jiffyLive = await page.evaluate(() => window.__g64?.jiffyLive?.());
     push({
       id: "xdo-geos-bootGeos",
-      pass: geosOk && !/FILE NOT FOUND|DEVICE NOT PRESENT/i.test(geosText),
+      pass:
+        geosOk &&
+        geosCanvas.pass &&
+        !isBasicReadyScreen(geosText) &&
+        !/FILE NOT FOUND|DEVICE NOT PRESENT/i.test(geosText) &&
+        jiffyLive === false,
       detail: {
         tail: geosText.slice(-160),
-        geosDesktop,
-        geosOpts: { drive8: geosOpts.vice_drive8_type, work: geosOpts.vice_work_disk },
+        geosCanvas,
+        jiffyLive,
+        geosOpts: {
+          drive8: geosOpts.vice_drive8_type,
+          work: geosOpts.vice_work_disk,
+          trueEmu: geosOpts.vice_drive_true_emulation,
+        },
       },
     });
     push({
@@ -288,20 +298,24 @@ try {
     await new Promise((r) => setTimeout(r, 12_000));
     await page.evaluate(() => window.__g64?.kbdDrain?.());
     let arText = await page.evaluate(() => window.__g64?.screenText?.() || "");
-    const readyOnly = /^\s*READY\.?\s*$/m.test(arText.trim());
+    const arCanvas = await canvasLooksLikeCartMenu(page);
     push({
       id: "xdo-ar6-boot",
-      pass: !readyOnly && arText.replace(/\s+/g, "").length > 12,
-      detail: arText.slice(0, 90),
+      pass: arCanvas.pass && !isBasicReadyScreen(arText),
+      detail: { text: arText.slice(0, 90), arCanvas },
     });
     const freezeOk = await page.evaluate(() => window.__g64?.cartFreeze?.());
     await page.evaluate(() => window.__g64?.kbdDrain?.());
-    await new Promise((r) => setTimeout(r, 2200));
+    await new Promise((r) => setTimeout(r, 2800));
     const afterFreeze = await page.evaluate(() => window.__g64?.screenText?.() || "");
+    const freezeCanvas = await canvasLooksLikeCartMenu(page, { minBuckets: 35 });
     push({
       id: "xdo-ar6-freeze",
-      pass: Boolean(freezeOk) && afterFreeze.length > 12 && !/^\s*READY\.?\s*$/m.test(afterFreeze.trim()),
-      detail: afterFreeze.slice(0, 90),
+      pass:
+        Boolean(freezeOk) &&
+        freezeCanvas.pass &&
+        !isBasicReadyScreen(afterFreeze),
+      detail: { text: afterFreeze.slice(0, 90), freezeCanvas },
     });
     await sh("xdotool", ["key", "--window", win, "F7"]);
     await page.evaluate(() => window.__g64?.kbdDrain?.());

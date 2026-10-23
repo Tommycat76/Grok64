@@ -364,15 +364,15 @@ html, body, #app {
     inset 0 1px 0 rgb(255 255 255 / 0.07),
     0 1px 0 rgb(0 0 0 / 0.35);
   font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 .g64-app[data-device="desktop"] .g64-top .g64-iconbtn:not(.g64-rail-more) .g64-iconbtn-icon {
-  width: 15px;
-  height: 15px;
-  opacity: 0.88;
+  width: 17px;
+  height: 17px;
+  opacity: 0.95;
 }
 .g64-app[data-device="desktop"] .g64-top .g64-iconbtn-label {
   display: inline;
@@ -389,6 +389,12 @@ html, body, #app {
   color: #f0fffc;
   border-color: color-mix(in oklab, var(--color-phosphor) 38%, var(--g64-toolbar-fill));
 }
+.g64-app[data-device="desktop"] .g64-top-rail .g64-chip {
+  font-size: 14px;
+  font-weight: 700;
+  color: #f0f0f4;
+  padding: 6px 11px;
+}
 .g64-iconbtn.extra {
   display: none;
 }
@@ -396,6 +402,9 @@ html, body, #app {
 .g64-app[data-device="tablet"] .g64-iconbtn.extra,
 .g64-app[data-device="desktop"] .g64-iconbtn.extra {
   display: grid;
+}
+.g64-app[data-device="desktop"] .g64-top-icons .g64-iconbtn.extra.g64-power-toggle {
+  display: none;
 }
 /* Phone: pin Software/disk; chips on a second row; lesser icons in More. */
 .g64-app[data-device="phone"] .g64-top {

@@ -153,10 +153,10 @@ export function jiffyCartCompat(cart: FastLoadCartKind, jiffyOn: boolean): Jiffy
         level: "caution",
         title: "Action Replay + JiffyDOS",
         summary:
-          "AR fast load and JiffyDOS both hook IEC. On real hardware, disable AR fast load (@K- or OFF) or turn JiffyDOS off to avoid FILE NOT FOUND.",
+          "AR fast load and JiffyDOS both hook IEC. Grok64 runs AR with the stock KERNAL so the freezer menu boots reliably.",
         realHardware:
-          "Physical AR + Jiffy ROM is a known conflict when AR’s RAM/fast loader is active; freezer features can still work with fast load disabled.",
-        suppressJiffy: false,
+          "Physical AR + Jiffy ROM is a known conflict when AR’s RAM/fast loader is active; disable AR fast load (@K-) or Jiffy on hardware.",
+        suppressJiffy: true,
         warnIfJiffyOn: jiffyOn,
       };
     case "final-cartridge-3":
