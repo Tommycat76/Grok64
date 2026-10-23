@@ -48,7 +48,6 @@ import {
   mountDiskOnUnit,
   applyIecUnit,
   attachAutostartDisk,
-  attachCartridgeInPlace,
   cartEject,
   cartFreeze,
   stabilizeFreezerScreen,
@@ -1550,7 +1549,7 @@ export function Grok64App() {
             vice_virtual_device_traps: "disabled",
           });
         }
-        autostartAfterReady(emu, !cartBoot, {
+        autostartAfterReady(emu, true, {
           autoloadWarp: autoloadWarpForPlay(playModeRef.current, spec.title),
         });
         applyIecUnit(emu, spec.live.iec, spec.live.unit);
@@ -2218,26 +2217,6 @@ export function Grok64App() {
       }
       const wrapped = wrapForDiskSwap(origKind, media, bootName);
       const diskBytes = wrapped ?? (isDiskKind(origKind) ? media : null);
-      if (
-        live &&
-        emuRef.current &&
-        !work &&
-        (plan.kind === "cart" || forceCart)
-      ) {
-        s.setBooting(true, plan.status, 35);
-        const attached = await attachCartridgeInPlace(emuRef.current, payloadView, bootName);
-        if (attached) {
-          s.setCurrentTitle(title);
-          if (!work) markSessionPlay(title);
-          notePlayMarker();
-          s.setRunning(true);
-          beginPlayLock(playLockDuration("cart", title), `Loading ${title}…`);
-          return;
-        }
-        useEmu.getState().setBooting(false);
-        toast.error("Could not attach that cartridge on the live C64.");
-        return;
-      }
       if ((((live && (canHotSwap || keepLiveCrt)) || floppyKeep) && emuRef.current && diskBytes && plan.kind === "floppy" && !forceCart)) {
         const payloadDisk = diskBytes;
         const playIec = attach?.iec ?? plan.live.iec;
@@ -2368,7 +2347,7 @@ export function Grok64App() {
               }, 800),
             );
           } else {
-            autostartAfterReady(emuRef.current, plan.kind !== "cart", {
+            autostartAfterReady(emuRef.current, true, {
               autoloadWarp: autoloadWarpForPlay(playModeRef.current, bootName),
             });
             applyIecUnit(emuRef.current, playIec, playAttachUnit);
@@ -2392,22 +2371,15 @@ export function Grok64App() {
       }
       if (mustKeep && live && iosInPlaceMediaKind(plan.kind) && emuRef.current) {
         s.setBooting(true, plan.status, 35);
-        const attached =
-          plan.kind === "cart" || forceCart
-            ? await attachCartridgeInPlace(emuRef.current, payloadView, bootName)
-            : false;
-        const wrote =
-          attached ||
-          (plan.kind !== "cart" && !forceCart && writeBootFile(emuRef.current, media, bootName));
+        const wrote = writeBootFile(emuRef.current, media, bootName);
         if (wrote) {
-          if (!attached) emuRef.current.fileName = bootName.replace(/^\//, "");
+          emuRef.current.fileName = bootName.replace(/^\//, "");
           glog("play-recycle-inplace", {
             filename,
             title,
             kind: origKind,
             media: plan.kind,
             keepLiveCrt: true,
-            cart: attached,
           });
           persistGateRef.current = false;
           inGameplayRef.current = false;
@@ -2418,11 +2390,9 @@ export function Grok64App() {
           markSessionPlay(title);
           notePlayMarker();
           s.setRunning(true);
-          if (!attached) {
-            autostartAfterReady(emuRef.current, plan.kind !== "cart", {
-              autoloadWarp: autoloadWarpForPlay(playModeRef.current, bootName),
-            });
-          }
+          autostartAfterReady(emuRef.current, true, {
+            autoloadWarp: autoloadWarpForPlay(playModeRef.current, bootName),
+          });
           if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, "play-recycle");
           scheduleFit(true);
           beginPlayLock(playLockDuration(playModeRef.current, title), `Loading ${title}…`);
@@ -2457,12 +2427,15 @@ export function Grok64App() {
         toast.error("Play stayed on the live CRT — did not remount the splash.");
         return;
       }
+      if ((plan.kind === "cart" || forceCart) && emuRef.current) {
+        await applyJiffyDos(emuRef.current, resolveJiffyWant(jiffyWantSetting, sessionFastCart));
+      }
       const blob = new Blob([toArrayBuffer(media)]);
       const url = URL.createObjectURL(blob);
       blobRef.current = url;
       await startWithUrl(url, bootName, {
         autostart: plan.autostartAfterReady,
-        diskLoad: plan.kind === "floppy" || diskLoad,
+        diskLoad: (plan.kind === "floppy" || diskLoad) && !forceCart && plan.kind !== "cart",
         title,
         iec: plan.live.iec,
         iecUnit: plan.live.unit,

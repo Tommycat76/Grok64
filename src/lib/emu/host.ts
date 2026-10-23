@@ -549,12 +549,17 @@ function loadCss(href: string) {
 /** Warm the VICE WASM payload so power-on is not a ~39s blank on first paint. */
 export function prefetchViceCores() {
   if (typeof fetch === "undefined") return;
+  if (grok64ViceCoreRoot()) {
+    const blob = grok64CoreBlobUrl();
+    if (blob) void fetch(blob, { mode: "cors", credentials: "omit", cache: "no-store" }).catch(() => undefined);
+    return;
+  }
   const blob = grok64CoreBlobUrl();
   if (blob) {
     void fetch(blob, { mode: "cors", credentials: "omit", cache: "no-store" }).catch(() => undefined);
     return;
   }
-  const names = isIosPhone() ? ["vice_x64sc"] : ["vice_x64sc", "vice_x64"];
+  const names = isIosPhone() ? ["vice_x64sc"] : ["vice_x64sc"];
   for (const n of names) {
     for (const ext of ["-wasm.js", "-wasm.data"] as const) {
       void fetch(`${DATA}cores/${n}${ext}`, { mode: "cors", credentials: "omit" }).catch(() => undefined);
@@ -2275,18 +2280,11 @@ export async function bootGeosFloppy(
   wireGrok64ViceHost(emu);
   detachGrok64Sd2iec(emu, unit);
   await tickGrok64Iec(emu);
-  disarmAutostart(emu, "disk");
-  const mounted = bootFileOf(emu) ?? "WORK DISK.D64";
-  if (!writeBootFile(emu, data, mounted)) return false;
-  emu.fileName = mounted.replace(/^\//, "");
-  unitMounts.set(unit, emu.fileName);
-  setSessionDisk(fileName.replace(/^\//, ""), data, unit);
-  syncViceWorkD64(emu, data);
-
-  const flushed = await flushEmuFs(emu, 3000);
-  if (!flushed) return false;
-
+  const viceMap = iecMap
+    ? viceMapFromIecMap({ ...iecMap, [unit]: "1541" })
+    : { [unit]: "1541" as IecDrive };
   applyRuntimeOptions(emu, {
+    ...viceDriveTypeVars(viceMap),
     ...viceGeosFloppyOptions(unit),
     [`vice_drive${unit}_type`]: "1542",
     vice_work_disk: `${unit}_d64`,
@@ -2295,10 +2293,39 @@ export async function bootGeosFloppy(
     emu,
     ["[C64]", `Drive${unit}Type=1542`, "DriveTrueEmulation=1", "VirtualDevices=0"].join("\n") + "\n",
   );
-  await refreshViceWorkDisk(emu, unit);
+  applyIecUnit(emu, "1541", unit);
+  disarmAutostart(emu, "disk");
+
   applyRuntimeOptions(emu, {
     ...viceGeosFloppyOptions(unit),
     [`vice_drive${unit}_type`]: "1542",
+    vice_work_disk: `${unit}_d64`,
+  });
+  applyIecUnit(emu, "1541", unit);
+
+  const attached = attachAutostartDisk(emu, data, fileName, "1541", unit);
+  if (!attached) {
+    const target = "WORK DISK.D64";
+    if (!swapBootDisk(emu, data, target) && !writeBootFile(emu, data, target)) return false;
+    emu.fileName = target;
+    unitMounts.set(unit, target);
+  }
+  setSessionDisk(fileName.replace(/^\//, ""), data, unit);
+  syncViceWorkD64(emu, data);
+
+  const flushed = await flushEmuFs(emu, 3000);
+  if (!flushed) return false;
+  applyRuntimeOptions(emu, {
+    ...viceGeosFloppyOptions(unit),
+    [`vice_drive${unit}_type`]: "1542",
+    vice_work_disk: `${unit}_d64`,
+  });
+  resetEmu(emu);
+  await flushEmuFs(emu, 1200);
+  applyRuntimeOptions(emu, {
+    ...viceGeosFloppyOptions(unit),
+    [`vice_drive${unit}_type`]: "1542",
+    vice_work_disk: `${unit}_d64`,
   });
   return await waitForC64Ready(emu, 45_000);
 }
