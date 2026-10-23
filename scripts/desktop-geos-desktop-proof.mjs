@@ -21,8 +21,10 @@ const display = process.env.GROK64_XDISPLAY || ":99";
 const geosPath = join(process.cwd(), "fixtures", "geos", "GEOS64_2.0.d64");
 const outDir = join(process.cwd(), "screenshots", "geos-desktop-proof");
 const artDir = join(process.cwd(), "artifacts", "desktop-geos-desktop-proof");
+const pubShot = "/opt/cursor/artifacts/screenshots";
 mkdirSync(outDir, { recursive: true });
 mkdirSync(artDir, { recursive: true });
+mkdirSync(pubShot, { recursive: true });
 
 function sh(cmd, args) {
   return new Promise((resolve, reject) => {
@@ -123,6 +125,14 @@ const report = {
     opts.vice_drive8_type === "1542",
 };
 writeFileSync(join(artDir, "results.json"), JSON.stringify(report, null, 2));
+for (const name of ["geos-desktop-crt.png", "geos-before-mouse.png", "geos-after-mouse.png"]) {
+  try {
+    const { copyFileSync } = await import("node:fs");
+    copyFileSync(join(outDir, name), join(pubShot, name));
+  } catch {
+    /* optional */
+  }
+}
 console.log(report.pass ? "PASS geos-desktop-proof" : "FAIL geos-desktop-proof", JSON.stringify(report));
 
 await browser.close();
