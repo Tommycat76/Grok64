@@ -137,6 +137,7 @@ import {
   markSessionPlay,
   markSessionReady,
   planPlay,
+  CART_PLAY_UNLOCK_VICE_OPTS,
   readPlayMarker,
   savePlayMarker,
   sessionCanAttach,
@@ -335,6 +336,7 @@ export function Grok64App() {
   const [cartLive, setCartLive] = useState(false);
   const cartLiveRef = useRef(false);
   const resetReadyRef = useRef(() => {});
+  const powerOffRef = useRef(() => {});
   const swapJoyPortRef = useRef(() => {});
   const toggleWarpRef = useRef(() => {});
   const [softwareStd, setSoftwareStd] = useState(null);
@@ -668,6 +670,7 @@ export function Grok64App() {
       },
       iecMap: () => useEmu.getState().iecMap,
       resetReady: () => resetReadyRef.current?.(),
+      powerOff: () => powerOffRef.current?.(),
       setCartLive: (v) => {
         cartLiveRef.current = !!v;
         setCartLive(!!v);
@@ -791,6 +794,7 @@ export function Grok64App() {
           ...viceJoyOptions(stGeos.joyPort),
           vice_ram_expansion_unit: reu,
         });
+        disarmAutostart(emuRef.current, "disk");
         const ok = await bootGeosFloppy(emuRef.current, new Uint8Array(buf), name, 8, geosMap);
         if (!ok) return false;
         setSessionDisk(name, new Uint8Array(buf), 8);
@@ -1424,10 +1428,24 @@ export function Grok64App() {
         setBusy(`Loading ${spec.title}…`, 78);
         if (isIosPhone()) await new Promise((r) => setTimeout(r, 140));
         if (loadGenRef.current !== gen) return;
+        const cartBoot = playModeRef.current === "cart";
+        if (cartBoot) {
+          disarmAutostart(emu, "cart");
+          applyRuntimeOptions(emu, {
+            ...CART_PLAY_UNLOCK_VICE_OPTS,
+            vice_drive_true_emulation: "enabled",
+            vice_virtual_device_traps: "disabled",
+          });
+        }
         autostartAfterReady(emu, true, {
           autoloadWarp: autoloadWarpForPlay(playModeRef.current, spec.title),
         });
         applyIecUnit(emu, spec.live.iec, spec.live.unit);
+        if (cartBoot) {
+          dismissEjsPrompts(emu);
+          bumpCrtPaint(emu);
+          scheduleFit(true);
+        }
         if (isIosPhone())     kickIosAfterEmuAction(emu, "settle", gen);
         beginPlayLock(playLockDuration(playModeRef.current, spec.title), `Loading ${spec.title}…`);
       } else {
@@ -2354,6 +2372,7 @@ export function Grok64App() {
           vice_ram_expansion_unit: reu,
         });
         setMouseAnalog(emuRef.current, true);
+        disarmAutostart(emuRef.current, "disk");
         const raw = new Uint8Array(file.data);
         const ok = await bootGeosFloppy(emuRef.current, raw, file.name, 8, geosMap);
         if (!ok) {
@@ -2513,7 +2532,34 @@ export function Grok64App() {
         toast.error(err instanceof Error ? err.message : "Boot failed");
       });
   }, [startWithUrl, resumePlayback]);
+  const powerOff = useCallback(() => {
+    const st = useEmu.getState();
+    if (!st.powered && !st.booting) return;
+    glog("power-off");
+    playLockRef.current = false;
+    bootHoldRef.current = false;
+    bootKickRef.current = false;
+    clearLivePlay();
+    clearPlayMarker();
+    clearSession();
+    beginColdSession();
+    playModeRef.current = "basic";
+    cartLiveRef.current = false;
+    setCartLive(false);
+    st.setFastLoadCart(null);
+    muteC64Space(false);
+    const el = document.getElementById("grok64-player");
+    destroyEmu(emuRef.current, el);
+    emuRef.current = null;
+    clearUnitMounts();
+    releaseBlob();
+    st.powerOff();
+    setPictureHold(false);
+    if (pictureHoldTimer.current) window.clearTimeout(pictureHoldTimer.current);
+    toast.message("Powered off");
+  }, []);
   powerOnRef.current = powerOn;
+  powerOffRef.current = powerOff;
   const recoverBoot = useCallback(() => {
     const st = useEmu.getState();
     if (
@@ -3606,6 +3652,18 @@ export function Grok64App() {
           }}
         >
           {s.paused ? <Play className="size-5" /> : <Pause className="size-5" />}
+        </button>
+        <button
+          type="button"
+          className="g64-iconbtn extra g64-power-toggle"
+          aria-label="Power off"
+          title="Power off"
+          onClick={() => {
+            setRailMoreOpen(false);
+            powerOff();
+          }}
+        >
+          <Power className="size-5" />
         </button>
         <button
           type="button"

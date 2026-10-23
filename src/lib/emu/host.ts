@@ -35,9 +35,11 @@ import {
   bindGrok64WasmExports,
   detachGrok64Sd2iec,
   ensureGrok64WasmExports,
+  tickGrok64Iec,
   wireGrok64ViceHost,
 } from "./grok64-vice-bridge";
 import { grok64RetroKeyboardAvailable } from "./grok64-keyboard";
+import { readScreenText } from "./screen-text";
 import type { SdPartition } from "./sd2iec";
 import type { Sd2iecVolume } from "./sd2iec-volume";
 import type {
@@ -2127,6 +2129,17 @@ export function swapBootDisk(emu: EjsInstance | null, data: Uint8Array, fallback
  * #60 wrote a *new* filename instead of this overwrite — unit 8 stayed
  * the blank work disk and Autostart typed FILE NOT FOUND (not DNP).
  */
+/** Wait until KERNAL prints READY (after hard reset / GEOS mount). */
+export async function waitForC64Ready(emu: EjsInstance | null, timeoutMs = 45_000): Promise<boolean> {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    const text = readScreenText(emu);
+    if (/READY/i.test(text)) return true;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return /READY/i.test(readScreenText(emu));
+}
+
 /** Mount a GEOS (or other) system disk on unit 8 as true 1541-II, no autostart PRG sniff. */
 export async function bootGeosFloppy(
   emu: EjsInstance | null,
@@ -2136,31 +2149,41 @@ export async function bootGeosFloppy(
   iecMap?: IecMap,
 ): Promise<boolean> {
   if (!emu || !coreHasFs(emu)) return false;
+  wireGrok64ViceHost(emu);
   detachGrok64Sd2iec(emu, unit);
-  if (iecMap) {
-    const viceMap = viceMapFromIecMap({ ...iecMap, [unit]: "1541" });
-    applyRuntimeOptions(emu, viceDriveTypeVars(viceMap));
-    injectViceRc(emu, viceRcForDrives(viceMap, false));
-  }
-  applyIecUnit(emu, "1541", unit);
-  applyRuntimeOptions(emu, viceGeosFloppyOptions(unit));
+  await tickGrok64Iec(emu);
+  const viceMap = iecMap
+    ? viceMapFromIecMap({ ...iecMap, [unit]: "1541" })
+    : { [unit]: "1541" as IecDrive };
+  applyRuntimeOptions(emu, {
+    ...viceDriveTypeVars(viceMap),
+    ...viceGeosFloppyOptions(unit),
+  });
+  injectViceRc(emu, viceRcForDrives(viceMap, false));
   injectViceRc(
     emu,
     ["[C64]", `Drive${unit}Type=1542`, "DriveTrueEmulation=1", "VirtualDevices=0"].join("\n") + "\n",
   );
-  const mounted = bootFileOf(emu);
-  const target =
-    mounted && /\.(d64|d81)$/i.test(mounted)
-      ? mounted.replace(/^\//, "")
-      : fileName.replace(/^\//, "");
-  const wrote = swapBootDisk(emu, data, target) || writeBootFile(emu, data, target);
-  if (!wrote) return false;
-  unitMounts.set(unit, target);
-  emu.fileName = target;
-  setSessionDisk(fileName.replace(/^\//, ""), data, unit);
   applyIecUnit(emu, "1541", unit);
+  disarmAutostart(emu, "disk");
+
+  applyRuntimeOptions(emu, viceGeosFloppyOptions(unit));
+  applyIecUnit(emu, "1541", unit);
+
+  const attached = attachAutostartDisk(emu, data, fileName, "1541", unit);
+  if (!attached) {
+    const target = "WORK DISK.D64";
+    if (!swapBootDisk(emu, data, target) && !writeBootFile(emu, data, target)) return false;
+    emu.fileName = target;
+    unitMounts.set(unit, target);
+  }
+  setSessionDisk(fileName.replace(/^\//, ""), data, unit);
+
   const flushed = await flushEmuFs(emu, 3000);
-  return flushed;
+  if (!flushed) return false;
+  resetEmu(emu);
+  await flushEmuFs(emu, 1200);
+  return await waitForC64Ready(emu, 45_000);
 }
 
 export function attachAutostartDisk(

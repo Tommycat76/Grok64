@@ -13,6 +13,14 @@ export async function waitForG64(page, ms = 12000) {
 export async function powerOnDesktop(page, base, { navigate = true } = {}) {
   if (navigate) await page.goto(base, { waitUntil: "domcontentloaded", timeout: 90000 });
   await waitForG64(page);
+  const live = await page.evaluate(() => Boolean(window.__g64?.hasFs?.()));
+  if (live) {
+    for (let i = 0; i < 40; i++) {
+      if (await page.evaluate(() => window.__g64?.hasFs?.())) return true;
+      await page.waitForTimeout(300);
+    }
+    return true;
+  }
   await page.locator(".g64-power").waitFor({ timeout: 30000 });
   for (let attempt = 0; attempt < 4; attempt++) {
     await page.evaluate(() => {
@@ -92,6 +100,9 @@ export function patchLocalStorage(page, combo) {
     if (!raw) return false;
     const data = JSON.parse(raw);
     if (!data.state) return false;
+    data.state.powered = false;
+    data.state.running = false;
+    data.state.booting = false;
     data.state.videoStandard = combo.video;
     data.state.sidModel = combo.sid;
     data.state.sid2Address = combo.sid2 ?? "disabled";

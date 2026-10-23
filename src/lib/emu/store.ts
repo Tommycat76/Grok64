@@ -140,6 +140,7 @@ interface SessionSlice {
   /** Active freezer / fast-load CRT this session (for JiffyDOS compatibility). */
   fastLoadCart: FastLoadCartKind | null;
   powerOn: () => void;
+  powerOff: () => void;
   setRunning: (v: boolean) => void;
   setPaused: (v: boolean) => void;
   setWarped: (v: boolean) => void;
@@ -268,6 +269,18 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       insertedDiskName: null,
       fastLoadCart: null,
       powerOn: () => set({ powered: true }),
+      powerOff: () =>
+        set({
+          powered: false,
+          running: false,
+          booting: false,
+          bootMsg: "",
+          bootProgress: 0,
+          paused: false,
+          currentTitle: null,
+          insertedDiskName: null,
+          fastLoadCart: null,
+        }),
       setRunning: (running) => set({ running }),
       setPaused: (paused) => set({ paused }),
       setWarped: (warped) => set({ warped }),

@@ -201,10 +201,40 @@ try {
     detail: loadLine ?? text.slice(-220),
   });
 
+  const geosPath = join(process.cwd(), "fixtures", "geos", "GEOS64_2.0.d64");
+  if (existsSync(geosPath)) {
+    const geosBytes = [...readFileSync(geosPath)];
+    const geosName = "GEOS64_2.0.d64";
+    const geosOk = await page.evaluate(
+      async ({ name, bytes }) => {
+        return Boolean(await window.__g64?.bootGeos?.(name, bytes));
+      },
+      { name: geosName, bytes: geosBytes },
+    );
+    await waitRunning(page, 180_000);
+    await page.waitForTimeout(5000);
+    let geosText = await page.evaluate(() => window.__g64?.screenText?.() || "");
+    push({
+      id: "xdo-geos-bootGeos",
+      pass: geosOk && !/FILE NOT FOUND/i.test(geosText) && !/WORK DISK/i.test(geosText.slice(-400)),
+      detail: geosText.slice(-160),
+    });
+    await page.evaluate(() => window.__g64?.resetReady?.());
+    await page.waitForFunction(() => /READY/i.test(window.__g64?.screenText?.() || ""), { timeout: 60_000 });
+    await new Promise((r) => setTimeout(r, 800));
+  } else {
+    push({ id: "xdo-geos-bootGeos", pass: true, skipped: true, detail: "fixtures/geos missing" });
+  }
+
   const ar6Path = join(process.cwd(), "fixtures", "carts", "ar6.crt");
   if (existsSync(ar6Path)) {
+    await page.evaluate(() => window.__g64?.resetReady?.());
+    await page.waitForFunction(() => /READY/i.test(window.__g64?.screenText?.() || ""), { timeout: 60_000 });
+    await new Promise((r) => setTimeout(r, 600));
     const arBytes = [...readFileSync(ar6Path)];
     const arName = "Action_Replay_V6.0_6.0_1989_PAL.crt";
+    const pageErrors = [];
+    page.on("pageerror", (e) => pageErrors.push(String(e)));
     await page.evaluate(
       async ({ name, bytes }) => {
         await window.__g64?.playBytes?.(name, bytes, { autostart: true });
@@ -213,7 +243,7 @@ try {
     );
     await waitRunning(page, 120000);
     await page.waitForFunction(() => window.__g64?.sessionFlags?.().cart === true, { timeout: 60_000 });
-    await new Promise((r) => setTimeout(r, 5500));
+    await new Promise((r) => setTimeout(r, 12_000));
     await page.evaluate(() => window.__g64?.kbdDrain?.());
     let arText = await page.evaluate(() => window.__g64?.screenText?.() || "");
     const readyOnly = /^\s*READY\.?\s*$/m.test(arText.trim());
@@ -232,6 +262,11 @@ try {
         afterF1.length > 20 &&
         (afterF1 !== arText || /REPLAY|FREEZE|AR |DISK|FILE|MONITOR/i.test(afterF1)),
       detail: afterF1.slice(0, 90),
+    });
+    push({
+      id: "xdo-ar6-console-errors",
+      pass: pageErrors.length < 8,
+      detail: { count: pageErrors.length, sample: pageErrors.slice(0, 3) },
     });
   } else {
     push({ id: "xdo-ar6-boot", pass: true, skipped: true, detail: "fixtures/carts/ar6.crt missing" });
