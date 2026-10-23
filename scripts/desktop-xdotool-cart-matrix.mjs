@@ -91,10 +91,10 @@ async function findChromiumWindow(server) {
 }
 
 function synthJiffyPair() {
-  const c64 = new Uint8Array(8192).fill(0x4a);
-  const d41 = new Uint8Array(8192).fill(0x41);
-  c64[0] = 0x4a;
-  d41[0] = 0x41;
+  const c64 = new Uint8Array(8192);
+  const d41 = new Uint8Array(8192);
+  for (let i = 0; i < c64.length; i++) c64[i] = (i * 17 + 0x4a) & 0xff;
+  for (let i = 0; i < d41.length; i++) d41[i] = (i * 13 + 0x41) & 0xff;
   return {
     "JiffyDOS_C64_6.01.bin": [...c64],
     "JiffyDOS_1541-II_6.00.bin": [...d41],

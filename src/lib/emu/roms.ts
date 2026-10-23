@@ -158,6 +158,21 @@ export function romsHaveJiffyPair(roms: Record<string, Uint8Array>): boolean {
   return Boolean(jiffyBytes(roms, "jiffy-c64") && jiffyBytes(roms, "jiffy-1541"));
 }
 
+/** Reject uniform placeholder ROMs (QA synth) — enabling them as KERNAL bricks VICE. */
+export function jiffyC64RomBootSafe(bytes: Uint8Array | null | undefined): boolean {
+  if (!bytes || bytes.byteLength < 4096) return false;
+  const slice = bytes.subarray(0, Math.min(bytes.byteLength, 2048));
+  const uniq = new Set(slice);
+  if (uniq.size < 6) return false;
+  const text = new TextDecoder("latin1").decode(slice);
+  if (/JIFFY|COPYRIGHT|MOS\s*TECHNOLOGY|COMMODORE/i.test(text)) return true;
+  return uniq.size >= 32;
+}
+
+export function jiffyPairBootSafe(roms: Record<string, Uint8Array>): boolean {
+  return jiffyC64RomBootSafe(jiffyBytes(roms, "jiffy-c64"));
+}
+
 /** VICE libretro expects canonical filenames under system/vice — always inject these. */
 export function jiffyRomPayload(roms: Record<string, Uint8Array>): Record<string, Uint8Array> {
   const out: Record<string, Uint8Array> = { ...roms };

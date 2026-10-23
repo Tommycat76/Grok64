@@ -1563,20 +1563,40 @@ export function Grok64App() {
     sessionUnitRef.current = plan.live.unit;
     const wantJiffy = resolveJiffyWant(st.jiffyDos, null);
     try {
-      if (!emu || !coreHasFs(emu)) {
-        throw new Error("Emulator not ready — power on first");
-      }
-      glog("cart-out-inplace", { boot: bootFileOf(emu) });
-      const ejected = cartEject(emu, workDiskBytesRef.current);
-      if (!ejected) throw new Error("Could not remove cartridge from core");
-      await syncJiffy(emu, "hard");
-      disarmAutostart(emu, "disk");
-      applyIecUnit(emu, plan.live.iec, plan.live.unit);
-      await presentFloppyMountReady(emu, plan.live);
+      // Real hardware: pulling a cart while powered crashes the C64 — never cartEject / hot-unplug.
+      // Software power-cycle: tear down WASM and cold-boot WORK DISK (same net effect as power off→on).
+      glog("cart-out-power-cycle", { boot: bootFileOf(emu) });
+      const el = document.getElementById("grok64-player");
+      stopIosPaintWatchdog();
+      stopIosCrt();
+      resetIosPaintState();
+      releaseBlob();
+      destroyEmu(emuRef.current, el);
+      emuRef.current = null;
+      clearUnitMounts();
+      cmdSwappedRef.current = false;
+      setCmdSwapped(false);
+      bootKickRef.current = true;
+      inGameplayRef.current = false;
+      playModeRef.current = "basic";
+      sessionIecRef.current = plan.live.iec;
+      sessionUnitRef.current = plan.live.unit;
+      st.powerOn();
+      st.setBooting(true, "Power cycle — cartridge out…", 12);
+      await startWithUrlRef.current(publicUrl("/software/blank.d64"), "WORK DISK.D64", {
+        autostart: false,
+        title: "BASIC",
+        iec: plan.live.iec,
+        iecUnit: plan.live.unit,
+        userIec: plan.user.iec,
+        userUnit: plan.user.unit,
+        // After a freezer cart (especially post-Reset), cold-boot stock KERNAL first, then Jiffy.
+        coldBasicAfterCart: wantJiffy,
+      });
       const playerEl = document.getElementById("grok64-player");
       const t0 = Date.now();
       let readyPaint = false;
-      while (Date.now() - t0 < 30_000) {
+      while (Date.now() - t0 < 45_000) {
         const live = emuRef.current;
         if (!live) break;
         const txt = readScreenText(live);
@@ -1590,7 +1610,7 @@ export function Grok64App() {
         fitEmu(playerEl, live);
         bumpCrtPaint(live);
         scheduleFit(true);
-        if (ready) {
+        if (ready && !useEmu.getState().booting) {
           readyPaint = true;
           break;
         }
@@ -1599,16 +1619,18 @@ export function Grok64App() {
       if (!readyPaint) glog("cart-out-ready-timeout", { boot: bootFileOf(emuRef.current) });
       markSessionReady();
       beginColdSession();
-      st.setBooting(false);
+      if (useEmu.getState().booting) st.setBooting(false);
       persistGateRef.current = true;
       inGameplayRef.current = true;
-      toast.message(wantJiffy ? "Cartridge out — JiffyDOS READY" : "Cartridge out — BASIC READY");
+      toast.message(
+        wantJiffy ? "Cartridge out — power cycled · JiffyDOS READY" : "Cartridge out — power cycled · BASIC READY",
+      );
     } catch (err) {
       glog("cart-out-fail", { m: err instanceof Error ? err.message : String(err) });
       st.setBooting(false);
       toast.error(err instanceof Error ? err.message : "Could not eject cartridge");
     }
-  }, [syncJiffy]);
+  }, []);
 
   const resetReady = useCallback(() => {
     const emu = emuRef.current;
@@ -2155,6 +2177,12 @@ export function Grok64App() {
         useEmu.getState().setReuSize(C64OS_REU);
         toast.message("16 MB REU on — real REU for C64 OS / Nuvie");
       }
+      let settleResolve: () => void = () => {};
+      let settleReject: (reason?: unknown) => void = () => {};
+      const settleDone = new Promise<void>((res, rej) => {
+        settleResolve = res;
+        settleReject = rej;
+      });
       try {
         const emu = await bootEmulator(el, {
           gameUrl,
@@ -2180,7 +2208,10 @@ export function Grok64App() {
           scpuTurbo: st.scpuTurbo,
           jiffy: false,
           onStart: () => {
-            if (loadGenRef.current !== gen) return;
+            if (loadGenRef.current !== gen) {
+              settleResolve();
+              return;
+            }
             bootPathRef.current = bootFileOf(emu) || gameName;
             applyRuntimeOptions(emu, {
               vice_autostart: "disabled",
@@ -2213,9 +2244,12 @@ export function Grok64App() {
                 unit: opts.userUnit ?? useEmu.getState().iecUnit,
               },
               onStarted: opts.onStarted,
-            });
+            })
+              .then(() => settleResolve())
+              .catch((err) => settleReject(err));
           },
           onError: (msg) => {
+            settleReject(new Error(msg));
             if (loadGenRef.current === gen) persistGateRef.current = true;
             bootKickRef.current = false;
             s.setBooting(false);
@@ -2224,7 +2258,9 @@ export function Grok64App() {
           },
         });
         emuRef.current = emu;
+        await settleDone;
       } catch (err) {
+        settleReject(err);
         persistGateRef.current = true;
         bootKickRef.current = false;
         glog("boot-throw", { m: err instanceof Error ? err.message : String(err) });

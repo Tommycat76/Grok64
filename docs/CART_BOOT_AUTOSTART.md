@@ -17,6 +17,10 @@ Symptoms of a wrapper bug (regression):
 
 QA gates use `grok64FloppyAutostartPoison()` in `scripts/desktop-qa-lib.mjs` to detect **this** pattern only.
 
+## CART OUT (hardware)
+
+On a real C64, **pulling a cartridge while the machine is powered on crashes the system**. Grok64 **CART OUT** must not simulate a hot-unplug (`cartEject` on the live core). It performs a **full software power-cycle**: destroy the WASM core and cold-boot **WORK DISK** to bare **READY** (then Jiffy is re-applied per Settings if enabled).
+
 ## 2. Cartridge-native auto-boot (hardware — leave VICE alone)
 
 Some carts implement their **own** disk boot logic. That is **not** Grok64 autostart and must **not** be suppressed.

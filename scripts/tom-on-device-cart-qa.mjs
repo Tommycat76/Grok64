@@ -60,11 +60,9 @@ await page.evaluate(async (roms) => {
     const id = /1541/i.test(name) ? "jiffy-1541" : "jiffy-c64";
     await window.__g64?.putRomBytes?.(id, name, bytes);
   }
-  window.__g64?.setJiffyDos?.(true);
 }, jiffy);
-await page.reload({ waitUntil: "domcontentloaded" });
-await powerOnDesktop(page, base, { navigate: false });
-await waitRunning(page, 120_000);
+await page.evaluate(() => window.__g64?.setJiffyDos?.(true));
+await page.waitForTimeout(4000);
 
 await page.evaluate(async ({ name, bytes }) => window.__g64?.importLibraryBytes?.(name, bytes), {
   name: ssName,
@@ -81,8 +79,7 @@ await page.screenshot({ path: join(out, "tom-qa-02-ss5-reset.png"), fullPage: tr
 const ssReset = { menu: ssMenuRe.test(t), poison: grok64FloppyAutostartPoison(t) };
 
 await page.evaluate(() => window.__g64?.hwPress?.("cart-out", "short"));
-await waitRunning(page, 120_000);
-for (let i = 0; i < 120; i++) {
+for (let i = 0; i < 180; i++) {
   await page.waitForTimeout(500);
   t = await page.evaluate(() => window.__g64?.screenText?.() || "");
   if (isBasicReadyScreen(t) && !grok64FloppyAutostartPoison(t)) break;

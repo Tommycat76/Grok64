@@ -6,6 +6,7 @@ import {
   hasJiffyPair,
   jiffyRomPayload,
   romFileMap,
+  jiffyPairBootSafe,
   romsHaveJiffyPair,
 } from "./roms";
 import {
@@ -1938,6 +1939,9 @@ export async function applyJiffyDos(emu: EjsInstance | null, want: boolean): Pro
   if (!romsHaveJiffyPair(roms)) {
     return finalizeJiffyOption(emu, false);
   }
+  if (!jiffyPairBootSafe(roms)) {
+    return finalizeJiffyOption(emu, false);
+  }
   injectRoms(emu, jiffyRomPayload(roms));
   await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
   return finalizeJiffyOption(emu, jiffyPairLanded(emu));
@@ -1950,7 +1954,7 @@ export function applyJiffyFromRoms(
   roms: Record<string, Uint8Array>,
 ): boolean {
   if (!emu) return false;
-  if (!want || !romsHaveJiffyPair(roms)) return finalizeJiffyOption(emu, false);
+  if (!want || !romsHaveJiffyPair(roms) || !jiffyPairBootSafe(roms)) return finalizeJiffyOption(emu, false);
   injectRoms(emu, jiffyRomPayload(roms));
   return finalizeJiffyOption(emu, jiffyPairLanded(emu));
 }
