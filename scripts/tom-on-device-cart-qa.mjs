@@ -18,7 +18,7 @@ const ar6 = cartFixturePath(CART_COMPAT_CATALOG.find((c) => c.id === "ar6"));
 const ssName = "Super_Snapshot_v5.00_1990_NTSC.crt";
 const arName = "Action_Replay_V6.0_6.0_1989_PAL.crt";
 
-async function playLibrary(page, displayRe) {
+async function playLibrary(page, displayRe, menuRe = /SNAPSHOT|SUPER|REPLAY|ACTION/i) {
   await page.locator('button[aria-label="Software"]').click();
   await page.waitForTimeout(400);
   await page.getByRole("button", { name: /On this device/i }).click();
@@ -26,7 +26,13 @@ async function playLibrary(page, displayRe) {
   const card = page.locator(".g64-card").filter({ hasText: displayRe });
   await card.locator('button[aria-label^="Play"]').click();
   await waitRunning(page, 180_000);
-  await page.waitForTimeout(10_000);
+  const t0 = Date.now();
+  while (Date.now() - t0 < 90_000) {
+    const text = await page.evaluate(() => window.__g64?.screenText?.() || "");
+    if (menuRe.test(text) && !grok64FloppyAutostartPoison(text)) return text;
+    await page.waitForTimeout(1_500);
+  }
+  return await page.evaluate(() => window.__g64?.screenText?.() || "");
 }
 
 const browser = await chromium.launch({ headless: true });
@@ -55,8 +61,7 @@ await page.evaluate(async ({ name, bytes }) => window.__g64?.importLibraryBytes?
   name: ssName,
   bytes: [...readFileSync(ss5)],
 });
-await playLibrary(page, /Super_Snapshot/i);
-let t = await page.evaluate(() => window.__g64?.screenText?.() || "");
+let t = await playLibrary(page, /Super_Snapshot/i, /SNAPSHOT|SUPER|TURBO/i);
 await page.screenshot({ path: join(out, "tom-qa-01-ss5-play.png"), fullPage: true });
 const ss1 = { poison: grok64FloppyAutostartPoison(t), menu: /SNAPSHOT|SUPER|TURBO/i.test(t) };
 
@@ -73,8 +78,7 @@ t = await page.evaluate(() => window.__g64?.screenText?.() || "");
 await page.screenshot({ path: join(out, "tom-qa-03-cart-out.png"), fullPage: true });
 const cartOut = { basic: /READY/i.test(t), poison: grok64FloppyAutostartPoison(t) };
 
-await playLibrary(page, /Super_Snapshot/i);
-t = await page.evaluate(() => window.__g64?.screenText?.() || "");
+t = await playLibrary(page, /Super_Snapshot/i, /SNAPSHOT|SUPER|TURBO/i);
 await page.screenshot({ path: join(out, "tom-qa-04-ss5-second.png"), fullPage: true });
 const ss2 = { poison: grok64FloppyAutostartPoison(t), menu: /SNAPSHOT|SUPER|TURBO/i.test(t) };
 
@@ -84,8 +88,7 @@ await page.evaluate(async ({ name, bytes }) => window.__g64?.importLibraryBytes?
   name: arName,
   bytes: [...readFileSync(ar6)],
 });
-await playLibrary(page, /Action_Replay/i);
-t = await page.evaluate(() => window.__g64?.screenText?.() || "");
+t = await playLibrary(page, /Action_Replay/i, /REPLAY|ACTION/i);
 await page.screenshot({ path: join(out, "tom-qa-05-ar6-play.png"), fullPage: true });
 const ar1 = { poison: grok64FloppyAutostartPoison(t), menu: /REPLAY|ACTION/i.test(t) };
 

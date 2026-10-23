@@ -124,7 +124,14 @@ async function playLibraryCart(page, displayName) {
     },
     { timeout: 120_000 },
   );
-  await page.waitForTimeout(8_000);
+  const menuRe = /SUPER SNAPSHOT|SNAPSHOT BY|TURBO DOS|SELECT OPTION|REPLAY PROFESSIONAL|ACTION REPLAY/i;
+  const t0 = Date.now();
+  while (Date.now() - t0 < 90_000) {
+    const text = await page.evaluate(() => window.__g64?.screenText?.() || "");
+    const pix = await canvasLooksLikeCartMenu(page, { minBuckets: 3 });
+    if (menuRe.test(text) && !grok64FloppyAutostartPoison(text) && pix.pass) return;
+    await page.waitForTimeout(1_500);
+  }
 }
 
 const diskAutostartPoison = grok64FloppyAutostartPoison;
@@ -189,6 +196,14 @@ await page.screenshot({ path: join(outDir, "01-ss5-first-play.png"), fullPage: t
 await page.reload({ waitUntil: "domcontentloaded" });
 await ensureEmuLive(page);
 await waitRunning(page, 180_000);
+await page.waitForTimeout(15_000);
+await page.waitForFunction(
+  () => {
+    const t = window.__g64?.screenText?.() || "";
+    return /SNAPSHOT|SUPER|REPLAY|ACTION/i.test(t) || /\bREADY\b/i.test(t);
+  },
+  { timeout: 120_000 },
+);
 const resumedHint = await page.evaluate(() => Boolean(document.body?.innerText?.includes("Resumed your last session")));
 await page.screenshot({ path: join(outDir, "01b-after-f5.png"), fullPage: true });
 
@@ -214,7 +229,7 @@ for (let i = 0; i < 75; i++) {
 }
 await page.screenshot({ path: join(outDir, "02-after-cart-out.png"), fullPage: true });
 
-const ssMenuRe = /SNAPSHOT|SUPER|TURBO/i;
+const ssMenuRe = /SUPER SNAPSHOT|SNAPSHOT BY|TURBO DOS|SELECT OPTION/i;
 await playLibraryCart(page, ss5Display);
 const ss2 = await waitForCartMenu(page, ssMenuRe);
 const ssText = ss2.text || (await page.evaluate(() => window.__g64?.screenText?.() || ""));

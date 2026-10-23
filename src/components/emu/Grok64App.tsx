@@ -1565,9 +1565,16 @@ export function Grok64App() {
     sessionIecRef.current = plan.live.iec;
     sessionUnitRef.current = plan.live.unit;
     try {
+      const el = document.getElementById("grok64-player");
+      if (emu && el) {
+        destroyEmu(emu, el);
+        emuRef.current = null;
+        clearUnitMounts();
+      }
       await startWithUrlRef.current(publicUrl("/software/blank.d64"), "WORK DISK.D64", {
         autostart: false,
         title: "BASIC",
+        playKind: "basic",
         iec: plan.live.iec,
         iecUnit: plan.live.unit,
         userIec: plan.user.iec,
@@ -1825,10 +1832,20 @@ export function Grok64App() {
           vice_drive_true_emulation: "enabled",
           vice_virtual_device_traps: "disabled",
         });
+        await applyJiffyDos(emu, jiffyForCart);
         cartBootReset(emu);
-        if (jiffyForCart) await applyJiffyDos(emu, true);
+        await flushEmuFs(emu, isIosPhone() ? 1200 : 400);
+        disarmAutostart(emu, "cart");
+        applyRuntimeOptions(emu, {
+          ...CART_PLAY_UNLOCK_VICE_OPTS,
+          vice_work_disk: "disabled",
+          vice_drive_true_emulation: "enabled",
+          vice_virtual_device_traps: "disabled",
+        });
+        hardReset(emu);
         const ssCart = useEmu.getState().fastLoadCart;
         scheduleSuperSnapshotVicFix(emu, ssCart);
+        if (ssCart) stabilizeFreezerScreen(emu, ssCart);
         dismissEjsPrompts(document.getElementById("grok64-player"));
         bumpCrtPaint(emu);
         window.setTimeout(() => bumpCrtPaint(emu), 400);
@@ -3129,8 +3146,13 @@ export function Grok64App() {
         }
         glog("crash-recover", { title: marker.title, filename: marker.filename });
         powerOnRef.current();
+        const recoverView = new Uint8Array(payload.data);
+        const recoverKind = kindOf(payload.name);
+        const recoverCart = isCartridgePayload(recoverView, payload.name);
+        const recoverMountOnly =
+          isDiskKind(recoverKind) || needsTypedBoot(recoverKind) || isGeosFamilyDiskName(payload.name);
         await playBufferRef.current(payload.name, payload.data, {
-          autostart: true,
+          autostart: !(recoverMountOnly || recoverCart),
           title: marker.title,
           libraryId: marker.libraryId ?? undefined,
           bundlePath: marker.bundlePath ?? undefined,
