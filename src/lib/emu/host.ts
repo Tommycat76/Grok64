@@ -1600,12 +1600,26 @@ export function repaintAfterCartFreeze(emu: EjsInstance | null) {
  * Super Snapshot / freezer menus expect standard text-mode VIC banking.
  * Wrong $d011/$d018 after freeze shows repeated header bands on the CRT.
  */
+export function isSuperSnapshotCartHint(cartHint?: string | null): boolean {
+  if (!cartHint) return false;
+  const h = cartHint.toLowerCase();
+  return h.includes("super-snapshot") || /^ss\d|snapshot\s*v/i.test(h) || /^ss/i.test(h);
+}
+
 export function stabilizeFreezerScreen(emu: EjsInstance | null, cartHint?: string | null) {
-  if (!emu || !cartHint || !/^ss/i.test(cartHint)) return;
+  if (!emu || !isSuperSnapshotCartHint(cartHint)) return;
   writeC64Bytes(emu, 0xd011, new Uint8Array([0x1b]));
   writeC64Bytes(emu, 0xd016, new Uint8Array([0x08]));
   writeC64Bytes(emu, 0xd018, new Uint8Array([0x14]));
   bumpCrtPaint(emu);
+}
+
+/** True when the live core booted from (or still has) a CRT in MEMFS. */
+export function cartMountedOnCore(emu: EjsInstance | null): boolean {
+  if (!emu) return false;
+  const boot = bootFileOf(emu);
+  if (boot && /\.(crt|bin)$/i.test(boot)) return true;
+  return readMountedMedia(emu).some((m) => /\.(crt|bin)$/i.test(m.name));
 }
 
 /** Attach a .crt/.bin on the live core — never through floppy autostart / WORK DISK. */
@@ -1667,6 +1681,9 @@ export function cartEject(emu: EjsInstance | null, workDisk?: Uint8Array | null)
   });
   resetEmu(emu);
   removeSessionCart();
+  disarmAutostart(emu, "disk");
+  hardReset(emu);
+  bumpCrtPaint(emu);
   return Boolean(isCartBoot || workDisk);
 }
 
