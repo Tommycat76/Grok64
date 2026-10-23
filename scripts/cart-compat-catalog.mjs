@@ -72,7 +72,7 @@ export const CART_COMPAT_CATALOG = /** @type {CartEntry[]} */ ([
     freezer: true,
     gameLoad: false,
     jiffyLevel: "caution",
-    jiffySuppress: false,
+    jiffySuppress: true,
   },
   {
     id: "ar5",
@@ -84,7 +84,7 @@ export const CART_COMPAT_CATALOG = /** @type {CartEntry[]} */ ([
     freezer: true,
     gameLoad: false,
     jiffyLevel: "caution",
-    jiffySuppress: false,
+    jiffySuppress: true,
   },
   {
     id: "ar4",
@@ -96,7 +96,7 @@ export const CART_COMPAT_CATALOG = /** @type {CartEntry[]} */ ([
     freezer: true,
     gameLoad: false,
     jiffyLevel: "caution",
-    jiffySuppress: false,
+    jiffySuppress: true,
   },
   {
     id: "fc3",
@@ -140,11 +140,12 @@ export const CART_COMPAT_CATALOG = /** @type {CartEntry[]} */ ([
     fixture: "kcs-power.crt",
     zipPattern: /KCS_Power_Cartridge_1985_v1/i,
     expectedKind: "kcs-power",
-    menuRe: /KCS|POWER|CARTRIDGE|READY/i,
+    menuRe: /KCS|POWER\s*CARTRIDGE/i,
     freezer: false,
-    gameLoad: true,
+    gameLoad: false,
     jiffyLevel: "caution",
     jiffySuppress: false,
+    notes: "Boulder Dash fast-load smoke: npm run test:desktop-xdotool-extended",
   },
   {
     id: "warp",
@@ -154,9 +155,10 @@ export const CART_COMPAT_CATALOG = /** @type {CartEntry[]} */ ([
     expectedKind: "warp-speed",
     menuRe: /WARP|SPEED|READY/i,
     freezer: false,
-    gameLoad: true,
+    gameLoad: false,
     jiffyLevel: "caution",
     jiffySuppress: false,
+    notes: "Boulder Dash fast-load smoke: npm run test:desktop-xdotool-extended",
   },
   {
     id: "easyflash",

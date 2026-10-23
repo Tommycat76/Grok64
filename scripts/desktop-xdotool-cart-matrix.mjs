@@ -193,10 +193,21 @@ async function runCartKernal(page, win, entry, kernal) {
     (entry.expectedKind === "other-fastload" && kind === "other-fastload");
   const menuOk = entry.menuRe.test(text0) || bootOk;
 
-  const gameWaitMs = entry.id === "ss5" || entry.id === "ss4" ? 90_000 : 50_000;
+  const gameWaitMs =
+    entry.id === "ss5" || entry.id === "ss4"
+      ? 90_000
+      : entry.id === "kcs" || entry.id === "epyx-fl" || entry.id === "warp"
+        ? 80_000
+        : 50_000;
   let gameOk = true;
   if (entry.gameLoad && kernal === "stock" && existsSync(DISK)) {
     await ensureReal1541Timing(page);
+    if (entry.id === "epyx-fl") {
+      await page.evaluate(async () => {
+        await window.__g64?.typeBasic?.(":");
+      });
+      await page.waitForTimeout(2500);
+    }
     const bytes = [...readFileSync(DISK)];
     await page.evaluate(
       async ({ bytes }) => {

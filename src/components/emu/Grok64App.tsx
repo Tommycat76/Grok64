@@ -1806,6 +1806,9 @@ export function Grok64App() {
         });
         applyIecUnit(emu, spec.live.iec, spec.live.unit);
         if (cartBoot) {
+          if (jiffyForCart) {
+            await applyJiffyDos(emu, true);
+          }
           const ssCart = useEmu.getState().fastLoadCart;
           scheduleSuperSnapshotVicFix(emu, ssCart);
           dismissEjsPrompts(document.getElementById("grok64-player"));

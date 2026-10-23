@@ -155,29 +155,63 @@ async function fetchRetroReplayRom() {
   console.log("ok", dest, "from", url);
 }
 
+function d64Label(data) {
+  if (data.byteLength < 17 * 21 * 256 + 0xa0) return "";
+  const raw = data.subarray(17 * 21 * 256 + 0x90, 17 * 21 * 256 + 0xa0);
+  let s = "";
+  for (const b of raw) s += String.fromCharCode(b === 0xa0 ? 32 : b & 0x7f);
+  return s.replace(/\0/g, " ").trim();
+}
+
+function looksLikeWheelsDisk(data) {
+  const label = d64Label(data).toUpperCase();
+  return /WHEELS|CLICK\s*HERE/i.test(label);
+}
+
 async function fetchWheelsDisk() {
+  const dest = join(dirs.geos, "Wheels64.d64");
+  const bogus = join(dirs.geos, "Wheels64-ClickHere.d64");
+  if (existsSync(bogus)) {
+    const { readFileSync, unlinkSync } = await import("node:fs");
+    const data = readFileSync(bogus);
+    if (!looksLikeWheelsDisk(data)) {
+      unlinkSync(bogus);
+      console.warn("removed bogus Wheels placeholder", bogus, "label=", d64Label(data));
+    }
+  }
+  if (existsSync(dest)) {
+    const { readFileSync } = await import("node:fs");
+    if (looksLikeWheelsDisk(readFileSync(dest))) return;
+  }
   const urls = [
     process.env.GROK64_WHEELS_URL,
-    "http://csdb.dk/getinternalfile.php/198632/Geos%20V1.2%20(1985)(BS).d64",
+    "https://archive.org/download/geos-wheels-64/Wheels%2064%20v1.1.d64",
+    "https://archive.org/download/geos-wheels-64/Wheels64.d64",
   ].filter(Boolean);
   for (const url of urls) {
-    const dest = join(dirs.geos, process.env.GROK64_WHEELS_NAME || "Wheels64-ClickHere.d64");
-    if (existsSync(dest) && dest.includes("Wheels")) return;
-    const ok = await fetchTo(url, dest);
-    if (ok && /wheels/i.test(dest)) return;
-  }
-  const searchUrls = [
-    "https://raw.githubusercontent.com/alexeykhokhlov/geos-wheels/master/Wheels64.d64",
-    "https://github.com/alexeykhokhlov/geos-wheels/raw/master/Wheels64.d64",
-  ];
-  for (const url of searchUrls) {
-    const dest = join(dirs.geos, "Wheels64.d64");
-    if (existsSync(dest)) return;
-    const ok = await fetchTo(url, dest);
-    if (ok) {
+    const ok = await fetchTo(url, dest, { force: true });
+    if (!ok) continue;
+    const { readFileSync, unlinkSync } = await import("node:fs");
+    let data = readFileSync(dest);
+    if (data[0] === 0x50 && data[1] === 0x4b) {
+      const { unzipSync } = await import("fflate");
+      const files = unzipSync(data);
+      const hit = Object.entries(files).find(([n, buf]) => /\.d64$/i.test(n) && looksLikeWheelsDisk(buf));
+      if (hit) {
+        writeFileSync(dest, hit[1]);
+        console.log("ok wheels from zip", url, hit[0]);
+        return;
+      }
+      unlinkSync(dest);
+      console.warn("reject wheels zip — no labeled .d64", url);
+      continue;
+    }
+    if (looksLikeWheelsDisk(data)) {
       console.log("ok wheels from", url);
       return;
     }
+    unlinkSync(dest);
+    console.warn("reject wheels candidate — label", d64Label(data));
   }
   console.log("skip Wheels disk (set GROK64_WHEELS_URL or add fixtures/geos/Wheels64.d64)");
 }
