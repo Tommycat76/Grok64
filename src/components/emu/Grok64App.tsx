@@ -129,6 +129,8 @@ import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor }
 import {
   geosBootSucceeded,
   geosBootStuckAtBasic,
+  geosBootLoadLine,
+  geosBootLooksLaunched,
   geosFamilyDesktopOk,
   geosFamilyLoadMs,
   geosFamilyPlayLockMs,
@@ -851,20 +853,26 @@ export function Grok64App() {
         setSessionDisk(name, new Uint8Array(buf), 8);
         await flushEmuFs(emuRef.current, 3000);
         applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
-        if (!(await feedBasicLine(emuRef.current, 'LOAD"*",8,1'))) return false;
+        const loadLine = geosBootLoadLine(name);
+        if (!(await feedBasicLine(emuRef.current, loadLine))) return false;
         const loadEnd = Date.now() + geosFamilyLoadMs(name);
         while (Date.now() < loadEnd) {
           const mid = readScreenText(emuRef.current);
           if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(mid)) return false;
-          if (!geosBootStuckAtBasic(mid) && mid.replace(/\s+/g, "").length > 60) break;
+          if (/LOADING/i.test(mid) || (!geosBootStuckAtBasic(mid) && mid.replace(/\s+/g, "").length > 60)) break;
           await new Promise((r) => window.setTimeout(r, 500));
         }
         applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
         if (!(await feedBasicLine(emuRef.current, "RUN", { runcmd: true }))) return false;
-        await new Promise((r) => window.setTimeout(r, 15_000));
+        const runEnd = Date.now() + 75_000;
+        while (Date.now() < runEnd) {
+          const screen = readScreenText(emuRef.current);
+          if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen)) return false;
+          if (geosBootSucceeded(screen, name) || geosBootLooksLaunched(screen)) return true;
+          await new Promise((r) => window.setTimeout(r, 800));
+        }
         const screen = readScreenText(emuRef.current);
-        if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen)) return false;
-        return geosBootSucceeded(screen, name);
+        return geosBootSucceeded(screen, name) || geosBootLooksLaunched(screen);
       },
       settings: () => {
         const st = useEmu.getState();
@@ -1399,22 +1407,16 @@ export function Grok64App() {
     },
     [],
   );
-  const resetReady = useCallback(() => {
+  const ejectCartToBasic = useCallback(async () => {
     const emu = emuRef.current;
     const st = useEmu.getState();
-    const hadCart =
-      cartLiveRef.current ||
-      playModeRef.current === "cart" ||
-      Boolean(st.fastLoadCart) ||
-      cartMountedOnCore(emu);
+    if (!st.powered) {
+      toast.message("Power on first — CART OUT");
+      return;
+    }
     playLockGen.current += 1;
     clearBootTimers();
-    glog("user-reset-ready", {
-      prev: playModeRef.current,
-      title: st.currentTitle,
-      hadCart,
-      boot: bootFileOf(emu),
-    });
+    glog("cart-out-recycle", { title: st.currentTitle, boot: bootFileOf(emu) });
     playModeRef.current = "basic";
     clearLivePlay();
     clearPlayMarker();
@@ -1433,42 +1435,96 @@ export function Grok64App() {
     diskRunAfterLoadRef.current = false;
     setAwaitingStart(false);
     st.setCurrentTitle("BASIC");
-    st.setBooting(false);
+    st.setBooting(true, "Ejecting cartridge…", 20);
     st.setInsertedDiskName(null);
-    focusGrok64Player();
-    if (hadCart && st.powered) {
-      if (emu) cartEject(emu, workDiskBytesRef.current);
+    if (emu) cartEject(emu, workDiskBytesRef.current);
+    const plan = planPlay({
+      filename: "WORK DISK.D64",
+      work: true,
+      userIec: st.iecDrive,
+      userUnit: st.iecUnit,
+      liveIec: sessionIecRef.current,
+      liveWorkDisk: lastAppliedWorkDisk(),
+      autostart: false,
+    });
+    sessionIecRef.current = plan.live.iec;
+    sessionUnitRef.current = plan.live.unit;
+    try {
+      await startWithUrlRef.current(publicUrl("/software/blank.d64"), "WORK DISK.D64", {
+        autostart: false,
+        title: "BASIC",
+        iec: plan.live.iec,
+        iecUnit: plan.live.unit,
+        userIec: plan.user.iec,
+        userUnit: plan.user.unit,
+      });
       markSessionReady();
       inGameplayRef.current = true;
-      const plan = planPlay({
-        filename: "WORK DISK.D64",
-        work: true,
-        userIec: st.iecDrive,
-        userUnit: st.iecUnit,
-        liveIec: sessionIecRef.current,
-        liveWorkDisk: lastAppliedWorkDisk(),
-        autostart: false,
+      toast.message("Cartridge out — BASIC READY");
+    } catch (err) {
+      glog("cart-out-recycle-fail", { m: err instanceof Error ? err.message : String(err) });
+      st.setBooting(false);
+      toast.error(err instanceof Error ? err.message : "Could not eject cartridge");
+    }
+  }, []);
+
+  const resetReady = useCallback(() => {
+    const emu = emuRef.current;
+    const st = useEmu.getState();
+    const hadCart =
+      cartLiveRef.current ||
+      playModeRef.current === "cart" ||
+      Boolean(st.fastLoadCart) ||
+      cartMountedOnCore(emu);
+    playLockGen.current += 1;
+    clearBootTimers();
+    glog("user-reset-ready", {
+      prev: playModeRef.current,
+      title: st.currentTitle,
+      hadCart,
+      boot: bootFileOf(emu),
+    });
+    persistGateRef.current = false;
+    pendingKickRef.current = false;
+    playLockRef.current = false;
+    bootHoldRef.current = false;
+    muteC64Space(false);
+    basicRunAfterLoadRef.current = false;
+    diskRunAfterLoadRef.current = false;
+    setAwaitingStart(false);
+    st.setBooting(false);
+    focusGrok64Player();
+    if (hadCart && emu && st.powered) {
+      playModeRef.current = "cart";
+      cartLiveRef.current = true;
+      setCartLive(true);
+      disarmAutostart(emu, "cart");
+      applyRuntimeOptions(emu, {
+        ...CART_PLAY_UNLOCK_VICE_OPTS,
+        vice_drive_true_emulation: "enabled",
+        vice_virtual_device_traps: "disabled",
       });
-      sessionIecRef.current = plan.live.iec;
-      sessionUnitRef.current = plan.live.unit;
-      void startWithUrlRef
-        .current(publicUrl("/software/blank.d64"), "WORK DISK.D64", {
-          autostart: false,
-          title: "BASIC",
-          iec: plan.live.iec,
-          iecUnit: plan.live.unit,
-          userIec: plan.user.iec,
-          userUnit: plan.user.unit,
-        })
-        .then(() => {
-          toast.message("Reset — READY (cartridge ejected)");
-        })
-        .catch((err) => {
-          glog("reset-cart-recycle-fail", { m: err instanceof Error ? err.message : String(err) });
-          toast.error(err instanceof Error ? err.message : "Reset failed");
-        });
+      hardReset(emu);
+      const ssCart = st.fastLoadCart;
+      if (isSuperSnapshotCartHint(ssCart)) {
+        stabilizeFreezerScreen(emu, ssCart);
+        window.setTimeout(() => stabilizeFreezerScreen(emu, ssCart), 500);
+      }
+      bumpCrtPaint(emu);
+      markSessionPlay(st.currentTitle);
+      inGameplayRef.current = true;
+      persistGateRef.current = true;
+      toast.message("Reset — cartridge restarted");
       return;
     }
+    playModeRef.current = "basic";
+    clearLivePlay();
+    clearPlayMarker();
+    cracktroOnceRef.current = "";
+    cartLiveRef.current = false;
+    setCartLive(false);
+    st.setFastLoadCart(null);
+    st.setCurrentTitle("BASIC");
     if (emu) {
       disarmAutostart(emu, "disk");
       hardReset(emu);
@@ -2572,7 +2628,8 @@ export function Grok64App() {
         );
         await flushEmuFs(emuRef.current, 3000);
         applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
-        if (!(await feedBasicLine(emuRef.current, 'LOAD"*",8,1'))) {
+        const loadLine = geosBootLoadLine(file.name);
+        if (!(await feedBasicLine(emuRef.current, loadLine))) {
           endPlayLock();
           toast.error(isWheelsDiskName(file.name) ? "Wheels LOAD failed" : "GEOS LOAD failed");
           return;
@@ -2585,14 +2642,19 @@ export function Grok64App() {
             toast.error("GEOS disk not found on unit 8");
             return;
           }
-          if (!geosBootStuckAtBasic(mid) && mid.replace(/\s+/g, "").length > 60) break;
+          if (/LOADING/i.test(mid) || (!geosBootStuckAtBasic(mid) && mid.replace(/\s+/g, "").length > 60)) break;
           await new Promise((r) => window.setTimeout(r, 500));
         }
         applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
         await feedBasicLine(emuRef.current, "RUN", { runcmd: true });
-        await new Promise((r) => window.setTimeout(r, 15_000));
-        const screen = readScreenText(emuRef.current);
-        if (!geosBootSucceeded(screen, file.name)) {
+        const runEnd = Date.now() + 75_000;
+        let screen = readScreenText(emuRef.current);
+        while (Date.now() < runEnd) {
+          screen = readScreenText(emuRef.current);
+          if (geosBootSucceeded(screen, file.name) || geosBootLooksLaunched(screen)) break;
+          await new Promise((r) => window.setTimeout(r, 800));
+        }
+        if (!geosBootSucceeded(screen, file.name) && !geosBootLooksLaunched(screen)) {
           endPlayLock();
           toast.error(
             geosBootStuckAtBasic(screen)
@@ -3257,16 +3319,7 @@ export function Grok64App() {
       return;
     }
     if (action === "cart-eject") {
-      if (!running) {
-        toast.message("Power on first — cart eject");
-        return;
-      }
-      const ok = cartEject(emuRef.current, workDiskBytesRef.current);
-      cartLiveRef.current = false;
-      setCartLive(false);
-      useEmu.getState().setFastLoadCart(null);
-      glog("cart-eject", { ok });
-      toast.message(ok ? "Cartridge ejected" : "Could not eject cartridge");
+      await ejectCartToBasic();
       return;
     }
     if (action === "scpu-reset") {
@@ -3673,7 +3726,7 @@ export function Grok64App() {
       ) : null}
       {s.powered && s.sessionRestoreHint ? (
         <div className="g64-restore-banner" role="status">
-          Resumed your last session — <strong>{s.sessionRestoreHint}</strong>. Reset clears the cartridge and returns to BASIC.
+          Resumed your last session — <strong>{s.sessionRestoreHint}</strong>. Use <strong>CART OUT</strong> to eject; Reset restarts the cartridge.
         </div>
       ) : null}
       <header className="g64-top" hidden={!s.powered}>

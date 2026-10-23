@@ -78,12 +78,21 @@ await page.screenshot({ path: join(outDir, "01-ss5-menu.png"), fullPage: true })
 
 await page.locator('button[aria-label="Reset"]').click();
 await page.waitForTimeout(2_000);
-await waitRunning(page, 90_000);
-await page.waitForTimeout(8_000);
+await waitRunning(page, 60_000);
+await page.waitForTimeout(10_000);
 const afterResetText = await page.evaluate(() => window.__g64?.screenText?.() || "");
-const basicAfterReset = isBasicReadyScreen(afterResetText);
+const ssAfterReset = /SNAPSHOT|SUPER/i.test(afterResetText);
 const cartUiAfterReset = await page.evaluate(() => window.__g64?.cartLive?.() ?? false);
 await page.screenshot({ path: join(outDir, "02-after-reset.png"), fullPage: true });
+
+await page.evaluate(() => window.__g64?.hwPress?.("cart-out", "short"));
+await page.waitForTimeout(3_000);
+await waitRunning(page, 120_000);
+await page.waitForTimeout(10_000);
+const afterEjectText = await page.evaluate(() => window.__g64?.screenText?.() || "");
+const basicAfterEject = isBasicReadyScreen(afterEjectText);
+const cartUiAfterEject = await page.evaluate(() => window.__g64?.cartLive?.() ?? false);
+await page.screenshot({ path: join(outDir, "02b-after-cart-out.png"), fullPage: true });
 
 await playFixture(ar6, "Action Replay 6");
 const arText = await page.evaluate(() => window.__g64?.screenText?.() || "");
@@ -93,11 +102,19 @@ await page.screenshot({ path: join(outDir, "03-ar6-after-sequence.png"), fullPag
 
 const report = {
   ssMenu,
-  basicAfterReset,
+  ssAfterReset,
   cartUiAfterReset,
+  basicAfterEject,
+  cartUiAfterEject,
   arMenu,
   arCanvas,
-  pass: ssMenu && basicAfterReset && !cartUiAfterReset && (arMenu || arCanvas.pass),
+  pass:
+    ssMenu &&
+    ssAfterReset &&
+    cartUiAfterReset &&
+    basicAfterEject &&
+    !cartUiAfterEject &&
+    (arMenu || arCanvas.pass),
 };
 writeFileSync(join(artDir, "results.json"), JSON.stringify(report, null, 2));
 console.log(report.pass ? "PASS cart-reset-sequence" : "FAIL cart-reset-sequence", JSON.stringify(report));
