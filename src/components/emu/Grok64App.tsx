@@ -2359,6 +2359,12 @@ export function Grok64App() {
         jiffyWant: jiffyWantSetting,
         jiffyLive,
       });
+      const bootBeforeCartPlay = bootFileOf(emuRef.current) || "";
+      const cartNeedsWasmRecycle =
+        (forceCart || plan.kind === "cart") &&
+        (playModeRef.current === "basic" ||
+          /WORK DISK|BLANK\.D64/i.test(bootBeforeCartPlay) ||
+          /\.d64$/i.test(bootBeforeCartPlay));
       if (forceCart || plan.kind === "cart") playModeRef.current = "cart";
       const playTitle = opts.title ?? filename;
       const hadCartBefore = cartLiveRef.current;
@@ -2782,7 +2788,8 @@ export function Grok64App() {
         (plan.kind === "cart" || forceCart) &&
         emuRef.current &&
         coreHasFs(emuRef.current) &&
-        cartMountedOnCore(emuRef.current)
+        cartMountedOnCore(emuRef.current) &&
+        !cartNeedsWasmRecycle
       ) {
         s.setBooting(true, plan.status, 35);
         const fastCart = detectFastLoadCart(bootName, playTitle);
@@ -2836,8 +2843,13 @@ export function Grok64App() {
       if ((plan.kind === "cart" || forceCart) && emuRef.current) {
         const el = document.getElementById("grok64-player");
         const onCore = cartMountedOnCore(emuRef.current);
-        if (!onCore || playModeRef.current === "basic" || bootFileOf(emuRef.current)?.includes("WORK DISK")) {
-          glog("cart-play-wasm-recycle", { bootName, boot: bootFileOf(emuRef.current), onCore });
+        if (cartNeedsWasmRecycle || !onCore || bootFileOf(emuRef.current)?.includes("WORK DISK")) {
+          glog("cart-play-wasm-recycle", {
+            bootName,
+            boot: bootFileOf(emuRef.current),
+            onCore,
+            cartNeedsWasmRecycle,
+          });
           destroyEmu(emuRef.current, el);
           emuRef.current = null;
           clearUnitMounts();
