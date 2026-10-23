@@ -41,3 +41,18 @@ Other freezer/fast-load carts may perform their own IEC loads; only flag failure
 - `isCartMediaBoot()` / `settleAfterStart`: cart path disables wrapper autostart and `vice_work_disk` autoload; **true drive** stays on so carts can talk to unit 8.
 - Do not add “anti-Searching” hacks that block cart firmware from using the drive.
 - GEOS / Wheels **`LOAD"*",8,1`** remains the **disk Play** path only (`docs/GEOS-WHEELS.md`).
+
+## Hands-on CRT diagnostics (IndexedDB / attach)
+
+When **Play** lands on stock BASIC but QA passes elsewhere, compare **data** (library bytes) vs **flow** (power-first cart boot).
+
+| Surface | What you get |
+|---------|----------------|
+| **Settings → About → Last cartridge Play** | JSON for the last cart Play: `payloadBytes`, `idbStoredSize`, `headerHex64`, `crtSignature`, `hwTypeId` / `hwTypeLabel`, `attachCode`, `cartMountedOnCore`, `bootFileAfter`, `wasmBuild`, `routesBundle`, `viceCoreKind` |
+| **Browser console** | `[grok64] lastCartPlay` on each update |
+| **`__g64.lastCartPlay()`** | Same object in DevTools |
+| **Play gate** | Invalid CRT header, &lt;4096 bytes, or library `size` ≠ loaded bytes → **error toast**, boot aborted |
+
+**`attachCode`:** `-1` = boot file write failed; `0` = CRT not visible as mounted boot/media; `>0` = CRT hardware type byte from the header (e.g. `2` = Super Snapshot v5) when attach succeeded.
+
+If the header validates and `cartMountedOnCore` is true but the freezer menu never appears, paste the full JSON — likely KERNAL/core execution, not a truncated IndexedDB row.

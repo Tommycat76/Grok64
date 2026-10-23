@@ -1926,6 +1926,11 @@ export function Grok64App() {
         if (mounted) {
           cartLiveRef.current = true;
           setCartLive(true);
+        } else if (spec.playKind === "cart" || cartBootSettle) {
+          toast.error(
+            "Cartridge did not stay mounted after reset. Open About → Last cartridge Play for header bytes and attach code.",
+            { duration: 14_000 },
+          );
         }
         beginPlayLock(playLockDuration(playModeRef.current, spec.title), `Loading ${spec.title}…`);
       } else if (spec.autostartAfterReady) {
@@ -2979,9 +2984,33 @@ export function Grok64App() {
           dismissEjsPrompts(document.getElementById("grok64-player"));
           bumpCrtPaint(emu);
           beginPlayLock(playLockDuration("cart", title), `Loading ${title}…`);
+          publishCartAttachDiag({
+            fileName: bootName,
+            libraryId: opts.libraryId ?? null,
+            idbStoredSize: opts.libraryStoredSize ?? null,
+            payload: payloadView,
+            writeBootOk: true,
+            mounted: cartMountedOnCore(emu),
+            bootFileAfter: bootFileOf(emu),
+            playMode: "cart",
+            fastLoadCart,
+            viceCoreKind: grok64CoreStatus(emu).kind,
+          });
           glog("cart-warm-boot", { bootName, fastCart, jiffyOnCart });
           return;
         }
+        publishCartAttachDiag({
+          fileName: bootName,
+          libraryId: opts.libraryId ?? null,
+          idbStoredSize: opts.libraryStoredSize ?? null,
+          payload: payloadView,
+          writeBootOk: false,
+          mounted: false,
+          bootFileAfter: bootFileOf(emuRef.current),
+          playMode: "cart",
+          fastLoadCart,
+          viceCoreKind: grok64CoreStatus(emuRef.current).kind,
+        });
         glog("cart-warm-boot-fail", { bootName });
       }
       const stayLive =
