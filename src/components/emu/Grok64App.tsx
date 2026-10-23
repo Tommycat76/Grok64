@@ -324,6 +324,7 @@ export function Grok64App() {
   const splashRef = useRef(null);
   const loadGenRef = useRef(0);
   const playModeRef = useRef("basic");
+  const postCartOutPlayRef = useRef(false);
   const basicRunAfterLoadRef = useRef(false);
   const diskRunAfterLoadRef = useRef(false);
   const persistGateRef = useRef(true);
@@ -1571,6 +1572,7 @@ export function Grok64App() {
         userUnit: plan.user.unit,
       });
       markSessionReady();
+      postCartOutPlayRef.current = true;
       st.setBooting(false);
       inGameplayRef.current = true;
       toast.message("Cartridge out — BASIC READY");
@@ -1719,6 +1721,7 @@ export function Grok64App() {
       const cartBoot = isCartMediaBoot({
         playMode: playModeRef.current,
         bootFile,
+        bootName: spec.bootName,
         title: spec.bootName ?? spec.title,
       });
       const jiffyForCart = resolveJiffyWant(st.jiffyDos, st.fastLoadCart);
@@ -1804,6 +1807,7 @@ export function Grok64App() {
         const cartBootNow = isCartMediaBoot({
           playMode: playModeRef.current,
           bootFile: bootFileOf(emu),
+          bootName: spec.bootName,
           title: spec.bootName ?? spec.title,
         });
         if (cartBootNow) {

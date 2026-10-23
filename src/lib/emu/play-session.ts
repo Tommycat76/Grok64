@@ -59,12 +59,18 @@ export interface PlayPlan {
 export function isCartMediaBoot(input: {
   playMode?: string | null;
   bootFile?: string | null;
+  bootName?: string | null;
   title?: string | null;
 }): boolean {
   if (input.playMode === "cart") return true;
   const boot = input.bootFile ?? "";
+  const bootName = input.bootName ?? "";
   const title = input.title ?? "";
-  return /\.(crt|bin)$/i.test(boot) || /\.(crt|bin)$/i.test(title);
+  return (
+    /\.(crt|bin)$/i.test(boot) ||
+    /\.(crt|bin)$/i.test(bootName) ||
+    /\.(crt|bin)$/i.test(title)
+  );
 }
 
 export function playKindOf(filename: string, work: boolean, data?: Uint8Array | null): PlayKind {

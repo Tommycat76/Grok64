@@ -267,6 +267,8 @@ const report = {
   pass:
     ssMenu &&
     !ssDiskAutostart &&
+    ss2.ok &&
+    !diskAutostartPoison(ssText) &&
     ssAfterReset &&
     ssAfterResetPix.pass &&
     basicAfterOut &&

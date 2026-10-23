@@ -193,6 +193,11 @@ export async function noPowerSplash(page) {
 
 export function patchLocalStorage(page, combo) {
   return page.evaluate((combo) => {
+    try {
+      sessionStorage.removeItem("grok64-post-cart-out");
+    } catch {
+      /* private mode */
+    }
     const keys = Object.keys(localStorage).filter((k) => k.includes("grok64"));
     if (!keys.length) return false;
     const raw = localStorage.getItem(keys[0]);
