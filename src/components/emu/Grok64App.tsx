@@ -844,10 +844,8 @@ export function Grok64App() {
         );
         const workBytes = viceWorkD64ByteLength(emuRef.current);
         const opts = runtimeViceOpts();
-        if (mountOk) {
-          await feedBasicLine(emuRef.current, 'LOAD"$",8');
-          await new Promise((r) => window.setTimeout(r, 10_000));
-        }
+        await flushEmuFs(emuRef.current, 2000);
+        bumpCrtPaint(emuRef.current);
         const dir = readScreenText(emuRef.current);
         return { mountOk, workBytes, opts, dir };
       },
@@ -1547,12 +1545,9 @@ export function Grok64App() {
     setAwaitingStart(false);
     inGameplayRef.current = false;
     bootKickRef.current = true;
-    beginColdSession();
     st.setCurrentTitle("BASIC");
     st.setBooting(true, "Ejecting cartridge…", 20);
     st.setInsertedDiskName(null);
-    // Full WASM recycle follows — in-place cartEject hard-resets the dying core and
-    // often leaves a black CRT when Jiffy + freezer carts were live (#67).
     const plan = planPlay({
       filename: "WORK DISK.D64",
       work: true,
@@ -1564,32 +1559,54 @@ export function Grok64App() {
     });
     sessionIecRef.current = plan.live.iec;
     sessionUnitRef.current = plan.live.unit;
+    const wantJiffy = resolveJiffyWant(st.jiffyDos, null);
     try {
-      const el = document.getElementById("grok64-player");
-      if (emu && el) {
-        destroyEmu(emu, el);
-        emuRef.current = null;
-        clearUnitMounts();
+      if (!emu || !coreHasFs(emu)) {
+        throw new Error("Emulator not ready — power on first");
       }
-      await startWithUrlRef.current(publicUrl("/software/blank.d64"), "WORK DISK.D64", {
-        autostart: false,
-        title: "BASIC",
-        playKind: "basic",
-        iec: plan.live.iec,
-        iecUnit: plan.live.unit,
-        userIec: plan.user.iec,
-        userUnit: plan.user.unit,
-      });
+      glog("cart-out-inplace", { boot: bootFileOf(emu) });
+      const ejected = cartEject(emu, workDiskBytesRef.current);
+      if (!ejected) throw new Error("Could not remove cartridge from core");
+      await syncJiffy(emu, "hard");
+      disarmAutostart(emu, "disk");
+      applyIecUnit(emu, plan.live.iec, plan.live.unit);
+      await presentFloppyMountReady(emu, plan.live);
+      const playerEl = document.getElementById("grok64-player");
+      const t0 = Date.now();
+      let readyPaint = false;
+      while (Date.now() - t0 < 30_000) {
+        const live = emuRef.current;
+        if (!live) break;
+        const txt = readScreenText(live);
+        const compact = txt.replace(/\s+/g, "");
+        const ready =
+          /\bREADY\.?\b/i.test(txt) &&
+          /BASIC|JIFFY|COMMODORE 64/i.test(txt) &&
+          !/TURBO|SNAPSHOT|REPLAY|ACTION/i.test(txt) &&
+          !/LOAD"[*$]/i.test(txt) &&
+          compact.length < 280;
+        fitEmu(playerEl, live);
+        bumpCrtPaint(live);
+        scheduleFit(true);
+        if (ready) {
+          readyPaint = true;
+          break;
+        }
+        await new Promise((r) => window.setTimeout(r, 150));
+      }
+      if (!readyPaint) glog("cart-out-ready-timeout", { boot: bootFileOf(emuRef.current) });
       markSessionReady();
+      beginColdSession();
       st.setBooting(false);
+      persistGateRef.current = true;
       inGameplayRef.current = true;
-      toast.message("Cartridge out — BASIC READY");
+      toast.message(wantJiffy ? "Cartridge out — JiffyDOS READY" : "Cartridge out — BASIC READY");
     } catch (err) {
-      glog("cart-out-recycle-fail", { m: err instanceof Error ? err.message : String(err) });
+      glog("cart-out-fail", { m: err instanceof Error ? err.message : String(err) });
       st.setBooting(false);
       toast.error(err instanceof Error ? err.message : "Could not eject cartridge");
     }
-  }, []);
+  }, [syncJiffy]);
 
   const resetReady = useCallback(() => {
     const emu = emuRef.current;
@@ -1833,8 +1850,6 @@ export function Grok64App() {
           vice_virtual_device_traps: "disabled",
         });
         await applyJiffyDos(emu, jiffyForCart);
-        cartBootReset(emu);
-        await flushEmuFs(emu, isIosPhone() ? 1200 : 400);
         disarmAutostart(emu, "cart");
         applyRuntimeOptions(emu, {
           ...CART_PLAY_UNLOCK_VICE_OPTS,
@@ -1843,6 +1858,7 @@ export function Grok64App() {
           vice_virtual_device_traps: "disabled",
         });
         hardReset(emu);
+        await flushEmuFs(emu, isIosPhone() ? 800 : 400);
         const ssCart = useEmu.getState().fastLoadCart;
         scheduleSuperSnapshotVicFix(emu, ssCart);
         if (ssCart) stabilizeFreezerScreen(emu, ssCart);
@@ -2817,17 +2833,15 @@ export function Grok64App() {
         toast.error("Play stayed on the live CRT — did not remount the splash.");
         return;
       }
-      if (
-        (plan.kind === "cart" || forceCart) &&
-        emuRef.current &&
-        coreHasFs(emuRef.current) &&
-        !cartMountedOnCore(emuRef.current)
-      ) {
+      if ((plan.kind === "cart" || forceCart) && emuRef.current) {
         const el = document.getElementById("grok64-player");
-        glog("cart-play-wasm-recycle", { bootName, boot: bootFileOf(emuRef.current) });
-        destroyEmu(emuRef.current, el);
-        emuRef.current = null;
-        clearUnitMounts();
+        const onCore = cartMountedOnCore(emuRef.current);
+        if (!onCore || playModeRef.current === "basic" || bootFileOf(emuRef.current)?.includes("WORK DISK")) {
+          glog("cart-play-wasm-recycle", { bootName, boot: bootFileOf(emuRef.current), onCore });
+          destroyEmu(emuRef.current, el);
+          emuRef.current = null;
+          clearUnitMounts();
+        }
       }
       const blob = new Blob([toArrayBuffer(media)]);
       const url = URL.createObjectURL(blob);

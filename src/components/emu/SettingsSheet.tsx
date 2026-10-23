@@ -196,9 +196,9 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               <label>IEC drives</label>
               <p className="mb-2 text-xs text-fg-subtle">
                 One number is one drive on the serial bus. <code>LOAD"$",8</code> talks to device 8,{" "}
-                <code>LOAD"$",9</code> to device 9. Floppy Play mounts the image on #8 and stops at{" "}
-                <code>READY</code> (directory via <code>LOAD"$",8</code>) — Grok64 never auto-types{" "}
-                <code>LOAD"*",8,1</code>. Device 8 cannot be empty.
+                <code>LOAD"$",9</code> to device 9. Floppy Play mounts the image on #8 and stops at bare{" "}
+                <code>READY</code> — Grok64 never auto-types <code>LOAD</code> on mount (no{" "}
+                <code>LOAD"$"</code> or <code>LOAD"*"</code>). Device 8 cannot be empty.
               </p>
               {IEC_UNITS.map((unit) => (
                 <div key={unit} className="g64-iec-row">

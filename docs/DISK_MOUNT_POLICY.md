@@ -5,9 +5,9 @@ Grok64 **never** auto-types **`LOAD"*",8,1`** — with or without a cartridge. V
 ## Floppy Play (`.d64` / `.d81`)
 
 1. Attach the image on **unit 8** with **true drive** emulation.
-2. **Hard reset** to **READY** (like closing the lid after inserting a disk).
-3. Optionally type **`LOAD"$",8`** so the directory appears on the CRT (and in QA).
-4. User picks a program from the listing or from the library UI.
+2. **Hard reset** to **bare READY** (like closing the lid after inserting a disk).
+3. User types **`LOAD"$",8`** or picks a program from the library UI when they want a directory.
+4. Named one-click Play may type **`LOAD"<file>",8,1`** — never `*` and never auto-typed on mount alone.
 
 Multi-game disks must not auto-run `*` — many disks contain several games.
 

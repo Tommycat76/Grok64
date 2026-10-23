@@ -6,7 +6,13 @@
 import { chromium } from "playwright";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { patchLocalStorage, powerOnDesktop, waitRunning, grok64FloppyAutostartPoison } from "./desktop-qa-lib.mjs";
+import {
+  patchLocalStorage,
+  powerOnDesktop,
+  waitRunning,
+  grok64FloppyAutostartPoison,
+  isBasicReadyScreen,
+} from "./desktop-qa-lib.mjs";
 import { cartFixturePath, CART_COMPAT_CATALOG } from "./cart-compat-catalog.mjs";
 
 const base = process.env.GROK64_BASE_URL || "http://127.0.0.1:8080/";
@@ -18,7 +24,10 @@ const ar6 = cartFixturePath(CART_COMPAT_CATALOG.find((c) => c.id === "ar6"));
 const ssName = "Super_Snapshot_v5.00_1990_NTSC.crt";
 const arName = "Action_Replay_V6.0_6.0_1989_PAL.crt";
 
-async function playLibrary(page, displayRe, menuRe = /SNAPSHOT|SUPER|REPLAY|ACTION/i) {
+const ssMenuRe = /SUPER SNAPSHOT|SNAPSHOT BY|TURBO DOS|SELECT OPTION/i;
+const arMenuRe = /REPLAY PROFESSIONAL|ACTION REPLAY/i;
+
+async function playLibrary(page, displayRe, menuRe = ssMenuRe) {
   await page.locator('button[aria-label="Software"]').click();
   await page.waitForTimeout(400);
   await page.getByRole("button", { name: /On this device/i }).click();
@@ -61,26 +70,33 @@ await page.evaluate(async ({ name, bytes }) => window.__g64?.importLibraryBytes?
   name: ssName,
   bytes: [...readFileSync(ss5)],
 });
-let t = await playLibrary(page, /Super_Snapshot/i, /SNAPSHOT|SUPER|TURBO/i);
+let t = await playLibrary(page, /Super_Snapshot/i, ssMenuRe);
 await page.screenshot({ path: join(out, "tom-qa-01-ss5-play.png"), fullPage: true });
-const ss1 = { poison: grok64FloppyAutostartPoison(t), menu: /SNAPSHOT|SUPER|TURBO/i.test(t) };
+const ss1 = { poison: grok64FloppyAutostartPoison(t), menu: ssMenuRe.test(t) };
 
 await page.locator('button[aria-label="Reset"]').click();
 await page.waitForTimeout(12_000);
 t = await page.evaluate(() => window.__g64?.screenText?.() || "");
 await page.screenshot({ path: join(out, "tom-qa-02-ss5-reset.png"), fullPage: true });
-const ssReset = { menu: /SNAPSHOT|SUPER/i.test(t), poison: grok64FloppyAutostartPoison(t) };
+const ssReset = { menu: ssMenuRe.test(t), poison: grok64FloppyAutostartPoison(t) };
 
 await page.evaluate(() => window.__g64?.hwPress?.("cart-out", "short"));
 await waitRunning(page, 120_000);
-await page.waitForTimeout(8_000);
-t = await page.evaluate(() => window.__g64?.screenText?.() || "");
+for (let i = 0; i < 120; i++) {
+  await page.waitForTimeout(500);
+  t = await page.evaluate(() => window.__g64?.screenText?.() || "");
+  if (isBasicReadyScreen(t) && !grok64FloppyAutostartPoison(t)) break;
+}
 await page.screenshot({ path: join(out, "tom-qa-03-cart-out.png"), fullPage: true });
-const cartOut = { basic: /READY/i.test(t), poison: grok64FloppyAutostartPoison(t) };
+const cartOut = {
+  basic: isBasicReadyScreen(t),
+  jiffy: /JIFFY/i.test(t),
+  poison: grok64FloppyAutostartPoison(t),
+};
 
-t = await playLibrary(page, /Super_Snapshot/i, /SNAPSHOT|SUPER|TURBO/i);
+t = await playLibrary(page, /Super_Snapshot/i, ssMenuRe);
 await page.screenshot({ path: join(out, "tom-qa-04-ss5-second.png"), fullPage: true });
-const ss2 = { poison: grok64FloppyAutostartPoison(t), menu: /SNAPSHOT|SUPER|TURBO/i.test(t) };
+const ss2 = { poison: grok64FloppyAutostartPoison(t), menu: ssMenuRe.test(t) };
 
 await page.evaluate(() => window.__g64?.hwPress?.("cart-out", "short"));
 await waitRunning(page, 90_000);
@@ -88,11 +104,26 @@ await page.evaluate(async ({ name, bytes }) => window.__g64?.importLibraryBytes?
   name: arName,
   bytes: [...readFileSync(ar6)],
 });
-t = await playLibrary(page, /Action_Replay/i, /REPLAY|ACTION/i);
+t = await playLibrary(page, /Action_Replay/i, arMenuRe);
 await page.screenshot({ path: join(out, "tom-qa-05-ar6-play.png"), fullPage: true });
-const ar1 = { poison: grok64FloppyAutostartPoison(t), menu: /REPLAY|ACTION/i.test(t) };
+const ar1 = { poison: grok64FloppyAutostartPoison(t), menu: arMenuRe.test(t) };
 
-const report = { ss1, ssReset, cartOut, ss2, ar1, pass: ss1.menu && !ss1.poison && ar1.menu && !ar1.poison };
+const report = {
+  ss1,
+  ssReset,
+  cartOut,
+  ss2,
+  ar1,
+  pass:
+    ss1.menu &&
+    !ss1.poison &&
+    ss2.menu &&
+    !ss2.poison &&
+    cartOut.basic &&
+    !cartOut.poison &&
+    ar1.menu &&
+    !ar1.poison,
+};
 console.log(JSON.stringify(report, null, 2));
 await browser.close();
-process.exit(report.pass && ss2.menu && !ss2.poison ? 0 : 1);
+process.exit(report.pass ? 0 : 1);
