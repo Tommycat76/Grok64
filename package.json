@@ -42,6 +42,7 @@
     "test:desktop-geos-proof": "node scripts/desktop-geos-desktop-proof.mjs",
     "test:desktop-jiffy-floppy-dir": "node scripts/desktop-jiffy-floppy-dir-proof.mjs",
     "test:desktop-library-geos-floppy-ui": "node scripts/desktop-library-geos-floppy-ui.mjs",
+    "test:desktop-dirty-profile-geos": "node scripts/desktop-dirty-profile-geos-floppy.mjs",
     "test:desktop-wheels-proof": "node scripts/desktop-wheels-proof.mjs",
     "test:desktop-drive-combo-matrix": "node scripts/desktop-drive-combo-matrix.mjs",
     "test:cart-matrix-ss-proof": "node scripts/cart-matrix-ss-headless-proof.mjs",

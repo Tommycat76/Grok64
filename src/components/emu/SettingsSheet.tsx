@@ -52,6 +52,19 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
   const mac = MACHINES.find((m) => m.id === s.machineId);
   const c64Family = (mac?.family ?? "c64") === "c64";
 
+  useEffect(() => {
+    if (!s.settingsOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (e.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+      s.setSettingsOpen(false);
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [s.settingsOpen, s.setSettingsOpen]);
+
   return (
     <>
       <Drawer.Root open={s.settingsOpen} onOpenChange={s.setSettingsOpen} handleOnly>

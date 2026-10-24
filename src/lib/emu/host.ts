@@ -2418,7 +2418,8 @@ export function mountDiskOnUnit(
   for (const [u, name] of unitMounts) {
     if (u !== unit && name === base) unitMounts.delete(u);
   }
-  applyIecUnit(emu, iec, unit);
+  const diskKind = kindOf(base);
+  applyIecUnitFloppy(emu, iec, unit, diskKind);
   const wrote = writeBootFile(emu, data, base);
   if (wrote) {
     unitMounts.set(unit, base);
@@ -2427,6 +2428,7 @@ export function mountDiskOnUnit(
       syncViceWorkD64(emu, data);
     }
     pruneExtraDisks(emu);
+    applyIecUnitFloppy(emu, iec, unit, diskKind);
   }
   return wrote;
 }
@@ -2574,7 +2576,6 @@ export function attachAutostartDisk(
   unit: IecUnit = 8,
 ): boolean {
   if (isCartridgePayload(data, _fallbackName ?? bootFileOf(emu))) return false;
-  applyIecUnit(emu, iec, unit);
   // Only overwrite the mounted boot image. A new filename leaves unit 8
   // as the blank work disk — LOAD"*",8,1 then FILE NOT FOUND (#60/#61).
   const mounted = bootFileOf(emu);
@@ -2586,16 +2587,17 @@ export function attachAutostartDisk(
     (kind === "g64" || kind === "g71") && fallback
       ? fallback
       : mountedClean;
+  applyIecUnitFloppy(emu, iec, unit, kindOf(target));
   const wrote = writeBootFile(emu, data, target);
   if (wrote) {
     unitMounts.set(unit, target);
     if (emu) emu.fileName = target;
-    applyIecUnit(emu, iec, unit);
     const label = fallback || target;
     setSessionDisk(label, data, unit);
     if (isAcceptedD64ByteLength(data.byteLength) && /\.d64$/i.test(target)) {
       syncViceWorkD64(emu, data);
     }
+    applyIecUnitFloppy(emu, iec, unit, kindOf(target));
   }
   return wrote;
 }

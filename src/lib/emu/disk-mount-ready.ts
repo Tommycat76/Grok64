@@ -9,7 +9,7 @@ import {
   resyncSessionDiskToVice,
 } from "./host";
 import { sessionDiskOnUnit } from "./session-media";
-import { kindOf } from "./formats";
+import { isGcrDiskKind, kindOf } from "./formats";
 import type { IecDrive, IecUnit } from "./types";
 import { isIosPhone } from "./detect";
 
@@ -32,9 +32,13 @@ export async function presentFloppyMountReady(
     vice_reset: "hard",
   });
   const slot = sessionDiskOnUnit(live.unit);
-  applyIecUnitFloppy(emu, live.iec, live.unit, slot ? kindOf(slot.name) : null);
-  hardReset(emu);
-  await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
+  const diskKind = slot ? kindOf(slot.name) : null;
+  applyIecUnitFloppy(emu, live.iec, live.unit, diskKind);
+  // GCR refresh (Play path) already hard-reset; another reset re-attaches WORK DISK.
+  if (!diskKind || !isGcrDiskKind(diskKind)) {
+    hardReset(emu);
+    await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
+  }
   resyncSessionDiskToVice(emu, live.unit);
   bumpCrtPaint(emu);
 }

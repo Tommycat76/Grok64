@@ -733,7 +733,7 @@ test("live-play lock survives a remount that reset refs to basic", () => {
       inGameplay: true,
       title: "Paradroid",
     }),
-    false,
+    true,
   );
   assert.equal(
     shouldSkipPlayPersist({

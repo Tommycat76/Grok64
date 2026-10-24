@@ -105,8 +105,10 @@ import {
   validateFloppyLibraryPayload,
 } from "@/lib/emu/disk-attach-diag";
 import {
+  c64KeyboardShouldDefer,
   enqueueC64KeyboardStroke,
   flushDeferredC64Keyboard,
+  setC64KeyboardDefer,
 } from "@/lib/emu/deferred-c64-keys";
 import { presentFloppyMountReady } from "@/lib/emu/disk-mount-ready";
 import { hasCmdRom, hasJiffyPair, prefetchBundledRoms } from "@/lib/emu/roms";
@@ -237,6 +239,7 @@ import {
   isCartridgePayload,
   isDiskKind,
   isWorkDiskImage,
+  isGcrDiskKind,
   isLikelyBlankD64Payload,
   kindOf,
   needsTypedBoot,
@@ -877,8 +880,18 @@ export function Grok64App() {
         } catch {
           /* optional */
         }
+        const opts = runtimeViceOpts();
         return {
           bootFile: bootFileOf(emuRef.current),
+          emuFileName: emuRef.current?.fileName ?? null,
+          playMode: playModeRef.current,
+          cartLive: cartLiveRef.current,
+          inGameplay: inGameplayRef.current,
+          booting: useEmu.getState().booting,
+          workDiskVar: lastAppliedWorkDisk(),
+          viceWorkDiskOpt: opts.vice_work_disk ?? null,
+          drive8Type: opts.vice_drive8_type ?? null,
+          jiffyOpt: opts.vice_jiffydos ?? null,
           session: session ? await diskAttachFingerprint(session.bytes, session.name) : null,
           viceWork: { bytes: viceSize, sha1: viceSha1 },
         };
@@ -1517,6 +1530,7 @@ export function Grok64App() {
     inGameplayRef.current = true;
     persistGateRef.current = true;
     clearMenuJoyInput();
+    setC64KeyboardDefer(false);
     flushDeferredC64Keyboard(emuRef.current);
   }, [s, clearMenuJoyInput]);
   const logFloppyAttach = useCallback(
@@ -1546,6 +1560,7 @@ export function Grok64App() {
       bootHoldRef.current = false;
       persistGateRef.current = false;
       inGameplayRef.current = false;
+      setC64KeyboardDefer(true);
       muteC64Space(true);
       clearMenuJoyInput();
       joyRef.current.fire = false;
@@ -2603,6 +2618,11 @@ export function Grok64App() {
       const playTitle = opts.title ?? filename;
       const hadCartBefore = cartLiveRef.current;
       const keepCartAcrossDiskEarly = hadCartBefore && plan.kind === "floppy" && !work;
+      if (plan.kind === "floppy" && !work && !keepCartAcrossDiskEarly) {
+        cartLiveRef.current = false;
+        setCartLive(false);
+        useEmu.getState().setFastLoadCart(null);
+      }
       let sessionFastCart = useEmu.getState().fastLoadCart;
       if (plan.kind === "cart") {
         sessionFastCart = detectFastLoadCartFromPayload(payloadView, bootName, playTitle);
@@ -2823,7 +2843,10 @@ export function Grok64App() {
         const payloadDisk = diskBytes;
         const playIec = attach?.iec ?? plan.live.iec;
         const playAttachUnit = attach?.unit ?? plan.live.unit;
+        const floppyKind = kindOf(filename);
+        const gcrFloppy = isGcrDiskKind(floppyKind);
         s.setBooting(true, plan.status, 35);
+        setC64KeyboardDefer(true);
         // Overwrite the mounted unit-8 image only. A new filename leaves
         // the blank work disk attached → FILE NOT FOUND (#60/#61).
         const mounted = inPlaceAutostartTarget(bootFileOf(emuRef.current), bootName);
@@ -2839,7 +2862,10 @@ export function Grok64App() {
             : swapBootDisk(emuRef.current, payloadDisk, mounted)
           : false;
         if (wrote) {
-          emuRef.current.fileName = mounted;
+          const bootAfterAttach = isGcrDiskKind(origKind)
+            ? filename.replace(/^\//, "")
+            : mounted.replace(/^\//, "");
+          emuRef.current.fileName = bootAfterAttach;
           if (plan.kind === "floppy" && !work) {
             useEmu.getState().setInsertedDiskName(filename);
           }
@@ -2902,7 +2928,9 @@ export function Grok64App() {
             ...(plan.trueDrive || attach
               ? {
                   ...(attach
-                    ? { vice_work_disk: workDiskFor(playIec, playAttachUnit) }
+                    ? gcrFloppy
+                      ? { vice_work_disk: "disabled" }
+                      : { vice_work_disk: workDiskFor(playIec, playAttachUnit) }
                     : {}),
                   vice_drive_true_emulation: "enabled",
                   vice_virtual_device_traps: "disabled",
@@ -2910,16 +2938,9 @@ export function Grok64App() {
               : {}),
             ...viceJoyOptions(useEmu.getState().joyPort),
           });
-          if (attach) applyIecUnit(emuRef.current, playIec, playAttachUnit);
+          if (attach) applyIecUnitFloppy(emuRef.current, playIec, playAttachUnit, floppyKind);
           const flushed = await flushEmuFs(emuRef.current, isIosPhone() ? 2000 : 800);
-          glog("play-mount", { flushed, workDisk: lastAppliedWorkDisk(), ios: isIosPhone() });
-          await prepareCore(emuRef.current, {
-            live: plan.live,
-            user: plan.user,
-            jiffyWant: resolveJiffyWant(stNow.jiffyDos, stNow.fastLoadCart),
-            skipJiffy: true,
-            driveMap: stNow.iecMap,
-          });
+          glog("play-mount", { flushed, workDisk: lastAppliedWorkDisk(), ios: isIosPhone(), gcrFloppy });
           const jiffyWantPlay = resolveJiffyWant(stNow.jiffyDos, stNow.fastLoadCart);
           if (attach && plan.kind === "floppy") {
             await applyJiffyThenRefreshWorkDisk(emuRef.current, playAttachUnit, jiffyWantPlay, {
@@ -2927,12 +2948,19 @@ export function Grok64App() {
               data: payloadDisk,
             });
           } else {
+            await prepareCore(emuRef.current, {
+              live: plan.live,
+              user: plan.user,
+              jiffyWant: jiffyWantPlay,
+              skipJiffy: true,
+              driveMap: stNow.iecMap,
+            });
             await applyJiffyDos(emuRef.current, jiffyWantPlay);
           }
           if (plan.kind === "floppy" && !work) {
             useEmu.getState().setInsertedDiskName(filename);
           }
-          applyIecUnit(emuRef.current, playIec, playAttachUnit);
+          applyIecUnitFloppy(emuRef.current, playIec, playAttachUnit, floppyKind);
           plugJoysticks(emuRef.current, useEmu.getState().joyPort);
           // #13: never reset paint / wipe the live canvas on in-place Play.
           if (isIosPhone() && !keepLiveCrt && !mustKeep) resetIosPaintState();
@@ -3356,14 +3384,18 @@ export function Grok64App() {
     const boot = bootFileName(file.name, kind);
     const mounted = bootFileOf(emuRef.current);
     const ok = mounted
-      ? attachAutostartDisk(emuRef.current, media, mounted, iec, unit)
+      ? attachAutostartDisk(emuRef.current, media, file.name, iec, unit)
       : mountDiskOnUnit(emuRef.current, unit, media, boot, iec);
     if (!ok) {
       toast.error("Could not mount that disk");
       return;
     }
-    bootPathRef.current = mounted ?? boot;
-    if (mounted) emuRef.current.fileName = mounted.replace(/^\//, "");
+    bootPathRef.current = isGcrDiskKind(kind) ? file.name : mounted ?? boot;
+    if (isGcrDiskKind(kind)) {
+      emuRef.current.fileName = file.name.replace(/^\//, "");
+    } else if (mounted) {
+      emuRef.current.fileName = mounted.replace(/^\//, "");
+    }
     const FS = emuRef.current?.Module?.FS ?? emuRef.current?.gameManager?.FS;
     for (const stale of ["blank.d64", "/blank.d64", "BLANK.D64"]) {
       try {
@@ -3602,9 +3634,18 @@ export function Grok64App() {
         powerOnRef.current();
         const recoverView = new Uint8Array(payload.data);
         const recoverKind = kindOf(payload.name);
-        const recoverCart = isCartridgePayload(recoverView, payload.name);
+        const recoverCart =
+          !isDiskKind(recoverKind) &&
+          !needsTypedBoot(recoverKind) &&
+          isCartridgePayload(recoverView, payload.name);
         const recoverMountOnly =
           isDiskKind(recoverKind) || needsTypedBoot(recoverKind) || isGeosFamilyDiskName(payload.name);
+        if (recoverMountOnly) {
+          cartLiveRef.current = false;
+          setCartLive(false);
+          useEmu.getState().setFastLoadCart(null);
+          playModeRef.current = "disk";
+        }
         await playBufferRef.current(payload.name, payload.data, {
           autostart: !(recoverMountOnly || recoverCart),
           title: marker.title,
@@ -3735,9 +3776,13 @@ export function Grok64App() {
   }, [s.running, cartLive]);
   useEffect(() => {
     setGrok64KeyboardPaintHook((emu) => bumpCrtPaint(emu ?? emuRef.current));
-    setC64HardwareKeySink((code, key, down, mods) =>
-      grok64RetroKeyboardFromDom(emuRef.current, code, key, down, mods),
-    );
+    setC64HardwareKeySink((code, key, down, mods) => {
+      if (c64KeyboardShouldDefer()) {
+        enqueueC64KeyboardStroke(code, key, down, mods);
+        return true;
+      }
+      return grok64RetroKeyboardFromDom(emuRef.current, code, key, down, mods);
+    });
     return () => {
       setGrok64KeyboardPaintHook(null);
       setC64HardwareKeySink(null);

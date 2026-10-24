@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import {
   JIFFY_FASTLOAD_CART_MATRIX,
@@ -50,6 +51,10 @@ export function JiffyDosToggleRow() {
   const s = useEmu();
   const cart = useEmu((st) => st.fastLoadCart);
   const blocked = cart ? jiffyCartCompat(cart, true).suppressJiffy : false;
+  const [jiffyUi, setJiffyUi] = useState(s.jiffyDos);
+  useEffect(() => {
+    setJiffyUi(s.jiffyDos);
+  }, [s.jiffyDos]);
   return (
     <>
       <JiffyCartCompatBanner />
@@ -58,10 +63,14 @@ export function JiffyDosToggleRow() {
         <button
           type="button"
           className="g64-switch"
-          data-on={s.jiffyDos ? "true" : "false"}
-          onClick={() => toggleJiffy(s.jiffyDos, cart, s.setJiffyDos)}
+          data-on={jiffyUi ? "true" : "false"}
+          onClick={() => {
+            const next = !jiffyUi;
+            setJiffyUi(next);
+            toggleJiffy(jiffyUi, cart, s.setJiffyDos);
+          }}
           role="switch"
-          aria-checked={s.jiffyDos}
+          aria-checked={jiffyUi}
           aria-disabled={blocked && !s.jiffyDos}
           title={blocked ? "Incompatible with the loaded fast-load cart — use stock KERNAL" : undefined}
         >

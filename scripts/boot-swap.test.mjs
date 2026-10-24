@@ -67,6 +67,23 @@ test("in-place Play overwrites WORK DISK — not a new filename (#60 FILE NOT FO
   assert.equal(files.has("Paradroid.d64"), false);
 });
 
+test("attachAutostartDisk writes .g64 under its own name — not WORK DISK", () => {
+  clearUnitMounts();
+  const vars = new Map();
+  const files = new Map([["WORK DISK.D64", new Uint8Array([1])]]);
+  const emu = mockEmu("WORK DISK.D64", files, vars);
+  const g64 = new Uint8Array(1024);
+  g64[0] = 0x47;
+  g64[1] = 0x43;
+  g64[2] = 0x52;
+  g64[3] = 0x2d;
+  assert.equal(attachAutostartDisk(emu, g64, "324_D1_Geos.g64", "1541", 8), true);
+  assert.equal(emu.fileName, "324_D1_Geos.g64");
+  assert.equal(files.get("WORK DISK.D64")?.[0], 1);
+  assert.equal(files.get("324_D1_Geos.g64")?.[0], 0x47);
+  assert.equal(vars.get("vice_work_disk"), "disabled");
+});
+
 test("attachAutostartDisk forces 1541 unit 8 even after SD2IEC IEC session", () => {
   clearUnitMounts();
   const vars = new Map([["vice_work_disk", "disabled"]]);

@@ -458,7 +458,7 @@ export function shouldSkipPlayPersist(input: {
   title?: string | null;
   livePlay?: boolean;
 }): boolean {
-  if (input.playMode === "cart") return true;
+  if (input.playMode === "cart" || input.playMode === "disk") return true;
   if (!input.iosPhone && !input.ios) return false;
   if (input.inGameplay || input.playMode !== "basic") return true;
   if (input.livePlay || livePlayTitle()) return true;
