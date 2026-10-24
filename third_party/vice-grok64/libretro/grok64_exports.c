@@ -407,8 +407,8 @@ int grok64_disk_attach(int unit, int drive, const char *path)
         snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
                  "file_system_attach_disk unit=%d path=%s fs_bytes=%d", unit, path, fs_bytes);
     } else {
-        grok64_drive_reload_image(unit, drive);
         grok64_disk_sync_true_drive((unsigned int)unit);
+        grok64_drive_reload_image(unit, drive);
     }
     return last_disk_attach_rc;
 }
@@ -690,6 +690,7 @@ int grok64_drive_sync_tde_image(int unit, int drive)
     if (resources_get_int_sprintf("Drive%uTrueEmulation", &tde_on, unit) != 0 || !tde_on) {
         return 0;
     }
+    grok64_disk_sync_true_drive((unsigned int)unit);
     vdrive = file_system_get_vdrive((unsigned int)unit);
     image = vdrive ? vdrive_get_image(vdrive, (unsigned int)drive) : NULL;
     if (!image) {
