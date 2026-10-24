@@ -164,7 +164,9 @@ try {
   const busOk =
     bus.wasmFilesystemDevice === 0 &&
     bus.wasmUnitTrueEmulation === 1 &&
-    (bus.wasmCpuClockAdvancing === true || bus.wasmCpuClockAdvancing == null);
+    (bus.wasmCpuClockAdvancing === true || bus.wasmCpuClockAdvancing == null) &&
+    bus.serialDeviceLabel != null &&
+    bus.serialDeviceLabel !== "virt";
   const pass =
     attachRcOk === true &&
     evidence.ok &&

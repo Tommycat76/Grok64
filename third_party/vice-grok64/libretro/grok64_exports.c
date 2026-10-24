@@ -97,6 +97,33 @@ static void grok64_disk_route_to_drive(unsigned int unit)
     resources_set_int("VirtualDevices", 0);
 }
 
+/** KERNAL IEC must not use SERIAL_DEVICE_VIRT traps when TDE + GCR image is live. */
+static void grok64_serial_layer_true_iec(unsigned int unit)
+{
+    char res[32];
+    unsigned int u;
+
+    if (unit < 8 || unit > 11) {
+        return;
+    }
+    resources_set_int("VirtualDevices", 0);
+    for (u = 8; u <= 11; u++) {
+        snprintf(res, sizeof(res), "VirtualDevice%u", u);
+        resources_set_int(res, 0);
+    }
+    snprintf(res, sizeof(res), "FileSystemDevice%u", unit);
+    resources_set_int(res, ATTACH_DEVICE_NONE);
+    snprintf(res, sizeof(res), "IECDevice%u", unit);
+    resources_set_int(res, 0);
+    snprintf(res, sizeof(res), "Drive%uTrueEmulation", unit);
+    resources_set_int(res, 1);
+    resources_set_int("DriveTrueEmulation", 1);
+    machine_bus_status_virtualdevices_set(unit, 0);
+    machine_bus_status_truedrive_set(unit, 1);
+    serial_device_type_set(SERIAL_DEVICE_REAL, unit);
+    serial_traps_reset();
+}
+
 static void grok64_clear_stale_vdrive_error(unsigned int unit)
 {
     vdrive_t *vd;
@@ -174,6 +201,7 @@ static void grok64_disk_sync_true_drive(unsigned int unit)
         snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
                  "sync-tde: drive_enable unit=%u failed", unit);
     }
+    grok64_serial_layer_true_iec(unit);
     grok64_clear_stale_vdrive_error(unit);
 }
 
@@ -766,22 +794,13 @@ int grok64_iec_bus_reconcile(int unit)
 {
     unsigned int dnr;
     diskunit_context_t *ctx;
-    int tde = 0;
-    int vglob = 0;
     int rc;
 
     if (unit < 8 || unit > 11) {
         return -EINVAL;
     }
     grok64_disk_route_to_drive((unsigned int)unit);
-    if (resources_get_int("VirtualDevices", &vglob) != 0) {
-        vglob = 0;
-    }
-    machine_bus_status_virtualdevices_set((unsigned int)unit, vglob ? 1u : 0u);
-    if (resources_get_int_sprintf("Drive%uTrueEmulation", &tde, unit) != 0) {
-        tde = 1;
-    }
-    machine_bus_status_truedrive_set((unsigned int)unit, tde ? 1u : 0u);
+    grok64_serial_layer_true_iec((unsigned int)unit);
     dnr = (unsigned int)unit - 8;
     ctx = diskunit_context[dnr];
     if (!ctx || ctx->type == DRIVE_TYPE_NONE) {

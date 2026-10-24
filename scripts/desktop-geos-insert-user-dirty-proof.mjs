@@ -165,7 +165,9 @@ try {
     bus.wasmFilesystemDevice === 0 &&
     bus.wasmUnitTrueEmulation === 1 &&
     bus.wasmCpuClockAdvancing === true &&
-    (bus.wasmTdeImageBytes ?? 0) > 174000;
+    (bus.wasmTdeImageBytes ?? 0) > 174000 &&
+    bus.serialDeviceLabel != null &&
+    bus.serialDeviceLabel !== "virt";
   const attachRcOk = (diagInsert?.viceLastReattach?.rc ?? -1) === 0;
   const jiffyStable = jiffyAfterPower.want === false || jiffyAfterPower.want === jiffyBefore.want;
   const iecFail = /FILE NOT FOUND|DEVICE NOT PRESENT/i.test(screen) || loadWait.error;

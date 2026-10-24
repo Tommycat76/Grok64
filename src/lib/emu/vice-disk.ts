@@ -501,6 +501,11 @@ const SERIAL_DEVICE_LABEL: Record<number, string> = {
   4: "virt",
 };
 
+/** TDE floppy insert: KERNAL must not route IEC traps through SERIAL_DEVICE_VIRT. */
+export function viceBusSerialRoutingOk(bus: ViceDriveBusProbe): boolean {
+  return bus.serialDeviceLabel != null && bus.serialDeviceLabel !== "virt";
+}
+
 export function viceDriveBusProbe(emu: ViceDiskEmu | null, unit: IecUnit = 8, drive = 0): ViceDriveBusProbe {
   const mod = diskMod(emu);
   if (mod) bindGrok64DiskExports(mod, emu);

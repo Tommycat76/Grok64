@@ -21,8 +21,11 @@ import { patchLocalStorage, powerOnDesktop, waitRunning } from "./desktop-qa-lib
 import { assertGrok64WasmCore, clearEmulatorJsCache, grok64DatapathFromEnv } from "./desktop-grok64-core.mjs";
 import {
   applySyntheticJiffy,
+  captureViceDriveBus,
+  dirOnUnit,
+  ensureLibraryFixture,
+  insertFloppyViaLibraryUI,
   loadSmokeOnUnit,
-  mountFloppyOnUnit,
 } from "./drive-combo-qa-lib.mjs";
 
 const base = process.env.GROK64_BASE_URL || "http://127.0.0.1:8080/";
@@ -117,18 +120,16 @@ for (const row of rows) {
     rec.pass = false;
   } else if (row.op === "DIR" || row.op === "LOAD") {
     const bytes = [...readFileSync(testDisk)];
-    await page.evaluate(() => window.__g64?.resetReady?.());
-    await waitRunning(page, 90_000);
-    await page.waitForTimeout(1500);
-    await mountFloppyOnUnit(page, {
-      fileName: "boulder-dash.d64",
-      bytes,
-      unit: row.pairFrom,
-      title: "Boulder Dash",
-    });
+    const fileName = "boulder-dash.d64";
+    await ensureLibraryFixture(page, fileName, bytes);
+    await insertFloppyViaLibraryUI(page, { filePath: testDisk, fileName, unit: row.pairFrom });
     await waitRunning(page, 120_000);
-    await page.waitForTimeout(6000);
-    const smoke = await loadSmokeOnUnit(page, row.pairFrom);
+    await page.waitForTimeout(2000);
+    Object.assign(rec, await captureViceDriveBus(page));
+    const smoke =
+      row.op === "DIR"
+        ? await dirOnUnit(page, row.pairFrom)
+        : await loadSmokeOnUnit(page, row.pairFrom);
     rec.pass = row.op === "DIR" ? smoke.ok : smoke.loadOk;
     rec.textHead = smoke.textHead;
     rec.listHead = smoke.listHead;

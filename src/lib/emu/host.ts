@@ -78,6 +78,8 @@ import {
   runSerializedDiskAttach,
   bindGrok64DiskExports,
   viceDiskLastAttachDiag,
+  viceBusSerialRoutingOk,
+  viceDriveBusProbe,
 } from "./vice-disk";
 import { writeC64Bytes } from "./c64-memory";
 import {
@@ -2585,7 +2587,14 @@ export async function ensureIecBusReconcile(emu: EjsInstance | null, unit: IecUn
   });
   await waitRetroFrames(45);
   await tickGrok64Iec(emu);
-  glog("iec-bus-reconcile", { unit, rc, diag: viceDiskLastAttachDiag(emu) });
+  const bus = viceDriveBusProbe(emu, unit);
+  glog("iec-bus-reconcile", {
+    unit,
+    rc,
+    diag: viceDiskLastAttachDiag(emu),
+    serialDeviceLabel: bus.serialDeviceLabel,
+    serialOk: viceBusSerialRoutingOk(bus),
+  });
   return rc;
 }
 
