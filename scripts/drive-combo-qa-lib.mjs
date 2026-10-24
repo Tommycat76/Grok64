@@ -64,6 +64,9 @@ export async function focusC64ForTyping(page) {
     await page.keyboard.press("Escape").catch(() => {});
     await page.waitForTimeout(120);
   }
+  await page.evaluate(() => {
+    window.__g64?.kbdReleaseAll?.();
+  });
   await page.locator("#grok64-player canvas, .g64-crt canvas").first().click({ timeout: 10_000 }).catch(() => {});
   await page.waitForTimeout(400);
 }
@@ -117,7 +120,7 @@ export async function mountFloppyOnUnit(page, { fileName, bytes, unit, title }) 
 export async function dirOnUnit(page, unit, { requireWorkBytes = true, typed = true } = {}) {
   if (typed) {
     await focusC64ForTyping(page);
-    await typeC64Screen(page, `LOAD"$",${unit}`, { keyDelayMs: 110 });
+    await typeC64Screen(page, `LOAD"$",${unit}`, { keyDelayMs: 85, lineEndMs: 800 });
     const loadWait = await waitForDollarLoad(page, { maxMs: 55_000 });
     if (loadWait.error) {
       return {

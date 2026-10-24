@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Tom dirty-profile flow: persisted settings, power off/on, Software Insert on 8,
- * LOAD"$",8 typed on C64 (no feedBasic, no synthetic Jiffy, no Run disk).
+ * LOAD"$",8 via Playwright keyboard.press on canvas (no typeC64, no feedBasic).
  */
 import { chromium } from "playwright";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -18,7 +18,7 @@ import {
   geosDirectoryOnScreen,
   patchLocalStorage,
   powerOnDesktop,
-  typeC64Screen,
+  typeC64RealKeyboard,
   waitForDollarLoad,
   waitForG64,
   waitRunning,
@@ -149,12 +149,12 @@ try {
     viceDriveLive: diagInsert?.viceDriveLive,
   };
 
-  await page.locator("#grok64-player canvas, .g64-crt canvas").first().click({ timeout: 10_000 }).catch(() => {});
-  await typeC64Screen(page, 'LOAD"$",8', { keyDelayMs: 90 });
+  await typeC64RealKeyboard(page, 'LOAD"$",8', { keyDelayMs: 75, lineEndMs: 900 });
   const loadWait = await waitForDollarLoad(page, { maxMs: 55_000 });
   trace.loadWait = { error: loadWait.error, head: loadWait.text?.slice(0, 200) };
+  trace.viceLoadDollarDiag = await page.evaluate(() => window.__g64?.captureLoadDollarDiag?.(8) ?? null);
   await page.waitForTimeout(3000);
-  await typeC64Screen(page, "LIST", { keyDelayMs: 70 });
+  await typeC64RealKeyboard(page, "LIST", { keyDelayMs: 70, lineEndMs: 500 });
   await page.waitForTimeout(12_000);
   await page.screenshot({ path: join(shotDir, "after-load-dollar.png"), fullPage: true });
 

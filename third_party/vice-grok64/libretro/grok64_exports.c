@@ -1009,6 +1009,122 @@ int grok64_work_disk_refresh(int unit)
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+static char last_load_dollar_diag_json[4096];
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+const char *grok64_load_dollar_diag_capture(int unit)
+{
+    uint8_t buf[64];
+    uint8_t t18[256];
+    char bam_name[20];
+    int i;
+    int pos = 0;
+    int out_len = (int)sizeof(last_load_dollar_diag_json);
+    char *out = last_load_dollar_diag_json;
+    vdrive_t *vd;
+    unsigned int dnr;
+    drive_t *drv;
+    disk_image_t *img;
+    disk_addr_t adr;
+    int half = -1;
+    int gcr = 0;
+    int img_bytes = 0;
+    int vdsame = 0;
+    int iec_lines = 0;
+    int serial = 0;
+    int vd_code = 0;
+
+    if (unit < 8 || unit > 11) {
+        unit = 8;
+    }
+    last_load_dollar_diag_json[0] = '\0';
+    pos += snprintf(out + pos, out_len - pos, "{\"unit\":%d", unit);
+
+    for (i = 0; i < 48; i++) {
+        buf[i] = grok64_c64_read((uint16_t)(0x0200 + i));
+    }
+    pos += snprintf(out + pos, out_len - pos, ",\"c64Input0200Hex\":\"");
+    for (i = 0; i < 48 && pos < out_len - 4; i++) {
+        pos += snprintf(out + pos, out_len - pos, "%02x", buf[i]);
+    }
+    pos += snprintf(out + pos, out_len - pos, "\"");
+
+    pos += snprintf(out + pos, out_len - pos, ",\"kernalIecNameC3Hex\":\"");
+    for (i = 0; i < 24 && pos < out_len - 4; i++) {
+        pos += snprintf(out + pos, out_len - pos, "%02x", grok64_c64_read((uint16_t)(0x00c3 + i)));
+    }
+    pos += snprintf(out + pos, out_len - pos, "\"");
+
+    vd = file_system_get_vdrive((unsigned int)unit);
+    if (vd) {
+        vd_code = vd->last_code;
+    }
+    serial = grok64_drive_serial_device_type(unit);
+    iec_lines = grok64_drive_iec_bus_lines(unit);
+    gcr = grok64_drive_gcr_loaded(unit, 0);
+    img_bytes = grok64_drive_tde_image_bytes(unit, 0);
+    vdsame = grok64_drive_vdrive_image_same(unit, 0);
+
+    dnr = (unsigned int)unit - 8;
+    if (dnr < NUM_DISK_UNITS && diskunit_context[dnr]) {
+        drv = diskunit_context[dnr]->drives[0];
+        if (drv) {
+            half = drv->current_half_track;
+            img = drv->image;
+        } else {
+            img = NULL;
+        }
+    } else {
+        drv = NULL;
+        img = NULL;
+    }
+
+    bam_name[0] = '\0';
+    memset(t18, 0, sizeof(t18));
+    if (grok64_unit_vdrive_image(unit, 0, NULL, &img) == 0 && img) {
+        adr.track = 18;
+        adr.sector = 0;
+        (void)disk_image_read_sector(img, t18, &adr);
+        (void)grok64_drive_bam_disk_name(unit, 0, bam_name, (int)sizeof(bam_name));
+    }
+
+    pos += snprintf(out + pos, out_len - pos, ",\"vdriveLastCode\":%d,\"vdriveErrorChHex\":\"", vd_code);
+    if (vd && vd->buffers[15].buffer && vd->buffers[15].length) {
+        int n = (int)vd->buffers[15].length;
+        if (n > 48) {
+            n = 48;
+        }
+        for (i = 0; i < n && pos < out_len - 4; i++) {
+            pos += snprintf(out + pos, out_len - pos, "%02x", vd->buffers[15].buffer[i]);
+        }
+    }
+    pos += snprintf(out + pos, out_len - pos, "\"");
+
+    pos += snprintf(out + pos, out_len - pos,
+                    ",\"serialDeviceType\":%d,\"iecBusLines\":%d,"
+                    "\"tdeHalfTrack\":%d,\"tdeGcrLoaded\":%d,\"tdeImageBytes\":%d,"
+                    "\"vdriveImageSameAsTde\":%d,\"imgBamDiskName\":\"",
+                    serial, iec_lines, half, gcr, img_bytes, vdsame);
+    for (i = 0; bam_name[i] && pos < out_len - 4; i++) {
+        char c = bam_name[i];
+        if (c == '"' || c == '\\') {
+            out[pos++] = '\\';
+        }
+        out[pos++] = c;
+    }
+    pos += snprintf(out + pos, out_len - pos, "\",\"imgTrack18Sector0Hex\":\"");
+    for (i = 0; i < 32 && pos < out_len - 4; i++) {
+        pos += snprintf(out + pos, out_len - pos, "%02x", t18[i]);
+    }
+    pos += snprintf(out + pos, out_len - pos, "\"}");
+    return last_load_dollar_diag_json;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 int grok64_disk_attach_deferred(int unit, int drive, const char *path)
 {
     if (!path || !path[0]) {

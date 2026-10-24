@@ -373,11 +373,18 @@ export async function typeC64(
   const delay = opts.delayMs ?? 70;
   for (const stroke of c64Keystrokes(text)) {
     if (opts.cancelled?.()) return;
-    if (stroke.shift) dispatchC64Key("ShiftLeft", "Shift", true);
+    if (stroke.shift) {
+      dispatchC64Key("ShiftLeft", "Shift", true);
+      await sleep(Math.min(35, Math.max(12, Math.floor(delay / 4))));
+    }
     dispatchC64Key(stroke.code, stroke.key, true, { shift: stroke.shift });
     await sleep(delay);
     dispatchC64Key(stroke.code, stroke.key, false, { shift: stroke.shift });
-    if (stroke.shift) dispatchC64Key("ShiftLeft", "Shift", false);
-    await sleep(Math.max(40, delay - 20));
+    if (stroke.shift) {
+      dispatchC64Key("ShiftLeft", "Shift", false);
+      await sleep(Math.max(55, delay - 10));
+    } else {
+      await sleep(Math.max(40, delay - 20));
+    }
   }
 }

@@ -51,6 +51,7 @@ const REQUIRED = [
   "grok64_drive_filesystem_device",
   "grok64_drive_cpu_clock",
   "grok64_drive_iec_bus_lines",
+  "grok64_load_dollar_diag_capture",
 ];
 
 rmSync(tmp, { recursive: true, force: true });

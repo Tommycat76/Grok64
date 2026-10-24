@@ -134,6 +134,7 @@ import {
   viceRetroSaveDirectory,
   viceDriveLiveProbe,
   viceDriveBusProbe,
+  viceLoadDollarDiagCapture,
   viceWasmWorkDiskDiag,
   viceAttachRcLabel,
 } from "@/lib/emu/vice-disk";
@@ -944,6 +945,7 @@ export function Grok64App() {
       viceAttachedImage: (unit = 8) => viceAttachedImage(emuRef.current, unit as 8),
       viceDriveLive: (unit = 8) => viceDriveLiveProbe(emuRef.current, unit as 8),
       iecBusReconcile: async (unit = 8) => ensureIecBusReconcile(emuRef.current, unit as IecUnit),
+      captureLoadDollarDiag: (unit = 8) => viceLoadDollarDiagCapture(emuRef.current, unit as IecUnit),
       attachDiskDiag: async (opts?: { light?: boolean }) => {
         const light = opts?.light === true;
         const session = sessionDiskOnUnit(8);
@@ -1050,6 +1052,7 @@ export function Grok64App() {
           legacyCoreIdb: light ? null : await grok64LegacyCoreIdbDiag(),
           appBuildId: readBuildId(),
           grok64WasmBindRev: GROK64_WASM_BIND_REV,
+          viceLoadDollarDiag: light ? null : viceLoadDollarDiagCapture(emuRef.current, unit),
         };
       },
       kbdDrain: () => grok64KeyboardDrain(),

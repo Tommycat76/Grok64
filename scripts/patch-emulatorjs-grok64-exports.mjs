@@ -49,6 +49,7 @@ const GROK64_EXPORTS = [
   "_grok64_drive_filesystem_device",
   "_grok64_drive_cpu_clock",
   "_grok64_drive_iec_bus_lines",
+  "_grok64_load_dollar_diag_capture",
 ];
 
 let text = readFileSync(makefile, "utf8");

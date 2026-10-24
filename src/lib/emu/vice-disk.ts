@@ -506,6 +506,29 @@ export function viceBusSerialRoutingOk(bus: ViceDriveBusProbe): boolean {
   return bus.serialDeviceLabel != null && bus.serialDeviceLabel !== "virt";
 }
 
+export type ViceLoadDollarDiag = {
+  unit?: number;
+  c64Input0200Hex?: string;
+  kernalIecNameC3Hex?: string;
+  vdriveLastCode?: number;
+  vdriveErrorChHex?: string;
+  serialDeviceType?: number;
+  iecBusLines?: number;
+  tdeHalfTrack?: number;
+  tdeGcrLoaded?: number;
+  tdeImageBytes?: number;
+  vdriveImageSameAsTde?: number;
+  imgBamDiskName?: string;
+  imgTrack18Sector0Hex?: string;
+};
+
+export function viceLoadDollarDiagCapture(emu: ViceDiskEmu | null, unit: IecUnit = 8): ViceLoadDollarDiag | null {
+  const mod = diskMod(emu);
+  if (mod) bindGrok64DiskExports(mod, emu);
+  const raw = grok64DiskApi(mod)?.loadDollarDiagCapture?.(unit);
+  return raw && typeof raw === "object" ? (raw as ViceLoadDollarDiag) : null;
+}
+
 export function viceDriveBusProbe(emu: ViceDiskEmu | null, unit: IecUnit = 8, drive = 0): ViceDriveBusProbe {
   const mod = diskMod(emu);
   if (mod) bindGrok64DiskExports(mod, emu);

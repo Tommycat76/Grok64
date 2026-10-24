@@ -302,6 +302,24 @@ async function pressC64Stroke(page, stroke, delayMs) {
   if (stroke.shift) await page.keyboard.up("Shift");
 }
 
+/** Playwright trusted keyboard on the CRT canvas (not typeC64 / feedBasic). */
+export async function typeC64RealKeyboard(page, text, { keyDelayMs = 65, lineEndMs = 700 } = {}) {
+  await page.evaluate(() => window.__g64?.kbdReleaseAll?.());
+  await page.locator("#grok64-player canvas, .g64-crt canvas").first().click({ timeout: 10_000 }).catch(() => {});
+  await page.waitForTimeout(300);
+  for (const ch of text) {
+    for (const stroke of c64Keystrokes(ch)) {
+      await pressC64Stroke(page, stroke, keyDelayMs);
+      await page.waitForTimeout(stroke.shift ? 50 : 25);
+    }
+    const settle = ch === '"' || ch === "$" || ch === "," ? 130 : 55;
+    await page.waitForTimeout(settle);
+  }
+  await page.waitForTimeout(200);
+  await page.keyboard.press("Enter", { delay: keyDelayMs });
+  await page.waitForTimeout(lineEndMs);
+}
+
 /** Type a BASIC line via VICE kbdbuf / KERNAL queue (real LOAD path). */
 /** Real 1541 @ 1× — for load timing (no warp / virtual traps). */
 export async function ensureReal1541Timing(page) {

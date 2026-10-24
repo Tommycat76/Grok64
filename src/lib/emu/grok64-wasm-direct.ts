@@ -73,6 +73,7 @@ const EXPECTED_GROK64_EXPORTS = [
   "grok64_drive_filesystem_device",
   "grok64_drive_cpu_clock",
   "grok64_drive_iec_bus_lines",
+  "grok64_load_dollar_diag_capture",
 ] as const;
 
 /** JS wrapper failed to marshal a UTF-8 path (distinct from C errno). */
@@ -520,6 +521,17 @@ export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
       const fn = resolveWasmExport(mod, "grok64_iec_bus_reconcile");
       if (!fn) return -99;
       return Number(fn(unit));
+    },
+    loadDollarDiagCapture: (unit) => {
+      const fn = resolveWasmExport(mod, "grok64_load_dollar_diag_capture");
+      if (!fn) return null;
+      const ptr = Number(fn(unit));
+      if (!ptr || !mod.UTF8ToString) return null;
+      try {
+        return JSON.parse(mod.UTF8ToString(ptr)) as Record<string, unknown>;
+      } catch {
+        return { raw: mod.UTF8ToString(ptr) };
+      }
     },
   };
   return true;
