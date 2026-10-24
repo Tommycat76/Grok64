@@ -520,6 +520,9 @@ export type ViceLoadDollarDiag = {
   vdriveImageSameAsTde?: number;
   imgBamDiskName?: string;
   imgTrack18Sector0Hex?: string;
+  imgTrack18Sector1Hex?: string;
+  c64FnamLen?: number;
+  c64FnambHex?: string;
 };
 
 export function viceLoadDollarDiagCapture(emu: ViceDiskEmu | null, unit: IecUnit = 8): ViceLoadDollarDiag | null {

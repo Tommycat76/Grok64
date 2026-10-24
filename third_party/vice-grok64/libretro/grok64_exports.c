@@ -1009,7 +1009,7 @@ int grok64_work_disk_refresh(int unit)
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
-static char last_load_dollar_diag_json[4096];
+static char last_load_dollar_diag_json[6144];
 
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
@@ -1018,6 +1018,7 @@ const char *grok64_load_dollar_diag_capture(int unit)
 {
     uint8_t buf[64];
     uint8_t t18[256];
+    uint8_t t18s1[256];
     char bam_name[20];
     int i;
     int pos = 0;
@@ -1057,6 +1058,13 @@ const char *grok64_load_dollar_diag_capture(int unit)
     }
     pos += snprintf(out + pos, out_len - pos, "\"");
 
+    pos += snprintf(out + pos, out_len - pos, ",\"c64FnamLen\":%d,\"c64FnambHex\":\"",
+                    (int)grok64_c64_read(0x00b7));
+    for (i = 0; i < 16 && pos < out_len - 4; i++) {
+        pos += snprintf(out + pos, out_len - pos, "%02x", grok64_c64_read((uint16_t)(0x00bb + i)));
+    }
+    pos += snprintf(out + pos, out_len - pos, "\"");
+
     vd = file_system_get_vdrive((unsigned int)unit);
     if (vd) {
         vd_code = vd->last_code;
@@ -1083,10 +1091,13 @@ const char *grok64_load_dollar_diag_capture(int unit)
 
     bam_name[0] = '\0';
     memset(t18, 0, sizeof(t18));
+    memset(t18s1, 0, sizeof(t18s1));
     if (grok64_unit_vdrive_image(unit, 0, NULL, &img) == 0 && img) {
         adr.track = 18;
         adr.sector = 0;
         (void)disk_image_read_sector(img, t18, &adr);
+        adr.sector = 1;
+        (void)disk_image_read_sector(img, t18s1, &adr);
         (void)grok64_drive_bam_disk_name(unit, 0, bam_name, (int)sizeof(bam_name));
     }
 
@@ -1117,6 +1128,10 @@ const char *grok64_load_dollar_diag_capture(int unit)
     pos += snprintf(out + pos, out_len - pos, "\",\"imgTrack18Sector0Hex\":\"");
     for (i = 0; i < 32 && pos < out_len - 4; i++) {
         pos += snprintf(out + pos, out_len - pos, "%02x", t18[i]);
+    }
+    pos += snprintf(out + pos, out_len - pos, "\",\"imgTrack18Sector1Hex\":\"");
+    for (i = 0; i < 64 && pos < out_len - 4; i++) {
+        pos += snprintf(out + pos, out_len - pos, "%02x", t18s1[i]);
     }
     pos += snprintf(out + pos, out_len - pos, "\"}");
     return last_load_dollar_diag_json;

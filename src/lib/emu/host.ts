@@ -2579,7 +2579,11 @@ export async function ensureIecBusReconcile(emu: EjsInstance | null, unit: IecUn
   if (mod) bindGrok64DiskExports(mod, emu);
   const api = grok64DiskApi(mod);
   const reconcile = api?.iecBusReconcile;
-  const rc = reconcile ? reconcile(unit) : (api?.driveSyncTdeImage?.(unit, 0) ?? -99);
+  let rc = reconcile ? reconcile(unit) : (api?.driveSyncTdeImage?.(unit, 0) ?? -99);
+  if (rc === 0 && api?.driveReloadImage) {
+    const reloadRc = api.driveReloadImage(unit, 0);
+    glog("iec-bus-reconcile-reload", { unit, reloadRc, diag: viceDiskLastAttachDiag(emu) });
+  }
   applyRuntimeOptions(emu, {
     vice_drive_true_emulation: "enabled",
     vice_virtual_device_traps: "disabled",
