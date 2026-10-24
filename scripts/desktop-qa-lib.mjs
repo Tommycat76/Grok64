@@ -359,12 +359,21 @@ export function baselineDriveLiveOk(live) {
 
 /** Merge attachDiskDiag live probe with C64-side OPEN 15 IEC read. */
 export async function liveWithIecErrorProbe(page, live = null) {
-  const iecProbe = await page.evaluate(async () => window.__g64?.iecErrorChannelProbe?.(8));
+  const wasmLive =
+    live ??
+    (await page.evaluate(() => {
+      const g = window.__g64;
+      const liveFn = g?.viceDriveLive;
+      return typeof liveFn === "function" ? liveFn() : null;
+    }));
+  const ch = String(wasmLive?.wasmErrorChannel ?? "").trim();
+  const isVirtual =
+    wasmLive?.wasmVdriveErrorIsVirtual === 1 || /VIRTUAL\s+DRIVE/i.test(ch);
   return {
-    ...(live ?? {}),
-    iecErrorChannel: iecProbe?.text ?? "",
-    iecProbeOk: iecProbe?.ok === true,
-    iecIsCbmDos: iecProbe?.isCbmDos === true,
+    ...wasmLive,
+    iecErrorChannel: ch,
+    iecProbeOk: ch.length > 0 && !isVirtual,
+    iecIsCbmDos: /CBM\s+DOS/i.test(ch) && !isVirtual,
   };
 }
 
@@ -388,17 +397,15 @@ export function geosFloppyEvidence({ screen = "", session = null, wasmWorkDisk =
   const dirHex = session?.dir18s1Hex ?? "";
   const label = session?.diskLabel ?? "";
   const onScreen = geosDirectoryOnScreen(screen);
-  const catalogFromDir = /47454f53/i.test(dirHex) || /geos/i.test(label);
-  const catalogOk = onScreen || catalogFromDir;
+  const catalogOk = onScreen;
   const attachOk = Boolean(viceAttachedImage?.trim());
   return {
     wasmOk,
     iecFail,
     catalogOk,
     onScreen,
-    catalogFromDir,
     attachOk,
-    ok: wasmOk && attachOk && !iecFail && catalogOk,
+    ok: wasmOk && attachOk && !iecFail && onScreen,
   };
 }
 

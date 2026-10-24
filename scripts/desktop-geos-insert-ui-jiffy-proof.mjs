@@ -117,8 +117,6 @@ try {
   };
 
   await page.evaluate(async () => {
-    window.__g64?.setJiffyDos?.(false);
-    await new Promise((r) => setTimeout(r, 800));
     await window.__g64?.feedBasic?.('LOAD"$",8', { runcmd: true });
     await window.__g64?.feedBasic?.("LIST", { runcmd: true });
   });

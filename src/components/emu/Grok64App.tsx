@@ -103,13 +103,14 @@ import {
   detachLibretroWorkDiskManager,
   ensureViceSessionDiskAttached,
   resyncSessionDiskToVice,
+  waitForC64Ready,
 } from "@/lib/emu/host";
 import {
   diskAttachFingerprint,
   validateFloppyLibraryPayload,
 } from "@/lib/emu/disk-attach-diag";
 import { geosDirectoryOnScreen } from "@/lib/emu/geos-evidence";
-import { probeIecDriveErrorChannel } from "@/lib/emu/iec-probe";
+import { wasmIecDriveStateFromLive } from "@/lib/emu/iec-probe";
 import {
   GROK64_WASM_BIND_REV,
   grok64DiskApi,
@@ -444,15 +445,7 @@ export function Grok64App() {
   const toggleWarpRef = useRef(() => {});
   const [softwareStd, setSoftwareStd] = useState(null);
   const softwareStdRef = useRef(null);
-  const [snap, setSnap] = useState({
-    device: "phone",
-    preferFast: true,
-    os: "other",
-    label: "Device",
-    memoryGb: null,
-    cores: null,
-    onn: false,
-  });
+  const [snap, setSnap] = useState(() => snapshotDevice());
   const snapRef = useRef(snap);
   snapRef.current = snap;
   const [view, setView] = useState({ width: 1280, height: 720, orient: "landscape" });
@@ -933,7 +926,9 @@ export function Grok64App() {
       screenText: () => readScreenText(emuRef.current),
       workD64Bytes: () => viceWorkD64ByteLength(emuRef.current),
       viceAttachedImage: (unit = 8) => viceAttachedImage(emuRef.current, unit as 8),
-      attachDiskDiag: async () => {
+      viceDriveLive: (unit = 8) => viceDriveLiveProbe(emuRef.current, unit as 8),
+      attachDiskDiag: async (opts?: { light?: boolean }) => {
+        const light = opts?.light === true;
         const session = sessionDiskOnUnit(8);
         const FS = emuRef.current?.Module?.FS ?? emuRef.current?.gameManager?.FS;
         let viceSha1: string | null = null;
@@ -947,7 +942,7 @@ export function Grok64App() {
         } catch {
           /* optional */
         }
-        const opts = runtimeViceOpts();
+        const viceOpts = runtimeViceOpts();
         const st = useEmu.getState();
         const unit = 8;
         const jiffyLive = lastAppliedJiffy();
@@ -961,9 +956,9 @@ export function Grok64App() {
           inGameplay: inGameplayRef.current,
           booting: st.booting,
           workDiskVar: lastAppliedWorkDisk(),
-          viceWorkDiskOpt: opts.vice_work_disk ?? null,
-          drive8Type: opts.vice_drive8_type ?? null,
-          jiffyOpt: opts.vice_jiffydos ?? null,
+          viceWorkDiskOpt: viceOpts.vice_work_disk ?? null,
+          drive8Type: viceOpts.vice_drive8_type ?? null,
+          jiffyOpt: viceOpts.vice_jiffydos ?? null,
           jiffyWant,
           jiffyLive,
           jiffyStale: jiffyWant !== jiffyLive,
@@ -1008,7 +1003,10 @@ export function Grok64App() {
             return { blank, iec, blankNote: "ENOENT (-errno) after Insert if /blank.d64 was unlinked — expected" };
           })(),
           viceDriveLive: viceDriveLiveProbe(emuRef.current, unit),
-          wasmWorkDisk: await viceWasmWorkDiskDiag(emuRef.current, unit, sessionFp),
+          iecWasmDriveState: wasmIecDriveStateFromLive(viceDriveLiveProbe(emuRef.current, unit)),
+          wasmWorkDisk: light
+            ? null
+            : await viceWasmWorkDiskDiag(emuRef.current, unit, sessionFp),
           coreBuildId: grok64CoreStatus(emuRef.current).coreBuildId,
           coreBuildIdExpected: grok64CoreStatus(emuRef.current).coreBuildIdExpected,
           coreBuildIdLoaded: grok64CoreStatus(emuRef.current).coreBuildIdLoaded,
@@ -1017,15 +1015,29 @@ export function Grok64App() {
           loadedGlueHasDiskExports: grok64CoreStatus(emuRef.current).loadedGlueHasDiskExports,
           coreUrlBuildId: grok64CoreStatus(emuRef.current).coreUrlBuildId,
           grok64Core: grok64CoreStatus(emuRef.current),
-          iecErrorChannelProbe: await probeIecDriveErrorChannel(emuRef.current, unit),
-          libraryIdb: await grok64LibraryIdbDiag(),
-          cacheEnvironment: await grok64CacheEnvironmentDiag(),
-          legacyCoreIdb: await grok64LegacyCoreIdbDiag(),
+          libraryIdb: light ? null : await grok64LibraryIdbDiag(),
+          cacheEnvironment: light ? null : await grok64CacheEnvironmentDiag(),
+          legacyCoreIdb: light ? null : await grok64LegacyCoreIdbDiag(),
           appBuildId: readBuildId(),
           grok64WasmBindRev: GROK64_WASM_BIND_REV,
         };
       },
       kbdDrain: () => grok64KeyboardDrain(),
+      kbdReleaseAll: () => grok64KeyboardReleaseAll(emuRef.current),
+      feedPetscii: (code: number) => {
+        const mod = emuRef.current?.Module;
+        if (!mod || !Number.isFinite(code)) return false;
+        bindGrok64WasmExports(mod);
+        const feed = grok64WasmApi(mod)?.kbdbufFeed;
+        if (!feed) return false;
+        try {
+          feed(String.fromCharCode(code & 0xff));
+          bumpCrtPaint(emuRef.current);
+          return true;
+        } catch {
+          return false;
+        }
+      },
       readC64Byte: (addr) => readC64Byte(emuRef.current, addr),
       writeC64Byte: (addr, v) => writeC64Byte(emuRef.current, addr, v),
       readC64Bytes: (addr, len) => {
@@ -1038,7 +1050,8 @@ export function Grok64App() {
       debugWasmIec: (dev, sec) => debugWasmIec(dev, sec),
       iecOpenDollarChannel: (unit = 8) => iecOpenDollarChannel(emuRef.current, unit as 8 | 9 | 10 | 11 | 12),
       feedBasic: (line, opts) => feedBasicLine(emuRef.current, line, opts),
-      iecErrorChannelProbe: (unit = 8) => probeIecDriveErrorChannel(emuRef.current, unit),
+      iecErrorChannelProbe: (unit = 8) =>
+        wasmIecDriveStateFromLive(viceDriveLiveProbe(emuRef.current, unit as 8)),
       hardReset: () => {
         hardReset(emuRef.current);
         return true;
@@ -2037,6 +2050,9 @@ export function Grok64App() {
     void (async () => {
       if (emu) {
         disarmAutostart(emu, "disk");
+        const unit = sessionUnitRef.current ?? 8;
+        const slot = sessionDiskOnUnit(unit);
+        const diskKind = slot ? kindOf(slot.name) : null;
         applyRuntimeOptions(emu, {
           vice_autostart: "disabled",
           vice_autostart_warp: "disabled",
@@ -2044,17 +2060,31 @@ export function Grok64App() {
           vice_work_disk: "disabled",
           vice_drive_true_emulation: "enabled",
           vice_virtual_device_traps: "disabled",
+          [`vice_drive${unit}_type`]: "1541",
         });
-        const unit = sessionUnitRef.current ?? 8;
-        const slot = sessionDiskOnUnit(unit);
-        hardReset(emu);
         if (slot?.bytes) {
           resyncSessionDiskToVice(emu, unit);
-          const rc = await ensureViceSessionDiskAttached(emu, unit, kindOf(slot.name));
-          glog("reset-reattach", { rc, path: viceAttachedImage(emu, unit), name: slot.name });
+          await flushEmuFs(emu, isIosPhone() ? 1200 : 500);
+        }
+        applyIecUnitFloppy(emu, "1541", unit, diskKind);
+        await syncJiffy(emu, "none");
+        hardReset(emu);
+        await flushEmuFs(emu, isIosPhone() ? 1200 : 600);
+        if (slot?.bytes) {
+          try {
+            await presentFloppyMountReady(emu, { iec: "1541", unit }, { afterDriveRefresh: true });
+            await waitForC64Ready(emu, 45_000);
+            glog("reset-reattach", {
+              rc: lastViceDiskAttach(unit)?.rc ?? -1,
+              path: viceAttachedImage(emu, unit),
+              name: slot.name,
+            });
+          } catch (err) {
+            glog("reset-reattach-fail", { err: String(err), name: slot.name });
+          }
+          bumpCrtPaint(emu);
         }
       }
-      await syncJiffy(emu, "none");
       if (isIosPhone()) {
         const playerEl = document.getElementById("grok64-player");
         fitEmu(playerEl, emu);

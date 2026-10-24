@@ -1,42 +1,24 @@
-/** C64-side IEC status channel (OPEN 15) — not the vdrive diagnostic buffer. */
-import type { Grok64Emu } from "./grok64-vice-bridge";
-import { feedBasicLine } from "./c64-keyboard";
-import { readScreenText } from "./screen-text";
+/** IEC / drive status from WASM exports only — never type into the C64 keyboard. */
+import type { ViceDriveLiveProbe } from "./vice-disk";
 
-function lastNonEmptyLine(screen: string): string {
-  const lines = screen.split("\n").map((l) => l.trim()).filter(Boolean);
-  return lines[lines.length - 1] ?? "";
-}
+export type WasmIecDriveState = {
+  errorChannel: string;
+  errorCode: number | null;
+  isVirtual: boolean;
+  isCbmDos: boolean;
+  driveUnitType: number | null;
+};
 
-/** Read drive error channel via BASIC (true IEC path when TDE is active). */
-export async function probeIecDriveErrorChannel(
-  emu: Grok64Emu | null,
-  unit = 8,
-  { settleMs = 6000 } = {},
-): Promise<{ ok: boolean; text: string; isVirtual: boolean; isCbmDos: boolean }> {
-  if (!emu) return { ok: false, text: "", isVirtual: false, isCbmDos: false };
-  const u = unit;
-  const script = [
-    `OPEN 15,${u},15`,
-    `PRINT#15,"UI"`,
-    `INPUT#15,A$`,
-    `CLOSE 15`,
-    `PRINT A$`,
-  ];
-  for (const line of script) {
-    const runcmd = line.startsWith("PRINT A$");
-    const ok = await feedBasicLine(emu, line, { runcmd });
-    if (!ok) return { ok: false, text: readScreenText(emu), isVirtual: false, isCbmDos: false };
-    if (line.startsWith("INPUT#")) await new Promise((r) => window.setTimeout(r, 1200));
-    if (runcmd) await new Promise((r) => window.setTimeout(r, settleMs));
-  }
-  const screen = readScreenText(emu);
-  const cbmLine = screen
-    .split("\n")
-    .map((l) => l.trim())
-    .find((l) => /CBM\s+DOS/i.test(l) || /VIRTUAL\s+DRIVE/i.test(l));
-  const text = cbmLine ?? lastNonEmptyLine(screen);
-  const isVirtual = /VIRTUAL\s+DRIVE/i.test(text);
-  const isCbmDos = /CBM\s+DOS/i.test(text);
-  return { ok: text.length > 0, text, isVirtual, isCbmDos };
+export function wasmIecDriveStateFromLive(live: ViceDriveLiveProbe | null | undefined): WasmIecDriveState {
+  const ch = String(live?.wasmErrorChannel ?? live?.wasmVdriveErrorChannel ?? "").trim();
+  const isVirtual =
+    live?.wasmVdriveErrorIsVirtual === 1 || /VIRTUAL\s+DRIVE/i.test(ch);
+  const isCbmDos = /CBM\s+DOS/i.test(ch) && !isVirtual;
+  return {
+    errorChannel: ch,
+    errorCode: live?.wasmErrorCode ?? null,
+    isVirtual,
+    isCbmDos,
+    driveUnitType: live?.wasmDriveUnitType ?? null,
+  };
 }

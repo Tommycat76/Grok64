@@ -614,14 +614,18 @@ function Drive8DiagPanel() {
   const [text, setText] = useState("");
   useEffect(() => {
     if (!aboutOpen) return;
+    const g0 = (window as unknown as { __g64?: Record<string, unknown> }).__g64;
+    (g0?.kbdReleaseAll as (() => void) | undefined)?.();
     const tick = async () => {
       const g = (window as unknown as { __g64?: Record<string, unknown> }).__g64;
       if (!g) {
         setText("Power on the C64 first, then reopen About.");
         return;
       }
-      const attachDiskDiag = g.attachDiskDiag as (() => Promise<Record<string, unknown>>) | undefined;
-      const diag = attachDiskDiag ? await attachDiskDiag() : null;
+      const attachDiskDiag = g.attachDiskDiag as
+        | ((opts?: { light?: boolean }) => Promise<Record<string, unknown>>)
+        | undefined;
+      const diag = attachDiskDiag ? await attachDiskDiag({ light: true }) : null;
       const block = {
         at: new Date().toISOString(),
         diag,
@@ -663,7 +667,7 @@ function Drive8DiagPanel() {
         <code className="text-fg">coreBuildIdExpected</code>, <code className="text-fg">coreBuildIdLoaded</code>,{" "}
         <code className="text-fg">diskExportsPresent</code>, <code className="text-fg">viceLastReattach.rc</code> (0 =
         ok; negative = WASM errno, see <code className="text-fg">rcLabel</code>), and{" "}
-        <code className="text-fg">iecErrorChannelProbe</code>. Use after Software → Run when LOAD fails — copy and send
+        <code className="text-fg">iecWasmDriveState</code> (WASM only — never types on the CRT). Use after Software → Run when LOAD fails — copy and send
         this block. Logs: last 20 floppy-attach / play-mount lines.
       </p>
       <button
