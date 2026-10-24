@@ -8,7 +8,12 @@ import {
   GROK64_CORE_BYTES as GENERATED_BYTES,
 } from "./grok64-core-build.generated";
 
-export { GROK64_CORE_SHA256, GROK64_CORE_BUILD_ID, GROK64_CORE_BYTES } from "./grok64-core-build.generated";
+export {
+  GROK64_CORE_SHA256,
+  GROK64_CORE_BUILD_ID,
+  GROK64_CORE_BYTES,
+  GROK64_CORE_GLUE_SHA12,
+} from "./grok64-core-build.generated";
 
 const TEST_LS_KEY = "grok64.testCoreBuildId";
 

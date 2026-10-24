@@ -99,6 +99,7 @@ import {
   tryGeosDiskAutostart,
   applyIecUnitFloppy,
   applyJiffyThenRefreshWorkDisk,
+  ensureViceSessionDiskAttached,
 } from "@/lib/emu/host";
 import {
   diskAttachFingerprint,
@@ -947,6 +948,11 @@ export function Grok64App() {
             session?.name ?? bootFileOf(emuRef.current) ?? "GEOS_2.0.d64",
           ),
           coreBuildId: grok64CoreStatus(emuRef.current).coreBuildId,
+          coreBuildIdExpected: grok64CoreStatus(emuRef.current).coreBuildIdExpected,
+          coreBuildIdLoaded: grok64CoreStatus(emuRef.current).coreBuildIdLoaded,
+          coreBuildMatches: grok64CoreStatus(emuRef.current).coreBuildMatches,
+          loadedGlueSha12: grok64CoreStatus(emuRef.current).loadedGlueSha12,
+          loadedGlueHasDiskExports: grok64CoreStatus(emuRef.current).loadedGlueHasDiskExports,
           coreUrlBuildId: grok64CoreStatus(emuRef.current).coreUrlBuildId,
           grok64Core: grok64CoreStatus(emuRef.current),
           appBuildId: readBuildId(),
@@ -991,8 +997,9 @@ export function Grok64App() {
         if (!/READY/i.test(head)) {
           return { ok: false, reason: "not-ready", text: head.slice(0, 400) };
         }
-        await refreshViceWorkDisk(emu);
-        await new Promise((r) => setTimeout(r, 1200));
+        await ensureViceSessionDiskAttached(emu, 8, "d64");
+        await flushEmuFs(emu, 600);
+        await new Promise((r) => setTimeout(r, 800));
         if (!(await feedBasicLine(emu, 'LOAD"$",8'))) {
           return { ok: false, reason: "load-fail", text: (readScreenText(emu) ?? "").slice(0, 400) };
         }

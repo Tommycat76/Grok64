@@ -103,13 +103,19 @@ try {
   const listOk =
     !/FILE NOT FOUND|DEVICE NOT PRESENT/i.test(screen) &&
     (/GEOS/i.test(screen) || /47454f53/i.test(diag?.session?.dir18s1Hex ?? ""));
+  const loadedOk =
+    afterBust.coreBuildIdLoaded === buildId ||
+    (afterBust.coreBuildMatches === true && afterBust.loadedGlueHasDiskExports === true);
   const pass =
     afterBust.coreBuildId === buildId &&
+    afterBust.coreBuildIdExpected === buildId &&
+    loadedOk &&
     afterBust.diskExportsPresent === true &&
     bustUrlOk &&
     legacyUrlOk &&
     listOk &&
-    diag?.diskExportsPresent === true;
+    diag?.diskExportsPresent === true &&
+    diag?.coreBuildMatches !== false;
 
   trace.pass = pass;
   writeFileSync(join(outDir, "trace.json"), JSON.stringify(trace, null, 2));

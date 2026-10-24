@@ -46,6 +46,17 @@ import { grok64DiskApi, grok64WasmApi } from "./grok64-api";
 import { grok64DiskAttachCallableEmu } from "./grok64-wasm-direct";
 import { grok64CoreBuildIdForUrl, grok64CoreManifestSummary, GROK64_CORE_BUILD_ID } from "./grok64-core-build";
 import {
+  grok64CoreBuildIdLoaded,
+  grok64CoreBuildMatchesExpected,
+  loadedCoreGlueInfo,
+  recordGrok64CoreGlue,
+} from "./grok64-core-loaded";
+import {
+  maybeAutoRefreshStaleEmulatorCore,
+  patchFetchNoStoreForGrok64Core,
+  syncEmulatorJsCoreCacheWithManifest,
+} from "./grok64-ejs-core-cache";
+import {
   grok64DiskExportsReady,
   resolveViceDiskAttachPath,
   viceAttachedImage,
@@ -174,6 +185,11 @@ export type Grok64CoreStatus = {
   diskAttach: boolean;
   diskExportsPresent: boolean;
   coreBuildId: string | null;
+  coreBuildIdExpected: string | null;
+  coreBuildIdLoaded: string | null;
+  coreBuildMatches: boolean;
+  loadedGlueSha12: string | null;
+  loadedGlueHasDiskExports: boolean;
   coreUrlBuildId: string | null;
   iecBackend: string;
 };
@@ -196,6 +212,11 @@ export function grok64CoreStatus(emu: EjsInstance | null): Grok64CoreStatus {
     diskAttach: diskExportsPresent,
     diskExportsPresent,
     coreBuildId: GROK64_CORE_BUILD_ID || manifest.buildId || null,
+    coreBuildIdExpected: GROK64_CORE_BUILD_ID || manifest.buildId || null,
+    coreBuildIdLoaded: grok64CoreBuildIdLoaded(),
+    coreBuildMatches: grok64CoreBuildMatchesExpected(),
+    loadedGlueSha12: loadedCoreGlueInfo()?.glueSha12 ?? null,
+    loadedGlueHasDiskExports: loadedCoreGlueInfo()?.glueHasDiskExports ?? false,
     coreUrlBuildId: manifest.urlBuildId,
     iecBackend: grok64ViceCoreRoot() ? "grok64-datapath" : "cdn-stock",
   };
@@ -414,6 +435,7 @@ export function guardCore(emu: EjsInstance | null) {
   if (grok64ViceCoreRoot()) {
     ensureGrok64WasmExports(emu);
     wireGrok64ViceHost(emu);
+    void maybeAutoRefreshStaleEmulatorCore(emu);
   }
 }
 
@@ -615,6 +637,8 @@ export function ensureRuntime(): Promise<void> {
     return Promise.resolve();
   }
   scriptsReady = (async () => {
+    patchFetchNoStoreForGrok64Core();
+    await syncEmulatorJsCoreCacheWithManifest();
     await loadCss(`${DATA}emulator.css`);
     for (const file of SCRIPTS) {
       await loadScript(`${DATA}src/${file}`);
@@ -622,6 +646,7 @@ export function ensureRuntime(): Promise<void> {
     if (!window.EmulatorJS) throw new Error("EmulatorJS failed to initialize");
     patchEjsInput();
     patchEjsGrok64CoreDownload();
+    patchEjsInitGameCoreGlue();
   })().catch((err) => {
     scriptsReady = null;
     throw err;
@@ -693,6 +718,26 @@ function patchEjsGrok64CoreDownload() {
     } finally {
       if (prevFb !== undefined && dt?.core) dt.core.cdnFallback = prevFb;
     }
+  };
+}
+
+function patchEjsInitGameCoreGlue() {
+  const EJS = (window as unknown as {
+    EmulatorJS?: { prototype: { initGameCore?: (js: unknown, wasm: unknown, thread: unknown) => void; __g64Glue?: boolean } };
+  }).EmulatorJS;
+  const proto = EJS?.prototype;
+  if (!proto?.initGameCore || proto.__g64Glue) return;
+  proto.__g64Glue = true;
+  const orig = proto.initGameCore;
+  proto.initGameCore = function patchedInitGameCore(js: unknown, wasm: unknown, thread: unknown) {
+    try {
+      if (js instanceof Uint8Array) recordGrok64CoreGlue(js);
+      else if (js instanceof ArrayBuffer) recordGrok64CoreGlue(js);
+      else if (typeof js === "string") recordGrok64CoreGlue(js);
+    } catch {
+      /* ignore */
+    }
+    return orig.call(this, js, wasm, thread);
   };
 }
 
@@ -867,8 +912,11 @@ function coreOptions(cfg: BootConfig): Record<string, string> {
 }
 
 export async function bootEmulator(el: HTMLElement, cfg: BootConfig): Promise<EjsInstance> {
+  patchFetchNoStoreForGrok64Core();
+  await syncEmulatorJsCoreCacheWithManifest();
   await ensureRuntime();
   patchEjsGrok64CoreDownload();
+  patchEjsInitGameCoreGlue();
   preserveWebglBuffer();
   keyboardArmed = false;
   clearRuntimeViceOpts();

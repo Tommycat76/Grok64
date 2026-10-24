@@ -641,19 +641,25 @@ function Drive8DiagPanel() {
   }, [aboutOpen]);
   const exportsMissing =
     text.includes('"diskExportsPresent": false') || text.includes('"viceDiskExports": false');
+  const coreMismatch =
+    text.includes('"coreBuildMatches": false') ||
+    text.includes('"loadedGlueHasDiskExports": false') ||
+    text.includes('"coreBuildIdLoaded": "stale-no-disk-exports"');
 
   return (
     <div className="mt-4 rounded-lg border border-border/60 bg-bg/40 p-3">
       <h3 className="mb-2 text-sm font-medium text-fg">Drive 8 diagnostics</h3>
-      {exportsMissing ? (
+      {exportsMissing || coreMismatch ? (
         <p className="mb-2 rounded-md border border-amber-500/60 bg-amber-500/15 px-2 py-2 text-xs font-medium leading-5 text-amber-100">
-          Stale or stock VICE core — disk WASM exports are missing. Floppy Run/Insert will fail (?FILE NOT FOUND).
-          Reload once; if this banner stays, the app should fetch a fresh core automatically (coreBuildId in the JSON
-          below). Send this block if it persists.
+          Stale or stock VICE core — disk WASM exports are missing or the loaded glue does not match the committed build.
+          Grok64 clears EmulatorJS core cache and reloads once automatically; compare{" "}
+          <code className="text-fg">coreBuildIdExpected</code> vs <code className="text-fg">coreBuildIdLoaded</code> in
+          the JSON below. Send this block if it persists after one reload.
         </p>
       ) : null}
       <p className="mb-2 text-xs leading-5 text-fg-muted">
-        Live attach state for IEC unit 8 (refreshes every 2s). Check <code className="text-fg">coreBuildId</code> and{" "}
+        Live attach state for IEC unit 8 (refreshes every 2s). Check{" "}
+        <code className="text-fg">coreBuildIdExpected</code>, <code className="text-fg">coreBuildIdLoaded</code>, and{" "}
         <code className="text-fg">diskExportsPresent</code>. Use after Software → Run when LOAD fails — copy and send
         this block. Logs: last 20 floppy-attach / play-mount lines.
       </p>
