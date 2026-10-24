@@ -431,6 +431,24 @@ export async function waitForDollarLoad(page, { maxMs = 45_000 } = {}) {
   return { done: false, text: last, error: false };
 }
 
+/** Type on the C64 canvas one key at a time (no kbdbuf / feedBasic). */
+export async function typeC64Screen(page, text, { keyDelayMs = 85, lineEndMs = 600 } = {}) {
+  await page.locator("#grok64-player canvas, .g64-crt canvas").first().click({ timeout: 10_000 }).catch(() => {});
+  for (const ch of text) {
+    await page.evaluate(
+      async ({ c, delay }) => {
+        await window.__g64?.typeC64?.(c, { delayMs: delay });
+      },
+      { c: ch, delay: keyDelayMs },
+    );
+    await page.waitForTimeout(30);
+  }
+  await page.evaluate(async (delay) => {
+    await window.__g64?.typeC64?.("\n", { delayMs: delay });
+  }, keyDelayMs);
+  await page.waitForTimeout(lineEndMs);
+}
+
 export async function typeBasic(page, text, { afterMs = 12_000, listAfterDollar = null } = {}) {
   const wantList = listAfterDollar ?? /LOAD\s*"\$"/i.test(text);
   const ok = await page.evaluate(async (line) => Boolean(await window.__g64?.feedBasic?.(line)), text);

@@ -2414,6 +2414,7 @@ export async function refreshViceGcrDiskHot(
   await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
   bumpCrtPaint(emu);
   await viceReattachSessionDisk(emu, unit);
+  await ensureIecBusReconcile(emu, unit);
   glog("gcr-disk-hot-swap", { unit, file: base, bytes: data.byteLength });
 }
 
@@ -2552,6 +2553,42 @@ export async function viceReattachDiskOnEmuThread(
   });
 }
 
+/** Overwrite stale IDB vicerc routing (FileSystemDevice / IECDevice / VirtualDevice). */
+export function viceRcTrueFloppyUnit(unit: IecUnit): string {
+  return (
+    [
+      "[C64]",
+      `Drive${unit}Type=1541`,
+      `Drive${unit}TrueEmulation=1`,
+      `FileSystemDevice${unit}=0`,
+      `IECDevice${unit}=0`,
+      `VirtualDevice${unit}=0`,
+      "DriveTrueEmulation=1",
+      "VirtualDevices=0",
+    ].join("\n") + "\n"
+  );
+}
+
+/** Route KERNAL IEC to true 1541 TDE (drive CPU + GCR), not fsdevice/vdrive traps. */
+export async function ensureIecBusReconcile(emu: EjsInstance | null, unit: IecUnit = 8): Promise<number> {
+  if (!emu) return -1;
+  injectViceRc(emu, viceRcTrueFloppyUnit(unit));
+  const mod = grok64DiskModule(emu);
+  if (mod) bindGrok64DiskExports(mod, emu);
+  const api = grok64DiskApi(mod);
+  const reconcile = api?.iecBusReconcile;
+  const rc = reconcile ? reconcile(unit) : (api?.driveSyncTdeImage?.(unit, 0) ?? -99);
+  applyRuntimeOptions(emu, {
+    vice_drive_true_emulation: "enabled",
+    vice_virtual_device_traps: "disabled",
+    [`vice_drive${unit}_type`]: "1541",
+  });
+  await waitRetroFrames(45);
+  await tickGrok64Iec(emu);
+  glog("iec-bus-reconcile", { unit, rc, diag: viceDiskLastAttachDiag(emu) });
+  return rc;
+}
+
 /** Hot-swap D64: flush MEMFS, re-attach on emu thread (Jiffy 1541 ROM must see fresh image). */
 export async function ensureViceSessionDiskAttached(
   emu: EjsInstance | null,
@@ -2568,26 +2605,8 @@ export async function ensureViceSessionDiskAttached(
     await flushEmuFs(emu, isIosPhone() ? 2000 : 1200);
     const rc = await viceReattachSessionDisk(emu, unit);
     if (rc === 0) {
-      applyRuntimeOptions(emu, {
-        vice_drive_true_emulation: "enabled",
-        vice_virtual_device_traps: "disabled",
-        [`vice_drive${unit}_type`]: "1541",
-      });
-      injectViceRc(
-        emu,
-        [
-          "[C64]",
-          `Drive${unit}Type=1541`,
-          `Drive${unit}TrueEmulation=1`,
-          "DriveTrueEmulation=1",
-          `FileSystemDevice${unit}=0`,
-          `IECDevice${unit}=0`,
-          `VirtualDevice${unit}=0`,
-          "VirtualDevices=0",
-        ].join("\n") + "\n",
-      );
-      await waitRetroFrames(30);
-      await tickGrok64Iec(emu);
+      const busRc = await ensureIecBusReconcile(emu, unit);
+      if (busRc < 0) return busRc;
     }
     return rc;
   }

@@ -669,7 +669,9 @@ function Drive8DiagPanel() {
         ok; negative = WASM errno, see <code className="text-fg">rcLabel</code>), and{" "}
         <code className="text-fg">iecWasmDriveState</code>,{" "}
         <code className="text-fg">viceDriveLive.wasmTdeImageBytes</code> (1541 GCR image on the IEC bus),{" "}
-        <code className="text-fg">wasmGcrLoaded</code>, <code className="text-fg">wasmVdriveImageSame</code>. WASM only — never types on the CRT. Use after Software → Run when LOAD fails — copy and send
+        <code className="text-fg">wasmGcrLoaded</code>, <code className="text-fg">wasmVdriveImageSame</code>, and{" "}
+        <code className="text-fg">viceDriveBus</code> (drive CPU clock advancing,{" "}
+        <code className="text-fg">wasmFilesystemDevice</code>=0, IEC line snapshot). WASM only — never types on the CRT. Use after Software → Insert when LOAD fails — copy and send
         this block. Logs: last 20 floppy-attach / play-mount lines.
       </p>
       <button

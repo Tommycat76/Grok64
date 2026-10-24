@@ -102,8 +102,10 @@ import {
   applyJiffyThenRefreshWorkDisk,
   detachLibretroWorkDiskManager,
   ensureViceSessionDiskAttached,
+  ensureIecBusReconcile,
   resyncSessionDiskToVice,
   waitForC64Ready,
+  waitRetroFrames,
   clearC64ScreenPetscii,
 } from "@/lib/emu/host";
 import {
@@ -131,6 +133,7 @@ import {
   viceDiskLastAttachDiag,
   viceRetroSaveDirectory,
   viceDriveLiveProbe,
+  viceDriveBusProbe,
   viceWasmWorkDiskDiag,
   viceAttachRcLabel,
 } from "@/lib/emu/vice-disk";
@@ -623,8 +626,9 @@ export function Grok64App() {
     prefetchBundledRoms()
       .then(async (added) => {
         if (added.length && (await hasJiffyPair())) {
-          useEmu.getState().setJiffyDos(true);
-          toast.message(`JiffyDOS ready — C64 + 1541${added.includes("jiffy-1571") ? " + 1571/1581" : ""}`);
+          toast.message(
+            `JiffyDOS ROMs in this browser — toggle in Settings${added.includes("jiffy-1571") ? " (1571/1581 too)" : ""}`,
+          );
         }
       })
       .catch(() => undefined);
@@ -1015,6 +1019,19 @@ export function Grok64App() {
             return { blank, iec, blankNote: "ENOENT (-errno) after Insert if /blank.d64 was unlinked — expected" };
           })(),
           viceDriveLive: viceDriveLiveProbe(emuRef.current, unit),
+          viceDriveBus: await (async () => {
+            const before = viceDriveBusProbe(emuRef.current, unit);
+            await waitRetroFrames(60);
+            const after = viceDriveBusProbe(emuRef.current, unit);
+            const clk0 = before.wasmCpuClock;
+            const clk1 = after.wasmCpuClock;
+            return {
+              ...after,
+              wasmCpuClockBefore: clk0,
+              wasmCpuClockAdvancing:
+                clk0 != null && clk1 != null && clk0 >= 0 && clk1 != null && clk1 >= 0 ? clk1 > clk0 : null,
+            };
+          })(),
           iecWasmDriveState: wasmIecDriveStateFromLive(viceDriveLiveProbe(emuRef.current, unit)),
           wasmWorkDisk: light
             ? null
@@ -3698,6 +3715,10 @@ export function Grok64App() {
       );
       disarmAutostart(emuRef.current, "disk");
       await presentFloppyMountReady(emuRef.current, { iec, unit }, { afterDriveRefresh: true });
+      const busRc = await ensureIecBusReconcile(emuRef.current, unit);
+      if (busRc < 0) {
+        throw new Error(`IEC bus reconcile failed (rc=${busRc}) ${viceDiskLastAttachDiag(emuRef.current) ?? ""}`);
+      }
       await flushEmuFs(emuRef.current, 600);
     } catch (err) {
       glog("insert-disk-fail", { err: String(err) });

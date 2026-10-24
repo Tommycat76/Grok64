@@ -127,8 +127,8 @@ export function grok64KeyboardReleaseAll(emu: Grok64Emu | null) {
 }
 
 /** C64 CLR (Shift+HOME) via libretro keys — never queues BASIC into kbdbuf. */
-export function clearC64ScreenRetro(emu: Grok64Emu | null): Promise<void> {
-  return enqueueDelivery(async () => {
+export function clearC64ScreenRetro(emu: Grok64Emu | null): void {
+  enqueueDelivery(async () => {
     const mod = emu?.Module as Grok64KbdMod | undefined;
     if (!mod) return;
     bindGrok64WasmExports(mod);

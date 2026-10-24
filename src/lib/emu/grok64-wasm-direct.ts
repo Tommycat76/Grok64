@@ -69,6 +69,10 @@ const EXPECTED_GROK64_EXPORTS = [
   "grok64_drive_gcr_loaded",
   "grok64_drive_vdrive_image_same",
   "grok64_drive_sync_tde_image",
+  "grok64_iec_bus_reconcile",
+  "grok64_drive_filesystem_device",
+  "grok64_drive_cpu_clock",
+  "grok64_drive_iec_bus_lines",
 ] as const;
 
 /** JS wrapper failed to marshal a UTF-8 path (distinct from C errno). */
@@ -496,6 +500,26 @@ export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
       const fn = resolveWasmExport(mod, "grok64_drive_sync_tde_image");
       if (!fn) return -99;
       return Number(fn(unit, drive));
+    },
+    driveFilesystemDevice: (unit) => {
+      const fn = resolveWasmExport(mod, "grok64_drive_filesystem_device");
+      if (!fn) return null;
+      return Number(fn(unit));
+    },
+    driveCpuClock: (unit) => {
+      const fn = resolveWasmExport(mod, "grok64_drive_cpu_clock");
+      if (!fn) return null;
+      return Number(fn(unit));
+    },
+    driveIecBusLines: (unit) => {
+      const fn = resolveWasmExport(mod, "grok64_drive_iec_bus_lines");
+      if (!fn) return null;
+      return Number(fn(unit));
+    },
+    iecBusReconcile: (unit) => {
+      const fn = resolveWasmExport(mod, "grok64_iec_bus_reconcile");
+      if (!fn) return -99;
+      return Number(fn(unit));
     },
   };
   return true;

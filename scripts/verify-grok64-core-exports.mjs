@@ -47,6 +47,10 @@ const REQUIRED = [
   "grok64_drive_gcr_loaded",
   "grok64_drive_vdrive_image_same",
   "grok64_drive_sync_tde_image",
+  "grok64_iec_bus_reconcile",
+  "grok64_drive_filesystem_device",
+  "grok64_drive_cpu_clock",
+  "grok64_drive_iec_bus_lines",
 ];
 
 rmSync(tmp, { recursive: true, force: true });

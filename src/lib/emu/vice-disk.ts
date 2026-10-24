@@ -472,6 +472,65 @@ function viceReattachDiskSync(
 }
 
 /** Async attach — waits for serialized queue (use from mount / emu thread). */
+/** Bus-side diagnostics (TDE CPU clock, IEC lines, resource routing). */
+export type ViceDriveBusProbe = {
+  wasmFilesystemDevice: number | null;
+  wasmIecDevice: number | null;
+  wasmVirtualDevice: number | null;
+  wasmSerialDeviceType: number | null;
+  wasmUnitTrueEmulation: number | null;
+  wasmUnitEnabled: number | null;
+  wasmCpuClock: number | null;
+  wasmCpuClockAfterFrames: number | null;
+  wasmCpuClockAdvancing: boolean | null;
+  wasmIecBusLines: number | null;
+  wasmIecBusDrvData: number | null;
+  wasmIecBusCpuBus: number | null;
+  wasmIecBusAtn: boolean | null;
+  wasmVdriveErrorChannel: string | null;
+  wasmTdeImageBytes: number | null;
+  wasmGcrLoaded: number | null;
+  serialDeviceLabel: string | null;
+};
+
+const SERIAL_DEVICE_LABEL: Record<number, string> = {
+  0: "none",
+  1: "fs",
+  2: "real",
+  3: "raw",
+  4: "virt",
+};
+
+export function viceDriveBusProbe(emu: ViceDiskEmu | null, unit: IecUnit = 8, drive = 0): ViceDriveBusProbe {
+  const mod = diskMod(emu);
+  if (mod) bindGrok64DiskExports(mod, emu);
+  const api = grok64DiskApi(mod);
+  const clk0 = api?.driveCpuClock?.(unit) ?? null;
+  const clk1: number | null = null;
+  const lines = api?.driveIecBusLines?.(unit) ?? null;
+  const serial = api?.driveSerialDeviceType?.(unit) ?? null;
+  return {
+    wasmFilesystemDevice: api?.driveFilesystemDevice?.(unit) ?? null,
+    wasmIecDevice: api?.driveIecDevice?.(unit) ?? null,
+    wasmVirtualDevice: api?.driveVirtualDevice?.(unit) ?? null,
+    wasmSerialDeviceType: serial,
+    wasmUnitTrueEmulation: api?.driveUnitTrueEmulation?.(unit) ?? null,
+    wasmUnitEnabled: api?.driveUnitEnabled?.(unit) ?? null,
+    wasmCpuClock: clk0,
+    wasmCpuClockAfterFrames: clk1,
+    wasmCpuClockAdvancing:
+      clk0 != null && clk1 != null && clk0 >= 0 && clk1 >= 0 ? clk1 > clk0 : null,
+    wasmIecBusLines: lines,
+    wasmIecBusDrvData: lines != null ? lines & 0xff : null,
+    wasmIecBusCpuBus: lines != null ? (lines >> 8) & 0xff : null,
+    wasmIecBusAtn: lines != null ? Boolean((lines >> 8) & 0x80) : null,
+    wasmVdriveErrorChannel: api?.driveErrorChannel?.(unit) ?? "",
+    wasmTdeImageBytes: api?.driveTdeImageBytes?.(unit, drive) ?? null,
+    wasmGcrLoaded: api?.driveGcrLoaded?.(unit, drive) ?? null,
+    serialDeviceLabel: serial != null ? (SERIAL_DEVICE_LABEL[serial] ?? String(serial)) : null,
+  };
+}
+
 export type ViceDriveLiveProbe = {
   attachPath: string | null;
   fsPathLabel: string | null;

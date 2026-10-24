@@ -42,7 +42,6 @@ export function HardwarePanel() {
     await seedRomsFromHost();
     setRoms(await listRoms());
     setParts(await loadSdCard());
-    if (await hasJiffyPair()) s.setJiffyDos(true);
   }
 
   useEffect(() => {

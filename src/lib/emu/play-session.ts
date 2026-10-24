@@ -628,6 +628,10 @@ export function viceRcForDrives(map: Partial<Record<IecUnit, IecDrive>>, virtual
   for (const unit of [8, 9, 10, 11] as IecUnit[]) {
     const iec = map[unit];
     lines.push(`Drive${unit}Type=${iec ? viceDriveTypeCode(iec) : 0}`);
+    lines.push(`Drive${unit}TrueEmulation=1`);
+    lines.push(`FileSystemDevice${unit}=0`);
+    lines.push(`IECDevice${unit}=0`);
+    lines.push(`VirtualDevice${unit}=0`);
   }
   lines.push("DriveTrueEmulation=1");
   lines.push(virtualDevices ? "VirtualDevices=1" : "VirtualDevices=0");
@@ -664,6 +668,12 @@ export function viceRcForUser(
   }
   lines.push("DriveTrueEmulation=1");
   lines.push("VirtualDevices=0");
+  for (const unit of [8, 9, 10, 11] as IecUnit[]) {
+    lines.push(`FileSystemDevice${unit}=0`);
+    lines.push(`IECDevice${unit}=0`);
+    lines.push(`VirtualDevice${unit}=0`);
+    lines.push(`Drive${unit}TrueEmulation=1`);
+  }
   return `${lines.join("\n")}\n`;
 }
 

@@ -317,7 +317,7 @@ const EXTRA: Record<string, C64Stroke> = {
   "\n": { code: "Enter", key: "Enter", shift: false },
   "\r": { code: "Enter", key: "Enter", shift: false },
   " ": { code: "Space", key: " ", shift: false },
-  '"': { code: "Digit2", key: '"', shift: false },
+  '"': { code: "Digit2", key: "2", shift: true },
   "*": { code: "BracketRight", key: "*", shift: false },
   "@": { code: "BracketLeft", key: "@", shift: false },
   ",": { code: "Comma", key: ",", shift: false },

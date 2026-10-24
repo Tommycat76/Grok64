@@ -37,7 +37,6 @@ export function ExpansionPanel() {
     await prefetchBundledRoms();
     setRoms(await listRoms());
     setParts(await listPartitions());
-    if (await hasJiffyPair()) s.setJiffyDos(true);
   }
 
   useEffect(() => {

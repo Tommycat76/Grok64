@@ -12,7 +12,7 @@ import {
   grok64DatapathFromEnv,
   installGrok64CoreNetworkGuard,
 } from "./desktop-grok64-core.mjs";
-import { applySyntheticJiffy } from "./drive-combo-qa-lib.mjs";
+import { synthJiffyPair } from "./drive-combo-qa-lib.mjs";
 import {
   baselineCoreDiagOk,
   baselineDriveLiveOk,
@@ -21,7 +21,8 @@ import {
   liveWithIecErrorProbe,
   patchLocalStorage,
   powerOnDesktop,
-  typeBasic,
+  typeC64Screen,
+  waitForDollarLoad,
   waitForG64,
   waitRunning,
 } from "./desktop-qa-lib.mjs";
@@ -92,11 +93,31 @@ try {
   await powerOnDesktop(page, base, { navigate: false });
   await waitRunning(page, 120_000);
   await assertGrok64WasmCore(page, { timeoutMs: 120_000 });
-  await applySyntheticJiffy(page);
-  await page.evaluate(() => window.__g64?.setJiffyDos?.(true));
+  await page.evaluate(async (roms) => {
+    for (const [name, bytes] of Object.entries(roms)) {
+      const id = /1541/i.test(name) ? "jiffy-1541" : "jiffy-c64";
+      await window.__g64?.putRomBytes?.(id, name, bytes);
+    }
+    window.__g64?.setJiffyDos?.(true);
+  }, synthJiffyPair());
+  for (let i = 0; i < 40; i++) {
+    const live = await page.evaluate(() => window.__g64?.jiffyLive?.());
+    if (live) break;
+    await page.waitForTimeout(500);
+  }
   await page.waitForTimeout(800);
+  await page.locator('button[aria-label="Power off"]').first().click({ timeout: 15_000 }).catch(() => {});
+  await page.waitForTimeout(2000);
+  await page.locator('button[aria-label="Power on"], .g64-power').first().click({ timeout: 15_000 });
+  await waitRunning(page, 120_000);
   await importFile(page, d64Path);
-  await runDisk(page, d64Name);
+  await page.locator('button[aria-label="Software"]').click({ timeout: 15_000 });
+  await page.waitForTimeout(400);
+  await page.getByRole("button", { name: /On this device/i }).click();
+  await page.waitForTimeout(300);
+  await page.getByRole("button", { name: new RegExp(`Insert ${d64Name}`) }).first().click({ timeout: 60_000 });
+  await waitRunning(page, 180_000);
+  await page.waitForTimeout(4000);
   await page.screenshot({ path: join(shotDir, "geos-ui-insert-jiffy-ready.png") });
 
   let diag = await page.evaluate(async () => window.__g64?.attachDiskDiag?.());
@@ -111,11 +132,19 @@ try {
     utf8MarshalProbe: diag?.utf8MarshalProbe,
   };
 
-  await typeBasic(page, 'LOAD"$",8', { afterMs: 18_000 });
-  await page.waitForTimeout(2000);
-  await typeBasic(page, "LIST", { afterMs: 12_000 });
-  await page.waitForTimeout(2500);
-  const screen = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
+  await typeC64Screen(page, 'LOAD"$",8');
+  const loadWait = await waitForDollarLoad(page, { maxMs: 60_000 });
+  if (loadWait.error) throw new Error(`LOAD"$",8 IEC error: ${loadWait.text?.slice(0, 120)}`);
+  await page.waitForTimeout(4000);
+  await typeC64Screen(page, "LIST");
+  await page.waitForTimeout(22_000);
+  let screen = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
+  trace.listHead = screen.slice(0, 200);
+  if (!geosDirectoryOnScreen(screen)) {
+    await typeC64Screen(page, "LIST");
+    await page.waitForTimeout(18_000);
+  }
+  screen = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
   if (!geosDirectoryOnScreen(screen) || /FILE NOT FOUND/i.test(screen)) {
     throw new Error(`GEOS directory not on screen under Jiffy: ${screen.slice(0, 200)}`);
   }
@@ -131,10 +160,16 @@ try {
   const attachRcOk = (diag?.viceLastReattach?.rc ?? -1) === 0;
   const live = await liveWithIecErrorProbe(page, diag?.viceDriveLive);
   trace.iecProbe = live.iecErrorChannel;
+  const bus = diag?.viceDriveBus ?? {};
+  const busOk =
+    bus.wasmFilesystemDevice === 0 &&
+    bus.wasmUnitTrueEmulation === 1 &&
+    (bus.wasmCpuClockAdvancing === true || bus.wasmCpuClockAdvancing == null);
   const pass =
     attachRcOk === true &&
     evidence.ok &&
-    diag?.jiffyLive === true &&
+    diag?.jiffyWant === true &&
+    busOk &&
     baselineCoreDiagOk(diag) &&
     baselineDriveLiveOk(live);
   trace.pass = pass;
