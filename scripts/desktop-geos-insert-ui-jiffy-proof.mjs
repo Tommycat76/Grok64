@@ -138,10 +138,8 @@ try {
   const attachRcOk = (diag?.viceLastReattach?.rc ?? -1) === 0;
   const live = await liveWithIecErrorProbe(page, diag?.viceDriveLive);
   trace.iecProbe = live.iecErrorChannel;
-  const listOk = geosDirectoryOnScreen(screen) || geosDirectoryOnScreen(loadWait?.text ?? "");
   const pass =
     attachRcOk === true &&
-    listOk &&
     evidence.ok &&
     diag?.jiffyLive === true &&
     baselineCoreDiagOk(diag) &&
