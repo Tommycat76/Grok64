@@ -943,6 +943,7 @@ export function Grok64App() {
       workD64Bytes: () => viceWorkD64ByteLength(emuRef.current),
       viceAttachedImage: (unit = 8) => viceAttachedImage(emuRef.current, unit as 8),
       viceDriveLive: (unit = 8) => viceDriveLiveProbe(emuRef.current, unit as 8),
+      iecBusReconcile: async (unit = 8) => ensureIecBusReconcile(emuRef.current, unit as IecUnit),
       attachDiskDiag: async (opts?: { light?: boolean }) => {
         const light = opts?.light === true;
         const session = sessionDiskOnUnit(8);

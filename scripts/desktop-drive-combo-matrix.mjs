@@ -18,7 +18,12 @@ import {
   rowTouchesCmdHd,
 } from "./drive-combo-catalog.mjs";
 import { patchLocalStorage, powerOnDesktop, waitRunning } from "./desktop-qa-lib.mjs";
-import { assertGrok64WasmCore, clearEmulatorJsCache, grok64DatapathFromEnv } from "./desktop-grok64-core.mjs";
+import {
+  assertGrok64WasmCore,
+  clearEmulatorJsCache,
+  grok64DatapathFromEnv,
+  installGrok64CoreNetworkGuard,
+} from "./desktop-grok64-core.mjs";
 import {
   applySyntheticJiffy,
   captureViceDriveBus,
@@ -26,7 +31,12 @@ import {
   ensureLibraryFixture,
   insertFloppyViaLibraryUI,
   loadSmokeOnUnit,
+  powerCycleDesktop,
 } from "./drive-combo-qa-lib.mjs";
+
+const expectedCoreBuildId = JSON.parse(
+  readFileSync(join(process.cwd(), "public/system/vice/emulatorjs/data/cores/grok64-core-manifest.json"), "utf8"),
+).buildId;
 
 const base = process.env.GROK64_BASE_URL || "http://127.0.0.1:8080/";
 const unpark = process.env.GROK64_DRIVE_COMBO_UNPARK === "1";
@@ -60,6 +70,7 @@ const results = [];
 
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+await installGrok64CoreNetworkGuard(page, base);
 
 for (const row of rows) {
   const rec = { id: row.id, map: row.mapLabel, op: row.op, pair: `${row.pairFrom}→${row.pairTo}`, pass: false };
@@ -94,6 +105,8 @@ for (const row of rows) {
   await powerOnDesktop(page, base, { navigate: false });
   await waitRunning(page, 120_000);
   await assertGrok64WasmCore(page, { timeoutMs: 120_000 });
+  await powerCycleDesktop(page);
+  await assertGrok64WasmCore(page, { timeoutMs: 120_000 });
 
   if (cmdRomPath) {
     const romBytes = [...readFileSync(cmdRomPath)];
@@ -125,18 +138,33 @@ for (const row of rows) {
     await insertFloppyViaLibraryUI(page, { filePath: testDisk, fileName, unit: row.pairFrom });
     await waitRunning(page, 120_000);
     await page.waitForTimeout(2000);
-    Object.assign(rec, await captureViceDriveBus(page));
-    const smoke =
-      row.op === "DIR"
-        ? await dirOnUnit(page, row.pairFrom)
-        : await loadSmokeOnUnit(page, row.pairFrom);
-    rec.pass = row.op === "DIR" ? smoke.ok : smoke.loadOk;
-    rec.textHead = smoke.textHead;
-    rec.listHead = smoke.listHead;
-    if (row.op === "LOAD") {
-      rec.prg = smoke.prg;
-      rec.afterHead = smoke.afterHead;
-      if (!rec.pass) rec.reason = smoke.reason ?? "named LOAD failed";
+    await page.evaluate(async (u) => window.__g64?.iecBusReconcile?.(u), row.pairFrom);
+    await page.waitForTimeout(1500);
+    const busSnap = await captureViceDriveBus(page);
+    Object.assign(rec, busSnap);
+    rec.coreBuildIdExpected = expectedCoreBuildId;
+    const serialLabel = busSnap.viceDriveBus?.serialDeviceLabel;
+    if (busSnap.coreBuildIdLoaded && busSnap.coreBuildIdLoaded !== expectedCoreBuildId) {
+      rec.pass = false;
+      rec.reason = `stale core ${busSnap.coreBuildIdLoaded} (want ${expectedCoreBuildId})`;
+      rec.skipped = false;
+    } else if (serialLabel === "virt") {
+      rec.pass = false;
+      rec.reason = "viceDriveBus.serialDeviceLabel=virt (KERNAL still on virtual IEC traps)";
+      rec.skipped = false;
+    } else {
+      const smoke =
+        row.op === "DIR"
+          ? await dirOnUnit(page, row.pairFrom)
+          : await loadSmokeOnUnit(page, row.pairFrom);
+      rec.pass = row.op === "DIR" ? smoke.ok : smoke.loadOk;
+      rec.textHead = smoke.textHead;
+      rec.listHead = smoke.listHead;
+      if (row.op === "LOAD") {
+        rec.prg = smoke.prg;
+        rec.afterHead = smoke.afterHead;
+        if (!rec.pass) rec.reason = smoke.reason ?? "named LOAD failed";
+      }
     }
   } else if (row.op === "COPY") {
     rec.skipped = true;

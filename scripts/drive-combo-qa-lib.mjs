@@ -25,6 +25,14 @@ export async function applySyntheticJiffy(page) {
   }, pair);
 }
 
+/** Dirty-profile style power off → on (matches geos-insert-user-dirty). */
+export async function powerCycleDesktop(page) {
+  await page.locator('button[aria-label="Power off"]').first().click({ timeout: 15_000 });
+  await page.waitForTimeout(2500);
+  await page.locator('button[aria-label="Power on"], .g64-power').first().click({ timeout: 15_000 });
+  await waitRunning(page, 120_000);
+}
+
 /** Software → On this device → Insert on unit (user path; no playBytes). */
 export async function insertFloppyViaLibraryUI(page, { filePath, fileName, unit }) {
   const esc = fileName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -66,6 +74,10 @@ export async function captureViceDriveBus(page) {
     viceDriveBus: diag?.viceDriveBus ?? null,
     viceLastReattach: diag?.viceLastReattach ?? null,
     viceLastAttachDiag: diag?.viceLastAttachDiag ?? null,
+    coreBuildIdLoaded: diag?.coreBuildIdLoaded ?? null,
+    coreBuildIdExpected: diag?.coreBuildIdExpected ?? null,
+    coreBuildMatches: diag?.coreBuildMatches ?? null,
+    grok64WasmBindRev: diag?.grok64WasmBindRev ?? null,
   };
 }
 

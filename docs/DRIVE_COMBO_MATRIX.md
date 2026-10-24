@@ -63,6 +63,8 @@ Tom wants **every unit order**: for each **injective assignment** of distinct dr
    - Map C: CMD HD on 8 vs 9 (regression class from play-session)  
 3. **Full matrix** — expand to all permutations once smoke is green.
 
+**Harness (unpark slice):** `desktop-drive-combo-matrix.mjs` uses Software **Insert** (not `playBytes`), power cycle before insert, `iecBusReconcile`, and fails rows when `serialDeviceLabel` is `virt` or core `buildId` ≠ manifest. First smoke row (SM-01) still tracks typed `LOAD"$",8` / named LOAD quality separately from IEC routing.
+
 Store each map as a row group key, e.g. `8:1541|9:1571|10:1581|11:cmdhd`.
 
 ---
