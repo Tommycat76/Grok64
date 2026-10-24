@@ -263,9 +263,17 @@ const workReattached =
   /\.g64$/i.test(mount?.diag?.bootFile || "") === false &&
   /WORK DISK/i.test(last?.diag?.bootFile || "");
 
-const d64Pass = shaOk && dirOk && !workReattached;
+const mountRow = trace.find((r) => r.at === "mount-finish");
+const watchRows = trace.filter((r) => /^watch-\d+s$/.test(r.at));
+const stableAfterMount =
+  mountRow?.meta?.playMode === "disk" &&
+  mountRow?.meta?.cartLive === false &&
+  !mountRow?.meta?.splash &&
+  watchRows.every((r) => !r.meta?.splash && r.meta?.playMode === "disk");
+const d64Pass = shaOk && dirOk && !workReattached && stableAfterMount;
 const report = {
   pass: d64Pass && (!requireG64Insert || (!g64Insert.skipped && g64Insert.pass)),
+  stableAfterMount,
   d64Sha1,
   dirOk,
   shaOk,

@@ -2147,7 +2147,7 @@ export function Grok64App() {
           setBusy("Disk on unit 8 · READY…", 68);
           const jiffyDisk = resolveJiffyWant(st.jiffyDos, st.fastLoadCart);
           await applyJiffyThenRefreshWorkDisk(emu, spec.live.unit, jiffyDisk);
-          await presentFloppyMountReady(emu, spec.live);
+          await presentFloppyMountReady(emu, spec.live, { afterDriveRefresh: true });
           if (loadGenRef.current !== gen) return;
           markSessionPlay(spec.title);
           s.setRunning(true);
