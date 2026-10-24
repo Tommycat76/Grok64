@@ -856,6 +856,11 @@ export function Grok64App() {
       },
       runtimeViceOpts: () => runtimeViceOpts(),
       openSoftware: () => useEmu.getState().setLibraryOpen(true),
+      openSoftwareLibrary: () => {
+        const st = useEmu.getState();
+        st.setLibraryTab("library");
+        st.setLibraryOpen(true);
+      },
       closeSoftware: () => useEmu.getState().setLibraryOpen(false),
       libraryCount: async () => (await listLibrary()).length,
       listLibraryItems: () => listLibrary(),
@@ -3769,6 +3774,7 @@ export function Grok64App() {
     setSessionDisk(item.name, media, unit);
     useEmu.getState().setInsertedDiskName(item.name);
     focusGrok64Player();
+    await waitRetroFrames(emuRef.current, 30);
     void logFloppyAttach("insert-disk", { name: item.name, bytes: media, libraryId: item.id });
     finishFloppyMountReady();
     toast.success(`Inserted ${label} on drive ${unit}`);

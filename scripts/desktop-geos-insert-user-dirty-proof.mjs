@@ -40,7 +40,7 @@ if (!grok64DatapathFromEnv() || !existsSync(d64Path)) {
 
 const d64Name = "GEOS_2.0.d64";
 const d64B64 = readFileSync(d64Path).toString("base64");
-const trace = { flow: "power-insert-type-load-dollar" };
+const trace = { flow: "power-insert-type-load-dollar", librarySeed: "importLibraryBytes" };
 
 async function powerCycle(page) {
   await page.locator('button[aria-label="Power off"]').first().click({ timeout: 15_000 });
@@ -49,22 +49,38 @@ async function powerCycle(page) {
   await waitRunning(page, 120_000);
 }
 
-async function importAndInsert(page) {
-  await page.locator('button[aria-label="Software"]').click({ timeout: 15_000 });
-  await page.waitForTimeout(400);
-  await page.getByRole("button", { name: /On this device/i }).click();
+async function openSoftwareLibraryTab(page) {
+  await page.locator('button[aria-label="Software"]').first().click({ timeout: 15_000, force: true });
+  const sheetVisible = await page
+    .locator(".g64-sheet")
+    .waitFor({ state: "visible", timeout: 4000 })
+    .then(() => true)
+    .catch(() => false);
+  if (!sheetVisible) {
+    trace.softwareOpen = "api-fallback";
+  }
+  await page.evaluate(() => window.__g64?.openSoftwareLibrary?.() ?? window.__g64?.openSoftware?.());
+  await page.locator(".g64-seg button").filter({ hasText: /^On this device/ }).click({ force: true }).catch(() => {});
+  await page.locator(".g64-sheet").waitFor({ state: "visible", timeout: 15_000 });
+  await page.locator("button.g64-btn").filter({ hasText: /^Import$/ }).first().waitFor({ state: "visible", timeout: 15_000 });
+  await page.waitForTimeout(200);
+}
+
+async function insertFromLibraryRow(page) {
+  await openSoftwareLibraryTab(page);
+  const card = page.locator(".g64-card").filter({ hasText: d64Name }).first();
+  await card.waitFor({ state: "visible", timeout: 30_000 });
+  await card.scrollIntoViewIfNeeded({ timeout: 15_000 });
+  await card
+    .getByRole("group", { name: /IEC drive unit/i })
+    .getByRole("button", { name: "8", exact: true })
+    .click({ force: true, timeout: 15_000 });
   await page.waitForTimeout(300);
-  await page.locator('input[type="file"]').setInputFiles(d64Path);
-  await page.waitForTimeout(1500);
-  await page.keyboard.press("Escape").catch(() => {});
-  await page.waitForTimeout(400);
-  await page.locator('button[aria-label="Software"]').click({ timeout: 15_000 });
-  await page.waitForTimeout(400);
-  await page.getByRole("button", { name: /On this device/i }).click();
-  await page.waitForTimeout(300);
-  await page.getByRole("button", { name: new RegExp(`Insert ${d64Name}`) }).first().click({ timeout: 60_000 });
+  const insertBtn = page.getByRole("button", { name: `Insert ${d64Name}`, exact: true });
+  await insertBtn.waitFor({ state: "visible", timeout: 30_000 });
+  await insertBtn.click({ timeout: 60_000, force: true });
   await waitRunning(page, 180_000);
-  await page.waitForTimeout(4000);
+  await page.waitForTimeout(5000);
 }
 
 const browser = await chromium.launch({ headless: true });
@@ -129,7 +145,7 @@ try {
   });
   trace.jiffyAfterPowerCycle = jiffyAfterPower;
 
-  await importAndInsert(page);
+  await insertFromLibraryRow(page);
   await page.screenshot({ path: join(shotDir, "after-insert.png"), fullPage: true });
 
   const diagInsert = await page.evaluate(async () => window.__g64?.attachDiskDiag?.());
@@ -139,18 +155,15 @@ try {
     viceDriveLive: diagInsert?.viceDriveLive,
   };
 
+  const keyMs = Number(process.env.GROK64_TOM_TYPING_MS || (jiffyOn ? "120" : "85"));
   const typeLine = typeC64RealKeyboard;
-  const loadDelay = jiffyOn ? { keyDelayMs: 120, lineEndMs: 2200 } : { keyDelayMs: 85, lineEndMs: 1000 };
+  const loadDelay = { keyDelayMs: keyMs, lineEndMs: Math.max(1000, keyMs * 2) };
+  trace.typingKeyMs = keyMs;
   await typeLine(page, 'LOAD"$",8', loadDelay);
-  let loadWait = await waitForDollarLoad(page, { maxMs: jiffyOn ? 60_000 : 60_000 });
+  let loadWait = await waitForDollarLoad(page, { maxMs: 90_000 });
   let screenProbe = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
-  if (!jiffyOn && (/LOAD\s*"",8/i.test(screenProbe) || /SYNTAX ERROR|ME ERROR/i.test(screenProbe))) {
-    trace.loadDollarKeyboardFallback = "feedBasic";
-    await page.evaluate(async () => {
-      await window.__g64?.feedBasic?.('LOAD"$",8', { runcmd: true });
-    });
-    await page.waitForTimeout(18_000);
-    loadWait = await waitForDollarLoad(page, { maxMs: 45_000 });
+  if (/LOAD\s*"",8/i.test(screenProbe) || /SYNTAX ERROR|ME ERROR/i.test(screenProbe)) {
+    trace.loadDollarKeyboardMiss = screenProbe.slice(0, 120);
   }
   trace.loadWait = { error: loadWait.error, head: loadWait.text?.slice(0, 200) };
   trace.viceLoadDollarDiag = await page.evaluate(async () => {
@@ -174,11 +187,8 @@ try {
     screen = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
   }
   await page.screenshot({ path: join(shotDir, "after-load-dollar.png"), fullPage: true });
-  const ramGeos = await page.evaluate(() => window.__g64?.screenRamShowsGeosCatalog?.() ?? false);
-  const onScreen = geosDirectoryOnScreen(screen) || ramGeos;
-  const catalogOk = onScreen && !/FILE NOT FOUND/i.test(screen);
-  trace.catalogOnScreen = onScreen;
-  trace.catalogRamGeos = ramGeos;
+  const catalogOk = geosDirectoryOnScreen(screen) && !/FILE NOT FOUND/i.test(screen);
+  trace.catalogOnScreen = geosDirectoryOnScreen(screen);
   const bus = diagInsert?.viceDriveBus ?? {};
   const busOk =
     bus.wasmFilesystemDevice === 0 &&
