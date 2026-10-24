@@ -815,6 +815,7 @@ export function Grok64App() {
       closeSoftware: () => useEmu.getState().setLibraryOpen(false),
       libraryCount: async () => (await listLibrary()).length,
       listLibraryItems: () => listLibrary(),
+      libraryIdbDiag: () => grok64LibraryIdbDiag(),
       librarySnapshot: async () => {
         const items = await listLibrary();
         const snap = [];
