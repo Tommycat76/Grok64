@@ -34,6 +34,7 @@ type DiskModule = {
   _grok64_disk_get_name?: (unit: number, drive: number) => number;
   _grok64_retro_save_directory?: () => number;
   _grok64_disk_last_attach_rc?: () => number;
+  _grok64_work_disk_refresh?: (unit: number) => number;
   UTF8ToString?: (ptr: number) => string;
   cwrap?: (...args: unknown[]) => unknown;
 };
@@ -112,6 +113,11 @@ export function bindGrok64DiskExports(mod: DiskModule): void {
     }
     if (!mod._grok64_disk_last_attach_rc) {
       mod._grok64_disk_last_attach_rc = wrap("grok64_disk_last_attach_rc", "number", []) as () => number;
+    }
+    if (!mod._grok64_work_disk_refresh) {
+      mod._grok64_work_disk_refresh = wrap("grok64_work_disk_refresh", "number", ["number"]) as (
+        unit: number,
+      ) => number;
     }
   } catch {
     /* stock core */
@@ -220,6 +226,34 @@ export function resolveViceDiskAttachPath(
 /**
  * Detach + attach on VICE unit 8 (drive 0). Returns attach rc (&lt;0 fail) or 0 ok; -99 if exports missing.
  */
+/** Re-attach `vice_work.d64` under retro_save_directory (custom core export). */
+export function refreshViceWorkDiskAttached(emu: ViceDiskEmu | null, unit: IecUnit = 8): number {
+  if (!grok64DiskExportsReady(emu)) return -99;
+  const mod = diskMod(emu)!;
+  if (!mod._grok64_work_disk_refresh) return -99;
+  try {
+    const rc = mod._grok64_work_disk_refresh(unit);
+    const attachRc = mod._grok64_disk_last_attach_rc?.();
+    const out = rc >= 0 ? rc : typeof attachRc === "number" && attachRc >= 0 ? attachRc : rc;
+    const after =
+      out === 0
+        ? diskNameFromModule(mod as DiskModule & { UTF8ToString?: (p: number) => string }, unit, 0)
+        : null;
+    lastAttachByUnit.set(unit, {
+      path: `${viceRetroSaveDirectory(emu) ?? "/data/saves"}/vice_work.d64`,
+      rc: out,
+      before: null,
+      after,
+      at: Date.now(),
+    });
+    glog("vice-work-disk-refresh", { unit, rc: out, after });
+    return out;
+  } catch (e) {
+    glog("vice-work-disk-refresh-err", { unit, err: String(e) });
+    return -1;
+  }
+}
+
 export function viceReattachDisk(
   emu: ViceDiskEmu | null,
   unit: IecUnit,

@@ -915,6 +915,9 @@ export function Grok64App() {
           viceSaveDirectory: viceRetroSaveDirectory(emuRef.current),
           viceDiskExports: grok64DiskExportsReady(emuRef.current),
           diskExportsPresent: grok64DiskExportsReady(emuRef.current),
+          workDiskRefreshExport: Boolean(
+            (emuRef.current?.Module as { _grok64_work_disk_refresh?: unknown })?._grok64_work_disk_refresh,
+          ),
           coreBuildId: grok64CoreStatus(emuRef.current).coreBuildId,
           coreUrlBuildId: grok64CoreStatus(emuRef.current).coreUrlBuildId,
           grok64Core: grok64CoreStatus(emuRef.current),

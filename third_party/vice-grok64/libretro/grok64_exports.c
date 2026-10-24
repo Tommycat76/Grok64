@@ -10,6 +10,7 @@
 #include "machine.h"
 #include "vdrive/vdrive.h"
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
 
 extern char retro_save_directory[];
@@ -227,6 +228,30 @@ EMSCRIPTEN_KEEPALIVE
 #endif
 int grok64_disk_last_attach_rc(void)
 {
+    return last_disk_attach_rc;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int grok64_work_disk_refresh(int unit)
+{
+    char path[GROK64_DISK_PATH_MAX];
+    const char *save;
+
+    if (unit < 8 || unit > 11) {
+        unit = 8;
+    }
+    save = retro_save_directory[0] ? retro_save_directory : "/data/saves";
+    snprintf(path, sizeof(path), "%s/vice_work.d64", save);
+    if (!path[0]) {
+        return -1;
+    }
+    file_system_detach_disk((unsigned int)unit, 0);
+    last_disk_attach_rc = file_system_attach_disk((unsigned int)unit, 0, path);
     return last_disk_attach_rc;
 }
 

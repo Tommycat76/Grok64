@@ -51,6 +51,7 @@ import {
   viceReattachDisk,
   viceRetroSaveDirectory,
   recordViceLastAttach,
+  refreshViceWorkDiskAttached,
 } from "./vice-disk";
 import { writeC64Bytes } from "./c64-memory";
 import {
@@ -2126,25 +2127,50 @@ function retroSaveDirFromModule(emu: EjsInstance | null): string | null {
   }
 }
 
+/** Yield real retro_run frames (setVariable / work_disk updates apply on the main loop). */
+export async function waitRetroFrames(frames = 1): Promise<void> {
+  if (frames <= 0) return;
+  if (typeof window === "undefined") {
+    await new Promise((r) => setTimeout(r, frames * 16));
+    return;
+  }
+  for (let i = 0; i < frames; i++) {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  }
+}
+
 /**
- * Ask libretro to re-run `update_work_disk()` on the next frame(s) after MEMFS bytes change.
- * Safer than sync `grok64_disk_attach` from the browser thread while the core is running.
+ * After MEMFS sync: WASM `grok64_work_disk_refresh` when present, else libretro option toggle on retro frames.
  */
 export async function bumpViceWorkDiskReload(emu: EjsInstance | null, unit: IecUnit = 8): Promise<void> {
   if (!emu) return;
-  const slot = `${unit}_d64`;
   const before = viceAttachedImage(emu, unit);
+  const wasmRc = refreshViceWorkDiskAttached(emu, unit);
+  if (wasmRc === 0) {
+    glog("vice-work-disk-reload", { unit, mode: "wasm-export", before, after: viceAttachedImage(emu, unit) });
+    return;
+  }
+  const slot = `${unit}_d64`;
+  applyRuntimeOptions(emu, { vice_work_disk: "9_d64" });
+  await waitRetroFrames(6);
   applyRuntimeOptions(emu, { vice_work_disk: "disabled" });
-  await new Promise((r) => setTimeout(r, 40));
+  await waitRetroFrames(6);
   applyRuntimeOptions(emu, { vice_work_disk: slot });
   rememberWorkDisk(slot);
-  for (let i = 0; i < 120; i++) {
+  for (let i = 0; i < 90; i++) {
+    await waitRetroFrames(1);
     await tickGrok64Iec(emu);
-    await new Promise((r) => setTimeout(r, 16));
     const now = viceAttachedImage(emu, unit);
-    if (now && now !== before && !/blank\.d64/i.test(now)) break;
+    if (now && !/blank\.d64/i.test(now) && now !== before) break;
   }
-  glog("vice-work-disk-reload", { unit, slot, before, after: viceAttachedImage(emu, unit) });
+  glog("vice-work-disk-reload", {
+    unit,
+    slot,
+    mode: wasmRc === -99 ? "core-option" : "core-option-after-wasm-fail",
+    wasmRc,
+    before,
+    after: viceAttachedImage(emu, unit),
+  });
 }
 
 export function syncViceWorkD64(emu: EjsInstance | null, data: Uint8Array) {
@@ -2366,9 +2392,9 @@ export async function viceReattachDiskOnEmuThread(
   if (defer) {
     rc = defer(unit, drive, path);
     if (rc === 0) {
-      for (let i = 0; i < 60; i++) {
+      for (let i = 0; i < 90; i++) {
+        await waitRetroFrames(1);
         await tickGrok64Iec(emu);
-        await new Promise((r) => setTimeout(r, 25));
         const attachRc = mod._grok64_disk_last_attach_rc?.();
         if (typeof attachRc === "number" && attachRc >= 0) {
           rc = attachRc;

@@ -41,7 +41,9 @@ if ! grep -q '_grok64_retro_keyboard' "${MAKEFILE}"; then
   sed -i 's|_grok64_cartridge_trigger_freeze|_grok64_cartridge_trigger_freeze,_grok64_retro_keyboard|' "${MAKEFILE}"
 fi
 if ! grep -q '_grok64_disk_attach' "${MAKEFILE}"; then
-  sed -i 's|_grok64_retro_keyboard|_grok64_retro_keyboard,_grok64_disk_attach,_grok64_disk_attach_deferred,_grok64_disk_detach,_grok64_disk_get_name,_grok64_retro_save_directory,_grok64_disk_last_attach_rc|' "${MAKEFILE}"
+  sed -i 's|_grok64_retro_keyboard|_grok64_retro_keyboard,_grok64_disk_attach,_grok64_disk_attach_deferred,_grok64_disk_detach,_grok64_disk_get_name,_grok64_retro_save_directory,_grok64_disk_last_attach_rc,_grok64_work_disk_refresh|' "${MAKEFILE}"
+elif ! grep -q '_grok64_work_disk_refresh' "${MAKEFILE}"; then
+  sed -i 's|_grok64_disk_last_attach_rc|_grok64_disk_last_attach_rc,_grok64_work_disk_refresh|' "${MAKEFILE}"
 fi
 
 cd "${RA}"
