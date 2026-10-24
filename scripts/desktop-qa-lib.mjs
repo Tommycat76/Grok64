@@ -325,6 +325,24 @@ export async function ensureReal1541Timing(page) {
 }
 
 /** GEOS insert/list evidence when CRT screenText omits ASCII "GEOS" (PETSCII). */
+/** Manifest + glue aligned with shipped IEC core (baseline gate). */
+export function baselineCoreDiagOk(diag) {
+  if (!diag) return false;
+  return (
+    diag.coreBuildMatches === true &&
+    diag.loadedGlueHasDiskExports === true &&
+    diag.diskExportsPresent === true
+  );
+}
+
+/** True 1541 TDE (not vdrive traps) when WASM probes exist. */
+export function baselineDriveLiveOk(live) {
+  if (!live) return true;
+  const hasTdeProbe = live.wasmVirtualDevice != null || live.wasmUnitTrueEmulation != null;
+  if (!hasTdeProbe) return true;
+  return live.wasmIecDevice === 0 && live.wasmVirtualDevice === 0 && live.wasmUnitTrueEmulation === 1;
+}
+
 export function geosFloppyEvidence({ screen = "", session = null, wasmWorkDisk = null, viceAttachedImage = null }) {
   const wasmOk = Boolean(
     wasmWorkDisk?.some((r) => r.matchesSession && (r.wasmFsStat ?? 0) > 0 && (r.moduleFsBytes ?? 0) > 0),

@@ -12,6 +12,8 @@ import {
   installGrok64CoreNetworkGuard,
 } from "./desktop-grok64-core.mjs";
 import {
+  baselineCoreDiagOk,
+  baselineDriveLiveOk,
   geosFloppyEvidence,
   patchLocalStorage,
   powerOnDesktop,
@@ -95,18 +97,12 @@ try {
     viceAttachedImage: postDiag?.viceAttachedImage ?? preList?.viceAttachedImage,
   });
   const live = postDiag?.viceDriveLive ?? preList?.viceDriveLive;
-  const iecDeviceOk = live?.wasmIecDevice === 0 || live?.wasmIecDevice == null;
-  const tdeOk =
-    live?.wasmUnitTrueEmulation === 1 ||
-    live?.wasmVirtualDevice === 0 ||
-    (live?.wasmUnitTrueEmulation == null && live?.wasmVirtualDevice == null);
   const pass =
     (list?.ok === true || evidence.ok) &&
     evidence.ok &&
     !loadWait?.error &&
-    iecDeviceOk &&
-    tdeOk &&
-    preList?.loadedGlueHasDiskExports === true;
+    baselineCoreDiagOk(postDiag ?? preList) &&
+    baselineDriveLiveOk(live);
   trace.evidence = evidence;
   trace.pass = pass;
   writeFileSync(join(outDir, "trace.json"), JSON.stringify(trace, null, 2));

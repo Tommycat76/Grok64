@@ -13,6 +13,8 @@ import {
   installGrok64CoreNetworkGuard,
 } from "./desktop-grok64-core.mjs";
 import {
+  baselineCoreDiagOk,
+  baselineDriveLiveOk,
   geosFloppyEvidence,
   openSoftware,
   patchLocalStorage,
@@ -125,7 +127,12 @@ try {
     viceAttachedImage: diag?.viceAttachedImage,
   });
   const attachRcOk = (diag?.viceLastReattach?.rc ?? -1) === 0;
-  const pass = evidence.ok && attachRcOk && diag?.jiffyLive === true;
+  const pass =
+    evidence.ok &&
+    attachRcOk &&
+    diag?.jiffyLive === true &&
+    baselineCoreDiagOk(diag) &&
+    baselineDriveLiveOk(diag?.viceDriveLive);
   trace.pass = pass;
   trace.evidence = evidence;
   trace.screen = screen.slice(0, 500);
