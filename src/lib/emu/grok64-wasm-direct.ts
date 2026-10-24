@@ -4,6 +4,7 @@
  */
 
 import type { Grok64ModuleBag } from "./grok64-api";
+import { grok64PristineCcall } from "./grok64-wasm-bind";
 
 type WasmBag = Grok64ModuleBag & {
   asm?: Record<string, unknown>;
@@ -15,7 +16,18 @@ type WasmBag = Grok64ModuleBag & {
   stringToUTF8?: (str: string, ptr: number, maxBytes: number) => void;
   lengthBytesUTF8?: (str: string) => number;
   _malloc?: (n: number) => number;
+  malloc?: (n: number) => number;
   _free?: (ptr: number) => void;
+  free?: (ptr: number) => void;
+  HEAPU8?: Uint8Array;
+  ccall?: (
+    ident: string,
+    returnType: string,
+    argTypes: string[],
+    args: unknown[],
+  ) => unknown;
+  allocateUTF8?: (str: string) => number;
+  _allocateUTF8?: (str: string) => number;
 };
 
 type WasmFn = (...args: unknown[]) => unknown;
@@ -42,13 +54,21 @@ const EXPECTED_GROK64_EXPORTS = [
   "grok64_fs_stat_bytes",
 ] as const;
 
+/** JS wrapper failed to marshal a UTF-8 path (distinct from C errno). */
+export const GROK64_UTF8_MARSHAL_ERR = -98;
+
+const diskBindEmu = new WeakMap<Grok64ModuleBag, unknown>();
+
 function asFn(v: unknown): WasmFn | null {
   return typeof v === "function" ? (v as WasmFn) : null;
 }
 
 /** All Emscripten Module bags that may host Grok64 exports (EJS sometimes uses __ejs.Module). */
 export function emuWasmModuleBags(emu: unknown): Grok64ModuleBag[] {
-  const e = emu as { Module?: Grok64ModuleBag } | null;
+  const e = emu as {
+    Module?: Grok64ModuleBag;
+    gameManager?: { Module?: Grok64ModuleBag };
+  } | null;
   const w =
     typeof window !== "undefined"
       ? (window as unknown as { __ejs?: { Module?: Grok64ModuleBag } }).__ejs
@@ -58,6 +78,7 @@ export function emuWasmModuleBags(emu: unknown): Grok64ModuleBag[] {
     if (m && !out.includes(m)) out.push(m);
   };
   push(e?.Module);
+  push(e?.gameManager?.Module);
   push(w?.Module);
   return out;
 }
@@ -79,6 +100,168 @@ export function resolveWasmExport(mod: Grok64ModuleBag | null | undefined, baseN
     }
   }
   return null;
+}
+
+function wasmRuntimeBags(emu: unknown, primary: Grok64ModuleBag | null): WasmBag[] {
+  const seen = new Set<WasmBag>();
+  const out: WasmBag[] = [];
+  const push = (m: WasmBag | null | undefined) => {
+    if (m && !seen.has(m)) {
+      seen.add(m);
+      out.push(m);
+    }
+  };
+  push(primary as WasmBag);
+  const e = emu as { Module?: WasmBag; gameManager?: { Module?: WasmBag; FS?: unknown } } | null;
+  push(e?.Module);
+  push(e?.gameManager?.Module);
+  for (const m of emuWasmModuleBags(emu)) push(m as WasmBag);
+  return out;
+}
+
+/** Merge heap + alloc helpers from every Module bag (EJS splits FS vs WASM heap). */
+export function mergedWasmRuntime(emu: unknown, primary: Grok64ModuleBag | null): WasmBag {
+  const bags = wasmRuntimeBags(emu, primary);
+  const merged = { ...(bags[0] ?? {}) } as WasmBag;
+  const keys = [
+    "HEAPU8",
+    "_malloc",
+    "malloc",
+    "_free",
+    "free",
+    "ccall",
+    "allocateUTF8",
+    "_allocateUTF8",
+    "stringToUTF8",
+    "lengthBytesUTF8",
+    "stackSave",
+    "stackRestore",
+    "stringToUTF8OnStack",
+  ] as const;
+  for (const key of keys) {
+    for (const b of bags) {
+      const v = (b as WasmBag)[key];
+      if (merged[key] == null && v != null) {
+        (merged as Record<string, unknown>)[key] = v;
+      }
+    }
+  }
+  const mem = (merged as WasmBag & { wasmMemory?: WebAssembly.Memory }).wasmMemory;
+  if (mem?.buffer && (!merged.HEAPU8 || merged.HEAPU8.buffer !== mem.buffer)) {
+    merged.HEAPU8 = new Uint8Array(mem.buffer);
+  }
+  return merged;
+}
+
+function resolveAlloc(rt: WasmBag): { malloc: (n: number) => number; free: (ptr: number) => void } | null {
+  const bags: Record<string, unknown>[] = [
+    rt,
+    rt.wasmExports,
+    rt.asm,
+    rt.instance?.exports as Record<string, unknown>,
+  ].filter(Boolean) as Record<string, unknown>[];
+  for (const bag of bags) {
+    const malloc = asFn(bag._malloc) ?? asFn(bag.malloc);
+    const free = asFn(bag._free) ?? asFn(bag.free);
+    if (malloc && free) {
+      return {
+        malloc: (n) => Number(malloc(n)),
+        free: (ptr) => {
+          free(ptr);
+        },
+      };
+    }
+  }
+  return null;
+}
+
+function tryCcallStringArg(rt: WasmBag, exportName: string, path: string): number | null {
+  const ccall = grok64PristineCcall(rt) ?? rt.ccall;
+  if (!ccall) return null;
+  try {
+    const out = ccall(exportName, "number", ["string"], [path]);
+    if (typeof out === "number" && !Number.isNaN(out)) return out;
+  } catch {
+    /* fall through */
+  }
+  return null;
+}
+
+/** About/diag: can WASM stat see a MEMFS path (not GROK64_UTF8_MARSHAL_ERR). */
+export function grok64Utf8PathMarshalProbe(
+  emu: unknown,
+  primary: Grok64ModuleBag | null,
+  path: string,
+): { bytes: number; marshalErr: boolean } {
+  const mod = primary;
+  if (!mod || !resolveWasmExport(mod, "grok64_fs_stat_bytes")) {
+    return { bytes: GROK64_UTF8_MARSHAL_ERR, marshalErr: true };
+  }
+  const fn = resolveWasmExport(mod, "grok64_fs_stat_bytes")!;
+  const rt = mergedWasmRuntime(emu, mod);
+  const viaCcall = tryCcallStringArg(rt, "grok64_fs_stat_bytes", path);
+  if (viaCcall != null) return { bytes: viaCcall, marshalErr: false };
+  const bytes = withUtf8Arg(emu, mod, path, (ptr) => Number(fn(ptr)));
+  return { bytes, marshalErr: bytes === GROK64_UTF8_MARSHAL_ERR };
+}
+
+export function withUtf8Arg(
+  emu: unknown,
+  primary: Grok64ModuleBag | null,
+  str: string,
+  run: (ptr: number) => number,
+): number {
+  const rt = mergedWasmRuntime(emu, primary);
+  const allocUtf8 = rt.allocateUTF8 ?? rt._allocateUTF8;
+  const freeFn = rt._free ?? rt.free;
+  if (typeof allocUtf8 === "function" && typeof freeFn === "function") {
+    const ptr = Number(allocUtf8(str));
+    try {
+      return run(ptr);
+    } finally {
+      freeFn(ptr);
+    }
+  }
+
+  const stackSave = rt.stackSave;
+  const stackRestore = rt.stackRestore;
+  const stringToUTF8OnStack = rt.stringToUTF8OnStack;
+  if (stackSave && stackRestore && stringToUTF8OnStack) {
+    const sp = stackSave();
+    try {
+      const ptr = stringToUTF8OnStack(str);
+      return run(ptr);
+    } finally {
+      stackRestore(sp);
+    }
+  }
+
+  const stringToUTF8 = rt.stringToUTF8;
+  const lengthBytesUTF8 = rt.lengthBytesUTF8;
+  const alloc = resolveAlloc(rt);
+  if (alloc && stringToUTF8 && lengthBytesUTF8) {
+    const len = lengthBytesUTF8(str) + 1;
+    const ptr = alloc.malloc(len);
+    try {
+      stringToUTF8(str, ptr, len);
+      return run(ptr);
+    } finally {
+      alloc.free(ptr);
+    }
+  }
+  const heap = rt.HEAPU8;
+  if (alloc && heap) {
+    const enc = new TextEncoder();
+    const bytes = enc.encode(`${str}\0`);
+    const ptr = alloc.malloc(bytes.length);
+    try {
+      heap.set(bytes, ptr);
+      return run(ptr);
+    } finally {
+      alloc.free(ptr);
+    }
+  }
+  return GROK64_UTF8_MARSHAL_ERR;
 }
 
 export function grok64DiskAttachCallable(mod: Grok64ModuleBag | null | undefined): boolean {
@@ -147,51 +330,27 @@ export function grok64WasmExportDiagEmu(emu: unknown) {
   };
 }
 
-function withUtf8Arg(mod: WasmBag, str: string, run: (ptr: number) => number): number {
-  const stackSave = mod.stackSave;
-  const stackRestore = mod.stackRestore;
-  const stringToUTF8OnStack = mod.stringToUTF8OnStack;
-  if (stackSave && stackRestore && stringToUTF8OnStack) {
-    const sp = stackSave();
-    try {
-      const ptr = stringToUTF8OnStack(str);
-      return run(ptr);
-    } finally {
-      stackRestore(sp);
-    }
-  }
-  const malloc = mod._malloc;
-  const free = mod._free;
-  const stringToUTF8 = mod.stringToUTF8;
-  const lengthBytesUTF8 = mod.lengthBytesUTF8;
-  if (malloc && free && stringToUTF8 && lengthBytesUTF8) {
-    const len = lengthBytesUTF8(str) + 1;
-    const ptr = malloc(len);
-    try {
-      stringToUTF8(str, ptr, len);
-      return run(ptr);
-    } finally {
-      free(ptr);
-    }
-  }
-  return -98;
-}
+export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag, emu?: unknown): boolean {
+  if (emu != null) diskBindEmu.set(mod, emu);
+  const boundEmu = () => diskBindEmu.get(mod) ?? emu ?? { Module: mod };
 
-export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag): boolean {
   if (mod.grok64DiskApi && grok64DiskAttachCallable(mod)) return true;
   if (!grok64DiskAttachCallable(mod)) return false;
 
+  const callWithPath = (exportName: string, invoke: (fn: WasmFn, ptr: number) => number, path: string) => {
+    const fn = resolveWasmExport(mod, exportName);
+    if (!fn) return -99;
+    const rt = mergedWasmRuntime(boundEmu(), mod);
+    const viaCcall = tryCcallStringArg(rt, exportName, path);
+    if (viaCcall != null) return viaCcall;
+    return withUtf8Arg(boundEmu(), mod, path, (ptr) => invoke(fn, ptr));
+  };
+
   mod.grok64DiskApi = {
-    diskAttach: (unit, drive, path) => {
-      const fn = resolveWasmExport(mod, "grok64_disk_attach");
-      if (!fn) return -99;
-      return withUtf8Arg(mod as WasmBag, path, (ptr) => Number(fn(unit, drive, ptr)));
-    },
-    diskAttachDeferred: (unit, drive, path) => {
-      const fn = resolveWasmExport(mod, "grok64_disk_attach_deferred");
-      if (!fn) return -99;
-      return withUtf8Arg(mod as WasmBag, path, (ptr) => Number(fn(unit, drive, ptr)));
-    },
+    diskAttach: (unit, drive, path) =>
+      callWithPath("grok64_disk_attach", (fn, ptr) => Number(fn(unit, drive, ptr)), path),
+    diskAttachDeferred: (unit, drive, path) =>
+      callWithPath("grok64_disk_attach_deferred", (fn, ptr) => Number(fn(unit, drive, ptr)), path),
     sd2iecPoll: () => {
       resolveWasmExport(mod, "grok64_sd2iec_poll")?.();
     },
@@ -223,16 +382,12 @@ export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag): boolean {
       if (!fn) return 0;
       return Number(fn());
     },
-    fsStatBytes: (path) => {
-      const fn = resolveWasmExport(mod, "grok64_fs_stat_bytes");
-      if (!fn) return -99;
-      return withUtf8Arg(mod as WasmBag, path, (ptr) => Number(fn(ptr)));
-    },
+    fsStatBytes: (path) => callWithPath("grok64_fs_stat_bytes", (fn, ptr) => Number(fn(ptr)), path),
   };
   return true;
 }
 
-export function bindGrok64WasmApiDirect(mod: Grok64ModuleBag): boolean {
+export function bindGrok64WasmApiDirect(mod: Grok64ModuleBag, emu?: unknown): boolean {
   const hasSd2iec = resolveWasmExport(mod, "grok64_sd2iec_attach") != null;
   const hasC64 = resolveWasmExport(mod, "grok64_c64_read") != null;
   if (!hasSd2iec && !hasC64) return false;
@@ -257,12 +412,12 @@ export function bindGrok64WasmApiDirect(mod: Grok64ModuleBag): boolean {
     kbdbufFeed: (text) => {
       const fn = resolveWasmExport(mod, "grok64_kbdbuf_feed");
       if (!fn) return -1;
-      return withUtf8Arg(mod as WasmBag, text, (ptr) => Number(fn(ptr)));
+      return withUtf8Arg(emu ?? { Module: mod }, mod, text, (ptr) => Number(fn(ptr)));
     },
     kbdbufFeedRuncmd: (text) => {
       const fn = resolveWasmExport(mod, "grok64_kbdbuf_feed_runcmd");
       if (!fn) return -1;
-      return withUtf8Arg(mod as WasmBag, text, (ptr) => Number(fn(ptr)));
+      return withUtf8Arg(emu ?? { Module: mod }, mod, text, (ptr) => Number(fn(ptr)));
     },
     kbdbufFlush: () => {
       resolveWasmExport(mod, "grok64_kbdbuf_flush")?.();

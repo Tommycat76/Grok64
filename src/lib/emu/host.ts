@@ -70,10 +70,13 @@ import {
   viceDiskAttachCandidates,
   grok64IecAttachD64Path,
   probeViceAttachPaths,
-  viceReattachDisk,
+  viceReattachDiskAsync,
   viceRetroSaveDirectory,
   recordViceLastAttach,
   refreshViceWorkDiskAttached,
+  grok64DiskModule,
+  runSerializedDiskAttach,
+  bindGrok64DiskExports,
 } from "./vice-disk";
 import { writeC64Bytes } from "./c64-memory";
 import {
@@ -2243,33 +2246,6 @@ export async function waitRetroFrames(frames = 1): Promise<void> {
 /**
  * After MEMFS sync: WASM `grok64_work_disk_refresh` when present, else libretro option toggle on retro frames.
  */
-/** Hot UI insert (Jiffy / existing work disk): pulse work_disk so 1541 sees new bytes. */
-export async function pulseViceDriveAfterHotDiskSwap(
-  emu: EjsInstance | null,
-  unit: IecUnit = 8,
-  opts?: { fileName?: string },
-): Promise<void> {
-  if (!emu) return;
-  const slot = `${unit}_d64`;
-  const label = opts?.fileName ?? sessionDiskOnUnit(unit)?.name ?? "";
-  const geos = /geos|wheels/i.test(label);
-  applyRuntimeOptions(emu, {
-    [`vice_drive${unit}_type`]: geos ? "1542" : "1541",
-    vice_drive_true_emulation: "enabled",
-    vice_virtual_device_traps: "disabled",
-    vice_work_disk: "disabled",
-  });
-  await waitRetroFrames(6);
-  await tickGrok64Iec(emu);
-  applyRuntimeOptions(emu, { vice_work_disk: slot });
-  rememberWorkDisk(slot);
-  for (let i = 0; i < 60; i++) {
-    await waitRetroFrames(1);
-    await tickGrok64Iec(emu);
-  }
-  glog("vice-drive-pulse", { unit, slot, image: viceAttachedImage(emu, unit) });
-}
-
 export async function bumpViceWorkDiskReload(emu: EjsInstance | null, unit: IecUnit = 8): Promise<void> {
   if (!emu) return;
   const before = viceAttachedImage(emu, unit);
@@ -2507,36 +2483,41 @@ export async function viceReattachDiskOnEmuThread(
   drive = 0,
 ): Promise<number> {
   if (!emu || !path?.trim()) return -1;
-  if (!grok64DiskExportsReady(emu)) return -99;
-  const api = grok64DiskApi(emu.Module as Parameters<typeof bindGrok64WasmExports>[0]);
-  const defer = api?.diskAttachDeferred;
-  let rc = -1;
-  if (defer) {
-    rc = defer(unit, drive, path);
-    if (rc === 0) {
-      for (let i = 0; i < 90; i++) {
-        await waitRetroFrames(1);
-        await tickGrok64Iec(emu);
-        const attachRc = api?.diskLastAttachRc?.();
-        if (typeof attachRc === "number" && attachRc >= 0) {
-          rc = attachRc;
-          break;
+  return runSerializedDiskAttach(async () => {
+    if (!grok64DiskExportsReady(emu)) return -99;
+    const mod = grok64DiskModule(emu) ?? (emu.Module as Parameters<typeof bindGrok64WasmExports>[0]);
+    bindGrok64DiskExports(mod, emu);
+    const api = grok64DiskApi(mod);
+    const defer = api?.diskAttachDeferred;
+    api?.diskDetach?.(unit, drive);
+    let rc = -1;
+    if (defer) {
+      rc = defer(unit, drive, path);
+      if (rc === 0) {
+        for (let i = 0; i < 90; i++) {
+          await waitRetroFrames(1);
+          await tickGrok64Iec(emu);
+          const attachRc = api?.diskLastAttachRc?.();
+          if (typeof attachRc === "number" && attachRc >= 0) {
+            rc = attachRc;
+            break;
+          }
+        }
+        if (rc < 0) {
+          const attachRc = api?.diskLastAttachRc?.();
+          rc = typeof attachRc === "number" && attachRc >= 0 ? attachRc : -1;
         }
       }
-      if (rc < 0) {
-        const attachRc = api?.diskLastAttachRc?.();
-        rc = typeof attachRc === "number" && attachRc >= 0 ? attachRc : -1;
-      }
+    } else {
+      rc = api?.diskAttach?.(unit, drive, path) ?? -1;
+      const attachRc = api?.diskLastAttachRc?.();
+      if (rc < 0 && typeof attachRc === "number" && attachRc >= 0) rc = attachRc;
     }
-  } else {
-    rc = api?.diskAttach?.(unit, drive, path) ?? -1;
-    const attachRc = api?.diskLastAttachRc?.();
-    if (rc < 0 && typeof attachRc === "number" && attachRc >= 0) rc = attachRc;
-  }
-  const after = rc === 0 ? viceAttachedImage(emu, unit, drive) : null;
-  recordViceLastAttach(unit, { path, rc, before: null, after, at: Date.now() });
-  glog("vice-disk-reattach", { unit, path, rc, after, emuThread: Boolean(defer) });
-  return rc;
+    const after = rc === 0 ? viceAttachedImage(emu, unit, drive) : null;
+    recordViceLastAttach(unit, { path, rc, before: null, after, at: Date.now() });
+    glog("vice-disk-reattach", { unit, path, rc, after, emuThread: Boolean(defer) });
+    return rc;
+  });
 }
 
 /** Hot-swap D64: libretro work-disk refresh first; GCR / fallback uses grok64_disk_attach. */
@@ -2970,7 +2951,7 @@ export function attachAutostartDisk(
     applyIecUnitFloppy(emu, iec, unit, kindOf(target));
     const attachPath = resolveViceDiskAttachPath(emu, unit, label || target);
     if (attachPath && !opts?.deferViceReattach) {
-      void runMountStage("autostart-vice-reattach", async () => viceReattachDisk(emu, unit, attachPath)).catch(
+      void runMountStage("autostart-vice-reattach", async () => viceReattachDiskAsync(emu, unit, attachPath)).catch(
         (err) => reportMountFailure("autostart-vice-reattach", err, { unit, attachPath }),
       );
     }

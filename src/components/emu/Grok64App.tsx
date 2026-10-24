@@ -101,7 +101,6 @@ import {
   applyIecUnitFloppy,
   applyJiffyThenRefreshWorkDisk,
   ensureViceSessionDiskAttached,
-  pulseViceDriveAfterHotDiskSwap,
 } from "@/lib/emu/host";
 import {
   diskAttachFingerprint,
@@ -114,7 +113,7 @@ import {
   grok64WasmApi,
   grok64WorkDiskRefreshExportReady,
 } from "@/lib/emu/grok64-api";
-import { grok64WasmExportDiagEmu } from "@/lib/emu/grok64-wasm-direct";
+import { grok64Utf8PathMarshalProbe, grok64WasmExportDiagEmu } from "@/lib/emu/grok64-wasm-direct";
 import {
   bindGrok64DiskExports,
   grok64DiskExportsReady,
@@ -966,12 +965,12 @@ export function Grok64App() {
           diskExportsPresent: grok64DiskAttachExportReady(emuRef.current?.Module),
           workDiskRefreshExport: (() => {
             const mod = emuRef.current?.Module;
-            if (mod) bindGrok64DiskExports(mod as Parameters<typeof bindGrok64DiskExports>[0]);
+            if (mod) bindGrok64DiskExports(mod, emuRef.current);
             return grok64WorkDiskRefreshExportReady(mod);
           })(),
           diskAttachDiagExport: (() => {
             const mod = emuRef.current?.Module;
-            if (mod) bindGrok64DiskExports(mod as Parameters<typeof bindGrok64DiskExports>[0]);
+            if (mod) bindGrok64DiskExports(mod, emuRef.current);
             return grok64WasmExportDiagEmu(emuRef.current).callable.grok64_disk_last_attach_diag === true;
           })(),
           diskAttachExport: grok64DiskAttachExportReady(emuRef.current?.Module),
@@ -983,6 +982,17 @@ export function Grok64App() {
             unit,
             session?.name ?? bootFileOf(emuRef.current) ?? "GEOS_2.0.d64",
           ),
+          utf8MarshalProbe: (() => {
+            const mod = emuRef.current?.Module ?? null;
+            if (mod) bindGrok64DiskExports(mod, emuRef.current);
+            const blank = grok64Utf8PathMarshalProbe(emuRef.current, mod, "/blank.d64");
+            const iec = grok64Utf8PathMarshalProbe(
+              emuRef.current,
+              mod,
+              `/data/saves/grok64_iec${unit}.d64`,
+            );
+            return { blank, iec };
+          })(),
           wasmWorkDisk: await viceWasmWorkDiskDiag(emuRef.current, unit, sessionFp),
           coreBuildId: grok64CoreStatus(emuRef.current).coreBuildId,
           coreBuildIdExpected: grok64CoreStatus(emuRef.current).coreBuildIdExpected,
@@ -3594,9 +3604,6 @@ export function Grok64App() {
     );
     disarmAutostart(emuRef.current, "disk");
     await presentFloppyMountReady(emuRef.current, { iec, unit }, { afterDriveRefresh: true });
-    if (!isGcrDiskKind(kind) && useEmu.getState().jiffyDos) {
-      await pulseViceDriveAfterHotDiskSwap(emuRef.current, unit, { fileName: file.name });
-    }
     await flushEmuFs(emuRef.current, 600);
     await touchPlayed(item.id);
     const bam = d64DiskName(media);

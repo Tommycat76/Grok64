@@ -81,16 +81,31 @@ export function recordViceLastAttach(unit: IecUnit, record: ViceDiskAttachRecord
   lastAttachByUnit.set(unit, record);
 }
 
-export function bindGrok64DiskExports(mod: Grok64ModuleBag): void {
-  if (isGrok64DiskExportsBound(mod)) return;
-  if (bindGrok64DiskApiDirect(mod)) markGrok64DiskExportsBound(mod);
+export function bindGrok64DiskExports(mod: Grok64ModuleBag, emu?: ViceDiskEmu | null): void {
+  if (isGrok64DiskExportsBound(mod)) {
+    if (emu != null) bindGrok64DiskApiDirect(mod, emu);
+    return;
+  }
+  if (bindGrok64DiskApiDirect(mod, emu)) markGrok64DiskExportsBound(mod);
 }
 
 export function grok64DiskExportsReady(emu: ViceDiskEmu | null): boolean {
   for (const mod of emuWasmModuleBags(emu)) {
-    if (!grok64DiskAttachCallable(mod)) bindGrok64DiskExports(mod);
+    if (!grok64DiskAttachCallable(mod)) bindGrok64DiskExports(mod, emu);
   }
   return grok64DiskAttachCallableEmu(emu);
+}
+
+let diskAttachChain: Promise<void> = Promise.resolve();
+
+/** One grok64_disk_attach / work_disk_refresh at a time (avoids racing hot insert). */
+export function runSerializedDiskAttach<T>(fn: () => T | Promise<T>): Promise<T> {
+  const run = diskAttachChain.then(() => fn());
+  diskAttachChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
 }
 
 export { grok64WorkDiskRefreshExportReady };
@@ -164,7 +179,7 @@ export function viceDiskLastAttachDiag(emu: ViceDiskEmu | null): string | null {
 export function viceWasmFsStatBytes(emu: ViceDiskEmu | null, path: string): number | null {
   const mod = diskMod(emu);
   if (!mod || !path?.trim()) return null;
-  if (!grok64DiskApi(mod)?.fsStatBytes) bindGrok64DiskExports(mod);
+  if (!grok64DiskApi(mod)?.fsStatBytes) bindGrok64DiskExports(mod, emu);
   const stat = grok64DiskApi(mod)?.fsStatBytes;
   if (!stat) return null;
   try {
@@ -367,7 +382,17 @@ export function refreshViceWorkDiskAttached(emu: ViceDiskEmu | null, unit: IecUn
   }
 }
 
+/** Synchronous attach (prefer {@link viceReattachDiskAsync} on the emu thread). */
 export function viceReattachDisk(
+  emu: ViceDiskEmu | null,
+  unit: IecUnit,
+  path: string,
+  drive = 0,
+): number {
+  return viceReattachDiskSync(emu, unit, path, drive);
+}
+
+function viceReattachDiskSync(
   emu: ViceDiskEmu | null,
   unit: IecUnit,
   path: string,
@@ -376,6 +401,7 @@ export function viceReattachDisk(
   if (!path?.trim()) return -1;
   if (!grok64DiskExportsReady(emu)) return -99;
   const mod = diskMod(emu)!;
+  bindGrok64DiskExports(mod, emu);
   const api = grok64DiskApi(mod);
   if (!api?.diskAttach) return -99;
   try {
@@ -409,4 +435,14 @@ export function viceReattachDisk(
     }
     return -1;
   }
+}
+
+/** Async attach — waits for serialized queue (use from mount / emu thread). */
+export async function viceReattachDiskAsync(
+  emu: ViceDiskEmu | null,
+  unit: IecUnit,
+  path: string,
+  drive = 0,
+): Promise<number> {
+  return runSerializedDiskAttach(() => viceReattachDiskSync(emu, unit, path, drive));
 }

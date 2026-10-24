@@ -5,6 +5,7 @@ import {
   TOUCH_ABC,
   TOUCH_SYM,
   dispatchC64Key,
+  touchC64Stroke,
   hasPetsciiLayer,
   type C64Key,
 } from "@/lib/emu/keys";
@@ -131,7 +132,8 @@ export function C64Keyboard() {
         dispatchC64Key(k.code, k.key, next);
         return;
       }
-      dispatchC64Key(k.code, k.key, false, { shift: shift || !!k.forceShift });
+      const stroke = touchC64Stroke(k, shift);
+      dispatchC64Key(stroke.code, stroke.key, false, { shift: stroke.shift });
       if (k.forceShift && !shift) dispatchC64Key("ShiftLeft", "Shift", false);
     },
     [shift, cbm, ctrl, lock],
@@ -141,8 +143,9 @@ export function C64Keyboard() {
     (k: C64Key) => {
       setDownId(k.id);
       if (k.modifier) return;
+      const stroke = touchC64Stroke(k, shift);
       if (k.forceShift && !shift) dispatchC64Key("ShiftLeft", "Shift", true);
-      dispatchC64Key(k.code, k.key, true, { shift: shift || !!k.forceShift });
+      dispatchC64Key(stroke.code, stroke.key, true, { shift: stroke.shift });
       if (k.code === "F5" || k.id === "f5") {
         try {
           window.dispatchEvent(new Event("g64-fit"));

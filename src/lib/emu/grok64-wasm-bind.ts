@@ -11,8 +11,8 @@ export type Grok64WasmModule = {
 const boundDisk = new WeakSet<object>();
 const boundWasm = new WeakSet<object>();
 
-export function grok64PristineCwrap(mod: Grok64WasmModule | null | undefined): Grok64WasmModule["cwrap"] | null {
-  if (!mod) return null;
+function capturePristineCcall(mod: Grok64WasmModule | null | undefined): void {
+  if (!mod) return;
   const bag = mod as Grok64WasmModule & {
     __grok64PristineCwrap?: Grok64WasmModule["cwrap"];
     __grok64PristineCcall?: Grok64WasmModule["ccall"];
@@ -23,7 +23,18 @@ export function grok64PristineCwrap(mod: Grok64WasmModule | null | undefined): G
   if (!bag.__grok64PristineCcall && typeof mod.ccall === "function") {
     bag.__grok64PristineCcall = mod.ccall;
   }
+}
+
+export function grok64PristineCwrap(mod: Grok64WasmModule | null | undefined): Grok64WasmModule["cwrap"] | null {
+  capturePristineCcall(mod);
+  const bag = mod as Grok64WasmModule & { __grok64PristineCwrap?: Grok64WasmModule["cwrap"] };
   return bag.__grok64PristineCwrap ?? null;
+}
+
+export function grok64PristineCcall(mod: Grok64WasmModule | null | undefined): Grok64WasmModule["ccall"] | null {
+  capturePristineCcall(mod);
+  const bag = mod as Grok64WasmModule & { __grok64PristineCcall?: Grok64WasmModule["ccall"] };
+  return bag.__grok64PristineCcall ?? null;
 }
 
 export function isGrok64DiskExportsBound(mod: object): boolean {

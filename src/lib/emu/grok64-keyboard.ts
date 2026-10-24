@@ -195,6 +195,9 @@ function resolveHostStroke(
 ): { code: string; key: string; mods: KbdMods; swallowUp?: boolean; hostShiftChord?: boolean } {
   let shift = !!mods.shift;
 
+  if (shift && (code === "Digit2" || key === "@")) {
+    return { code: "Digit2", key: '"', mods: { ...mods, shift: false }, swallowUp: true };
+  }
   if (shift && code === "Digit4") {
     return { code: "Digit4", key: "$", mods: { ...mods, shift: false }, swallowUp: true };
   }
@@ -363,13 +366,13 @@ function scheduleDomKey(
       }
     }
 
-    if (stroke.swallowUp && key.length === 1 && C64_GLYPH[key]?.shift) {
+    if (stroke.swallowUp && C64_GLYPH[stroke.key]?.shift) {
       if (mods.shift) {
         swallowHostShiftUp = true;
         hostShiftChord = false;
       }
-      await playSyntheticShiftedGlyph(fn, key, emu);
-      eatKeyUp.add(tag);
+      await playSyntheticShiftedGlyph(fn, stroke.key, emu);
+      eatKeyUp.add(eventTag(stroke.code, stroke.key));
       return;
     }
 

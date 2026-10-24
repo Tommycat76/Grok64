@@ -48,20 +48,20 @@ export function probeGrok64ViceModule(emu: Grok64Emu | null): boolean {
 }
 
 /** Bind direct WASM export callers (idempotent, once per Module). */
-export function bindGrok64WasmExports(mod: Grok64ModuleBag): void {
+export function bindGrok64WasmExports(mod: Grok64ModuleBag, emu?: Grok64Emu | null): void {
   if (isGrok64WasmExportsBound(mod)) return;
-  const wasmOk = bindGrok64WasmApiDirect(mod);
-  const diskOk = bindGrok64DiskApiDirect(mod);
+  const wasmOk = bindGrok64WasmApiDirect(mod, emu);
+  const diskOk = bindGrok64DiskApiDirect(mod, emu);
   if (wasmOk || diskOk || grok64DiskAttachCallable(mod) || resolveWasmExport(mod, "grok64_sd2iec_attach")) {
     markGrok64WasmExportsBound(mod);
   }
-  bindGrok64DiskExports(mod);
+  bindGrok64DiskExports(mod, emu);
 }
 
 export function ensureGrok64WasmExports(emu: Grok64Emu | null): boolean {
   const mod = emu?.Module as Grok64ModuleBag | undefined;
   if (!mod) return false;
-  bindGrok64WasmExports(mod);
+  bindGrok64WasmExports(mod, emu);
   const api = grok64WasmApi(mod);
   return Boolean(resolveWasmExport(mod, "grok64_sd2iec_attach") && api?.c64Read);
 }
