@@ -2,7 +2,6 @@
  * Direct VICE file_system_* disk attach (Grok64 WASM exports).
  * Option flips + MEMFS writes do not replace an image already open on unit 8.
  */
-import { bindGrok64WasmExports } from "./grok64-vice-bridge";
 import { glog } from "./debug";
 import type { IecUnit } from "./types";
 import { isGcrDiskKind, kindOf } from "./formats";
@@ -68,14 +67,17 @@ export function recordViceLastAttach(unit: IecUnit, record: ViceDiskAttachRecord
 export function grok64DiskExportsReady(emu: ViceDiskEmu | null): boolean {
   const mod = diskMod(emu);
   if (!mod) return false;
-  bindGrok64WasmExports(mod as Parameters<typeof bindGrok64WasmExports>[0]);
   bindGrok64DiskExports(mod);
   return typeof mod._grok64_disk_attach === "function" && typeof mod._grok64_disk_get_name === "function";
 }
 
+let bindingDiskExports = false;
+
 export function bindGrok64DiskExports(mod: DiskModule): void {
+  if (bindingDiskExports) return;
   const wrap = mod.cwrap;
   if (!wrap) return;
+  bindingDiskExports = true;
   try {
     if (!mod._grok64_disk_attach) {
       mod._grok64_disk_attach = wrap("grok64_disk_attach", "number", ["number", "number", "string"]) as (
@@ -114,6 +116,8 @@ export function bindGrok64DiskExports(mod: DiskModule): void {
     }
   } catch {
     /* stock core */
+  } finally {
+    bindingDiskExports = false;
   }
 }
 

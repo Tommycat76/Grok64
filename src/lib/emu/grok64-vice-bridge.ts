@@ -46,10 +46,14 @@ export function probeGrok64ViceModule(emu: Grok64Emu | null): boolean {
   return Boolean(mod?._grok64_sd2iec_poll || mod?._grok64_sd2iec_attach || mod?.grok64Sd2iecHost);
 }
 
+let bindingWasmExports = false;
+
 /** Bind Emscripten exports onto Module (idempotent). */
 export function bindGrok64WasmExports(mod: Grok64Module & { cwrap?: (...args: unknown[]) => unknown }): void {
+  if (bindingWasmExports) return;
   const wrap = mod.cwrap;
   if (!wrap) return;
+  bindingWasmExports = true;
   try {
     if (!mod._grok64_sd2iec_attach) {
       mod._grok64_sd2iec_attach = wrap("grok64_sd2iec_attach", null, ["number"]) as (unit: number) => void;
@@ -103,6 +107,8 @@ export function bindGrok64WasmExports(mod: Grok64Module & { cwrap?: (...args: un
     }
   } catch {
     /* stock core */
+  } finally {
+    bindingWasmExports = false;
   }
 }
 

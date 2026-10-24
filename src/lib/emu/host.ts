@@ -2110,10 +2110,26 @@ const WORK_DISK_NAMES = new Set(["WORK DISK.D64", "work disk.d64"]);
  * Mirror a .d64 into paths VICE libretro reads for `vice_work_disk` (see update_work_disk in libretro-core.c).
  * RetroArch save dir is `/data/saves` → `vice_work.d64` is what file_system_attach_disk(8,…) opens.
  */
+function retroSaveDirFromModule(emu: EjsInstance | null): string | null {
+  const mod = emu?.Module as {
+    _grok64_retro_save_directory?: () => number;
+    UTF8ToString?: (ptr: number) => string;
+  };
+  if (!mod?._grok64_retro_save_directory || !mod.UTF8ToString) return null;
+  try {
+    const ptr = mod._grok64_retro_save_directory();
+    const raw = ptr ? mod.UTF8ToString(ptr) : "";
+    const dir = raw.trim().replace(/\/$/, "");
+    return dir || null;
+  } catch {
+    return null;
+  }
+}
+
 export function syncViceWorkD64(emu: EjsInstance | null, data: Uint8Array) {
   const FS = fsOf(emu);
   if (!FS?.writeFile || !isAcceptedD64ByteLength(data.byteLength)) return;
-  const saveDir = viceRetroSaveDirectory(emu);
+  const saveDir = retroSaveDirFromModule(emu) ?? viceRetroSaveDirectory(emu);
   const targets = [
     ...(saveDir ? [`${saveDir}/vice_work.d64`] : []),
     "/data/saves/vice_work.d64",
@@ -2183,6 +2199,34 @@ export async function refreshViceGcrDisk(
   glog("gcr-disk-refresh", { unit, file: base, bytes: data.byteLength });
 }
 
+/** Live CRT: swap GCR image bytes + reattach without hard-reset (avoids stack/recursion on hot Play). */
+export async function refreshViceGcrDiskHot(
+  emu: EjsInstance | null,
+  unit: IecUnit,
+  data: Uint8Array,
+  fileName: string,
+): Promise<void> {
+  if (!emu) return;
+  const base = fileName.replace(/^\//, "");
+  writeBootFile(emu, data, base);
+  emu.fileName = base;
+  unitMounts.set(unit, base);
+  setSessionDisk(base, data, unit);
+  applyIecUnitFloppy(emu, "1541", unit, kindOf(base));
+  applyRuntimeOptions(emu, {
+    vice_autostart: "disabled",
+    vice_autostart_warp: "disabled",
+    vice_autoloadwarp: "disabled",
+    vice_work_disk: "disabled",
+    vice_drive_true_emulation: "enabled",
+    vice_virtual_device_traps: "disabled",
+  });
+  await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
+  bumpCrtPaint(emu);
+  await viceReattachSessionDisk(emu, unit);
+  glog("gcr-disk-hot-swap", { unit, file: base, bytes: data.byteLength });
+}
+
 export function applyIecUnitFloppy(
   emu: EjsInstance | null,
   iec: IecDrive,
@@ -2220,7 +2264,10 @@ export async function applyJiffyThenRefreshWorkDisk(
     const data = image?.data ?? session?.bytes;
     const name = image?.fileName ?? session?.name;
     if (data && name) {
-      await runMountStage("gcr-refresh", () => refreshViceGcrDisk(emu, unit, data, name), 60_000);
+      const refresh = opts?.hotSwap
+        ? () => refreshViceGcrDiskHot(emu, unit, data, name)
+        : () => refreshViceGcrDisk(emu, unit, data, name);
+      await runMountStage(opts?.hotSwap ? "gcr-hot-swap" : "gcr-refresh", refresh, 60_000);
     }
   } else if (opts?.hotSwap) {
     await runMountStage(
@@ -2231,9 +2278,8 @@ export async function applyJiffyThenRefreshWorkDisk(
         if (data) syncViceWorkD64(emu, data);
         resyncSessionDiskToVice(emu, unit);
         await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
-        await viceReattachSessionDisk(emu, unit);
       },
-      60_000,
+      45_000,
     );
   } else {
     await runMountStage("work-disk-refresh", () => refreshViceWorkDisk(emu, unit), 90_000);

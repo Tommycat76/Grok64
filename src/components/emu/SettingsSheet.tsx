@@ -57,9 +57,9 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (e.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
-      if (s.aboutOpen) s.setAboutOpen(false);
-      else if (s.settingsOpen) s.setSettingsOpen(false);
-      else if (s.mapperOpen) s.setMapperOpen(false);
+        if (s.aboutOpen) s.setAboutOpen(false);
+        if (s.settingsOpen) s.setSettingsOpen(false);
+        if (s.mapperOpen) s.setMapperOpen(false);
       e.preventDefault();
       e.stopPropagation();
     };
