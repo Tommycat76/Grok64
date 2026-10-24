@@ -667,7 +667,9 @@ function Drive8DiagPanel() {
         <code className="text-fg">coreBuildIdExpected</code>, <code className="text-fg">coreBuildIdLoaded</code>,{" "}
         <code className="text-fg">diskExportsPresent</code>, <code className="text-fg">viceLastReattach.rc</code> (0 =
         ok; negative = WASM errno, see <code className="text-fg">rcLabel</code>), and{" "}
-        <code className="text-fg">iecWasmDriveState</code> (WASM only — never types on the CRT). Use after Software → Run when LOAD fails — copy and send
+        <code className="text-fg">iecWasmDriveState</code>,{" "}
+        <code className="text-fg">viceDriveLive.wasmTdeImageBytes</code> (1541 GCR image on the IEC bus),{" "}
+        <code className="text-fg">wasmGcrLoaded</code>, <code className="text-fg">wasmVdriveImageSame</code>. WASM only — never types on the CRT. Use after Software → Run when LOAD fails — copy and send
         this block. Logs: last 20 floppy-attach / play-mount lines.
       </p>
       <button

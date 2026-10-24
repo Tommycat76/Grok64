@@ -59,7 +59,9 @@ try {
   await waitRunning(page, 60_000);
   await page.waitForTimeout(1500);
 
+  const skipAbout = process.env.GROK64_RESET_ONLY === "1";
   const beforeAbout = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
+  if (!skipAbout) {
   await page.getByRole("button", { name: "About" }).click({ timeout: 15_000 });
   await page.waitForTimeout(2500);
   const duringAbout = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
@@ -68,22 +70,27 @@ try {
   trace.diagHasReattach = diag?.viceLastReattach?.rc === 0;
   trace.iecWasm = diag?.iecWasmDriveState;
   await page.screenshot({ path: join(shotDir, "hands-on-about-drive8-diag.png"), fullPage: true });
-  await page.keyboard.press("Escape");
+  await page.evaluate(() => window.__g64?.closeUiSheets?.());
+  await page.locator("#grok64-player").click({ timeout: 5000 }).catch(() => {});
   await page.waitForTimeout(800);
   const afterAboutClose = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
   trace.aboutTyping =
     /OPEN\s*15|PRINT#15|INPUT#15|\?SYNTAX\s+ERROR/i.test(duringAbout) ||
     /OPEN\s*15|PRINT#15/i.test(afterAboutClose);
+  } else {
+    trace.aboutTyping = false;
+    trace.aboutSkipped = true;
+  }
 
-  await page.evaluate(() => window.__g64?.resetReady?.());
-  await page.waitForTimeout(8000);
-  await page.screenshot({ path: join(shotDir, "hands-on-after-reset-ready.png") });
   await page.evaluate(async () => {
-    await window.__g64?.feedBasic?.('LOAD"$",8', { runcmd: true });
-    await window.__g64?.feedBasic?.("LIST", { runcmd: true });
+    await window.__g64?.resetReady?.();
   });
-  const loadWait = await waitForDollarLoad(page, { maxMs: 90_000 });
-  const screenAfter = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
+  await page.screenshot({ path: join(shotDir, "hands-on-after-reset-ready.png") });
+  const dollarList = await page.evaluate(async () => window.__g64?.basicDollarList?.());
+  trace.readyAfterReset = dollarList?.reason !== "not-ready";
+  trace.basicDollarList = dollarList;
+  const loadWait = { done: dollarList?.ok, text: dollarList?.text ?? "", error: dollarList?.reason === "iec-error" };
+  const screenAfter = dollarList?.text ?? (await page.evaluate(() => window.__g64?.screenText?.() ?? ""));
   await page.screenshot({ path: join(shotDir, "hands-on-after-reset-list.png") });
   trace.resetListOk = geosDirectoryOnScreen(screenAfter) || geosDirectoryOnScreen(loadWait?.text ?? "");
   trace.resetAttach = (await page.evaluate(() => window.__g64?.viceAttachedImage?.(8))) ?? null;

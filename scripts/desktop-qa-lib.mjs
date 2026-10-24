@@ -354,7 +354,12 @@ export function baselineDriveLiveOk(live) {
   const iecOk = iecProbeUsable
     ? /CBM\s+DOS/i.test(iecText) && !/VIRTUAL\s+DRIVE/i.test(iecText)
     : live.wasmVdriveErrorIsVirtual !== 1 && !vdriveTrap;
-  return tde && cpu && iecOk;
+  const tdeBytes = live.wasmTdeImageBytes;
+  const tdeBus =
+    tdeBytes == null
+      ? true
+      : tdeBytes >= 174848 && live.wasmGcrLoaded === 1 && live.wasmVdriveImageSame === 1;
+  return tde && cpu && iecOk && tdeBus;
 }
 
 /** Merge attachDiskDiag live probe with C64-side OPEN 15 IEC read. */

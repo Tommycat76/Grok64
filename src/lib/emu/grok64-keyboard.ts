@@ -366,6 +366,24 @@ function scheduleDomKey(
       }
     }
 
+    if (down && stroke.code === "Home") {
+      const homeRetro = RETROK.Home;
+      if (homeRetro != null) {
+        const clr = !!(stroke.mods.shift || mods.shift);
+        if (clr) {
+          fn(RETROK.ShiftLeft, 1, 0, 0);
+          await sleep(24);
+        }
+        await holdRetro(fn, homeRetro, emu);
+        if (clr) {
+          await releaseC64Shift(fn, emu);
+        }
+        eatKeyUp.add(tag);
+        eatKeyUp.add(eventTag(stroke.code, stroke.key));
+        return;
+      }
+    }
+
     if (stroke.swallowUp && C64_GLYPH[stroke.key]?.shift) {
       if (mods.shift) {
         swallowHostShiftUp = true;

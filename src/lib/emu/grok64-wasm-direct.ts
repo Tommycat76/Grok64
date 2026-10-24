@@ -65,6 +65,10 @@ const EXPECTED_GROK64_EXPORTS = [
   "grok64_rom_loaded",
   "grok64_drive_serial_device_type",
   "grok64_drive_vdrive_error_is_virtual",
+  "grok64_drive_tde_image_bytes",
+  "grok64_drive_gcr_loaded",
+  "grok64_drive_vdrive_image_same",
+  "grok64_drive_sync_tde_image",
 ] as const;
 
 /** JS wrapper failed to marshal a UTF-8 path (distinct from C errno). */
@@ -472,6 +476,26 @@ export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
       const fn = resolveWasmExport(mod, "grok64_drive_vdrive_error_is_virtual");
       if (!fn) return null;
       return Number(fn(unit));
+    },
+    driveTdeImageBytes: (unit, drive = 0) => {
+      const fn = resolveWasmExport(mod, "grok64_drive_tde_image_bytes");
+      if (!fn) return null;
+      return Number(fn(unit, drive));
+    },
+    driveGcrLoaded: (unit, drive = 0) => {
+      const fn = resolveWasmExport(mod, "grok64_drive_gcr_loaded");
+      if (!fn) return null;
+      return Number(fn(unit, drive));
+    },
+    driveVdriveImageSame: (unit, drive = 0) => {
+      const fn = resolveWasmExport(mod, "grok64_drive_vdrive_image_same");
+      if (!fn) return null;
+      return Number(fn(unit, drive));
+    },
+    driveSyncTdeImage: (unit, drive = 0) => {
+      const fn = resolveWasmExport(mod, "grok64_drive_sync_tde_image");
+      if (!fn) return -99;
+      return Number(fn(unit, drive));
     },
   };
   return true;

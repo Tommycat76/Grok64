@@ -60,6 +60,19 @@ function readScreenTextWith(
   return lines.join("\n").trimEnd();
 }
 
+/** True when the bottom of the text screen shows a KERNAL READY prompt (not scattered PETSCII). */
+export function screenTextHasReady(text: string): boolean {
+  const lines = text.trimEnd().split("\n");
+  const tail = lines.slice(-4);
+  return tail.some((line) => {
+    const t = line.trim();
+    if (!t) return false;
+    if (/^\*?READY\.?\s*$/i.test(t)) return true;
+    if (/^READY\s/i.test(t)) return true;
+    return false;
+  });
+}
+
 function asciiToScreenCode(ch: string): number {
   const n = ch.charCodeAt(0);
   if (n === 32) return 32;

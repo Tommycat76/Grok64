@@ -104,12 +104,14 @@ import {
   ensureViceSessionDiskAttached,
   resyncSessionDiskToVice,
   waitForC64Ready,
+  clearC64ScreenPetscii,
 } from "@/lib/emu/host";
 import {
   diskAttachFingerprint,
   validateFloppyLibraryPayload,
 } from "@/lib/emu/disk-attach-diag";
 import { geosDirectoryOnScreen } from "@/lib/emu/geos-evidence";
+import { screenTextHasReady } from "@/lib/emu/screen-text";
 import { wasmIecDriveStateFromLive } from "@/lib/emu/iec-probe";
 import {
   GROK64_WASM_BIND_REV,
@@ -137,6 +139,7 @@ import {
   enqueueC64KeyboardStroke,
   flushDeferredC64Keyboard,
   setC64KeyboardDefer,
+  clearDeferredC64Keyboard,
 } from "@/lib/emu/deferred-c64-keys";
 import { presentFloppyMountReady } from "@/lib/emu/disk-mount-ready";
 import { reportMountFailure, runMountStage } from "@/lib/emu/disk-mount-stage";
@@ -785,6 +788,14 @@ export function Grok64App() {
       },
       iecMap: () => useEmu.getState().iecMap,
       resetReady: () => resetReadyRef.current?.(),
+      closeUiSheets: () => {
+        const st = useEmu.getState();
+        st.setAboutOpen(false);
+        st.setSettingsOpen(false);
+        st.setLibraryOpen(false);
+        st.setMapperOpen(false);
+        st.setSnapsOpen(false);
+      },
       powerOff: () => powerOffRef.current?.(),
       setCartLive: (v) => {
         cartLiveRef.current = !!v;
@@ -1063,18 +1074,30 @@ export function Grok64App() {
         setWarp(emu, false);
         useEmu.getState().setWarped(false);
         let head = readScreenText(emu) ?? "";
-        if (!/READY/i.test(head)) {
-          hardReset(emu);
-          const t0 = Date.now();
-          while (Date.now() - t0 < 90_000) {
-            if (!useEmu.getState().booting) {
-              head = readScreenText(emu) ?? "";
-              if (/READY/i.test(head)) break;
-            }
-            await new Promise((r) => setTimeout(r, 400));
+        if (!screenTextHasReady(head)) {
+          clearC64ScreenPetscii(emu);
+          await flushEmuFs(emu, 400);
+          let t0 = Date.now();
+          while (Date.now() - t0 < 12_000) {
+            head = readScreenText(emu) ?? "";
+            if (screenTextHasReady(head)) break;
+            await new Promise((r) => setTimeout(r, 300));
           }
         }
-        if (!/READY/i.test(head)) {
+        if (!screenTextHasReady(head)) {
+          await feedBasicLine(emu, "PRINT CHR$(147)", { runcmd: true });
+          await new Promise((r) => setTimeout(r, 900));
+          head = readScreenText(emu) ?? "";
+        }
+        if (!screenTextHasReady(head)) {
+          hardReset(emu);
+          await waitForC64Ready(emu, 60_000);
+          clearC64ScreenPetscii(emu);
+          await feedBasicLine(emu, "PRINT CHR$(147)", { runcmd: true });
+          await new Promise((r) => setTimeout(r, 900));
+          head = readScreenText(emu) ?? "";
+        }
+        if (!screenTextHasReady(head)) {
           return { ok: false, reason: "not-ready", text: head.slice(0, 400) };
         }
         await ensureViceSessionDiskAttached(emu, 8, "d64");
@@ -1985,7 +2008,7 @@ export function Grok64App() {
     }
   }, []);
 
-  const resetReady = useCallback(() => {
+  const resetReady = useCallback(async () => {
     const emu = emuRef.current;
     const st = useEmu.getState();
     const hadCart =
@@ -2047,8 +2070,10 @@ export function Grok64App() {
     st.setCurrentTitle("BASIC");
     markSessionReady();
     inGameplayRef.current = true;
-    void (async () => {
+    await (async () => {
       if (emu) {
+        grok64KeyboardReleaseAll(emu);
+        clearDeferredC64Keyboard();
         disarmAutostart(emu, "disk");
         const unit = sessionUnitRef.current ?? 8;
         const slot = sessionDiskOnUnit(unit);
@@ -2073,7 +2098,13 @@ export function Grok64App() {
         if (slot?.bytes) {
           try {
             await presentFloppyMountReady(emu, { iec: "1541", unit }, { afterDriveRefresh: true });
+            clearC64ScreenPetscii(emu);
+            await flushEmuFs(emu, 300);
             await waitForC64Ready(emu, 45_000);
+            if (!screenTextHasReady(readScreenText(emu) ?? "")) {
+              await feedBasicLine(emu, "PRINT CHR$(147)", { runcmd: true });
+              await waitForC64Ready(emu, 20_000);
+            }
             glog("reset-reattach", {
               rc: lastViceDiskAttach(unit)?.rc ?? -1,
               path: viceAttachedImage(emu, unit),
@@ -4098,6 +4129,7 @@ export function Grok64App() {
       if (down && e.repeat) return;
       if (down && e.shiftKey && /^Digit[0-9]$/.test(e.code)) {
         await grok64KeyboardDrain();
+        await new Promise((r) => setTimeout(r, 32));
       }
       const handled = grok64RetroKeyboardFromDom(emuRef.current, e.code, e.key, down, {
         shift: e.shiftKey,

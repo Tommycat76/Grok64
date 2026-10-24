@@ -88,7 +88,7 @@ import {
 } from "./formats";
 import type { FastLoadCartKind } from "./jiffy-cart-compat";
 import { jiffyAllowedDuringCartBoot } from "./jiffy-cart-compat";
-import { readScreenText } from "./screen-text";
+import { readScreenText, screenTextHasReady } from "./screen-text";
 import { setSessionCart } from "./session-media";
 import type { SdPartition } from "./sd2iec";
 import type { Sd2iecVolume } from "./sd2iec-volume";
@@ -2580,6 +2580,8 @@ export async function ensureViceSessionDiskAttached(
           `Drive${unit}Type=1541`,
           `Drive${unit}TrueEmulation=1`,
           "DriveTrueEmulation=1",
+          `FileSystemDevice${unit}=0`,
+          `IECDevice${unit}=0`,
           `VirtualDevice${unit}=0`,
           "VirtualDevices=0",
         ].join("\n") + "\n",
@@ -2865,15 +2867,30 @@ export function swapBootDisk(emu: EjsInstance | null, data: Uint8Array, fallback
  * #60 wrote a *new* filename instead of this overwrite — unit 8 stayed
  * the blank work disk and Autostart typed FILE NOT FOUND (not DNP).
  */
+/** PETSCII 147 — CLR screen (HOME/CLR keys); leaves cursor at READY. */
+export function clearC64ScreenPetscii(emu: EjsInstance | null): boolean {
+  const mod = emu?.Module as Parameters<typeof bindGrok64WasmExports>[0] | undefined;
+  if (!mod) return false;
+  bindGrok64WasmExports(mod);
+  const feed = grok64WasmApi(mod)?.kbdbufFeed;
+  if (!feed) return false;
+  try {
+    feed(String.fromCharCode(147));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Wait until KERNAL prints READY (after hard reset / GEOS mount). */
 export async function waitForC64Ready(emu: EjsInstance | null, timeoutMs = 45_000): Promise<boolean> {
   const t0 = Date.now();
   while (Date.now() - t0 < timeoutMs) {
     const text = readScreenText(emu);
-    if (/READY/i.test(text)) return true;
+    if (screenTextHasReady(text)) return true;
     await new Promise((r) => setTimeout(r, 250));
   }
-  return /READY/i.test(readScreenText(emu));
+  return screenTextHasReady(readScreenText(emu));
 }
 
 /** GEOS / Wheels need the stock KERNAL — JiffyDOS ROM breaks LOAD/RUN into the deskTop. */

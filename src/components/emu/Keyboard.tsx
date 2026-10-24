@@ -143,14 +143,6 @@ export function C64Keyboard() {
     (k: C64Key) => {
       setDownId(k.id);
       if (k.modifier) return;
-      if (k.id === "clr") {
-        (window as { __g64?: { feedPetscii?: (n: number) => boolean } }).__g64?.feedPetscii?.(147);
-        return;
-      }
-      if (k.id === "home") {
-        (window as { __g64?: { feedPetscii?: (n: number) => boolean } }).__g64?.feedPetscii?.(19);
-        return;
-      }
       const digitOnSym = sym && /^[0-9]$/.test(k.id);
       const stroke = touchC64Stroke(k, digitOnSym ? false : shift);
       if (k.forceShift && !shift) dispatchC64Key("ShiftLeft", "Shift", true);

@@ -41,6 +41,10 @@ const GROK64_EXPORTS = [
   "_grok64_rom_loaded",
   "_grok64_drive_serial_device_type",
   "_grok64_drive_vdrive_error_is_virtual",
+  "_grok64_drive_tde_image_bytes",
+  "_grok64_drive_gcr_loaded",
+  "_grok64_drive_vdrive_image_same",
+  "_grok64_drive_sync_tde_image",
 ];
 
 let text = readFileSync(makefile, "utf8");

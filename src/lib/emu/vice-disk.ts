@@ -444,6 +444,10 @@ function viceReattachDiskSync(
     const attachRc = api.diskLastAttachRc?.();
     if (rc < 0 && typeof attachRc === "number" && attachRc >= 0) rc = attachRc;
     if (rc === 0) {
+      const syncTde = api?.driveSyncTdeImage?.(unit, drive);
+      if (typeof syncTde === "number" && syncTde < 0 && syncTde !== -99) {
+        glog("vice-disk-sync-tde-warn", { unit, path, syncTde, label: viceAttachRcLabel(syncTde) });
+      }
       const reloadRc = reloadViceDriveImage(emu, unit, drive);
       if (reloadRc < 0 && reloadRc !== -99) {
         glog("vice-disk-reload-warn", { unit, path, reloadRc, label: viceAttachRcLabel(reloadRc) });
@@ -495,6 +499,9 @@ export type ViceDriveLiveProbe = {
   wasmRomLoaded: number | null;
   wasmSerialDeviceType: number | null;
   wasmVdriveErrorIsVirtual: number | null;
+  wasmTdeImageBytes: number | null;
+  wasmGcrLoaded: number | null;
+  wasmVdriveImageSame: number | null;
   sessionLabel: string | null;
 };
 
@@ -537,6 +544,9 @@ export function viceDriveLiveProbe(emu: ViceDiskEmu | null, unit: IecUnit = 8, d
     wasmRomLoaded: api?.romLoaded?.() ?? null,
     wasmSerialDeviceType: api?.driveSerialDeviceType?.(unit) ?? null,
     wasmVdriveErrorIsVirtual: api?.driveVdriveErrorIsVirtual?.(unit) ?? null,
+    wasmTdeImageBytes: api?.driveTdeImageBytes?.(unit, drive) ?? null,
+    wasmGcrLoaded: api?.driveGcrLoaded?.(unit, drive) ?? null,
+    wasmVdriveImageSame: api?.driveVdriveImageSame?.(unit, drive) ?? null,
     sessionLabel,
   };
 }

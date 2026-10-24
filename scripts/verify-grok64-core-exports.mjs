@@ -43,6 +43,10 @@ const REQUIRED = [
   "grok64_rom_loaded",
   "grok64_drive_serial_device_type",
   "grok64_drive_vdrive_error_is_virtual",
+  "grok64_drive_tde_image_bytes",
+  "grok64_drive_gcr_loaded",
+  "grok64_drive_vdrive_image_same",
+  "grok64_drive_sync_tde_image",
 ];
 
 rmSync(tmp, { recursive: true, force: true });
