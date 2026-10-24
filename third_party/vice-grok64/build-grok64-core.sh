@@ -9,7 +9,7 @@ OUT="${ROOT}/public/system/vice/emulatorjs/data/cores"
 
 source "${EMS}/emsdk_env.sh"
 
-bash "${ROOT}/third_party/vice-grok64/apply-patches.sh" "${VICE}" 2>/dev/null || true
+bash "${ROOT}/third_party/vice-grok64/apply-patches.sh" "${VICE}"
 
 cd "${VICE}"
 emmake make clean EMUTYPE=x64sc

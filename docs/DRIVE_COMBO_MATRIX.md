@@ -2,7 +2,7 @@
 
 **Status: PARKED** — Full IEC matrix (`GROK64_DRIVE_COMBO_UNPARK=1`) stays off until Tom signs off **emulator baseline** (cart + Jiffy + library floppy Play/Insert on dirty profiles).
 
-**Baseline track (2026-10-24):** **`518f732634af`** core — serial **REAL** route, BMC64-style **unit‑8 flush** (detach/reattach + reconcile + **`viceRcSafeFloppyProfile` restore** for CMD/secondary drives), runtime **floppy isolate** only during reconcile; **SD2IEC unit skipped**. About **`viceLoadDollarDiag`** + **`profilePersistDiff`**. Comparison + no-regression smokes: `docs/GEOS_REFERENCE_EMULATOR_COMPARISON.md`, `npm run test:desktop-grok64-feature-smoke`. Gates: `test:desktop-geos-insert-user-dirty`, `test:desktop-sd2iec-iec`. No merge/deploy without Tom.
+**Baseline track (2026-10-24):** **`faaf40949509`** core (attach without nested iec reconcile; JS never double-reconciles) — serial **REAL** route, BMC64-style **unit‑8 flush** (detach/reattach + reconcile + **`viceRcSafeFloppyProfile` restore** for CMD/secondary drives), runtime **floppy isolate** only during reconcile; **SD2IEC unit skipped**. About **`viceLoadDollarDiag`** + **`profilePersistDiff`**. Comparison + no-regression smokes: `docs/GEOS_REFERENCE_EMULATOR_COMPARISON.md`, `npm run test:desktop-grok64-feature-smoke`. Gates: `test:desktop-geos-insert-user-dirty`, `test:desktop-sd2iec-iec`. No merge/deploy without Tom.
 
 **Last updated:** 2026-10-24 (spec + harness; **no matrix PASS/FAIL rows** until unpark)
 

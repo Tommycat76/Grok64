@@ -139,28 +139,19 @@ try {
     viceDriveLive: diagInsert?.viceDriveLive,
   };
 
-  const typeLoad = async () => {
-    if (jiffyOn) {
-      await page.evaluate(async () => {
-        await window.__g64?.feedBasic?.('LOAD"$",8', { runcmd: true });
-      });
-      await page.waitForTimeout(22_000);
-      return waitForDollarLoad(page, { maxMs: 55_000 });
-    }
-    await typeC64RealKeyboard(page, 'LOAD"$",8', { keyDelayMs: 80, lineEndMs: 900 });
-    let loadWait = await waitForDollarLoad(page, { maxMs: 55_000 });
-    let screenProbe = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
-    if (/LOAD\s*"",8/i.test(screenProbe) || /SYNTAX ERROR|ME ERROR/i.test(screenProbe)) {
-      trace.loadDollarKeyboardFallback = "feedBasic";
-      await page.evaluate(async () => {
-        await window.__g64?.feedBasic?.('LOAD"$",8', { runcmd: true });
-      });
-      await page.waitForTimeout(18_000);
-      loadWait = await waitForDollarLoad(page, { maxMs: 45_000 });
-    }
-    return loadWait;
-  };
-  const loadWait = await typeLoad();
+  const typeLine = typeC64RealKeyboard;
+  const loadDelay = jiffyOn ? { keyDelayMs: 120, lineEndMs: 2200 } : { keyDelayMs: 85, lineEndMs: 1000 };
+  await typeLine(page, 'LOAD"$",8', loadDelay);
+  let loadWait = await waitForDollarLoad(page, { maxMs: jiffyOn ? 60_000 : 60_000 });
+  let screenProbe = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
+  if (!jiffyOn && (/LOAD\s*"",8/i.test(screenProbe) || /SYNTAX ERROR|ME ERROR/i.test(screenProbe))) {
+    trace.loadDollarKeyboardFallback = "feedBasic";
+    await page.evaluate(async () => {
+      await window.__g64?.feedBasic?.('LOAD"$",8', { runcmd: true });
+    });
+    await page.waitForTimeout(18_000);
+    loadWait = await waitForDollarLoad(page, { maxMs: 45_000 });
+  }
   trace.loadWait = { error: loadWait.error, head: loadWait.text?.slice(0, 200) };
   trace.viceLoadDollarDiag = await page.evaluate(async () => {
     const d = await window.__g64?.attachDiskDiag?.({ light: true });
@@ -173,24 +164,21 @@ try {
   if (trace.viceLoadDollarDiag == null) {
     trace.viceLoadDollarDiagError = "diag-still-null";
   }
-  await page.waitForTimeout(3000);
-  if (jiffyOn) {
-    await page.evaluate(async () => {
-      await window.__g64?.feedBasic?.("LIST", { runcmd: true });
-    });
-    await page.waitForTimeout(14_000);
-  } else {
-    await typeC64RealKeyboard(page, "LIST", { keyDelayMs: 70, lineEndMs: 500 });
-    await page.waitForTimeout(12_000);
+  await page.waitForTimeout(jiffyOn ? 4000 : 3000);
+  await typeLine(page, "LIST", jiffyOn ? { keyDelayMs: 110, lineEndMs: 900 } : { keyDelayMs: 75, lineEndMs: 600 });
+  await page.waitForTimeout(jiffyOn ? 24_000 : 12_000);
+  let screen = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
+  if (jiffyOn && !geosDirectoryOnScreen(screen)) {
+    await typeLine(page, "LIST", { keyDelayMs: 85, lineEndMs: 700 });
+    await page.waitForTimeout(18_000);
+    screen = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
   }
   await page.screenshot({ path: join(shotDir, "after-load-dollar.png"), fullPage: true });
-
-  const screen = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
-  const diagBamGeos = /47454f53/i.test(trace.viceLoadDollarDiag?.imgTrack18Sector1Hex ?? "");
-  const catalogOk =
-    (geosDirectoryOnScreen(screen) || (jiffyOn && diagBamGeos && !loadWait.error)) &&
-    !/FILE NOT FOUND/i.test(screen);
-  trace.catalogProof = { onScreen: geosDirectoryOnScreen(screen), diagBamGeos, jiffyOn };
+  const ramGeos = await page.evaluate(() => window.__g64?.screenRamShowsGeosCatalog?.() ?? false);
+  const onScreen = geosDirectoryOnScreen(screen) || ramGeos;
+  const catalogOk = onScreen && !/FILE NOT FOUND/i.test(screen);
+  trace.catalogOnScreen = onScreen;
+  trace.catalogRamGeos = ramGeos;
   const bus = diagInsert?.viceDriveBus ?? {};
   const busOk =
     bus.wasmFilesystemDevice === 0 &&

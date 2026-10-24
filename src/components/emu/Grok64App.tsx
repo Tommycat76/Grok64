@@ -320,7 +320,7 @@ import {
 import { createMenuJoyGate, menuJoyStep, resetMenuJoyGate } from "@/lib/emu/menu-joy.mjs";
 import { applyStickPrecision, createStickPrecision, resetStickPrecision } from "@/lib/emu/stick-precision.mjs";
 import { publicUrl } from "@/lib/public-url";
-import { readScreenText } from "@/lib/emu/screen-text";
+import { readScreenText, screenRamShowsGeosCatalog } from "@/lib/emu/screen-text";
 import { applyEmuVolume, gestureUnlockAudio, pokeAudioUnlock } from "@/lib/emu/audio-unlock";
 import {
   forceIosMirrorBlit,
@@ -947,6 +947,7 @@ export function Grok64App() {
         }
       },
       screenText: () => readScreenText(emuRef.current),
+      screenRamShowsGeosCatalog: () => screenRamShowsGeosCatalog(emuRef.current),
       workD64Bytes: () => viceWorkD64ByteLength(emuRef.current),
       viceAttachedImage: (unit = 8) => viceAttachedImage(emuRef.current, unit as 8),
       viceDriveLive: (unit = 8) => viceDriveLiveProbe(emuRef.current, unit as 8),
@@ -3715,19 +3716,16 @@ export function Grok64App() {
     setC64KeyboardDefer(true);
     const iec = useEmu.getState().iecDrive;
     const boot = bootFileName(file.name, kind);
-    const mounted = bootFileOf(emuRef.current);
-    const ok = mounted
-      ? attachAutostartDisk(emuRef.current, media, file.name, iec, unit, { deferViceReattach: true })
-      : mountDiskOnUnit(emuRef.current, unit, media, boot, iec);
+    const ok = mountDiskOnUnit(emuRef.current, unit, media, boot, iec);
     if (!ok) {
       toast.error("Could not mount that disk");
       return;
     }
-    bootPathRef.current = isGcrDiskKind(kind) ? file.name : mounted ?? boot;
+    bootPathRef.current = isGcrDiskKind(kind) ? file.name : boot;
     if (isGcrDiskKind(kind)) {
       emuRef.current.fileName = file.name.replace(/^\//, "");
-    } else if (mounted) {
-      emuRef.current.fileName = mounted.replace(/^\//, "");
+    } else {
+      emuRef.current.fileName = boot.replace(/^\//, "");
     }
     try {
       detachGrok64Sd2iec(emuRef.current, unit);

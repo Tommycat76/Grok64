@@ -4,7 +4,7 @@
 
 **No-regression:** Flush + safe-profile work must **not** break any **Grok64-only** feature below (not only SD2IEC). After floppy isolate during flush, Grok64 **restores** the user IEC map via `viceRcSafeFloppyProfile` so **CMD HD/FD**, secondary units, and Settings layout stay live.
 
-**Grok64 core:** `518f732634af` (VICE **3.9.0** lineage). Glue: `diskapi-v18-profile-persist-atn`.
+**Grok64 core:** `faaf40949509` (VICE **3.9.0** lineage; rebuilt after removing nested attach/reconcile). Glue: `diskapi-v18-profile-persist-atn`.
 
 **Screenshot smoke (all Grok64-only surfaces):**  
 `npm run test:desktop-grok64-feature-smoke` → `screenshots/grok64-feature-smoke/*.png` + `artifacts/grok64-feature-smoke/smoke.json`  

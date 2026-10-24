@@ -7,7 +7,10 @@ const ROW = [
 
 /** PETSCII screencode (0x01–0xFF) → display char for directory / BASIC listings. */
 function petToChar(code: number): string {
-  const c = code & 0xff;
+  let c = code & 0xff;
+  if (c >= 0x80 && c <= 0xfe) {
+    c -= 0x80;
+  }
   if (c === 0 || c === 32 || c === 160) return " ";
   if (c >= 1 && c <= 26) return String.fromCharCode(64 + c);
   if (c >= 48 && c <= 57) return String.fromCharCode(c);
@@ -98,6 +101,29 @@ export function paintScreenLines(emu: RamEmu | null, lines: string[], startRow =
       writeC64Byte(emu, base + col, asciiToScreenCode(line[col] ?? " "));
     }
   }
+}
+
+/** True when 40×25 screen RAM contains a GEOS directory entry (PETSCII screencodes G,E,O,S). */
+export function screenRamShowsGeosCatalog(emu: RamEmu | null): boolean {
+  if (!emu) return false;
+  const codes: number[] = [];
+  for (let row = 0; row < 25; row++) {
+    const base = ROW[row] ?? 0x0400 + row * 40;
+    for (let col = 0; col < 40; col++) {
+      const b = readC64Byte(emu, base + col);
+      if (b !== null) codes.push(b & 0xff);
+    }
+  }
+  const norm = codes.map((c) => (c >= 0x80 && c <= 0xfe ? c - 0x80 : c));
+  for (let i = 0; i + 3 < norm.length; i++) {
+    const a = norm[i];
+    const b = norm[i + 1];
+    const c = norm[i + 2];
+    const d = norm[i + 3];
+    if (a === 7 && b === 5 && c === 15 && d === 19) return true;
+    if (a === 0x47 && b === 0x45 && c === 0x4f && d === 0x53) return true;
+  }
+  return /GEOS/i.test(readScreenTextWith((addr) => readC64Byte(emu, addr)));
 }
 
 export function readScreenText(emu: RamEmu | null): string {

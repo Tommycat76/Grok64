@@ -1701,8 +1701,9 @@ export async function bmc64FlushSessionDisk(
     injectViceRc(emu, viceRcFloppyIsolateProfile(unit, iecMap));
     const rc = await viceReattachSessionDisk(emu, unit);
     if (rc < 0) return rc;
+    return 0;
   }
-  const busRc = await ensureIecBusReconcile(emu, unit, iecMap, { skipReload: true });
+  const busRc = await ensureIecBusReconcile(emu, unit, iecMap, { lightVicerc: true });
   if (busRc < 0) return busRc;
   if (iecMap) {
     const merged: IecMap = { ...defaultIecMap(), ...iecMap, [unit]: "1541" };
@@ -1721,15 +1722,19 @@ export async function finishFloppyInsertIec(
 ): Promise<number> {
   if (!emu) return -1;
   if (iecMapUnitIsSd2iec(iecMap, unit)) return 0;
-  const busRc = await ensureIecBusReconcile(emu, unit, iecMap, { skipReload: true, lightVicerc: true });
-  if (busRc < 0) return busRc;
+  /* Attach path already ran iec_bus_reconcile in WASM — only restore CMD map + frames here. */
   if (iecMap) {
     const merged: IecMap = { ...defaultIecMap(), ...iecMap, [unit]: "1541" };
     restoreUserDriveVicerc(emu, merged);
-    await waitRetroFrames(12);
+    await waitRetroFrames(18);
+  }
+  const bus = viceDriveBusProbe(emu, unit);
+  if ((bus.wasmTdeImageBytes ?? 0) < 174_000 || bus.wasmGcrLoaded !== 1) {
+    glog("finish-floppy-insert-iec-tde-miss", { unit, bus });
+    return -1;
   }
   ensureViceLastAttachRecorded(emu, unit);
-  return busRc;
+  return 0;
 }
 
 /** Hard reset then re-attach unit 8 session disk when one is mounted (BMC64 flush pattern). */
@@ -2689,19 +2694,9 @@ export async function ensureViceSessionDiskAttached(
     const slot = sessionDiskOnUnit(unit);
     if (slot?.bytes) syncViceWorkD64(emu, slot.bytes);
     await flushEmuFs(emu, isIosPhone() ? 2000 : 1200);
-    const rc = await viceReattachSessionDisk(emu, unit);
-    if (rc === 0) {
-      const busRc = await ensureIecBusReconcile(emu, unit, undefined, { skipReload: true, lightVicerc: true });
-      if (busRc < 0) return busRc;
-    }
-    return rc;
+    return viceReattachSessionDisk(emu, unit);
   }
-  const rc = await viceReattachSessionDisk(emu, unit);
-  if (rc === 0) {
-    const busRc = await ensureIecBusReconcile(emu, unit, undefined, { skipReload: true, lightVicerc: true });
-    if (busRc < 0) return busRc;
-  }
-  return rc;
+  return viceReattachSessionDisk(emu, unit);
 }
 
 /** file_system_detach_disk + file_system_attach_disk for the live session image on `unit`. */

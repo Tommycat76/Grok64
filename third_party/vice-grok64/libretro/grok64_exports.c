@@ -451,7 +451,7 @@ int grok64_disk_attach(int unit, int drive, const char *path)
             last_disk_attach_rc = sync_rc;
             return sync_rc;
         }
-        /* IEC reconcile once from JS (avoid nested attach/reconcile stack overflow). */
+        /* iec_bus_reconcile: JS calls once after attach (not here — nested reconcile stack overflow). */
     }
     return last_disk_attach_rc;
 }
