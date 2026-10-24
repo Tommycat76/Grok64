@@ -46,6 +46,22 @@ function asFn(v: unknown): WasmFn | null {
   return typeof v === "function" ? (v as WasmFn) : null;
 }
 
+/** All Emscripten Module bags that may host Grok64 exports (EJS sometimes uses __ejs.Module). */
+export function emuWasmModuleBags(emu: unknown): Grok64ModuleBag[] {
+  const e = emu as { Module?: Grok64ModuleBag } | null;
+  const w =
+    typeof window !== "undefined"
+      ? (window as unknown as { __ejs?: { Module?: Grok64ModuleBag } }).__ejs
+      : null;
+  const out: Grok64ModuleBag[] = [];
+  const push = (m: Grok64ModuleBag | null | undefined) => {
+    if (m && !out.includes(m)) out.push(m);
+  };
+  push(e?.Module);
+  push(w?.Module);
+  return out;
+}
+
 /** Resolve a WASM export by logical name (no leading underscore). */
 export function resolveWasmExport(mod: Grok64ModuleBag | null | undefined, baseName: string): WasmFn | null {
   if (!mod) return null;
@@ -66,39 +82,65 @@ export function resolveWasmExport(mod: Grok64ModuleBag | null | undefined, baseN
 }
 
 export function grok64DiskAttachCallable(mod: Grok64ModuleBag | null | undefined): boolean {
-  return resolveWasmExport(mod, "grok64_disk_attach") != null;
+  if (resolveWasmExport(mod, "grok64_disk_attach")) return true;
+  return false;
 }
 
 export function grok64WorkDiskRefreshCallable(mod: Grok64ModuleBag | null | undefined): boolean {
   return resolveWasmExport(mod, "grok64_work_disk_refresh") != null;
 }
 
-export function listGrok64WasmExportNames(mod: Grok64ModuleBag | null | undefined): string[] {
-  if (!mod) return [];
-  const out = new Set<string>();
-  const m = mod as WasmBag & Record<string, unknown>;
-  for (const key of Object.keys(m)) {
-    if (/grok64_/i.test(key) && asFn(m[key])) out.add(key.replace(/^_/, ""));
+export function grok64WorkDiskRefreshCallableEmu(emu: unknown): boolean {
+  return emuWasmModuleBags(emu).some((mod) => grok64WorkDiskRefreshCallable(mod));
+}
+
+export function grok64DiskAttachCallableEmu(emu: unknown): boolean {
+  for (const mod of emuWasmModuleBags(emu)) {
+    if (grok64DiskAttachCallable(mod)) return true;
   }
-  for (const bag of [m.wasmExports, m.asm, m.instance?.exports as Record<string, unknown> | undefined]) {
-    if (!bag) continue;
+  return false;
+}
+
+export function listGrok64WasmExportNames(mod: Grok64ModuleBag | null | undefined): string[] {
+  const mods = mod ? [mod] : [];
+  const out = new Set<string>();
+  for (const m of mods) {
+    const bag = m as WasmBag & Record<string, unknown>;
     for (const key of Object.keys(bag)) {
       if (/grok64_/i.test(key) && asFn(bag[key])) out.add(key.replace(/^_/, ""));
     }
+    for (const wasmBag of [bag.wasmExports, bag.asm, bag.instance?.exports as Record<string, unknown> | undefined]) {
+      if (!wasmBag) continue;
+      for (const key of Object.keys(wasmBag)) {
+        if (/grok64_/i.test(key) && asFn(wasmBag[key])) out.add(key.replace(/^_/, ""));
+      }
+    }
+    for (const name of EXPECTED_GROK64_EXPORTS) {
+      if (resolveWasmExport(m, name)) out.add(name);
+    }
   }
-  for (const name of EXPECTED_GROK64_EXPORTS) {
-    if (resolveWasmExport(mod, name)) out.add(name);
+  return [...out].sort();
+}
+
+export function listGrok64WasmExportNamesEmu(emu: unknown): string[] {
+  const out = new Set<string>();
+  for (const mod of emuWasmModuleBags(emu)) {
+    for (const n of listGrok64WasmExportNames(mod)) out.add(n);
   }
   return [...out].sort();
 }
 
 export function grok64WasmExportDiag(mod: Grok64ModuleBag | null | undefined) {
+  return grok64WasmExportDiagEmu(mod ? { Module: mod } : null);
+}
+
+export function grok64WasmExportDiagEmu(emu: unknown) {
   const callable: Record<string, boolean> = {};
   for (const name of EXPECTED_GROK64_EXPORTS) {
-    callable[name] = resolveWasmExport(mod, name) != null;
+    callable[name] = emuWasmModuleBags(emu).some((mod) => resolveWasmExport(mod, name) != null);
   }
   return {
-    wasmExportNames: listGrok64WasmExportNames(mod),
+    wasmExportNames: listGrok64WasmExportNamesEmu(emu),
     callable,
     diskAttach: callable.grok64_disk_attach ?? false,
     workDiskRefresh: callable.grok64_work_disk_refresh ?? false,

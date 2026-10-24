@@ -6,7 +6,8 @@
 
 import {
   grok64DiskAttachCallable,
-  grok64WorkDiskRefreshCallable,
+  grok64DiskAttachCallableEmu,
+  grok64WorkDiskRefreshCallableEmu,
 } from "./grok64-wasm-direct";
 import type { Grok64WasmModule } from "./grok64-wasm-bind";
 
@@ -57,10 +58,10 @@ export function grok64WasmApi(mod: Grok64ModuleBag | null | undefined): Grok64Wa
 
 /** True when the WASM module exposes grok64_work_disk_refresh (callable, not just JS wrapper). */
 export function grok64WorkDiskRefreshExportReady(mod: Grok64ModuleBag | null | undefined): boolean {
-  return grok64WorkDiskRefreshCallable(mod);
+  return grok64WorkDiskRefreshCallableEmu(mod ? { Module: mod } : null);
 }
 
 /** True when grok64_disk_attach resolves to a WASM function. */
 export function grok64DiskAttachExportReady(mod: Grok64ModuleBag | null | undefined): boolean {
-  return grok64DiskAttachCallable(mod);
+  return grok64DiskAttachCallableEmu(mod ? { Module: mod } : null);
 }

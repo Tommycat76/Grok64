@@ -111,7 +111,7 @@ import {
   grok64WasmApi,
   grok64WorkDiskRefreshExportReady,
 } from "@/lib/emu/grok64-api";
-import { grok64WasmExportDiag } from "@/lib/emu/grok64-wasm-direct";
+import { grok64WasmExportDiagEmu } from "@/lib/emu/grok64-wasm-direct";
 import {
   bindGrok64DiskExports,
   grok64DiskExportsReady,
@@ -926,7 +926,7 @@ export function Grok64App() {
           viceLastReattach: lastViceDiskAttach(unit),
           viceSaveDirectory: viceRetroSaveDirectory(emuRef.current),
           viceDiskExports: grok64DiskExportsReady(emuRef.current),
-          diskExportsPresent: grok64DiskExportsReady(emuRef.current),
+          diskExportsPresent: grok64DiskAttachExportReady(emuRef.current?.Module),
           workDiskRefreshExport: (() => {
             const mod = emuRef.current?.Module;
             if (mod) bindGrok64DiskExports(mod as Parameters<typeof bindGrok64DiskExports>[0]);
@@ -935,11 +935,11 @@ export function Grok64App() {
           diskAttachDiagExport: (() => {
             const mod = emuRef.current?.Module;
             if (mod) bindGrok64DiskExports(mod as Parameters<typeof bindGrok64DiskExports>[0]);
-            return grok64WasmExportDiag(mod).callable.grok64_disk_last_attach_diag === true;
+            return grok64WasmExportDiagEmu(emuRef.current).callable.grok64_disk_last_attach_diag === true;
           })(),
           diskAttachExport: grok64DiskAttachExportReady(emuRef.current?.Module),
-          wasmExportNames: grok64WasmExportDiag(emuRef.current?.Module).wasmExportNames,
-          wasmExportCallable: grok64WasmExportDiag(emuRef.current?.Module).callable,
+          wasmExportNames: grok64WasmExportDiagEmu(emuRef.current).wasmExportNames,
+          wasmExportCallable: grok64WasmExportDiagEmu(emuRef.current).callable,
           viceLastAttachDiag: viceDiskLastAttachDiag(emuRef.current),
           attachPathProbe: probeViceAttachPaths(
             emuRef.current,
@@ -966,6 +966,46 @@ export function Grok64App() {
       debugWasmIec: (dev, sec) => debugWasmIec(dev, sec),
       iecOpenDollarChannel: (unit = 8) => iecOpenDollarChannel(emuRef.current, unit as 8 | 9 | 10 | 11 | 12),
       feedBasic: (line) => feedBasicLine(emuRef.current, line),
+      hardReset: () => {
+        hardReset(emuRef.current);
+        return true;
+      },
+      /** QA: hard reset → READY → LOAD"$",8 → LIST (GEOS listing proof). */
+      basicDollarList: async () => {
+        const emu = emuRef.current;
+        if (!emu) return { ok: false, reason: "no-emu" };
+        setWarp(emu, false);
+        useEmu.getState().setWarped(false);
+        hardReset(emu);
+        const t0 = Date.now();
+        while (Date.now() - t0 < 90_000) {
+          if (!useEmu.getState().booting) {
+            const t = readScreenText(emu) ?? "";
+            if (/READY/i.test(t)) break;
+          }
+          await new Promise((r) => setTimeout(r, 400));
+        }
+        const head = readScreenText(emu) ?? "";
+        if (!/READY/i.test(head)) {
+          return { ok: false, reason: "not-ready", text: head.slice(0, 400) };
+        }
+        if (!(await feedBasicLine(emu, 'LOAD"$",8'))) {
+          return { ok: false, reason: "load-fail", text: (readScreenText(emu) ?? "").slice(0, 400) };
+        }
+        await new Promise((r) => setTimeout(r, 14_000));
+        if (!(await feedBasicLine(emu, "LIST"))) {
+          return { ok: false, reason: "list-fail", text: (readScreenText(emu) ?? "").slice(0, 400) };
+        }
+        await new Promise((r) => setTimeout(r, 8000));
+        const text = readScreenText(emu) ?? "";
+        const unit = 8;
+        return {
+          ok: /GEOS/i.test(text) && !/FILE NOT FOUND/i.test(text) && !/^work\s*disk/i.test(text),
+          text: text.slice(0, 1600),
+          viceAttachedImage: viceAttachedImage(emu, unit),
+          viceLastReattach: lastViceDiskAttach(unit),
+        };
+      },
       printTi: async () => readPrintTi(emuRef.current, () => readScreenText(emuRef.current)),
       geosMountAndDir: async (name, bytes) => {
         let buf: ArrayBuffer;

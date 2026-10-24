@@ -88,7 +88,11 @@ export async function assertGrok64WasmCore(page, { timeoutMs = 90000 } = {}) {
   let last = null;
   while (Date.now() - t0 < timeoutMs) {
     last = await readGrok64CoreStatus(page);
-    if (last?.attach && last?.c64read && last?.diskExportsPresent) return last;
+    const diag = await page.evaluate(async () => window.__g64?.attachDiskDiag?.());
+    const diskOk =
+      diag?.diskAttachExport === true &&
+      diag?.wasmExportCallable?.grok64_disk_attach === true;
+    if (last?.attach && last?.c64read && diskOk) return { ...last, attachDiskDiag: diag };
     await page.waitForTimeout(500);
   }
   const blocked = await page.evaluate(() => window.__GROK64_STOCK_CORE_BLOCKED__ ?? []);

@@ -10,7 +10,12 @@ import {
   grok64WorkDiskRefreshExportReady,
   type Grok64ModuleBag,
 } from "./grok64-api";
-import { bindGrok64DiskApiDirect, grok64DiskAttachCallable } from "./grok64-wasm-direct";
+import {
+  bindGrok64DiskApiDirect,
+  emuWasmModuleBags,
+  grok64DiskAttachCallable,
+  grok64DiskAttachCallableEmu,
+} from "./grok64-wasm-direct";
 import { isGrok64DiskExportsBound, markGrok64DiskExportsBound } from "./grok64-wasm-bind";
 
 type EmuFs = { stat?: (p: string) => unknown };
@@ -21,8 +26,10 @@ function fsOf(emu: ViceDiskEmu | null): EmuFs | null {
 }
 
 function diskMod(emu: ViceDiskEmu | null): Grok64ModuleBag | null {
+  const bags = emuWasmModuleBags(emu);
   const e = emu as { Module?: Grok64ModuleBag & { UTF8ToString?: (ptr: number) => string } } | null;
-  const mod = e?.Module ?? null;
+  const mod =
+    bags.find((m) => grok64DiskAttachCallable(m)) ?? bags[0] ?? e?.Module ?? null;
   if (mod && !mod.UTF8ToString) {
     const m = mod as Grok64ModuleBag & { UTF8ToString?: (ptr: number) => string };
     m.UTF8ToString =
@@ -65,10 +72,10 @@ export function bindGrok64DiskExports(mod: Grok64ModuleBag): void {
 }
 
 export function grok64DiskExportsReady(emu: ViceDiskEmu | null): boolean {
-  const mod = diskMod(emu);
-  if (!mod) return false;
-  if (!grok64DiskAttachCallable(mod)) bindGrok64DiskExports(mod);
-  return grok64DiskAttachCallable(mod);
+  for (const mod of emuWasmModuleBags(emu)) {
+    if (!grok64DiskAttachCallable(mod)) bindGrok64DiskExports(mod);
+  }
+  return grok64DiskAttachCallableEmu(emu);
 }
 
 export { grok64WorkDiskRefreshExportReady };

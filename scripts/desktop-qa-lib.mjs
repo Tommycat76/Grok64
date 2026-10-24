@@ -316,17 +316,11 @@ export async function ensureReal1541Timing(page) {
 
 export async function typeBasic(page, text, { afterMs = 12_000, listAfterDollar = null } = {}) {
   const wantList = listAfterDollar ?? /LOAD\s*"\$"/i.test(text);
-  const ok = await page.evaluate(async (line) => {
-    window.__ejs?.Module?._grok64_sd2iec_attach?.(8);
-    return Boolean(await window.__g64?.feedBasic?.(line));
-  }, text);
+  const ok = await page.evaluate(async (line) => Boolean(await window.__g64?.feedBasic?.(line)), text);
   if (!ok) throw new Error("feedBasic failed");
   await page.waitForTimeout(wantList ? 18_000 : afterMs);
   if (wantList) {
-    const listed = await page.evaluate(async () => {
-      window.__ejs?.Module?._grok64_sd2iec_attach?.(8);
-      return Boolean(await window.__g64?.feedBasic?.("LIST"));
-    });
+    const listed = await page.evaluate(async () => Boolean(await window.__g64?.feedBasic?.("LIST")));
     if (!listed) throw new Error("feedBasic LIST failed");
     await page.waitForTimeout(afterMs);
   }

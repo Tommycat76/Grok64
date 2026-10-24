@@ -4,11 +4,16 @@
  * Jiffy on, REU 2MB. GEOS D64 dir + deskTop; second library Run; About Escape.
  */
 import { chromium } from "playwright";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { patchLocalStorage, powerOnDesktop, typeBasic, waitRunning, waitForG64 } from "./desktop-qa-lib.mjs";
-import { assertGrok64WasmCore, clearEmulatorJsCache, grok64DatapathFromEnv } from "./desktop-grok64-core.mjs";
+import {
+  assertGrok64WasmCore,
+  clearEmulatorJsCache,
+  grok64CoreBuildIdFromManifest,
+  grok64DatapathFromEnv,
+} from "./desktop-grok64-core.mjs";
 
 const base = process.env.GROK64_BASE_URL || "http://127.0.0.1:8080/";
 const shotDir = join(process.cwd(), "screenshots", "geos-mount-proof");
@@ -81,6 +86,16 @@ async function runFromLibrary(page, label) {
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 const report = { steps: [] };
+const committedCore = join(
+  process.cwd(),
+  "public/system/vice/emulatorjs/data/cores/vice_x64sc-grok64-iec-wasm.data",
+);
+const committedSha = createHash("sha256").update(readFileSync(committedCore)).digest("hex");
+report.committedCore = {
+  buildId: grok64CoreBuildIdFromManifest(),
+  sha256: committedSha,
+  bytes: readFileSync(committedCore).byteLength,
+};
 
 try {
   await page.goto(base, { waitUntil: "domcontentloaded" });
@@ -133,14 +148,16 @@ try {
     ...first,
   });
 
-  await typeBasic(page, 'LOAD"$",8', { afterMs: 12_000 });
-  await page.waitForTimeout(3000);
-  await typeBasic(page, "LIST", { afterMs: 10_000 });
-  await page.waitForTimeout(2000);
-  const list = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
+  const dollarList = await page.evaluate(async () => window.__g64?.basicDollarList?.());
   await page.screenshot({ path: join(shotDir, "list.png"), fullPage: true });
-  const listOk = /GEOS/i.test(list) && !/FILE NOT FOUND/i.test(list);
-  report.steps.push({ id: "list", pass: listOk });
+  report.steps.push({
+    id: "list",
+    pass: Boolean(dollarList?.ok),
+    reason: dollarList?.reason,
+    viceAttachedImage: dollarList?.viceAttachedImage,
+    viceLastReattach: dollarList?.viceLastReattach,
+    head: dollarList?.text?.slice(0, 240),
+  });
 
   await typeBasic(page, 'LOAD"GEOS",8,1', { afterMs: 35_000 });
   await page.waitForTimeout(2000);

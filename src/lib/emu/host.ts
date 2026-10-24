@@ -43,7 +43,7 @@ import {
 import { grok64RetroKeyboardAvailable } from "./grok64-keyboard";
 import { reportMountFailure, runMountStage } from "./disk-mount-stage";
 import { grok64DiskApi, grok64WasmApi } from "./grok64-api";
-import { grok64DiskAttachCallable } from "./grok64-wasm-direct";
+import { grok64DiskAttachCallableEmu } from "./grok64-wasm-direct";
 import { grok64CoreBuildIdForUrl, grok64CoreManifestSummary, GROK64_CORE_BUILD_ID } from "./grok64-core-build";
 import {
   grok64DiskExportsReady,
@@ -184,7 +184,7 @@ export function grok64CoreStatus(emu: EjsInstance | null): Grok64CoreStatus {
   if (mod) bindGrok64WasmExports(mod);
   const wasmApi = grok64WasmApi(mod);
   const manifest = grok64CoreManifestSummary();
-  const diskExportsPresent = grok64DiskAttachCallable(mod) || grok64DiskExportsReady(emu);
+  const diskExportsPresent = grok64DiskAttachCallableEmu(emu) || grok64DiskExportsReady(emu);
   return {
     kind: "vice_x64sc-grok64-iec",
     blobUrl: grok64CoreBlobUrl(),
