@@ -74,7 +74,33 @@ const EXPECTED_GROK64_EXPORTS = [
   "grok64_drive_cpu_clock",
   "grok64_drive_iec_bus_lines",
   "grok64_load_dollar_diag_capture",
+  "grok64_vice_apply_safe_floppy_profile",
+  "grok64_vice_drive_resource_snapshot",
 ] as const;
+
+function wasmUtf8JsonExport(
+  mod: Grok64ModuleBag,
+  exportName: string,
+  ...args: unknown[]
+): Record<string, unknown> {
+  const fn = resolveWasmExport(mod, exportName);
+  if (!fn) return { captureError: `missing wasm export ${exportName}` };
+  let raw: unknown;
+  try {
+    raw = fn(...args);
+  } catch (e) {
+    return { captureError: String(e) };
+  }
+  const ptr = typeof raw === "bigint" ? Number(raw) : Number(raw);
+  if (!ptr) return { captureError: `empty pointer from ${exportName}` };
+  const str = mod.UTF8ToString?.(ptr);
+  if (!str) return { captureError: `UTF8 decode failed for ${exportName}` };
+  try {
+    return JSON.parse(str) as Record<string, unknown>;
+  } catch {
+    return { raw: str };
+  }
+}
 
 /** JS wrapper failed to marshal a UTF-8 path (distinct from C errno). */
 export const GROK64_UTF8_MARSHAL_ERR = -98;
@@ -522,17 +548,13 @@ export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
       if (!fn) return -99;
       return Number(fn(unit));
     },
-    loadDollarDiagCapture: (unit) => {
-      const fn = resolveWasmExport(mod, "grok64_load_dollar_diag_capture");
-      if (!fn) return null;
-      const ptr = Number(fn(unit));
-      if (!ptr || !mod.UTF8ToString) return null;
-      try {
-        return JSON.parse(mod.UTF8ToString(ptr)) as Record<string, unknown>;
-      } catch {
-        return { raw: mod.UTF8ToString(ptr) };
-      }
+    loadDollarDiagCapture: (unit) => wasmUtf8JsonExport(mod, "grok64_load_dollar_diag_capture", unit),
+    viceApplySafeFloppyProfile: (unit) => {
+      const fn = resolveWasmExport(mod, "grok64_vice_apply_safe_floppy_profile");
+      if (!fn) return -99;
+      return Number(fn(unit));
     },
+    viceDriveResourceSnapshot: () => wasmUtf8JsonExport(mod, "grok64_vice_drive_resource_snapshot"),
   };
   return true;
 }

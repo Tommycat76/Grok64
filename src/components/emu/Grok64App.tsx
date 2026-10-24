@@ -103,6 +103,9 @@ import {
   detachLibretroWorkDiskManager,
   ensureViceSessionDiskAttached,
   ensureIecBusReconcile,
+  bmc64FlushSessionDisk,
+  hardResetAndFlushSessionDisk,
+  flushSessionDiskAfterPowerOn,
   resyncSessionDiskToVice,
   waitForC64Ready,
   waitRetroFrames,
@@ -135,6 +138,7 @@ import {
   viceDriveLiveProbe,
   viceDriveBusProbe,
   viceLoadDollarDiagCapture,
+  viceLoadDollarDiagForAbout,
   viceWasmWorkDiskDiag,
   viceAttachRcLabel,
 } from "@/lib/emu/vice-disk";
@@ -292,6 +296,7 @@ import { explodeArchive, pickBootFile, toArrayBuffer } from "@/lib/emu/archive";
 import { BuildId } from "@/components/emu/BuildId";
 import { debugQueryOn, drive8LogLines, glog, glogFire, setDebugUi, subscribeLog } from "@/lib/emu/debug";
 import { grok64LibraryIdbDiag } from "@/lib/emu/library-diag";
+import { grok64ProfilePersistDiff } from "@/lib/emu/grok64-profile-diag";
 import {
   maybeAutoRefreshStaleEmulatorCore,
   qaCountEmulatorJsCoreCacheRows,
@@ -944,7 +949,8 @@ export function Grok64App() {
       workD64Bytes: () => viceWorkD64ByteLength(emuRef.current),
       viceAttachedImage: (unit = 8) => viceAttachedImage(emuRef.current, unit as 8),
       viceDriveLive: (unit = 8) => viceDriveLiveProbe(emuRef.current, unit as 8),
-      iecBusReconcile: async (unit = 8) => ensureIecBusReconcile(emuRef.current, unit as IecUnit),
+      iecBusReconcile: async (unit = 8) =>
+        ensureIecBusReconcile(emuRef.current, unit as IecUnit, useEmu.getState().iecMap),
       captureLoadDollarDiag: (unit = 8) => viceLoadDollarDiagCapture(emuRef.current, unit as IecUnit),
       attachDiskDiag: async (opts?: { light?: boolean }) => {
         const light = opts?.light === true;
@@ -1052,7 +1058,8 @@ export function Grok64App() {
           legacyCoreIdb: light ? null : await grok64LegacyCoreIdbDiag(),
           appBuildId: readBuildId(),
           grok64WasmBindRev: GROK64_WASM_BIND_REV,
-          viceLoadDollarDiag: light ? null : viceLoadDollarDiagCapture(emuRef.current, unit),
+          viceLoadDollarDiag: viceLoadDollarDiagForAbout(emuRef.current, unit),
+          profilePersistDiff: grok64ProfilePersistDiff(emuRef.current),
         };
       },
       kbdDrain: () => grok64KeyboardDrain(),
@@ -1085,8 +1092,8 @@ export function Grok64App() {
       feedBasic: (line, opts) => feedBasicLine(emuRef.current, line, opts),
       iecErrorChannelProbe: (unit = 8) =>
         wasmIecDriveStateFromLive(viceDriveLiveProbe(emuRef.current, unit as 8)),
-      hardReset: () => {
-        hardReset(emuRef.current);
+      hardReset: async () => {
+        await hardResetAndFlushSessionDisk(emuRef.current, useEmu.getState().iecMap);
         return true;
       },
       /** QA: hard reset → READY → LOAD"$",8 → LIST (GEOS listing proof). */
@@ -1107,13 +1114,14 @@ export function Grok64App() {
           }
         }
         if (!screenTextHasReady(head)) {
-          hardReset(emu);
+          await hardResetAndFlushSessionDisk(emu, useEmu.getState().iecMap);
           await waitForC64Ready(emu, 60_000);
           head = readScreenText(emu) ?? "";
         }
         if (!screenTextHasReady(head)) {
           return { ok: false, reason: "not-ready", text: head.slice(0, 400) };
         }
+        await bmc64FlushSessionDisk(emu, 8, useEmu.getState().iecMap);
         await ensureViceSessionDiskAttached(emu, 8, "d64");
         await flushEmuFs(emu, 600);
         await new Promise((r) => setTimeout(r, 800));
@@ -1675,6 +1683,20 @@ export function Grok64App() {
     }, 350);
     return () => window.clearInterval(id);
   }, [s.powered]);
+  useEffect(() => {
+    if (!s.powered) return;
+    let lastFailHead = "";
+    const id = window.setInterval(() => {
+      const head = readScreenText(emuRef.current) ?? "";
+      if (!/FILE NOT FOUND/i.test(head)) return;
+      const snap = head.slice(0, 200);
+      if (snap === lastFailHead) return;
+      lastFailHead = snap;
+      viceLoadDollarDiagCapture(emuRef.current, 8, { source: "live" });
+      glog("load-dollar-diag-file-not-found", { head: snap.slice(0, 120) });
+    }, 1200);
+    return () => window.clearInterval(id);
+  }, [s.powered]);
   const persistNow = useCallback(async () => {
     if (!persistGateRef.current) return;
     if (
@@ -1898,7 +1920,7 @@ export function Grok64App() {
       if (!emu) return false;
       const st = useEmu.getState();
       const on = await applyJiffyDos(emu, resolveJiffyWant(st.jiffyDos, st.fastLoadCart));
-      if (reset === "hard") hardReset(emu);
+      if (reset === "hard") await hardResetAndFlushSessionDisk(emu, st.iecMap);
       else if (reset === "soft") resetEmu(emu);
       return on;
     },
@@ -2238,6 +2260,11 @@ export function Grok64App() {
         applyRuntimeOptions(emu, { vice_jiffydos: jiffyForCart ? "enabled" : "disabled" });
       }
       glog("core-ready", { ...prep, live: spec.live, user: spec.user, reu: st.reuSize, jiffyForCart, cartBoot });
+      if (sessionDiskOnUnit(8)?.name) {
+        void flushSessionDiskAfterPowerOn(emu, st.iecMap).then((rc) =>
+          glog("session-disk-flush-after-power-on", { rc }),
+        );
+      }
       applyIecUnit(emu, spec.live.iec, spec.live.unit);
       applyRuntimeOptions(emu, {
         ...viceJoyOptions(st.joyPort),
@@ -3719,9 +3746,9 @@ export function Grok64App() {
       );
       disarmAutostart(emuRef.current, "disk");
       await presentFloppyMountReady(emuRef.current, { iec, unit }, { afterDriveRefresh: true });
-      const busRc = await ensureIecBusReconcile(emuRef.current, unit);
+      const busRc = await bmc64FlushSessionDisk(emuRef.current, unit, useEmu.getState().iecMap);
       if (busRc < 0) {
-        throw new Error(`IEC bus reconcile failed (rc=${busRc}) ${viceDiskLastAttachDiag(emuRef.current) ?? ""}`);
+        throw new Error(`IEC bus flush failed (rc=${busRc}) ${viceDiskLastAttachDiag(emuRef.current) ?? ""}`);
       }
       await flushEmuFs(emuRef.current, 600);
     } catch (err) {

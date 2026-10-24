@@ -632,10 +632,53 @@ export function viceRcForDrives(map: Partial<Record<IecUnit, IecDrive>>, virtual
     lines.push(`FileSystemDevice${unit}=0`);
     lines.push(`IECDevice${unit}=0`);
     lines.push(`VirtualDevice${unit}=0`);
+    viceRcSafeDriveUnitLines(lines, unit);
   }
   lines.push("DriveTrueEmulation=1");
   lines.push(virtualDevices ? "VirtualDevices=1" : "VirtualDevices=0");
+  lines.push("DriveSoundEmulation=0");
+  lines.push("DriveSoundEmulationVolume=0");
   return `${lines.join("\n")}\n`;
+}
+
+/** Per-unit keys stale IDB vicerc often leaves wrong — force on every floppy reconcile. */
+function viceRcSafeDriveUnitLines(lines: string[], unit: IecUnit) {
+  lines.push(`Drive${unit}ParallelCable=0`);
+  lines.push(`Drive${unit}IdleMethod=0`);
+  lines.push(`Drive${unit}ExtendImagePolicy=0`);
+  for (const ram of ["RAM2000", "RAM4000", "RAM6000", "RAM8000", "RAMA000"]) {
+    lines.push(`Drive${unit}${ram}=0`);
+  }
+}
+
+/**
+ * Runtime-only vicerc while unit `activeUnit` runs a floppy session (LOAD/insert/flush).
+ * Does not change zustand `iecMap` — secondary IEC drives are muted so stale CMD on 9
+ * cannot steal ATN; user drive layout stays in Settings.
+ */
+export function viceRcFloppyIsolateProfile(activeUnit: IecUnit, map?: IecMap): string {
+  const merged: IecMap = { ...defaultIecMap(), ...map };
+  merged[activeUnit] = "1541";
+  const lines = ["[C64]", "DriveTrueEmulation=1", "VirtualDevices=0", "DriveSoundEmulation=0", "DriveSoundEmulationVolume=0"];
+  for (const unit of [8, 9, 10, 11] as IecUnit[]) {
+    const iec = merged[unit];
+    let type = !iec || iec === "none" || iec === "sd2iec" ? 0 : viceDriveTypeCode(iec as IecDrive);
+    if (unit === activeUnit) type = 1541;
+    else if (unit !== activeUnit && type !== 0) type = 0;
+    lines.push(`Drive${unit}Type=${type}`);
+    lines.push(`Drive${unit}TrueEmulation=1`);
+    lines.push(`FileSystemDevice${unit}=0`);
+    lines.push(`IECDevice${unit}=0`);
+    lines.push(`VirtualDevice${unit}=0`);
+    viceRcSafeDriveUnitLines(lines, unit);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+/** Safe routing lines while honoring the user's IEC map drive types (boot / settings). */
+export function viceRcSafeFloppyProfile(activeUnit: IecUnit, map?: IecMap): string {
+  const viceMap = viceMapFromIecMap({ ...defaultIecMap(), ...map, [activeUnit]: "1541" });
+  return viceRcForDrives(viceMap, false);
 }
 
 /**
@@ -721,6 +764,12 @@ export function setIecSlot(map: IecMap, unit: IecUnit, slot: IecSlot): IecMap {
 export function mapHasDrive(map: IecMap | null | undefined, drive: IecDrive): boolean {
   if (!map) return false;
   return IEC_UNITS.some((u) => map[u] === drive);
+}
+
+/** Settings IEC map has SD2IEC on `unit` — skip BMC64 floppy isolate / flush on that unit. */
+export function iecMapUnitIsSd2iec(map: IecMap | null | undefined, unit: IecUnit): boolean {
+  const merged: IecMap = { ...defaultIecMap(), ...map };
+  return merged[unit] === "sd2iec";
 }
 
 export function unitOfDrive(map: IecMap | null | undefined, drive: IecDrive): IecUnit | null {

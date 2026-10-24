@@ -16,6 +16,7 @@
 #include "machine-drive.h"
 #include "machine-bus.h"
 #include "iecbus.h"
+#include "iecdrive.h"
 #include "serial.h"
 #include "cbmdos.h"
 #include "vice-event.h"
@@ -783,13 +784,135 @@ int grok64_drive_iec_bus_lines(int unit)
     if (idx >= IECBUS_NUM) {
         return -ENODEV;
     }
-    /* low 8: drv_data[unit]; high 8: cpu_bus ATN/data/clk snapshot */
+    /* low 8: drv_data[unit]; high 8: iecbus.cpu_bus (bit 0x10 ATN out released; 0x80 DATA-IN) */
     return ((int)iecbus.drv_data[idx] & 0xff) | (((int)iecbus.cpu_bus & 0xff) << 8);
 }
 
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+static void grok64_vice_apply_safe_floppy_profile_unit(unsigned int unit)
+{
+    char res[48];
+    unsigned int u;
+
+    resources_set_int("VirtualDevices", 0);
+    resources_set_int("DriveTrueEmulation", 1);
+    resources_set_int("DriveSoundEmulation", 0);
+    resources_set_int("DriveSoundEmulationVolume", 0);
+    for (u = 8; u <= 11; u++) {
+        snprintf(res, sizeof(res), "Drive%uParallelCable", u);
+        resources_set_int(res, 0);
+        snprintf(res, sizeof(res), "Drive%uIdleMethod", u);
+        resources_set_int(res, 0);
+        snprintf(res, sizeof(res), "Drive%uExtendImagePolicy", u);
+        resources_set_int(res, 0);
+        snprintf(res, sizeof(res), "FileSystemDevice%u", u);
+        resources_set_int(res, ATTACH_DEVICE_NONE);
+        snprintf(res, sizeof(res), "IECDevice%u", u);
+        resources_set_int(res, 0);
+        snprintf(res, sizeof(res), "VirtualDevice%u", u);
+        resources_set_int(res, 0);
+        snprintf(res, sizeof(res), "Drive%uTrueEmulation", u);
+        resources_set_int(res, 1);
+        snprintf(res, sizeof(res), "Drive%uRAM2000", u);
+        resources_set_int(res, 0);
+        snprintf(res, sizeof(res), "Drive%uRAM4000", u);
+        resources_set_int(res, 0);
+        snprintf(res, sizeof(res), "Drive%uRAM6000", u);
+        resources_set_int(res, 0);
+        snprintf(res, sizeof(res), "Drive%uRAM8000", u);
+        resources_set_int(res, 0);
+        snprintf(res, sizeof(res), "Drive%uRAMA000", u);
+        resources_set_int(res, 0);
+    }
+    snprintf(res, sizeof(res), "Drive%uType", unit);
+    resources_set_int(res, DRIVE_TYPE_1541);
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int grok64_vice_apply_safe_floppy_profile(int unit)
+{
+    if (unit < 8 || unit > 11) {
+        return -EINVAL;
+    }
+    grok64_vice_apply_safe_floppy_profile_unit((unsigned int)unit);
+    iec_update_ports();
+    return 0;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+static char last_vice_drive_resource_json[8192];
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+const char *grok64_vice_drive_resource_snapshot(void)
+{
+    char res[48];
+    unsigned int u;
+    int v;
+    int pos = 0;
+    int out_len = (int)sizeof(last_vice_drive_resource_json);
+    char *out = last_vice_drive_resource_json;
+
+    last_vice_drive_resource_json[0] = '\0';
+    pos += snprintf(out + pos, out_len - pos, "{");
+    for (u = 8; u <= 11 && pos < out_len - 64; u++) {
+        if (u > 8) {
+            pos += snprintf(out + pos, out_len - pos, ",");
+        }
+        pos += snprintf(out + pos, out_len - pos, "\"u%u\":{", u);
+        snprintf(res, sizeof(res), "Drive%uType", u);
+        if (resources_get_int(res, &v) == 0) {
+            pos += snprintf(out + pos, out_len - pos, "\"type\":%d,", v);
+        }
+        snprintf(res, sizeof(res), "Drive%uTrueEmulation", u);
+        if (resources_get_int(res, &v) == 0) {
+            pos += snprintf(out + pos, out_len - pos, "\"tde\":%d,", v);
+        }
+        snprintf(res, sizeof(res), "FileSystemDevice%u", u);
+        if (resources_get_int(res, &v) == 0) {
+            pos += snprintf(out + pos, out_len - pos, "\"fsDev\":%d,", v);
+        }
+        snprintf(res, sizeof(res), "IECDevice%u", u);
+        if (resources_get_int(res, &v) == 0) {
+            pos += snprintf(out + pos, out_len - pos, "\"iecDev\":%d,", v);
+        }
+        snprintf(res, sizeof(res), "VirtualDevice%u", u);
+        if (resources_get_int(res, &v) == 0) {
+            pos += snprintf(out + pos, out_len - pos, "\"virtDev\":%d,", v);
+        }
+        snprintf(res, sizeof(res), "Drive%uIdleMethod", u);
+        if (resources_get_int(res, &v) == 0) {
+            pos += snprintf(out + pos, out_len - pos, "\"idle\":%d,", v);
+        }
+        snprintf(res, sizeof(res), "Drive%uParallelCable", u);
+        if (resources_get_int(res, &v) == 0) {
+            pos += snprintf(out + pos, out_len - pos, "\"parallel\":%d,", v);
+        }
+        snprintf(res, sizeof(res), "Drive%uExtendImagePolicy", u);
+        if (resources_get_int(res, &v) == 0) {
+            pos += snprintf(out + pos, out_len - pos, "\"extend\":%d", v);
+        }
+        pos += snprintf(out + pos, out_len - pos, "}");
+    }
+    if (resources_get_int("VirtualDevices", &v) == 0) {
+        pos += snprintf(out + pos, out_len - pos, ",\"VirtualDevices\":%d", v);
+    }
+    if (resources_get_int("DriveSoundEmulation", &v) == 0) {
+        pos += snprintf(out + pos, out_len - pos, ",\"DriveSoundEmulation\":%d", v);
+    }
+    pos += snprintf(out + pos, out_len - pos, ",\"iecCpuBus\":%d,\"iecDrv8\":%d",
+                    (int)iecbus.cpu_bus & 0xff, (int)iecbus.drv_data[8] & 0xff);
+    pos += snprintf(out + pos, out_len - pos, "}");
+    return last_vice_drive_resource_json;
+}
+
 int grok64_iec_bus_reconcile(int unit)
 {
     unsigned int dnr;
@@ -799,6 +922,7 @@ int grok64_iec_bus_reconcile(int unit)
     if (unit < 8 || unit > 11) {
         return -EINVAL;
     }
+    grok64_vice_apply_safe_floppy_profile_unit((unsigned int)unit);
     grok64_disk_route_to_drive((unsigned int)unit);
     grok64_serial_layer_true_iec((unsigned int)unit);
     dnr = (unsigned int)unit - 8;
@@ -818,6 +942,7 @@ int grok64_iec_bus_reconcile(int unit)
         return rc;
     }
     grok64_clear_stale_vdrive_error((unsigned int)unit);
+    iec_update_ports();
     return 0;
 }
 
@@ -1115,9 +1240,14 @@ const char *grok64_load_dollar_diag_capture(int unit)
 
     pos += snprintf(out + pos, out_len - pos,
                     ",\"serialDeviceType\":%d,\"iecBusLines\":%d,"
+                    "\"iecCpuBus\":%d,\"iecDrvData\":%d,"
+                    "\"iecAtnOutReleased\":%s,\"iecAtnAsserted\":%s,"
                     "\"tdeHalfTrack\":%d,\"tdeGcrLoaded\":%d,\"tdeImageBytes\":%d,"
                     "\"vdriveImageSameAsTde\":%d,\"imgBamDiskName\":\"",
-                    serial, iec_lines, half, gcr, img_bytes, vdsame);
+                    serial, iec_lines, (iec_lines >> 8) & 0xff, iec_lines & 0xff,
+                    ((iec_lines >> 8) & 0x10) ? "true" : "false",
+                    ((iec_lines >> 8) & 0x10) ? "false" : "true",
+                    half, gcr, img_bytes, vdsame);
     for (i = 0; bam_name[i] && pos < out_len - 4; i++) {
         char c = bam_name[i];
         if (c == '"' || c == '\\') {

@@ -19,6 +19,7 @@ import {
 } from "./session-media";
 import { buildViceExtras, workDiskFor } from "./vice-extras";
 import {
+  defaultIecMap,
   iecMapFromLegacy,
   liveDriveOptions,
   CART_PLAY_UNLOCK_VICE_OPTS,
@@ -26,6 +27,9 @@ import {
   viceDriveTypeVars,
   viceMapFromIecMap,
   viceRcForDrives,
+  viceRcFloppyIsolateProfile,
+  viceRcSafeFloppyProfile,
+  iecMapUnitIsSd2iec,
   withLiveFloppy,
   type DriveAttach,
 } from "./play-session";
@@ -1677,6 +1681,51 @@ export function hardReset(emu: EjsInstance | null) {
   resetEmu(emu);
 }
 
+/** BMC64 disk flush: detach+reattach session image on `unit`, then IEC reconcile. */
+export async function bmc64FlushSessionDisk(
+  emu: EjsInstance | null,
+  unit: IecUnit = 8,
+  iecMap?: IecMap,
+): Promise<number> {
+  if (!emu) return -1;
+  if (iecMapUnitIsSd2iec(iecMap, unit)) return 0;
+  const slot = sessionDiskOnUnit(unit);
+  if (!slot?.name && !unitMounts.get(unit)) return 0;
+  injectViceRc(emu, viceRcFloppyIsolateProfile(unit, iecMap));
+  const rc = await viceReattachSessionDisk(emu, unit);
+  if (rc < 0) return rc;
+  const busRc = await ensureIecBusReconcile(emu, unit, iecMap);
+  if (busRc < 0) return busRc;
+  if (iecMap) {
+    const merged: IecMap = { ...defaultIecMap(), ...iecMap, [unit]: "1541" };
+    injectViceRc(emu, viceRcSafeFloppyProfile(unit, iecMap));
+    applyRuntimeOptions(emu, {
+      ...viceDriveTypeVars(viceMapFromIecMap(merged)),
+      vice_drive_true_emulation: "enabled",
+      vice_virtual_device_traps: "disabled",
+    });
+    await waitRetroFrames(20);
+    await tickGrok64Iec(emu);
+  }
+  return busRc;
+}
+
+/** Hard reset then re-attach unit 8 session disk when one is mounted (BMC64 flush pattern). */
+export async function hardResetAndFlushSessionDisk(emu: EjsInstance | null, iecMap?: IecMap): Promise<number> {
+  if (!emu) return -1;
+  const hadSession = Boolean(sessionDiskOnUnit(8)?.name);
+  hardReset(emu);
+  await waitRetroFrames(60);
+  if (!hadSession || iecMapUnitIsSd2iec(iecMap, 8)) return 0;
+  return bmc64FlushSessionDisk(emu, 8, iecMap);
+}
+
+/** After C64 power-on when a session floppy is already mounted on unit 8. */
+export async function flushSessionDiskAfterPowerOn(emu: EjsInstance | null, iecMap?: IecMap): Promise<number> {
+  if (!emu || !sessionDiskOnUnit(8)?.name || iecMapUnitIsSd2iec(iecMap, 8)) return 0;
+  return bmc64FlushSessionDisk(emu, 8, iecMap);
+}
+
 /**
  * Cartridge freeze button (Action Replay / Retro Replay / Freeze Frame).
  * VICE libretro `vice_reset=freeze` is the cart freeze line, not a machine reset.
@@ -2556,28 +2605,31 @@ export async function viceReattachDiskOnEmuThread(
 }
 
 /** Overwrite stale IDB vicerc routing (FileSystemDevice / IECDevice / VirtualDevice). */
-export function viceRcTrueFloppyUnit(unit: IecUnit): string {
-  return (
-    [
-      "[C64]",
-      `Drive${unit}Type=1541`,
-      `Drive${unit}TrueEmulation=1`,
-      `FileSystemDevice${unit}=0`,
-      `IECDevice${unit}=0`,
-      `VirtualDevice${unit}=0`,
-      "DriveTrueEmulation=1",
-      "VirtualDevices=0",
-    ].join("\n") + "\n"
-  );
+export function viceRcTrueFloppyUnit(unit: IecUnit, iecMap?: IecMap): string {
+  return viceRcFloppyIsolateProfile(unit, iecMap);
+}
+
+/** Restore vicerc from saved Settings IEC map (after a floppy-isolate session). */
+export function restoreUserDriveVicerc(emu: EjsInstance | null, iecMap: IecMap): void {
+  if (!emu) return;
+  const viceMap = viceMapFromIecMap(iecMap);
+  injectViceRc(emu, viceRcForDrives(viceMap, false));
+  applyRuntimeOptions(emu, viceDriveTypeVars(viceMap));
 }
 
 /** Route KERNAL IEC to true 1541 TDE (drive CPU + GCR), not fsdevice/vdrive traps. */
-export async function ensureIecBusReconcile(emu: EjsInstance | null, unit: IecUnit = 8): Promise<number> {
+export async function ensureIecBusReconcile(
+  emu: EjsInstance | null,
+  unit: IecUnit = 8,
+  iecMap?: IecMap,
+): Promise<number> {
   if (!emu) return -1;
-  injectViceRc(emu, viceRcTrueFloppyUnit(unit));
+  if (iecMapUnitIsSd2iec(iecMap, unit)) return 0;
+  injectViceRc(emu, viceRcTrueFloppyUnit(unit, iecMap));
   const mod = grok64DiskModule(emu);
   if (mod) bindGrok64DiskExports(mod, emu);
   const api = grok64DiskApi(mod);
+  api?.viceApplySafeFloppyProfile?.(unit);
   const reconcile = api?.iecBusReconcile;
   let rc = reconcile ? reconcile(unit) : (api?.driveSyncTdeImage?.(unit, 0) ?? -99);
   if (rc === 0 && api?.driveReloadImage) {
@@ -2947,10 +2999,7 @@ export async function bootGeosFloppy(
     [`vice_drive${unit}_type`]: "1541",
     vice_work_disk: `${unit}_d64`,
   });
-  injectViceRc(
-    emu,
-    ["[C64]", `Drive${unit}Type=1541`, "DriveTrueEmulation=1", "VirtualDevices=0"].join("\n") + "\n",
-  );
+  injectViceRc(emu, viceRcSafeFloppyProfile(unit, iecMap));
   applyIecUnit(emu, "1541", unit);
   disarmAutostart(emu, "disk");
 

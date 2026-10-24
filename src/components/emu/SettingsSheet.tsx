@@ -673,7 +673,9 @@ function Drive8DiagPanel() {
         <code className="text-fg">viceDriveBus</code> (drive CPU clock advancing,{" "}
         <code className="text-fg">wasmFilesystemDevice</code>=0,{" "}
         <code className="text-fg">serialDeviceLabel</code> not <code className="text-fg">virt</code>,{" "}
-        <code className="text-fg">viceLoadDollarDiag</code> (BASIC $0200 + KERNAL $C3 filename bytes, vdrive/TDE error 62, track-18 BAM hex, IEC lines). WASM only — never types on the CRT. Use after Software → Insert when LOAD fails — copy and send
+        <code className="text-fg">viceLoadDollarDiag</code> (captured every About refresh and auto on FILE NOT FOUND; BASIC $0200, KERNAL $C3, vdrive error 62, track-18 BAM, IEC lines).{" "}
+        <code className="text-fg">wasmIecBusAtn</code> false at idle READY (ATN released);{" "}
+        <code className="text-fg">profilePersistDiff</code> diffs localStorage / vicerc / WASM drive resources vs a fresh profile. WASM only — copy and send
         this block. Logs: last 20 floppy-attach / play-mount lines.
       </p>
       <button

@@ -52,6 +52,8 @@ const REQUIRED = [
   "grok64_drive_cpu_clock",
   "grok64_drive_iec_bus_lines",
   "grok64_load_dollar_diag_capture",
+  "grok64_vice_apply_safe_floppy_profile",
+  "grok64_vice_drive_resource_snapshot",
 ];
 
 rmSync(tmp, { recursive: true, force: true });

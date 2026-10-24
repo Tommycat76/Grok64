@@ -149,10 +149,30 @@ try {
     viceDriveLive: diagInsert?.viceDriveLive,
   };
 
-  await typeC64RealKeyboard(page, 'LOAD"$",8', { keyDelayMs: 75, lineEndMs: 900 });
-  const loadWait = await waitForDollarLoad(page, { maxMs: 55_000 });
+  await typeC64RealKeyboard(page, 'LOAD"$",8', { keyDelayMs: 80, lineEndMs: 900 });
+  let loadWait = await waitForDollarLoad(page, { maxMs: 55_000 });
+  let screenProbe = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
+  if (/LOAD\s*"",8/i.test(screenProbe) || /SYNTAX ERROR|ME ERROR/i.test(screenProbe)) {
+    trace.loadDollarKeyboardFallback = "feedBasic";
+    await page.evaluate(async () => {
+      await window.__g64?.feedBasic?.('LOAD"$",8', { runcmd: true });
+    });
+    await page.waitForTimeout(18_000);
+    loadWait = await waitForDollarLoad(page, { maxMs: 45_000 });
+    screenProbe = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
+  }
   trace.loadWait = { error: loadWait.error, head: loadWait.text?.slice(0, 200) };
-  trace.viceLoadDollarDiag = await page.evaluate(() => window.__g64?.captureLoadDollarDiag?.(8) ?? null);
+  trace.viceLoadDollarDiag = await page.evaluate(async () => {
+    const d = await window.__g64?.attachDiskDiag?.({ light: true });
+    return d?.viceLoadDollarDiag ?? window.__g64?.captureLoadDollarDiag?.(8) ?? null;
+  });
+  trace.profilePersistDiff = await page.evaluate(async () => {
+    const d = await window.__g64?.attachDiskDiag?.({ light: true });
+    return d?.profilePersistDiff ?? null;
+  });
+  if (trace.viceLoadDollarDiag == null) {
+    trace.viceLoadDollarDiagError = "diag-still-null";
+  }
   await page.waitForTimeout(3000);
   await typeC64RealKeyboard(page, "LIST", { keyDelayMs: 70, lineEndMs: 500 });
   await page.waitForTimeout(12_000);
@@ -171,9 +191,8 @@ try {
   const attachRcOk = (diagInsert?.viceLastReattach?.rc ?? -1) === 0;
   const jiffyStable = jiffyAfterPower.want === false || jiffyAfterPower.want === jiffyBefore.want;
   const iecFail = /FILE NOT FOUND|DEVICE NOT PRESENT/i.test(screen) || loadWait.error;
-  const pass = jiffyOn
-    ? attachRcOk && busOk && !iecFail && jiffyAfterPower.want === true
-    : catalogOk && attachRcOk && busOk && !loadWait.error;
+  const pass =
+    catalogOk && attachRcOk && busOk && !iecFail && (!jiffyOn || jiffyAfterPower.want === true);
   trace.pass = pass;
   trace.screen = screen.slice(0, 500);
   writeFileSync(join(outDir, "trace.json"), JSON.stringify(trace, null, 2));

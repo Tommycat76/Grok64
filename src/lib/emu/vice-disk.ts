@@ -486,7 +486,12 @@ export type ViceDriveBusProbe = {
   wasmIecBusLines: number | null;
   wasmIecBusDrvData: number | null;
   wasmIecBusCpuBus: number | null;
+  /** @deprecated Misread ATN from DATA-IN bit — use wasmIecBusAtnOutReleased */
   wasmIecBusAtn: boolean | null;
+  /** C64 IEC port ATN out (VICE iecbus.cpu_bus bit 0x10): true = released at idle. */
+  wasmIecBusAtnOutReleased: boolean | null;
+  /** IEC ATN read line (cpu_bus bit 0x80); open-collector, not “stuck assert”. */
+  wasmIecBusAtnReadLine: boolean | null;
   wasmVdriveErrorChannel: string | null;
   wasmTdeImageBytes: number | null;
   wasmGcrLoaded: number | null;
@@ -525,11 +530,77 @@ export type ViceLoadDollarDiag = {
   c64FnambHex?: string;
 };
 
-export function viceLoadDollarDiagCapture(emu: ViceDiskEmu | null, unit: IecUnit = 8): ViceLoadDollarDiag | null {
+export type ViceLoadDollarDiagReport = ViceLoadDollarDiag & {
+  capturedAt?: string;
+  captureSource?: "live" | "cached" | "unavailable";
+  captureError?: string;
+};
+
+let lastViceLoadDollarDiag: ViceLoadDollarDiagReport | null = null;
+
+export function getLastViceLoadDollarDiag(): ViceLoadDollarDiagReport | null {
+  return lastViceLoadDollarDiag;
+}
+
+/** Always returns a JSON object for About — never null. */
+export function viceLoadDollarDiagCapture(
+  emu: ViceDiskEmu | null,
+  unit: IecUnit = 8,
+  opts?: { source?: ViceLoadDollarDiagReport["captureSource"]; allowCached?: boolean },
+): ViceLoadDollarDiagReport {
+  const source = opts?.source ?? "live";
   const mod = diskMod(emu);
-  if (mod) bindGrok64DiskExports(mod, emu);
-  const raw = grok64DiskApi(mod)?.loadDollarDiagCapture?.(unit);
-  return raw && typeof raw === "object" ? (raw as ViceLoadDollarDiag) : null;
+  if (!mod) {
+    const report: ViceLoadDollarDiagReport = {
+      unit,
+      captureSource: "unavailable",
+      captureError: "emulator module not ready",
+      capturedAt: new Date().toISOString(),
+    };
+    lastViceLoadDollarDiag = report;
+    return report;
+  }
+  bindGrok64DiskExports(mod, emu);
+  const fn = grok64DiskApi(mod)?.loadDollarDiagCapture;
+  if (!fn) {
+    const report: ViceLoadDollarDiagReport = {
+      unit,
+      captureSource: "unavailable",
+      captureError: "wasm export grok64_load_dollar_diag_capture missing — hard-refresh core",
+      capturedAt: new Date().toISOString(),
+    };
+    lastViceLoadDollarDiag = report;
+    return report;
+  }
+  const raw = fn(unit);
+  if (!raw || typeof raw !== "object") {
+    const report: ViceLoadDollarDiagReport = {
+      unit,
+      captureSource: "unavailable",
+      captureError: "wasm load_dollar_diag returned empty",
+      capturedAt: new Date().toISOString(),
+    };
+    lastViceLoadDollarDiag = report;
+    return report;
+  }
+  const report: ViceLoadDollarDiagReport = {
+    ...(raw as ViceLoadDollarDiag),
+    capturedAt: new Date().toISOString(),
+    captureSource: source,
+  };
+  lastViceLoadDollarDiag = report;
+  return report;
+}
+
+export function viceLoadDollarDiagForAbout(
+  emu: ViceDiskEmu | null,
+  unit: IecUnit = 8,
+): ViceLoadDollarDiagReport {
+  const live = viceLoadDollarDiagCapture(emu, unit, { source: "live" });
+  if (live.captureError && lastViceLoadDollarDiag && !lastViceLoadDollarDiag.captureError) {
+    return { ...lastViceLoadDollarDiag, captureSource: "cached" };
+  }
+  return live;
 }
 
 export function viceDriveBusProbe(emu: ViceDiskEmu | null, unit: IecUnit = 8, drive = 0): ViceDriveBusProbe {
@@ -554,7 +625,10 @@ export function viceDriveBusProbe(emu: ViceDiskEmu | null, unit: IecUnit = 8, dr
     wasmIecBusLines: lines,
     wasmIecBusDrvData: lines != null ? lines & 0xff : null,
     wasmIecBusCpuBus: lines != null ? (lines >> 8) & 0xff : null,
-    wasmIecBusAtn: lines != null ? Boolean((lines >> 8) & 0x80) : null,
+    /** True when C64 ATN out is actively asserted (VICE cpu_bus bit 0x10 clear). Idle READY should be false. */
+    wasmIecBusAtn: lines != null ? !Boolean((lines >> 8) & 0x10) : null,
+    wasmIecBusAtnOutReleased: lines != null ? Boolean((lines >> 8) & 0x10) : null,
+    wasmIecBusAtnReadLine: lines != null ? Boolean((lines >> 8) & 0x80) : null,
     wasmVdriveErrorChannel: api?.driveErrorChannel?.(unit) ?? "",
     wasmTdeImageBytes: api?.driveTdeImageBytes?.(unit, drive) ?? null,
     wasmGcrLoaded: api?.driveGcrLoaded?.(unit, drive) ?? null,
