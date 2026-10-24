@@ -1,4 +1,5 @@
 import type { MediaKind } from "./types";
+import { normalizeD64ErrorInfoTail } from "./d64-error-info";
 import { isAcceptedD64ByteLength } from "./formats";
 
 const D64_SIZE = 174848;
@@ -359,7 +360,7 @@ export function screenInvitesCracktroInput(screen: string): boolean {
 export function wrapForDiskSwap(kind: MediaKind, data: Uint8Array, name: string): Uint8Array | null {
   if (kind === "d64") {
     if (!isAcceptedD64ByteLength(data.byteLength)) return null;
-    return data;
+    return normalizeD64ErrorInfoTail(data);
   }
   if (kind === "g64" || kind === "g71") {
     return data.byteLength >= 4 ? data : null;

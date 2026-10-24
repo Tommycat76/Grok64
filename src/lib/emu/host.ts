@@ -87,6 +87,7 @@ import {
   viceDriveBusProbe,
 } from "./vice-disk";
 import { writeC64Bytes } from "./c64-memory";
+import { normalizeD64ErrorInfoTail } from "./d64-error-info";
 import {
   isAcceptedD64ByteLength,
   isCartridgePayload,
@@ -1722,25 +1723,40 @@ export async function finishFloppyInsertIec(
 ): Promise<number> {
   if (!emu) return -1;
   if (iecMapUnitIsSd2iec(iecMap, unit)) return 0;
-  const busBefore = viceDriveBusProbe(emu, unit);
-  const tdeOkBefore =
-    (busBefore.wasmTdeImageBytes ?? 0) > 174_000 && busBefore.wasmGcrLoaded === 1;
-  const serialOkBefore = busBefore.serialDeviceLabel === "real";
-  if (iecMap) {
-    const merged: IecMap = { ...defaultIecMap(), ...iecMap, [unit]: "1541" };
+  const merged: IecMap | undefined = iecMap
+    ? { ...defaultIecMap(), ...iecMap, [unit]: "1541" }
+    : undefined;
+  const multiIecDrive =
+    merged &&
+    ([8, 9, 10, 11] as IecUnit[]).filter((u) => {
+      const slot = merged[u];
+      return slot && slot !== "none" && slot !== "sd2iec";
+    }).length > 1;
+  if (merged && multiIecDrive) {
+    injectViceRc(emu, viceRcFloppyIsolateProfile(unit, merged));
+    applyRuntimeOptions(emu, {
+      vice_drive_true_emulation: "enabled",
+      vice_virtual_device_traps: "disabled",
+      [`vice_drive${unit}_type`]: "1541",
+    });
+    await waitRetroFrames(18);
+  } else if (merged) {
     restoreUserDriveVicerc(emu, merged);
     await waitRetroFrames(18);
   }
-  if (!serialOkBefore || !tdeOkBefore) {
+  let busNeed = viceDriveBusProbe(emu, unit);
+  const tdeOk = (busNeed.wasmTdeImageBytes ?? 0) > 174_000 && busNeed.wasmGcrLoaded === 1;
+  const serialOk = busNeed.serialDeviceLabel === "real";
+  if (!serialOk || !tdeOk) {
     const busRc = await ensureIecBusReconcile(emu, unit, iecMap, {
-      lightVicerc: true,
-      skipReload: tdeOkBefore,
+      lightVicerc: !multiIecDrive,
+      skipReload: tdeOk,
     });
     if (busRc < 0) return busRc;
   }
   const bus = viceDriveBusProbe(emu, unit);
   if ((bus.wasmTdeImageBytes ?? 0) < 174_000 || bus.wasmGcrLoaded !== 1) {
-    glog("finish-floppy-insert-iec-tde-miss", { unit, bus, busBefore });
+    glog("finish-floppy-insert-iec-tde-miss", { unit, bus, busNeed });
     return -1;
   }
   if (bus.serialDeviceLabel !== "real") {
@@ -2412,6 +2428,7 @@ export async function bumpViceWorkDiskReload(emu: EjsInstance | null, unit: IecU
 
 export function syncViceWorkD64(emu: EjsInstance | null, data: Uint8Array, unit: IecUnit = 8) {
   if (!isAcceptedD64ByteLength(data.byteLength)) return;
+  data = normalizeD64ErrorInfoTail(data);
   const saveDir = retroSaveDirFromModule(emu) ?? viceRetroSaveDirectory(emu);
   const targets = [
     grok64IecAttachD64Path(unit),
@@ -2931,6 +2948,9 @@ export function mountDiskOnUnit(
 ): boolean {
   const FS = fsOf(emu);
   if (!FS?.writeFile) return false;
+  if (/\.d64$/i.test(filename) && isAcceptedD64ByteLength(data.byteLength)) {
+    data = normalizeD64ErrorInfoTail(data);
+  }
   const base = filename.replace(/^\//, "");
   const prev = unitMounts.get(unit);
   if (prev && prev !== base) removeMediaFile(FS, prev);

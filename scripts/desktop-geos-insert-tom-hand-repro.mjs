@@ -23,6 +23,11 @@ import {
   typeC64RealKeyboard,
   waitRunning,
 } from "./desktop-qa-lib.mjs";
+import {
+  GEOS_D64_EXPECTED_BYTES,
+  TOM_GEOS_D64_SHA1_PREFIX,
+  geosD64Fingerprint,
+} from "./geos-fixture-lib.mjs";
 
 const base = process.env.GROK64_BASE_URL || "http://127.0.0.1:8080/";
 const keyMs = Number(process.env.GROK64_TOM_TYPING_MS || "400");
@@ -39,8 +44,24 @@ if (!grok64DatapathFromEnv() || !existsSync(d64Path)) {
 }
 
 const d64Name = "GEOS_2.0.d64";
-const d64B64 = readFileSync(d64Path).toString("base64");
-const trace = { keyMs, path: "library-row-insert-unit-8", librarySeed: "importLibraryBytes-no-ui-import" };
+const d64Bytes = readFileSync(d64Path);
+const d64Fp = geosD64Fingerprint(d64Bytes);
+const d64B64 = d64Bytes.toString("base64");
+const trace = {
+  keyMs,
+  path: "library-row-insert-unit-8",
+  librarySeed: "importLibraryBytes-no-ui-import",
+  geosD64: d64Fp,
+  geosD64Expect: { bytes: GEOS_D64_EXPECTED_BYTES, sha1Prefix: TOM_GEOS_D64_SHA1_PREFIX },
+};
+if (d64Fp.bytes !== GEOS_D64_EXPECTED_BYTES) {
+  console.log(JSON.stringify({ pass: false, skipped: true, reason: "wrong-geos-bytes", geosD64: d64Fp }));
+  process.exit(0);
+}
+if (process.env.GROK64_TOM_GEOS_STRICT === "1" && !d64Fp.tomHand) {
+  console.log(JSON.stringify({ pass: false, skipped: true, reason: "not-tom-geos-sha", geosD64: d64Fp }));
+  process.exit(0);
+}
 
 async function typeTomKeyboard(page, text) {
   await typeC64RealKeyboard(page, text, { keyDelayMs: keyMs, lineEndMs: Math.max(1200, keyMs * 2) });
