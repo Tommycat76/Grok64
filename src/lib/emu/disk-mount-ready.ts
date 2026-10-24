@@ -7,7 +7,7 @@ import {
   flushEmuFs,
   hardReset,
   resyncSessionDiskToVice,
-  viceReattachSessionDisk,
+  ensureViceSessionDiskAttached,
 } from "./host";
 import { sessionDiskOnUnit } from "./session-media";
 import { isGcrDiskKind, kindOf } from "./formats";
@@ -36,7 +36,9 @@ export async function presentFloppyMountReady(
     await runMountStage("resync-session-disk", async () => {
       resyncSessionDiskToVice(emu, live.unit);
     });
-    const rc = await runMountStage("vice-reattach-session", () => viceReattachSessionDisk(emu, live.unit), 60_000);
+    const rc = await runMountStage("vice-reattach-session", () =>
+      ensureViceSessionDiskAttached(emu, live.unit, diskKind),
+    60_000);
     if (rc !== 0) {
       const last = lastViceDiskAttach(live.unit);
       throw new Error(`VICE disk reattach failed (rc=${rc})${last ? ` path=${last.path} attachRc=${last.rc}` : ""}`);
@@ -62,7 +64,9 @@ export async function presentFloppyMountReady(
   await runMountStage("resync-session-disk", async () => {
     resyncSessionDiskToVice(emu, live.unit);
   });
-  const rcCold = await runMountStage("vice-reattach-session", () => viceReattachSessionDisk(emu, live.unit), 60_000);
+  const rcCold = await runMountStage("vice-reattach-session", () =>
+    ensureViceSessionDiskAttached(emu, live.unit, diskKind),
+  60_000);
   if (rcCold !== 0) {
     const last = lastViceDiskAttach(live.unit);
     throw new Error(

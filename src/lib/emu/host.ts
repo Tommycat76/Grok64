@@ -2126,6 +2126,27 @@ function retroSaveDirFromModule(emu: EjsInstance | null): string | null {
   }
 }
 
+/**
+ * Ask libretro to re-run `update_work_disk()` on the next frame(s) after MEMFS bytes change.
+ * Safer than sync `grok64_disk_attach` from the browser thread while the core is running.
+ */
+export async function bumpViceWorkDiskReload(emu: EjsInstance | null, unit: IecUnit = 8): Promise<void> {
+  if (!emu) return;
+  const slot = `${unit}_d64`;
+  const before = viceAttachedImage(emu, unit);
+  applyRuntimeOptions(emu, { vice_work_disk: "disabled" });
+  await new Promise((r) => setTimeout(r, 40));
+  applyRuntimeOptions(emu, { vice_work_disk: slot });
+  rememberWorkDisk(slot);
+  for (let i = 0; i < 120; i++) {
+    await tickGrok64Iec(emu);
+    await new Promise((r) => setTimeout(r, 16));
+    const now = viceAttachedImage(emu, unit);
+    if (now && now !== before && !/blank\.d64/i.test(now)) break;
+  }
+  glog("vice-work-disk-reload", { unit, slot, before, after: viceAttachedImage(emu, unit) });
+}
+
 export function syncViceWorkD64(emu: EjsInstance | null, data: Uint8Array) {
   const FS = fsOf(emu);
   if (!FS?.writeFile || !isAcceptedD64ByteLength(data.byteLength)) return;
@@ -2368,6 +2389,30 @@ export async function viceReattachDiskOnEmuThread(
   recordViceLastAttach(unit, { path, rc, before: null, after, at: Date.now() });
   glog("vice-disk-reattach", { unit, path, rc, after, emuThread: Boolean(defer) });
   return rc;
+}
+
+/** Hot-swap D64: libretro work-disk refresh first; GCR / fallback uses grok64_disk_attach. */
+export async function ensureViceSessionDiskAttached(
+  emu: EjsInstance | null,
+  unit: IecUnit,
+  diskKind: ReturnType<typeof kindOf> | null,
+): Promise<number> {
+  if (!emu) return -1;
+  if (diskKind && !isGcrDiskKind(diskKind)) {
+    await bumpViceWorkDiskReload(emu, unit);
+    const attached = viceAttachedImage(emu, unit);
+    if (attached && !/blank\.d64/i.test(attached)) {
+      recordViceLastAttach(unit, {
+        path: attached,
+        rc: 0,
+        before: null,
+        after: attached,
+        at: Date.now(),
+      });
+      return 0;
+    }
+  }
+  return viceReattachSessionDisk(emu, unit);
 }
 
 /** file_system_detach_disk + file_system_attach_disk for the live session image on `unit`. */
