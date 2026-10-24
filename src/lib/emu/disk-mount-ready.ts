@@ -6,6 +6,7 @@ import {
   disarmAutostart,
   flushEmuFs,
   hardReset,
+  resyncSessionDiskToVice,
 } from "./host";
 import type { IecDrive, IecUnit } from "./types";
 import { isIosPhone } from "./detect";
@@ -31,5 +32,6 @@ export async function presentFloppyMountReady(
   applyIecUnit(emu, live.iec, live.unit);
   hardReset(emu);
   await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
+  resyncSessionDiskToVice(emu, live.unit);
   bumpCrtPaint(emu);
 }

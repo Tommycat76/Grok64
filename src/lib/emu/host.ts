@@ -12,6 +12,7 @@ import {
 import {
   clearSessionMedia,
   removeSessionCart,
+  sessionDiskOnUnit,
   sessionMediaList,
   setSessionDisk,
   type SessionMediaSlot,
@@ -41,7 +42,7 @@ import {
 } from "./grok64-vice-bridge";
 import { grok64RetroKeyboardAvailable } from "./grok64-keyboard";
 import { writeC64Bytes } from "./c64-memory";
-import { isCartridgePayload } from "./formats";
+import { isCartridgePayload, kindOf } from "./formats";
 import type { FastLoadCartKind } from "./jiffy-cart-compat";
 import { jiffyAllowedDuringCartBoot } from "./jiffy-cart-compat";
 import { readScreenText } from "./screen-text";
@@ -2132,6 +2133,20 @@ export async function refreshViceWorkDisk(emu: EjsInstance | null, unit: IecUnit
   await flushEmuFs(emu, 1500);
   bumpCrtPaint(emu);
   await new Promise((r) => setTimeout(r, 250));
+  resyncSessionDiskToVice(emu, unit);
+}
+
+/** After VICE reset, rewrite session floppy bytes to MEMFS + vice_work.d64 mirror. */
+export function resyncSessionDiskToVice(emu: EjsInstance | null, unit: IecUnit = 8): boolean {
+  const slot = sessionDiskOnUnit(unit);
+  if (!slot || !emu) return false;
+  const target = slot.name.replace(/^\//, "");
+  if (!writeBootFile(emu, slot.bytes, target)) return false;
+  emu.fileName = target;
+  if (/\.d64$/i.test(target) && slot.bytes.byteLength >= 174848) {
+    syncViceWorkD64(emu, slot.bytes);
+  }
+  return true;
 }
 
 /** QA: bytes on MEMFS path VICE opens for `8_d64` work disk attach. */
@@ -2324,6 +2339,9 @@ export function mountDiskOnUnit(
   if (wrote) {
     unitMounts.set(unit, base);
     setSessionDisk(base, data, unit);
+    if (/\.d64$/i.test(base) && data.byteLength >= 174848) {
+      syncViceWorkD64(emu, data);
+    }
     pruneExtraDisks(emu);
   }
   return wrote;
@@ -2345,7 +2363,12 @@ function pruneExtraDisks(emu: EjsInstance | null) {
 /** Hot-swap a game disk without changing IEC unit wiring — keeps emu.fileName valid for autostart. */
 export function swapBootDisk(emu: EjsInstance | null, data: Uint8Array, fallbackName?: string | null): boolean {
   const target = bootFileOf(emu) ?? fallbackName ?? null;
-  return writeBootFile(emu, data, target);
+  const wrote = writeBootFile(emu, data, target);
+  if (wrote && target && /\.d64$/i.test(target) && data.byteLength >= 174848) {
+    syncViceWorkD64(emu, data);
+    setSessionDisk(target.replace(/^\//, ""), data, 8);
+  }
+  return wrote;
 }
 
 /**
@@ -2472,14 +2495,21 @@ export function attachAutostartDisk(
   // as the blank work disk — LOAD"*",8,1 then FILE NOT FOUND (#60/#61).
   const mounted = bootFileOf(emu);
   if (!mounted) return false;
-  const wrote = writeBootFile(emu, data, mounted);
+  const mountedClean = mounted.replace(/^\//, "");
+  const fallback = (_fallbackName || "").replace(/^\//, "");
+  const kind = kindOf(fallback || mountedClean);
+  const target =
+    (kind === "g64" || kind === "g71") && fallback
+      ? fallback
+      : mountedClean;
+  const wrote = writeBootFile(emu, data, target);
   if (wrote) {
-    unitMounts.set(unit, mounted);
-    if (emu) emu.fileName = mounted;
+    unitMounts.set(unit, target);
+    if (emu) emu.fileName = target;
     applyIecUnit(emu, iec, unit);
-    const label = (_fallbackName || mounted).replace(/^\//, "");
+    const label = fallback || target;
     setSessionDisk(label, data, unit);
-    if (data.byteLength >= 174848 && /\.d64$/i.test(mounted)) {
+    if (data.byteLength >= 174848 && /\.d64$/i.test(target)) {
       syncViceWorkD64(emu, data);
     }
   }

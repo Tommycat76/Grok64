@@ -34,3 +34,7 @@ export function removeSessionCart() {
 export function sessionMediaList(): SessionMediaSlot[] {
   return slots.map((s) => ({ ...s, bytes: s.bytes }));
 }
+
+export function sessionDiskOnUnit(unit = 8): SessionMediaSlot | null {
+  return slots.find((s) => s.kind === "disk" && (s.unit ?? 8) === unit) ?? null;
+}

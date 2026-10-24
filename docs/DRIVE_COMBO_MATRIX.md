@@ -2,7 +2,7 @@
 
 **Status: PARKED** — Tom **hands-on PASS** on cart + Jiffy baseline (`ab220c7`+, library bytes intact, 2026-10-24). **Do not unpark** this matrix, SuperCPU, or RAMLink-style RAMdisk rows until Tom explicitly says so. No merge/deploy from the cart PR without Tom.
 
-**Last updated:** 2026-10-24 (spec only — no drive-combo QA run yet)
+**Last updated:** 2026-10-24 (spec + harness; **no matrix PASS/FAIL rows** until Tom unparks)
 
 ---
 
@@ -21,6 +21,8 @@ Results are **PASS / FAIL per row**, with **hands-on Chromium** click-through an
 | Gate | Owner | Notes |
 |------|--------|--------|
 | Cart + Jiffy UI gate green | Cart fix PR | `npm run test:desktop-cart-jiffy-ui-gate` + manual screenshots |
+| Jiffy + floppy directory (generic path) | Agent gate | `npm run test:desktop-jiffy-floppy-dir` — GEOS + boulder-dash, Jiffy on/off (`cf5c6e6` pairs 1541 ROM before work-disk refresh) |
+| Tom hands-on Jiffy + REU Play | Tom | Same path as gate; sign-off before unpark |
 | Floppy mount policy | Done | `docs/DISK_MOUNT_POLICY.md` — mount READY, named LOAD only |
 | CMD Boot ROM 2.80 | QA | User-uploaded; matrix uses real CMD HD behavior |
 | Jiffy ROM pair (+ 1571 ROM if 1571 rows) | QA | Settings upload; synthetic pair OK for automation only if Tom agrees |
@@ -156,7 +158,8 @@ Implementation notes:
 
 - Reuse `scripts/desktop-qa-lib.mjs` (power on, Settings IEC chips, `patchLocalStorage`).
 - Drive map iterator: generate permutations from a catalog in `scripts/drive-combo-catalog.mjs`.
-- Never type `LOAD"*",8,1` in harness (Tom); use fixture manifest names.
+- Shared LOAD/DIR helpers: `scripts/drive-combo-qa-lib.mjs` (mount on `pairFrom`, `LOAD"$"`, LIST, first PRG named LOAD for **LOAD** rows).
+- Never type `LOAD"*",8,1` in harness (Tom); use directory-derived PRG names or fixture manifest.
 - Long-running: shard by map id in CI; full factorial is a release/manual milestone.
 
 ---

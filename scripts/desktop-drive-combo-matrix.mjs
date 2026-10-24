@@ -12,17 +12,18 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   DRIVE_COMBO_SMOKE_ROWS,
+  iecMapForHarness,
   mapId,
   rowNeeds1571,
-  rowNeedsCmdHd,
+  rowTouchesCmdHd,
 } from "./drive-combo-catalog.mjs";
-import {
-  patchLocalStorage,
-  powerOnDesktop,
-  typeBasic,
-  waitRunning,
-} from "./desktop-qa-lib.mjs";
+import { patchLocalStorage, powerOnDesktop, waitRunning } from "./desktop-qa-lib.mjs";
 import { assertGrok64WasmCore, clearEmulatorJsCache, grok64DatapathFromEnv } from "./desktop-grok64-core.mjs";
+import {
+  applySyntheticJiffy,
+  loadSmokeOnUnit,
+  mountFloppyOnUnit,
+} from "./drive-combo-qa-lib.mjs";
 
 const base = process.env.GROK64_BASE_URL || "http://127.0.0.1:8080/";
 const unpark = process.env.GROK64_DRIVE_COMBO_UNPARK === "1";
@@ -54,17 +55,6 @@ if (!grok64DatapathFromEnv()) {
 const testDisk = join(process.cwd(), "fixtures", "disks", "boulder-dash.d64");
 const results = [];
 
-function synthJiffyPair() {
-  const c64 = new Uint8Array(8192);
-  const d41 = new Uint8Array(8192);
-  for (let i = 0; i < c64.length; i++) c64[i] = (i * 17 + 0x4a) & 0xff;
-  for (let i = 0; i < d41.length; i++) d41[i] = (i * 13 + 0x41) & 0xff;
-  return {
-    "JiffyDOS_C64_6.01.bin": [...c64],
-    "JiffyDOS_1541-II_6.00.bin": [...d41],
-  };
-}
-
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 
@@ -77,36 +67,40 @@ for (const row of rows) {
     console.log("SKIP", row.id, rec.reason);
     continue;
   }
-  if (rowNeedsCmdHd(row) && !process.env.GROK64_CMD_ROM_PATH) {
+  const cmdRomPath = process.env.GROK64_CMD_ROM_PATH;
+  if (rowTouchesCmdHd(row) && !cmdRomPath) {
     rec.skipped = true;
-    rec.reason = "CMD HD Boot ROM — set GROK64_CMD_ROM_PATH for smoke rows with cmdhd";
+    rec.reason = "CMD HD Boot ROM — set GROK64_CMD_ROM_PATH when pair uses cmdhd unit";
     results.push(rec);
     console.log("SKIP", row.id, rec.reason);
     continue;
   }
 
+  const iecMap = iecMapForHarness(row, { cmdRomAvailable: Boolean(cmdRomPath) });
+  if (cmdRomPath) rec.cmdRom = cmdRomPath;
+
   await page.goto(base, { waitUntil: "domcontentloaded" });
   await clearEmulatorJsCache(page);
   await patchLocalStorage(page, {
-    video: "ntsc",
+    video: "pal",
     jiffy: false,
     reu: row.reu === "none" ? "none" : row.reu,
-    iecMap: row.iecMap,
+    iecMap,
   });
   await page.reload({ waitUntil: "domcontentloaded" });
   await powerOnDesktop(page, base, { navigate: false });
   await waitRunning(page, 120_000);
   await assertGrok64WasmCore(page, { timeoutMs: 120_000 });
 
+  if (cmdRomPath) {
+    const romBytes = [...readFileSync(cmdRomPath)];
+    await page.evaluate(async (bytes) => {
+      await window.__g64?.putRomBytes?.("cmdhd", "dosCMDHD.bin", bytes);
+    }, romBytes);
+  }
+
   if (row.kernal === "jiffy") {
-    const pair = synthJiffyPair();
-    await page.evaluate(async (roms) => {
-      for (const [name, bytes] of Object.entries(roms)) {
-        const id = /1541/i.test(name) ? "jiffy-1541" : "jiffy-c64";
-        await window.__g64?.putRomBytes?.(id, name, bytes);
-      }
-      window.__g64?.setJiffyDos?.(true);
-    }, pair);
+    await applySyntheticJiffy(page);
     await page.reload({ waitUntil: "domcontentloaded" });
     await powerOnDesktop(page, base, { navigate: false });
     await waitRunning(page, 120_000);
@@ -117,26 +111,35 @@ for (const row of rows) {
   const mapShot = join(shotRoot, `${row.id}-${mapId(row.iecMap)}-settings.png`);
   await page.screenshot({ path: mapShot, fullPage: true });
 
-  if (existsSync(testDisk) && row.op === "DIR") {
-    const bytes = [...readFileSync(testDisk)];
-    await page.evaluate(
-      async ({ bytes, unit }) => {
-        await window.__g64?.playBytes?.("boulder-dash.d64", bytes, {
-          autostart: false,
-          title: "Boulder Dash",
-          iecUnit: unit,
-        });
-      },
-      { bytes, unit: row.pairFrom },
-    );
-    await waitRunning(page, 90_000);
-    await typeBasic(page, `LOAD"$",${row.pairFrom}`, { afterMs: 15_000 });
-    const text = await page.evaluate(() => window.__g64?.screenText?.() || "");
-    rec.pass = !/FILE NOT FOUND|DEVICE NOT PRESENT/i.test(text) && text.length > 40;
-    rec.textHead = text.slice(0, 120);
-  } else if (row.op === "LOAD" || row.op === "COPY") {
+  if (!existsSync(testDisk)) {
     rec.skipped = true;
-    rec.reason = "LOAD/COPY harness TBD — DIR smoke only in first unpark slice";
+    rec.reason = "fixtures/disks/boulder-dash.d64 missing";
+    rec.pass = false;
+  } else if (row.op === "DIR" || row.op === "LOAD") {
+    const bytes = [...readFileSync(testDisk)];
+    await page.evaluate(() => window.__g64?.resetReady?.());
+    await waitRunning(page, 90_000);
+    await page.waitForTimeout(1500);
+    await mountFloppyOnUnit(page, {
+      fileName: "boulder-dash.d64",
+      bytes,
+      unit: row.pairFrom,
+      title: "Boulder Dash",
+    });
+    await waitRunning(page, 120_000);
+    await page.waitForTimeout(6000);
+    const smoke = await loadSmokeOnUnit(page, row.pairFrom);
+    rec.pass = row.op === "DIR" ? smoke.ok : smoke.loadOk;
+    rec.textHead = smoke.textHead;
+    rec.listHead = smoke.listHead;
+    if (row.op === "LOAD") {
+      rec.prg = smoke.prg;
+      rec.afterHead = smoke.afterHead;
+      if (!rec.pass) rec.reason = smoke.reason ?? "named LOAD failed";
+    }
+  } else if (row.op === "COPY") {
+    rec.skipped = true;
+    rec.reason = "COPY A↔B harness TBD — LOAD/DIR smoke only in first unpark slice";
     rec.pass = false;
   }
 

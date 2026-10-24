@@ -101,6 +101,30 @@ export function rowNeedsCmdHd(row) {
   return Object.values(row.iecMap).includes("cmdhd");
 }
 
+/** True when the ordered pair uses a unit wired as CMD HD. */
+export function rowTouchesCmdHd(row) {
+  return row.iecMap[row.pairFrom] === "cmdhd" || row.iecMap[row.pairTo] === "cmdhd";
+}
+
 export function rowNeeds1571(row) {
   return Object.values(row.iecMap).includes("1571");
+}
+
+export function rowTouches1581(row) {
+  return row.iecMap[row.pairFrom] === "1581" || row.iecMap[row.pairTo] === "1581";
+}
+
+/**
+ * IEC map for boot in harness: inactive CMD HD / 1581 / 1571 slots become `none`
+ * unless the row pair needs them (avoids missing-ROM boot quirks on unrelated units).
+ */
+export function iecMapForHarness(row, { cmdRomAvailable }) {
+  const out = { ...row.iecMap };
+  for (const u of [8, 9, 10, 11]) {
+    if (out[u] === "cmdhd" && (!cmdRomAvailable || !rowTouchesCmdHd(row))) out[u] = "none";
+    if (out[u] === "1581" && !rowTouches1581(row)) out[u] = "none";
+    if (out[u] === "1571") out[u] = "none";
+  }
+  if (out[8] === "none") out[8] = "1541";
+  return out;
 }

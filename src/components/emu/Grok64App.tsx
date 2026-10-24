@@ -99,6 +99,14 @@ import {
   tryGeosDiskAutostart,
   applyJiffyThenRefreshWorkDisk,
 } from "@/lib/emu/host";
+import {
+  diskAttachFingerprint,
+  validateFloppyLibraryPayload,
+} from "@/lib/emu/disk-attach-diag";
+import {
+  enqueueC64KeyboardStroke,
+  flushDeferredC64Keyboard,
+} from "@/lib/emu/deferred-c64-keys";
 import { presentFloppyMountReady } from "@/lib/emu/disk-mount-ready";
 import { hasCmdRom, hasJiffyPair, prefetchBundledRoms } from "@/lib/emu/roms";
 import {
@@ -202,7 +210,7 @@ import { applyTabletContainFit, tabletBezelAvail, tabletGlassFillsBezel } from "
 import { detectJoyPort, detectSoftwareStandard } from "@/lib/emu/region";
 import { RETRO_BTN } from "@/lib/emu/types";
 import { feedBasicLine, readPrintTi } from "@/lib/emu/c64-keyboard";
-import { removeSessionCart, setSessionCart, setSessionDisk } from "@/lib/emu/session-media";
+import { removeSessionCart, sessionDiskOnUnit, setSessionCart, setSessionDisk } from "@/lib/emu/session-media";
 import { focusGrok64Player } from "@/lib/emu/focus-player";
 import {
   dispatchC64Key,
@@ -854,6 +862,26 @@ export function Grok64App() {
       },
       screenText: () => readScreenText(emuRef.current),
       workD64Bytes: () => viceWorkD64ByteLength(emuRef.current),
+      attachDiskDiag: async () => {
+        const session = sessionDiskOnUnit(8);
+        const FS = emuRef.current?.Module?.FS ?? emuRef.current?.gameManager?.FS;
+        let viceSha1: string | null = null;
+        let viceSize = viceWorkD64ByteLength(emuRef.current);
+        try {
+          const raw = FS?.readFile?.("/data/saves/vice_work.d64");
+          if (raw instanceof Uint8Array && raw.byteLength) {
+            viceSize = raw.byteLength;
+            viceSha1 = (await diskAttachFingerprint(raw, "vice_work.d64")).sha1;
+          }
+        } catch {
+          /* optional */
+        }
+        return {
+          bootFile: bootFileOf(emuRef.current),
+          session: session ? await diskAttachFingerprint(session.bytes, session.name) : null,
+          viceWork: { bytes: viceSize, sha1: viceSha1 },
+        };
+      },
       kbdDrain: () => grok64KeyboardDrain(),
       readC64Byte: (addr) => readC64Byte(emuRef.current, addr),
       writeC64Byte: (addr, v) => writeC64Byte(emuRef.current, addr, v),
@@ -1099,7 +1127,18 @@ export function Grok64App() {
         await playBufferRef.current(item.name, buf, { autostart: true, title: item.name });
         return item.id;
       },
-      playBytes: async (name, bytes, opts?: { autostart?: boolean }) => {
+      playBytes: async (
+        name,
+        bytes,
+        opts?: {
+          autostart?: boolean;
+          title?: string;
+          iecUnit?: number;
+          diskLoad?: boolean;
+          libraryId?: string;
+          bootName?: string;
+        },
+      ) => {
         let buf: ArrayBuffer;
         if (bytes instanceof ArrayBuffer) buf = bytes;
         else if (Array.isArray(bytes)) buf = new Uint8Array(bytes).buffer;
@@ -1109,7 +1148,14 @@ export function Grok64App() {
           buf = new Uint8Array(bytes as ArrayLike<number>).buffer;
         }
         const autostart = opts?.autostart !== false;
-        await playBufferRef.current(name, buf, { autostart, title: name });
+        await playBufferRef.current(name, buf, {
+          autostart,
+          title: opts?.title ?? name,
+          iecUnit: opts?.iecUnit,
+          diskLoad: opts?.diskLoad,
+          libraryId: opts?.libraryId,
+          bootName: opts?.bootName,
+        });
         return true;
       },
       /** Nuvie: zip `base.prg` + `base.reu` so libretro VICE pairs the REU image. */
@@ -1463,7 +1509,31 @@ export function Grok64App() {
     muteC64Space(false);
     clearBootTimers();
     useEmu.getState().setBooting(false);
+    flushDeferredC64Keyboard(emuRef.current);
   }, []);
+  const finishFloppyMountReady = useCallback(() => {
+    s.setBooting(false, "", 0);
+    inGameplayRef.current = true;
+    persistGateRef.current = true;
+    clearMenuJoyInput();
+    flushDeferredC64Keyboard(emuRef.current);
+  }, [s, clearMenuJoyInput]);
+  const logFloppyAttach = useCallback(
+    async (tag: string, source: { name: string; bytes: Uint8Array; libraryId?: string | null }) => {
+      const session = sessionDiskOnUnit(8);
+      const src = await diskAttachFingerprint(source.bytes, source.name);
+      const attached = session ? await diskAttachFingerprint(session.bytes, session.name) : null;
+      glog("floppy-attach", {
+        tag,
+        libraryId: source.libraryId ?? null,
+        source: src,
+        session: attached,
+        viceWorkBytes: viceWorkD64ByteLength(emuRef.current),
+        bootFile: bootFileOf(emuRef.current),
+      });
+    },
+    [],
+  );
   const beginPlayLock = useCallback(
     (ms, msg) => {
       playLockGen.current += 1;
@@ -1488,6 +1558,7 @@ export function Grok64App() {
         window.setTimeout(() => {
           if (playLockGen.current !== gen) return;
           playLockRef.current = false;
+          flushDeferredC64Keyboard(emuRef.current);
           fireArmedAt.current = Date.now() + 300;
           setWarp(emuRef.current, false);
           disarmAutostart(
@@ -2882,7 +2953,12 @@ export function Grok64App() {
             await presentFloppyMountReady(emuRef.current, plan.live);
             applyIecUnit(emuRef.current, playIec, playAttachUnit);
             if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, keepLiveCrt || floppyKeep ? "play-recycle" : "hot-swap");
-            beginPlayLock(playLockDuration(playModeRef.current, title), `Mounted ${title}…`);
+            void logFloppyAttach("play-hot-swap", {
+              name: filename,
+              bytes: payloadDisk,
+              libraryId: opts.libraryId ?? null,
+            });
+            finishFloppyMountReady();
           } else {
             autostartAfterReady(emuRef.current, true, {
               autoloadWarp: autoloadWarpForPlay(playModeRef.current, bootName),
@@ -2930,7 +3006,8 @@ export function Grok64App() {
           if (plan.kind === "floppy") {
             disarmAutostart(emuRef.current, "disk");
             await presentFloppyMountReady(emuRef.current, plan.live);
-            beginPlayLock(playLockDuration(playModeRef.current, title), `Mounted ${title}…`);
+            void logFloppyAttach("play-inplace-ios", { name: filename, bytes: media, libraryId: opts.libraryId ?? null });
+            finishFloppyMountReady();
           } else {
             autostartAfterReady(emuRef.current, true, {
               autoloadWarp: autoloadWarpForPlay(playModeRef.current, bootName),
@@ -3181,7 +3258,7 @@ export function Grok64App() {
       }
       notePlayMarker();
     },
-    [s, persistNow, startWithUrl, beginPlayLock, syncJiffy],
+    [s, persistNow, startWithUrl, beginPlayLock, syncJiffy, finishFloppyMountReady, logFloppyAttach],
   );
   playBufferRef.current = playBuffer;
   const playBundled = useCallback(
@@ -3218,6 +3295,21 @@ export function Grok64App() {
       const localKind = kindOf(file.name);
       const mountOnlyDisk =
         isDiskKind(localKind) || isGeosFamilyDiskName(file.name) || needsTypedBoot(localKind);
+      const libBytes = new Uint8Array(file.data);
+      if (mountOnlyDisk) {
+        const check = validateFloppyLibraryPayload(file.name, libBytes);
+        if (!check.ok) {
+          const fp = await diskAttachFingerprint(libBytes, file.name);
+          glog("library-play-reject", { name: file.name, id: item.id, reason: check.reason, fp });
+          toast.error(
+            `That library copy looks wrong (${check.reason}). Delete the row and import the disk again.`,
+          );
+          return;
+        }
+        if (file.size !== libBytes.byteLength) {
+          glog("library-size-mismatch", { name: file.name, id: item.id, stored: file.size, actual: libBytes.byteLength });
+        }
+      }
       await playBuffer(file.name, file.data, {
         autostart: !mountOnlyDisk,
         title: meta?.title ?? item.catalogTitle ?? item.name,
@@ -3238,6 +3330,13 @@ export function Grok64App() {
     }
     const raw = new Uint8Array(file.data);
     const kind = kindOf(file.name);
+    const check = validateFloppyLibraryPayload(file.name, raw);
+    if (!check.ok) {
+      const fp = await diskAttachFingerprint(raw, file.name);
+      glog("library-insert-reject", { name: file.name, id: item.id, reason: check.reason, fp });
+      toast.error(`That library copy looks wrong (${check.reason}). Re-import the disk.`);
+      return;
+    }
     const media = wrapForDiskSwap(kind, raw, file.name) ?? (isDiskKind(kind) ? raw : null);
     if (!media) {
       toast.error("Can't insert that as a disk");
@@ -3275,12 +3374,18 @@ export function Grok64App() {
     await applyJiffyThenRefreshWorkDisk(emuRef.current, unit, useEmu.getState().jiffyDos);
     await flushEmuFs(emuRef.current, 600);
     await touchPlayed(item.id);
-    const label = d64DiskName(media) ?? item.name.replace(/\.[a-z0-9]{2,4}$/i, "");
+    const bam = d64DiskName(media);
+    const label =
+      bam && /^[\x20-\x7e]+$/.test(bam) && !/^work\s*disk/i.test(bam)
+        ? bam
+        : item.name.replace(/\.[a-z0-9]{2,4}$/i, "");
     setSessionDisk(item.name, media, unit);
     useEmu.getState().setInsertedDiskName(item.name);
     focusGrok64Player();
+    void logFloppyAttach("insert-disk", { name: item.name, bytes: media, libraryId: item.id });
+    finishFloppyMountReady();
     toast.success(`Inserted ${label} on drive ${unit}`);
-  }, []);
+  }, [finishFloppyMountReady, logFloppyAttach]);
   const toggleWarp = useCallback(() => {
     const next = !useEmu.getState().warped;
     useEmu.getState().setWarped(next);
@@ -3635,7 +3740,6 @@ export function Grok64App() {
     const onHostKey = (e: KeyboardEvent) => {
       if (!useEmu.getState().running) return;
       const freezerFn = /^F[1-8]$/.test(e.code) && (cartLiveRef.current || useEmu.getState().fastLoadCart);
-      if (playLockRef.current && !freezerFn) return;
       if (!grok64RetroKeyboardAvailable(emuRef.current)) return;
       const target = e.target;
       if (target instanceof Element && target.closest(".g64-kb, .g64-sheet")) return;
@@ -3645,6 +3749,17 @@ export function Grok64App() {
       }
       if (isJoyFireKey(e.code)) return;
       const down = e.type === "keydown";
+      const deferKeys = playLockRef.current || useEmu.getState().booting;
+      if (deferKeys && !freezerFn) {
+        enqueueC64KeyboardStroke(e.code, e.key, down, {
+          shift: e.shiftKey,
+          ctrl: e.ctrlKey,
+          alt: e.altKey,
+        });
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
       if (down && e.repeat) return;
       const handled = grok64RetroKeyboardFromDom(emuRef.current, e.code, e.key, down, {
         shift: e.shiftKey,
