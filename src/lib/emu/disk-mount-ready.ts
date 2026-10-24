@@ -64,7 +64,10 @@ export async function presentFloppyMountReady(
   });
   const rcCold = await runMountStage("vice-reattach-session", () => viceReattachSessionDisk(emu, live.unit), 60_000);
   if (rcCold !== 0) {
-    throw new Error(`VICE disk reattach failed (rc=${rcCold})`);
+    const last = lastViceDiskAttach(live.unit);
+    throw new Error(
+      `VICE disk reattach failed (rc=${rcCold})${last ? ` path=${last.path} attachRc=${last.rc}` : ""}`,
+    );
   }
   bumpCrtPaint(emu);
 }
