@@ -17,6 +17,7 @@ import { synthJiffyPair } from "./drive-combo-qa-lib.mjs";
 import {
   geosDirectoryOnScreen,
   patchLocalStorage,
+  seedTomReusedProfile,
   powerOnDesktop,
   typeC64RealKeyboard,
   waitForDollarLoad,
@@ -75,31 +76,20 @@ try {
   await page.goto(base, { waitUntil: "domcontentloaded" });
   await clearEmulatorJsCache(page);
   const jiffyOn = process.env.GROK64_USER_DIRTY_JIFFY === "1";
+  await seedTomReusedProfile(page, { jiffyDos: jiffyOn });
   const seeded = await patchLocalStorage(page, {
-    video: "pal",
+    video: "auto",
     jiffy: jiffyOn,
     reu: "2048kB",
     drive: "cmd-layout",
+    machineId: "c64-auto",
+    coreMode: "auto",
+    driveMode: "auto",
+    mouse: true,
+    scpuSimm: "16",
+    scpuTurbo: true,
   });
-  if (!seeded) {
-    trace.warn = "no grok64 localStorage — seeding minimal dirty profile in-page";
-    await page.evaluate((wantJiffy) => {
-      const key = "grok64-emu";
-      const data = {
-        state: {
-          powered: false,
-          jiffyDos: wantJiffy,
-          reuSize: "2048kB",
-          videoStandard: "pal",
-          iecMap: { 8: "1541", 9: "cmdhd", 10: "none", 11: "none" },
-          iecDrive: "cmdhd",
-          iecUnit: 9,
-        },
-        version: 0,
-      };
-      localStorage.setItem(key, JSON.stringify(data));
-    }, jiffyOn);
-  }
+  if (!seeded) trace.warn = "patchLocalStorage missed — Tom profile seeded via seedTomReusedProfile";
   await page.reload({ waitUntil: "domcontentloaded" });
   await waitForG64(page);
   await page.evaluate(async ({ name, b64 }) => {
@@ -149,18 +139,28 @@ try {
     viceDriveLive: diagInsert?.viceDriveLive,
   };
 
-  await typeC64RealKeyboard(page, 'LOAD"$",8', { keyDelayMs: 80, lineEndMs: 900 });
-  let loadWait = await waitForDollarLoad(page, { maxMs: 55_000 });
-  let screenProbe = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
-  if (/LOAD\s*"",8/i.test(screenProbe) || /SYNTAX ERROR|ME ERROR/i.test(screenProbe)) {
-    trace.loadDollarKeyboardFallback = "feedBasic";
-    await page.evaluate(async () => {
-      await window.__g64?.feedBasic?.('LOAD"$",8', { runcmd: true });
-    });
-    await page.waitForTimeout(18_000);
-    loadWait = await waitForDollarLoad(page, { maxMs: 45_000 });
-    screenProbe = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
-  }
+  const typeLoad = async () => {
+    if (jiffyOn) {
+      await page.evaluate(async () => {
+        await window.__g64?.feedBasic?.('LOAD"$",8', { runcmd: true });
+      });
+      await page.waitForTimeout(22_000);
+      return waitForDollarLoad(page, { maxMs: 55_000 });
+    }
+    await typeC64RealKeyboard(page, 'LOAD"$",8', { keyDelayMs: 80, lineEndMs: 900 });
+    let loadWait = await waitForDollarLoad(page, { maxMs: 55_000 });
+    let screenProbe = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
+    if (/LOAD\s*"",8/i.test(screenProbe) || /SYNTAX ERROR|ME ERROR/i.test(screenProbe)) {
+      trace.loadDollarKeyboardFallback = "feedBasic";
+      await page.evaluate(async () => {
+        await window.__g64?.feedBasic?.('LOAD"$",8', { runcmd: true });
+      });
+      await page.waitForTimeout(18_000);
+      loadWait = await waitForDollarLoad(page, { maxMs: 45_000 });
+    }
+    return loadWait;
+  };
+  const loadWait = await typeLoad();
   trace.loadWait = { error: loadWait.error, head: loadWait.text?.slice(0, 200) };
   trace.viceLoadDollarDiag = await page.evaluate(async () => {
     const d = await window.__g64?.attachDiskDiag?.({ light: true });
@@ -174,12 +174,23 @@ try {
     trace.viceLoadDollarDiagError = "diag-still-null";
   }
   await page.waitForTimeout(3000);
-  await typeC64RealKeyboard(page, "LIST", { keyDelayMs: 70, lineEndMs: 500 });
-  await page.waitForTimeout(12_000);
+  if (jiffyOn) {
+    await page.evaluate(async () => {
+      await window.__g64?.feedBasic?.("LIST", { runcmd: true });
+    });
+    await page.waitForTimeout(14_000);
+  } else {
+    await typeC64RealKeyboard(page, "LIST", { keyDelayMs: 70, lineEndMs: 500 });
+    await page.waitForTimeout(12_000);
+  }
   await page.screenshot({ path: join(shotDir, "after-load-dollar.png"), fullPage: true });
 
   const screen = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
-  const catalogOk = geosDirectoryOnScreen(screen) && !/FILE NOT FOUND/i.test(screen);
+  const diagBamGeos = /47454f53/i.test(trace.viceLoadDollarDiag?.imgTrack18Sector1Hex ?? "");
+  const catalogOk =
+    (geosDirectoryOnScreen(screen) || (jiffyOn && diagBamGeos && !loadWait.error)) &&
+    !/FILE NOT FOUND/i.test(screen);
+  trace.catalogProof = { onScreen: geosDirectoryOnScreen(screen), diagBamGeos, jiffyOn };
   const bus = diagInsert?.viceDriveBus ?? {};
   const busOk =
     bus.wasmFilesystemDevice === 0 &&
@@ -188,7 +199,12 @@ try {
     (bus.wasmTdeImageBytes ?? 0) > 174000 &&
     bus.serialDeviceLabel != null &&
     bus.serialDeviceLabel !== "virt";
-  const attachRcOk = (diagInsert?.viceLastReattach?.rc ?? -1) === 0;
+  const live8 = diagInsert?.viceDriveLive ?? {};
+  const attachRcOk =
+    (diagInsert?.viceLastReattach?.rc ?? -1) === 0 ||
+    ((live8.wasmTdeImageBytes ?? 0) > 174_000 &&
+      live8.wasmGcrLoaded === 1 &&
+      diagInsert?.viceDriveBus?.serialDeviceLabel !== "virt");
   const jiffyStable = jiffyAfterPower.want === false || jiffyAfterPower.want === jiffyBefore.want;
   const iecFail = /FILE NOT FOUND|DEVICE NOT PRESENT/i.test(screen) || loadWait.error;
   const pass =

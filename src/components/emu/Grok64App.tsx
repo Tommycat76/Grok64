@@ -104,6 +104,7 @@ import {
   ensureViceSessionDiskAttached,
   ensureIecBusReconcile,
   bmc64FlushSessionDisk,
+  finishFloppyInsertIec,
   hardResetAndFlushSessionDisk,
   flushSessionDiskAfterPowerOn,
   resyncSessionDiskToVice,
@@ -1121,7 +1122,7 @@ export function Grok64App() {
         if (!screenTextHasReady(head)) {
           return { ok: false, reason: "not-ready", text: head.slice(0, 400) };
         }
-        await bmc64FlushSessionDisk(emu, 8, useEmu.getState().iecMap);
+        await finishFloppyInsertIec(emu, 8, useEmu.getState().iecMap);
         await ensureViceSessionDiskAttached(emu, 8, "d64");
         await flushEmuFs(emu, 600);
         await new Promise((r) => setTimeout(r, 800));
@@ -3746,9 +3747,9 @@ export function Grok64App() {
       );
       disarmAutostart(emuRef.current, "disk");
       await presentFloppyMountReady(emuRef.current, { iec, unit }, { afterDriveRefresh: true });
-      const busRc = await bmc64FlushSessionDisk(emuRef.current, unit, useEmu.getState().iecMap);
+      const busRc = await finishFloppyInsertIec(emuRef.current, unit, useEmu.getState().iecMap);
       if (busRc < 0) {
-        throw new Error(`IEC bus flush failed (rc=${busRc}) ${viceDiskLastAttachDiag(emuRef.current) ?? ""}`);
+        throw new Error(`IEC bus reconcile failed (rc=${busRc}) ${viceDiskLastAttachDiag(emuRef.current) ?? ""}`);
       }
       await flushEmuFs(emuRef.current, 600);
     } catch (err) {

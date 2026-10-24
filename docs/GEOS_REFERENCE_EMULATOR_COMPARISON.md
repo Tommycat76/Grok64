@@ -82,7 +82,8 @@ npm run test:desktop-grok64-feature-smoke
 | Condition | Behavior |
 |-----------|----------|
 | Settings unit is **SD2IEC** | Skip `bmc64Flush`, `ensureIecBusReconcile`, floppy isolate on that unit |
-| **Floppy Insert** on unit 8 with CMD on 9 | Isolate **during** reconcile only; then **`viceRcSafeFloppyProfile`** + `viceDriveTypeVars` restore CMD (and REU opts unchanged) |
+| **Floppy Insert** on unit 8 with CMD on 9 | **`finishFloppyInsertIec`** (one reconcile, no second detach/reattach); **`restoreUserDriveVicerc`** restores CMD map without `viceDriveTypeVars` churn (REU/SCPU/auto settings stay) |
+| **WASM attach** | `grok64_disk_attach` no longer calls `iec_bus_reconcile` (prevents stack overflow); JS reconciles once |
 | **REU / warp / Jiffy** | Not written by isolate vicerc; session opts re-applied on power-on |
 | **Cart session** | Flush path is floppy-oriented; cart boot uses `prepareCore` + cart vicerc |
 

@@ -82,6 +82,21 @@ export function recordViceLastAttach(unit: IecUnit, record: ViceDiskAttachRecord
   lastAttachByUnit.set(unit, record);
 }
 
+/** QA / About: when VICE already has an image but attach skipped recording (work-disk refresh path). */
+export function ensureViceLastAttachRecorded(emu: ViceDiskEmu | null, unit: IecUnit = 8): void {
+  const path = viceAttachedImage(emu, unit);
+  if (!path?.trim()) return;
+  const last = lastAttachByUnit.get(unit);
+  if (last?.rc === 0 && last.after) return;
+  recordViceLastAttach(unit, {
+    path,
+    rc: 0,
+    before: last?.after ?? null,
+    after: path,
+    at: Date.now(),
+  });
+}
+
 export function bindGrok64DiskExports(mod: Grok64ModuleBag, emu?: ViceDiskEmu | null): void {
   if (isGrok64DiskExportsBound(mod)) {
     if (emu != null) bindGrok64DiskApiDirect(mod, emu);

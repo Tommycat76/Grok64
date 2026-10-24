@@ -213,6 +213,55 @@ export async function noPowerSplash(page) {
   return (await page.locator(".g64-splash[data-on='true']").count()) === 0;
 }
 
+/** Tom's reused profile (auto machine/video/core/drive + REU 2M + SCPU prefs). */
+export const TOM_REUSED_PROFILE = {
+  machineId: "c64-auto",
+  videoStandard: "auto",
+  coreMode: "auto",
+  driveMode: "auto",
+  reuSize: "2048kB",
+  mouseMode: true,
+  scpuSimm: "16",
+  scpuTurbo: true,
+  iecMap: { 8: "1541", 9: "cmdhd", 10: "none", 11: "none" },
+  iecDrive: "cmdhd",
+  iecUnit: 9,
+};
+
+export async function seedTomReusedProfile(page, overrides = {}) {
+  const merged = { ...TOM_REUSED_PROFILE, ...overrides };
+  return page.evaluate((p) => {
+    try {
+      sessionStorage.removeItem("grok64-post-cart-out");
+    } catch {
+      /* ignore */
+    }
+    const data = {
+      state: {
+        powered: false,
+        running: false,
+        booting: false,
+        machineId: p.machineId,
+        videoStandard: p.videoStandard,
+        coreMode: p.coreMode,
+        driveMode: p.driveMode,
+        reuSize: p.reuSize,
+        jiffyDos: !!p.jiffyDos,
+        mouseMode: !!p.mouseMode,
+        scpuSimm: p.scpuSimm,
+        scpuTurbo: !!p.scpuTurbo,
+        iecMap: p.iecMap,
+        iecDrive: p.iecDrive,
+        iecUnit: p.iecUnit,
+        joyPort: 2,
+      },
+      version: 0,
+    };
+    localStorage.setItem("grok64-emu", JSON.stringify(data));
+    return true;
+  }, merged);
+}
+
 export function patchLocalStorage(page, combo) {
   return page.evaluate((combo) => {
     try {
@@ -229,7 +278,12 @@ export function patchLocalStorage(page, combo) {
     data.state.powered = false;
     data.state.running = false;
     data.state.booting = false;
-    data.state.videoStandard = combo.video;
+    if (combo.video != null) data.state.videoStandard = combo.video;
+    if (combo.driveMode) data.state.driveMode = combo.driveMode;
+    if (combo.coreMode) data.state.coreMode = combo.coreMode;
+    if (combo.machineId) data.state.machineId = combo.machineId;
+    if (combo.scpuSimm) data.state.scpuSimm = combo.scpuSimm;
+    if (combo.scpuTurbo != null) data.state.scpuTurbo = !!combo.scpuTurbo;
     data.state.sidModel = combo.sid;
     data.state.sid2Address = combo.sid2 ?? "disabled";
     data.state.sid3Address = "disabled";

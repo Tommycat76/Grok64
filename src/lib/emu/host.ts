@@ -77,6 +77,7 @@ import {
   viceReattachDiskAsync,
   viceRetroSaveDirectory,
   recordViceLastAttach,
+  ensureViceLastAttachRecorded,
   refreshViceWorkDiskAttached,
   grok64DiskModule,
   runSerializedDiskAttach,
@@ -1691,22 +1692,43 @@ export async function bmc64FlushSessionDisk(
   if (iecMapUnitIsSd2iec(iecMap, unit)) return 0;
   const slot = sessionDiskOnUnit(unit);
   if (!slot?.name && !unitMounts.get(unit)) return 0;
-  injectViceRc(emu, viceRcFloppyIsolateProfile(unit, iecMap));
-  const rc = await viceReattachSessionDisk(emu, unit);
-  if (rc < 0) return rc;
-  const busRc = await ensureIecBusReconcile(emu, unit, iecMap);
+  const bus = viceDriveBusProbe(emu, unit);
+  const tdeLive =
+    (bus.wasmTdeImageBytes ?? 0) > 174_000 &&
+    bus.wasmGcrLoaded === 1 &&
+    bus.serialDeviceLabel !== "virt";
+  if (!tdeLive) {
+    injectViceRc(emu, viceRcFloppyIsolateProfile(unit, iecMap));
+    const rc = await viceReattachSessionDisk(emu, unit);
+    if (rc < 0) return rc;
+  }
+  const busRc = await ensureIecBusReconcile(emu, unit, iecMap, { skipReload: true });
   if (busRc < 0) return busRc;
   if (iecMap) {
     const merged: IecMap = { ...defaultIecMap(), ...iecMap, [unit]: "1541" };
-    injectViceRc(emu, viceRcSafeFloppyProfile(unit, iecMap));
-    applyRuntimeOptions(emu, {
-      ...viceDriveTypeVars(viceMapFromIecMap(merged)),
-      vice_drive_true_emulation: "enabled",
-      vice_virtual_device_traps: "disabled",
-    });
-    await waitRetroFrames(20);
-    await tickGrok64Iec(emu);
+    restoreUserDriveVicerc(emu, merged);
+    await waitRetroFrames(12);
   }
+  ensureViceLastAttachRecorded(emu, unit);
+  return busRc;
+}
+
+/** After Software Insert mount: one IEC reconcile + restore Settings map (no second detach/reattach). */
+export async function finishFloppyInsertIec(
+  emu: EjsInstance | null,
+  unit: IecUnit,
+  iecMap?: IecMap,
+): Promise<number> {
+  if (!emu) return -1;
+  if (iecMapUnitIsSd2iec(iecMap, unit)) return 0;
+  const busRc = await ensureIecBusReconcile(emu, unit, iecMap, { skipReload: true, lightVicerc: true });
+  if (busRc < 0) return busRc;
+  if (iecMap) {
+    const merged: IecMap = { ...defaultIecMap(), ...iecMap, [unit]: "1541" };
+    restoreUserDriveVicerc(emu, merged);
+    await waitRetroFrames(12);
+  }
+  ensureViceLastAttachRecorded(emu, unit);
   return busRc;
 }
 
@@ -2591,12 +2613,6 @@ export async function viceReattachDiskOnEmuThread(
     let rc = api?.diskAttach?.(unit, drive, path) ?? -1;
     const attachRc = api?.diskLastAttachRc?.();
     if (rc < 0 && typeof attachRc === "number" && attachRc >= 0) rc = attachRc;
-    if (rc === 0) {
-      const reloadRc = await reloadViceDriveImageAfterAttach(emu, unit, drive);
-      if (reloadRc < 0 && reloadRc !== -99) {
-        glog("vice-disk-reload-warn", { unit, path, reloadRc });
-      }
-    }
     const after = rc === 0 ? viceAttachedImage(emu, unit, drive) : null;
     recordViceLastAttach(unit, { path, rc, before: null, after, at: Date.now() });
     glog("vice-disk-reattach", { unit, path, rc, after, syncAttach: true });
@@ -2622,26 +2638,31 @@ export async function ensureIecBusReconcile(
   emu: EjsInstance | null,
   unit: IecUnit = 8,
   iecMap?: IecMap,
+  opts?: { skipReload?: boolean; lightVicerc?: boolean },
 ): Promise<number> {
   if (!emu) return -1;
   if (iecMapUnitIsSd2iec(iecMap, unit)) return 0;
-  injectViceRc(emu, viceRcTrueFloppyUnit(unit, iecMap));
+  if (!opts?.lightVicerc) {
+    injectViceRc(emu, viceRcTrueFloppyUnit(unit, iecMap));
+  }
   const mod = grok64DiskModule(emu);
   if (mod) bindGrok64DiskExports(mod, emu);
   const api = grok64DiskApi(mod);
   api?.viceApplySafeFloppyProfile?.(unit);
   const reconcile = api?.iecBusReconcile;
   let rc = reconcile ? reconcile(unit) : (api?.driveSyncTdeImage?.(unit, 0) ?? -99);
-  if (rc === 0 && api?.driveReloadImage) {
+  if (rc === 0 && api?.driveReloadImage && !opts?.skipReload) {
     const reloadRc = api.driveReloadImage(unit, 0);
     glog("iec-bus-reconcile-reload", { unit, reloadRc, diag: viceDiskLastAttachDiag(emu) });
   }
-  applyRuntimeOptions(emu, {
-    vice_drive_true_emulation: "enabled",
-    vice_virtual_device_traps: "disabled",
-    [`vice_drive${unit}_type`]: "1541",
-  });
-  await waitRetroFrames(45);
+  if (!opts?.lightVicerc) {
+    applyRuntimeOptions(emu, {
+      vice_drive_true_emulation: "enabled",
+      vice_virtual_device_traps: "disabled",
+      [`vice_drive${unit}_type`]: "1541",
+    });
+  }
+  await waitRetroFrames(opts?.lightVicerc ? 18 : 45);
   await tickGrok64Iec(emu);
   const bus = viceDriveBusProbe(emu, unit);
   glog("iec-bus-reconcile", {
@@ -2670,12 +2691,17 @@ export async function ensureViceSessionDiskAttached(
     await flushEmuFs(emu, isIosPhone() ? 2000 : 1200);
     const rc = await viceReattachSessionDisk(emu, unit);
     if (rc === 0) {
-      const busRc = await ensureIecBusReconcile(emu, unit);
+      const busRc = await ensureIecBusReconcile(emu, unit, undefined, { skipReload: true, lightVicerc: true });
       if (busRc < 0) return busRc;
     }
     return rc;
   }
-  return viceReattachSessionDisk(emu, unit);
+  const rc = await viceReattachSessionDisk(emu, unit);
+  if (rc === 0) {
+    const busRc = await ensureIecBusReconcile(emu, unit, undefined, { skipReload: true, lightVicerc: true });
+    if (busRc < 0) return busRc;
+  }
+  return rc;
 }
 
 /** file_system_detach_disk + file_system_attach_disk for the live session image on `unit`. */
