@@ -54,8 +54,10 @@ import {
 } from "./grok64-core-loaded";
 import {
   maybeAutoRefreshStaleEmulatorCore,
+  patchEmulatorJsDownloaderCoreCacheBypass,
   patchFetchNoStoreForGrok64Core,
   patchIndexedDbForEmulatorJsCache,
+  purgeAllEmulatorJsCoreRows,
   syncEmulatorJsCoreCacheWithManifest,
 } from "./grok64-ejs-core-cache";
 
@@ -632,10 +634,24 @@ export function prefetchViceCores() {
   }
 }
 
+function applyGrok64EmulatorJsRuntimePatches(): void {
+  patchEjsGrok64CoreDownload();
+  patchEjsInitGameCoreGlue();
+  patchEmulatorJsDownloaderCoreCacheBypass();
+}
+
 export function ensureRuntime(): Promise<void> {
   if (scriptsReady) return scriptsReady;
   if (typeof window !== "undefined" && window.EmulatorJS && (window as unknown as { nipplejs?: unknown }).nipplejs) {
-    return Promise.resolve();
+    if (!scriptsReady) {
+      scriptsReady = (async () => {
+        patchIndexedDbForEmulatorJsCache();
+        patchFetchNoStoreForGrok64Core();
+        await syncEmulatorJsCoreCacheWithManifest().catch(() => undefined);
+        applyGrok64EmulatorJsRuntimePatches();
+      })();
+    }
+    return scriptsReady;
   }
   scriptsReady = (async () => {
     patchIndexedDbForEmulatorJsCache();
@@ -647,8 +663,7 @@ export function ensureRuntime(): Promise<void> {
     }
     if (!window.EmulatorJS) throw new Error("EmulatorJS failed to initialize");
     patchEjsInput();
-    patchEjsGrok64CoreDownload();
-    patchEjsInitGameCoreGlue();
+    applyGrok64EmulatorJsRuntimePatches();
   })().catch((err) => {
     scriptsReady = null;
     throw err;
@@ -688,6 +703,7 @@ function patchEjsGrok64CoreDownload() {
     const filePaths = (this as { config?: { filePaths?: Record<string, string> } }).config?.filePaths;
     const canonical = grok64CoreBlobUrl();
     if (isViceCoreData) {
+      void purgeAllEmulatorJsCoreRows("pre-vice-download").catch(() => undefined);
       recordGrok64CoreLoad(leaf, filePaths?.[leaf] ?? canonical ?? url, filePaths?.[leaf] ? "filePaths" : "redirect");
       if (canonical && filePaths) {
         for (const name of GROK64_VICE_CORE_DATA_NAMES) {
@@ -924,8 +940,7 @@ export async function bootEmulator(el: HTMLElement, cfg: BootConfig): Promise<Ej
   patchFetchNoStoreForGrok64Core();
   await syncEmulatorJsCoreCacheWithManifest().catch(() => undefined);
   await ensureRuntime();
-  patchEjsGrok64CoreDownload();
-  patchEjsInitGameCoreGlue();
+  applyGrok64EmulatorJsRuntimePatches();
   preserveWebglBuffer();
   keyboardArmed = false;
   clearRuntimeViceOpts();

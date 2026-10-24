@@ -130,6 +130,20 @@ function idbGet<T>(db: IDBDatabase, store: string, key: string): Promise<T | und
   });
 }
 
+function idbPut(db: IDBDatabase, store: string, key: string, value: unknown): Promise<void> {
+  if (!db.objectStoreNames.contains(store)) return Promise.resolve();
+  return new Promise((resolve) => {
+    try {
+      const tx = db.transaction(store, "readwrite");
+      tx.objectStore(store).put(value, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
+  });
+}
+
 function idbDelete(db: IDBDatabase, store: string, key: string): Promise<void> {
   if (!db.objectStoreNames.contains(store)) return Promise.resolve();
   return new Promise((resolve) => {
@@ -259,9 +273,8 @@ export async function syncEmulatorJsCoreCacheWithManifest(): Promise<Grok64EjsCa
   const manifestBump = prev !== GROK64_CORE_BUILD_ID;
   const reason = manifestBump ? "manifest-build-id-changed" : "vice-core-url-sync";
   let removed = 0;
-  if (manifestBump) {
-    removed += (await purgeAllEmulatorJsCoreRows(`${reason}:all-core`)).removed;
-  }
+  // Every boot: drop EmulatorJS Core IDB rows so stale blobs cannot win over network (dontCache does not skip IDB read).
+  removed += (await purgeAllEmulatorJsCoreRows(`${reason}:boot-all-core`)).removed;
   removed += (await purgeEmulatorJsViceCoreCache(reason)).removed;
   if (manifestBump) {
     try {
@@ -300,13 +313,123 @@ export async function forceFreshGrok64CoreDownloadCache(): Promise<void> {
   await purgeEmulatorJsViceCoreCache("force-fresh-core");
 }
 
+/** QA: rows in EmulatorJS-Cache with type Core. */
+export async function qaCountEmulatorJsCoreCacheRows(): Promise<number> {
+  const db = await openEjsCacheDb();
+  if (!db) return 0;
+  const metas = await listCacheMetas(db);
+  db.close();
+  return metas.filter((m) => /^core$/i.test(String(m.type ?? ""))).length;
+}
+
+/**
+ * QA: insert metadata for a stale core URL (grok64core without grok64glue) like upgraded real profiles.
+ * Does not write blob payloads — EJS should miss blobs and refetch after purge.
+ */
+async function writeEjsCoreCacheBlob(
+  db: IDBDatabase,
+  cacheKey: string,
+  meta: Record<string, unknown>,
+  filename: string,
+  bytes: Uint8Array,
+): Promise<void> {
+  const fileKey = `${cacheKey}__blob__0`;
+  await idbPut(db, "blobs", fileKey, bytes);
+  await idbPut(db, "blobs", cacheKey, {
+    _ejsBlobManifest: true,
+    files: [{ filename, type: "single", key: fileKey }],
+  });
+  await idbPut(db, "cache", cacheKey, meta);
+  const keys = (await idbGet<string[]>(db, "cache", "?EJS_KEYS!")) ?? [];
+  if (!keys.includes(cacheKey)) keys.push(cacheKey);
+  await idbPut(db, "cache", "?EJS_KEYS!", keys);
+}
+
+/**
+ * QA: poison IDB with stock vice *.data bytes keyed to the current Grok64 canonical URL (Tom-shaped stale blob).
+ */
+export async function qaSeedStaleEmulatorJsCoreCacheWithStockBlob(): Promise<{
+  key: string;
+  url: string;
+  bytes: number;
+  stockSha12: string | null;
+} | null> {
+  patchIndexedDbForEmulatorJsCache();
+  const root = grok64ViceCoreRoot();
+  if (!root || typeof window === "undefined") return null;
+  const rel = `${root.startsWith("/") ? root : `/${root}`}/cores/vice_x64sc-wasm.data`;
+  const stockUrl = `${window.location.origin}${rel}`;
+  const res = await fetch(stockUrl, { cache: "no-store" });
+  if (!res.ok) return null;
+  const buf = new Uint8Array(await res.arrayBuffer());
+  const { sha256PrefixAsync } = await import("./grok64-core-loaded");
+  const stockSha12 = await sha256PrefixAsync(buf);
+
+  const canonical = grok64CoreBlobUrl();
+  if (!canonical) return null;
+
+  const db = await openEjsCacheDb();
+  if (!db) return null;
+  const key = `Obj-qa-stale-blob-${Date.now()}`;
+  const now = Date.now();
+  const meta = {
+    key,
+    url: canonical,
+    type: "Core",
+    filename: "vice_x64sc-wasm.data",
+    added: now,
+    lastAccessed: now,
+    fileSize: buf.byteLength,
+    responseType: "arraybuffer",
+    cacheExpiry: now + 7 * 86400000,
+  };
+  await writeEjsCoreCacheBlob(db, key, meta, "vice_x64sc-wasm.data", buf);
+  db.close();
+  return { key, url: canonical, bytes: buf.byteLength, stockSha12 };
+}
+
+export async function qaSeedStaleEmulatorJsCoreCacheRow(): Promise<{ key: string; url: string } | null> {
+  patchIndexedDbForEmulatorJsCache();
+  const buildId = grok64CoreBuildIdForUrl();
+  const root = grok64ViceCoreRoot();
+  if (!buildId || !root || typeof window === "undefined") return null;
+  const rel = `${root.startsWith("/") ? root : `/${root}`}/cores/${GROK64_IEC_CORE_BLOB}`;
+  const staleUrl = `${window.location.origin}${rel}?grok64core=${encodeURIComponent(buildId)}`;
+  const db = await openEjsCacheDb();
+  if (!db) return null;
+  const key = `Obj-qa-stale-${Date.now()}`;
+  const now = Date.now();
+  const meta = {
+    key,
+    url: staleUrl,
+    type: "Core",
+    filename: "vice_x64sc-wasm.data",
+    added: now,
+    lastAccessed: now,
+    fileSize: 1,
+    responseType: "arraybuffer",
+    cacheExpiry: now + 7 * 86400000,
+  };
+  await idbPut(db, "cache", key, meta);
+  const keys = (await idbGet<string[]>(db, "cache", "?EJS_KEYS!")) ?? [];
+  if (!keys.includes(key)) keys.push(key);
+  await idbPut(db, "cache", "?EJS_KEYS!", keys);
+  db.close();
+  return { key, url: staleUrl };
+}
+
 export async function maybeAutoRefreshStaleEmulatorCore(emu: { Module?: unknown } | null): Promise<boolean> {
   if (!grok64ViceCoreRoot() || !GROK64_CORE_BUILD_ID) return false;
   if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(AUTO_RELOAD_SS)) return false;
 
-  for (let i = 0; i < 24; i++) {
+  for (let i = 0; i < 60; i++) {
     const g = loadedCoreGlueInfo();
-    if (g?.glueSha12 != null || g?.glueHasDiskExports === false) break;
+    if (!g) {
+      await new Promise((r) => setTimeout(r, 50));
+      continue;
+    }
+    if (!g.glueHasDiskExports) break;
+    if (g.glueSha12 != null) break;
     await new Promise((r) => setTimeout(r, 50));
   }
 
@@ -321,10 +444,15 @@ export async function maybeAutoRefreshStaleEmulatorCore(emu: { Module?: unknown 
     }
     return false;
   }
-  if (!glue?.glueSha12) return false;
 
+  const glueShaMismatch =
+    Boolean(glue?.glueSha12 && GROK64_CORE_GLUE_SHA12 && glue.glueSha12 !== GROK64_CORE_GLUE_SHA12);
   const needsRefresh =
-    !glue.glueHasDiskExports || !matches || (glue.glueHasDiskExports && !exportsOk);
+    !glue ||
+    !glue.glueHasDiskExports ||
+    glueShaMismatch ||
+    !matches ||
+    !exportsOk;
   if (!needsRefresh) return false;
 
   await forceFreshGrok64CoreDownloadCache();
@@ -335,4 +463,62 @@ export async function maybeAutoRefreshStaleEmulatorCore(emu: { Module?: unknown 
   }
   window.location.reload();
   return true;
+}
+
+function viceCoreDownloadUrl(url: string): boolean {
+  const u = String(url);
+  return (
+    u.includes(GROK64_IEC_CORE_BLOB) ||
+    /\/cores\/vice_.*wasm\.data/i.test(u) ||
+    viceCoreUrl({ key: "", url: u })
+  );
+}
+
+/**
+ * EmulatorJS `dontCache` skips IDB write but still reads IDB by URL — bypass storage for VICE cores.
+ */
+type EjsDownloaderLike = {
+  downloadFile?: (...args: unknown[]) => unknown;
+  storageCache?: unknown;
+  __g64Bypass?: boolean;
+};
+
+export function patchEmulatorJsDownloaderCoreCacheBypass(): void {
+  if (typeof window === "undefined") return;
+  const w = window as unknown as {
+    EmulatorJS?: new (...a: unknown[]) => { downloader?: EjsDownloaderLike };
+    __g64EjsDlBypass?: boolean;
+  };
+  const EJS = w.EmulatorJS;
+  if (!EJS || w.__g64EjsDlBypass) return;
+  w.__g64EjsDlBypass = true;
+
+  const wrapDownloader = (dl: EjsDownloaderLike | undefined) => {
+    if (!dl?.downloadFile || dl.__g64Bypass) return;
+    dl.__g64Bypass = true;
+    const orig = dl.downloadFile.bind(dl);
+    dl.downloadFile = function bypassCoreIdbRead(...args: unknown[]) {
+      const url = String(args[0] ?? "");
+      const type = String(args[1] ?? "");
+      const isCore = /^core$/i.test(type) || viceCoreDownloadUrl(url);
+      if (!isCore) return orig(...args);
+      if (args.length > 10) args[10] = true;
+      const storageCache = dl.storageCache;
+      dl.storageCache = null;
+      try {
+        return orig(...args);
+      } finally {
+        dl.storageCache = storageCache;
+      }
+    };
+  };
+
+  const Orig = EJS;
+  const Wrapped = function Grok64PatchedEmulatorJS(this: unknown, ...args: unknown[]) {
+    const inst = Reflect.construct(Orig, args, Wrapped) as { downloader?: EjsDownloaderLike };
+    wrapDownloader(inst.downloader);
+    return inst;
+  } as unknown as typeof EJS;
+  Wrapped.prototype = Orig.prototype;
+  w.EmulatorJS = Wrapped;
 }

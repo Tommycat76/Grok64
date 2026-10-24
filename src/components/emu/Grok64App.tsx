@@ -271,6 +271,13 @@ import { explodeArchive, pickBootFile, toArrayBuffer } from "@/lib/emu/archive";
 import { BuildId } from "@/components/emu/BuildId";
 import { debugQueryOn, drive8LogLines, glog, glogFire, setDebugUi, subscribeLog } from "@/lib/emu/debug";
 import { grok64LibraryIdbDiag } from "@/lib/emu/library-diag";
+import {
+  maybeAutoRefreshStaleEmulatorCore,
+  qaCountEmulatorJsCoreCacheRows,
+  qaSeedStaleEmulatorJsCoreCacheRow,
+  qaSeedStaleEmulatorJsCoreCacheWithStockBlob,
+} from "@/lib/emu/grok64-ejs-core-cache";
+import { grok64CacheEnvironmentDiag, patchGrok64DataFetchInstrumentation } from "@/lib/emu/grok64-cache-diag";
 import { readBuildId } from "@/lib/emu/build-id";
 import {
   cartAttachResultCode,
@@ -591,6 +598,11 @@ export function Grok64App() {
   }, []);
   useEffect(() => {
     patchIndexedDbForEmulatorJsCache();
+    patchGrok64DataFetchInstrumentation();
+    const onGlueSha = () => {
+      void maybeAutoRefreshStaleEmulatorCore(emuRef.current);
+    };
+    window.addEventListener("grok64-core-glue-sha", onGlueSha);
     void listLibrary()
       .then((rows) => useEmu.getState().setLibrary(rows))
       .catch(() => undefined);
@@ -607,6 +619,7 @@ export function Grok64App() {
     void import("@/lib/emu/sd2iec-card-source").then((m) =>
       m.setSd2iecWriteEnabled(useEmu.getState().sd2iecWriteEnabled),
     );
+    return () => window.removeEventListener("grok64-core-glue-sha", onGlueSha);
   }, []);
   useEffect(() => {
     installIosPaintHooks(() => ({
@@ -816,6 +829,9 @@ export function Grok64App() {
       libraryCount: async () => (await listLibrary()).length,
       listLibraryItems: () => listLibrary(),
       libraryIdbDiag: () => grok64LibraryIdbDiag(),
+      qaSeedStaleEmulatorJsCoreCache: () => qaSeedStaleEmulatorJsCoreCacheRow(),
+      qaSeedStaleEmulatorJsCoreCacheBlob: () => qaSeedStaleEmulatorJsCoreCacheWithStockBlob(),
+      qaEmulatorJsCoreCacheCount: () => qaCountEmulatorJsCoreCacheRows(),
       librarySnapshot: async () => {
         const items = await listLibrary();
         const snap = [];
@@ -963,6 +979,7 @@ export function Grok64App() {
           coreUrlBuildId: grok64CoreStatus(emuRef.current).coreUrlBuildId,
           grok64Core: grok64CoreStatus(emuRef.current),
           libraryIdb: await grok64LibraryIdbDiag(),
+          cacheEnvironment: await grok64CacheEnvironmentDiag(),
           appBuildId: readBuildId(),
           grok64WasmBindRev: GROK64_WASM_BIND_REV,
         };

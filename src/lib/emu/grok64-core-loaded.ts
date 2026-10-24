@@ -55,6 +55,11 @@ export function recordGrok64CoreGlue(js: Uint8Array | ArrayBuffer | string): voi
     const w = window as unknown as Record<string, Grok64LoadedCoreGlue | undefined>;
     const cur = w[WIN_KEY];
     if (cur) cur.glueSha12 = glueSha12;
+    try {
+      window.dispatchEvent(new CustomEvent("grok64-core-glue-sha"));
+    } catch {
+      /* ignore */
+    }
   });
 }
 
