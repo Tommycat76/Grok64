@@ -109,7 +109,9 @@ const context = await browser.newContext({ viewport: { width: 1280, height: 800 
 const page = await context.newPage();
 
 await page.goto(base, { waitUntil: "domcontentloaded" });
-await clearEmulatorJsCache(page);
+if (process.env.GROK64_CLEAR_EJS_CACHE === "1") {
+  await clearEmulatorJsCache(page);
+}
 await patchLocalStorage(page, { video: "pal", jiffy: true, reu: "2048kB", drive: "cmd-layout" });
 await page.reload({ waitUntil: "domcontentloaded" });
 await powerOnDesktop(page, base, { navigate: false });
@@ -270,10 +272,18 @@ const stableAfterMount =
   mountRow?.meta?.cartLive === false &&
   !mountRow?.meta?.splash &&
   watchRows.every((r) => !r.meta?.splash && r.meta?.playMode === "disk");
-const d64Pass = shaOk && dirOk && !workReattached && stableAfterMount;
+const coreStatus = mount?.diag?.grok64Core ?? mountRow?.diag?.grok64Core ?? last?.diag?.grok64Core ?? null;
+const coreBuildId = mount?.diag?.coreBuildId ?? last?.diag?.coreBuildId ?? coreStatus?.coreBuildId ?? null;
+const diskExportsPresent =
+  mount?.diag?.diskExportsPresent === true ||
+  last?.diag?.diskExportsPresent === true ||
+  coreStatus?.diskExportsPresent === true;
+const d64Pass = shaOk && dirOk && !workReattached && stableAfterMount && diskExportsPresent && Boolean(coreBuildId);
 const report = {
   pass: d64Pass && (!requireG64Insert || (!g64Insert.skipped && g64Insert.pass)),
   stableAfterMount,
+  coreBuildId,
+  diskExportsPresent,
   d64Sha1,
   dirOk,
   shaOk,
