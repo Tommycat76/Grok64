@@ -5,6 +5,7 @@
 import { glog } from "./debug";
 import type { IecUnit } from "./types";
 import { isGcrDiskKind, kindOf } from "./formats";
+import { diskAttachFingerprint, type DiskAttachFingerprint } from "./disk-attach-diag";
 import {
   grok64DiskApi,
   grok64WorkDiskRefreshExportReady,
@@ -30,6 +31,10 @@ function pathVisibleToWasm(emu: ViceDiskEmu | null, path: string): boolean {
   return n != null && n > 0;
 }
 
+export function grok64DiskModule(emu: ViceDiskEmu | null): Grok64ModuleBag | null {
+  return diskMod(emu);
+}
+
 function diskMod(emu: ViceDiskEmu | null): Grok64ModuleBag | null {
   const bags = emuWasmModuleBags(emu);
   const e = emu as { Module?: Grok64ModuleBag & { UTF8ToString?: (ptr: number) => string } } | null;
@@ -52,6 +57,11 @@ const WORK_DISK_PATHS = [
   "/data/saves/vice_work.d64",
   "/home/web_user/retroarch/userdata/saves/vice_work.d64",
 ];
+
+/** Flat MEMFS path for grok64_disk_attach (avoids spaced save dir + stale same-path refresh). */
+export function grok64IecAttachD64Path(unit: IecUnit): string {
+  return `/data/saves/grok64_iec${unit}.d64`;
+}
 
 export type ViceDiskAttachRecord = {
   path: string;
@@ -164,6 +174,50 @@ export function viceWasmFsStatBytes(emu: ViceDiskEmu | null, path: string): numb
   }
 }
 
+export type ViceWasmWorkDiskRow = {
+  path: string;
+  wasmFsStat: number | null;
+  moduleFsBytes: number | null;
+  moduleSha1: string | null;
+  matchesSession: boolean;
+};
+
+export async function viceWasmWorkDiskDiag(
+  emu: ViceDiskEmu | null,
+  unit: IecUnit,
+  session?: DiskAttachFingerprint | null,
+): Promise<ViceWasmWorkDiskRow[]> {
+  const modFs = (emu as { Module?: { FS?: { readFile?: (p: string) => Uint8Array | string } } } | null)?.Module?.FS;
+  const saveDir = viceRetroSaveDirectory(emu);
+  const paths = [
+    grok64IecAttachD64Path(unit),
+    "/data/saves/vice_work.d64",
+    ...(saveDir ? [`${saveDir}/vice_work.d64`] : []),
+  ];
+  const rows: ViceWasmWorkDiskRow[] = [];
+  for (const path of paths) {
+    let moduleFsBytes: number | null = null;
+    let moduleSha1: string | null = null;
+    try {
+      const raw = modFs?.readFile?.(path);
+      if (raw instanceof Uint8Array && raw.byteLength) {
+        moduleFsBytes = raw.byteLength;
+        moduleSha1 = (await diskAttachFingerprint(raw, path)).sha1;
+      }
+    } catch {
+      /* ignore */
+    }
+    rows.push({
+      path,
+      wasmFsStat: viceWasmFsStatBytes(emu, path),
+      moduleFsBytes,
+      moduleSha1,
+      matchesSession: Boolean(session?.sha1 && moduleSha1 === session.sha1),
+    });
+  }
+  return rows;
+}
+
 export function viceRetroSaveDirectory(emu: ViceDiskEmu | null): string | null {
   const mod = diskMod(emu);
   if (!mod) return null;
@@ -180,17 +234,56 @@ export function viceRetroSaveDirectory(emu: ViceDiskEmu | null): string | null {
   }
 }
 
-/** Candidate MEMFS paths to try for file_system_attach_disk on `unit`. */
+function attachPathProbeRows(
+  emu: ViceDiskEmu | null,
+  paths: string[],
+): { path: string; jsFsBytes: number | null; wasmFsStat: number | null }[] {
+  return paths.map((path) => ({
+    path,
+    jsFsBytes: pathByteLength(emu, path),
+    wasmFsStat: viceWasmFsStatBytes(emu, path),
+  }));
+}
+
+export function viceDiskAttachPathUniverse(
+  emu: ViceDiskEmu | null,
+  unit: IecUnit,
+  fileName: string,
+): string[] {
+  const base = fileName.replace(/^\//, "");
+  const kind = kindOf(base);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (p: string) => {
+    const norm = p.startsWith("/") ? p : `/${p}`;
+    if (!seen.has(norm)) {
+      seen.add(norm);
+      out.push(norm);
+    }
+  };
+  const saveDir = viceRetroSaveDirectory(emu);
+  if (isGcrDiskKind(kind)) {
+    push(grok64IecAttachD64Path(unit));
+    push(`/${base}`);
+    push(base);
+  } else {
+    if (saveDir) push(`${saveDir}/vice_work.d64`);
+    for (const p of WORK_DISK_PATHS) push(p);
+    push("/data/saves/vice_work.d64");
+    push(grok64IecAttachD64Path(unit));
+    push(`/${base}`);
+    push(base);
+  }
+  return out;
+}
+
+/** About: all candidate paths + JS/WASM byte probes (not filtered). */
 export function probeViceAttachPaths(
   emu: ViceDiskEmu | null,
   unit: IecUnit,
   fileName: string,
 ): { path: string; jsFsBytes: number | null; wasmFsStat: number | null }[] {
-  return viceDiskAttachCandidates(emu, unit, fileName).map((path) => ({
-    path,
-    jsFsBytes: pathByteLength(emu, path),
-    wasmFsStat: viceWasmFsStatBytes(emu, path),
-  }));
+  return attachPathProbeRows(emu, viceDiskAttachPathUniverse(emu, unit, fileName));
 }
 
 export function viceDiskAttachCandidates(
@@ -213,21 +306,23 @@ export function viceDiskAttachCandidates(
   const saveDir = viceRetroSaveDirectory(emu);
 
   if (isGcrDiskKind(kind)) {
+    push(grok64IecAttachD64Path(unit));
     push(`/${base}`);
     push(base);
   } else {
+    if (saveDir) push(`${saveDir}/vice_work.d64`);
     for (const p of WORK_DISK_PATHS) push(p);
     push("/data/saves/vice_work.d64");
-    if (saveDir) push(`${saveDir}/vice_work.d64`);
+    push(grok64IecAttachD64Path(unit));
     push(`/${base}`);
     push(base);
   }
 
-  return out.filter((p) => {
-    if (pathVisibleToWasm(emu, p)) return true;
-    if (!pathExistsOnFs(emu, p)) return false;
-    return pathVisibleToWasm(emu, p);
-  });
+  const filtered = out.filter((p) => pathVisibleToWasm(emu, p));
+  if (filtered.length) return filtered;
+  const iecPath = grok64IecAttachD64Path(unit);
+  if (pathExistsOnFs(emu, iecPath)) return [iecPath];
+  return out.filter((p) => pathExistsOnFs(emu, p));
 }
 
 /** Preferred MEMFS path for the current session floppy on `unit`. */
@@ -284,6 +379,7 @@ export function viceReattachDisk(
   const api = grok64DiskApi(mod);
   if (!api?.diskAttach) return -99;
   try {
+    api.diskDetach?.(unit, drive);
     let rc = api.diskAttach(unit, drive, path) ?? -1;
     const attachRc = api.diskLastAttachRc?.();
     if (rc < 0 && typeof attachRc === "number" && attachRc >= 0) rc = attachRc;

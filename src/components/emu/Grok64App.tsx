@@ -101,6 +101,7 @@ import {
   applyIecUnitFloppy,
   applyJiffyThenRefreshWorkDisk,
   ensureViceSessionDiskAttached,
+  pulseViceDriveAfterHotDiskSwap,
 } from "@/lib/emu/host";
 import {
   diskAttachFingerprint,
@@ -122,6 +123,7 @@ import {
   viceAttachedImage,
   viceDiskLastAttachDiag,
   viceRetroSaveDirectory,
+  viceWasmWorkDiskDiag,
 } from "@/lib/emu/vice-disk";
 import { bindGrok64WasmExports } from "@/lib/emu/grok64-vice-bridge";
 import {
@@ -940,6 +942,7 @@ export function Grok64App() {
         const unit = 8;
         const jiffyLive = lastAppliedJiffy();
         const jiffyWant = st.jiffyDos;
+        const sessionFp = session ? await diskAttachFingerprint(session.bytes, session.name) : null;
         return {
           bootFile: bootFileOf(emuRef.current),
           emuFileName: emuRef.current?.fileName ?? null,
@@ -954,7 +957,7 @@ export function Grok64App() {
           jiffyWant,
           jiffyLive,
           jiffyStale: jiffyWant !== jiffyLive,
-          session: session ? await diskAttachFingerprint(session.bytes, session.name) : null,
+          session: sessionFp,
           viceWork: { bytes: viceSize, sha1: viceSha1 },
           viceAttachedImage: viceAttachedImage(emuRef.current, unit),
           viceLastReattach: lastViceDiskAttach(unit),
@@ -980,6 +983,7 @@ export function Grok64App() {
             unit,
             session?.name ?? bootFileOf(emuRef.current) ?? "GEOS_2.0.d64",
           ),
+          wasmWorkDisk: await viceWasmWorkDiskDiag(emuRef.current, unit, sessionFp),
           coreBuildId: grok64CoreStatus(emuRef.current).coreBuildId,
           coreBuildIdExpected: grok64CoreStatus(emuRef.current).coreBuildIdExpected,
           coreBuildIdLoaded: grok64CoreStatus(emuRef.current).coreBuildIdLoaded,
@@ -3557,7 +3561,7 @@ export function Grok64App() {
     const boot = bootFileName(file.name, kind);
     const mounted = bootFileOf(emuRef.current);
     const ok = mounted
-      ? attachAutostartDisk(emuRef.current, media, file.name, iec, unit)
+      ? attachAutostartDisk(emuRef.current, media, file.name, iec, unit, { deferViceReattach: true })
       : mountDiskOnUnit(emuRef.current, unit, media, boot, iec);
     if (!ok) {
       toast.error("Could not mount that disk");
@@ -3590,6 +3594,9 @@ export function Grok64App() {
     );
     disarmAutostart(emuRef.current, "disk");
     await presentFloppyMountReady(emuRef.current, { iec, unit }, { afterDriveRefresh: true });
+    if (!isGcrDiskKind(kind) && useEmu.getState().jiffyDos) {
+      await pulseViceDriveAfterHotDiskSwap(emuRef.current, unit, { fileName: file.name });
+    }
     await flushEmuFs(emuRef.current, 600);
     await touchPlayed(item.id);
     const bam = d64DiskName(media);

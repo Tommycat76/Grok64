@@ -68,6 +68,7 @@ import {
   resolveViceDiskAttachPath,
   viceAttachedImage,
   viceDiskAttachCandidates,
+  grok64IecAttachD64Path,
   probeViceAttachPaths,
   viceReattachDisk,
   viceRetroSaveDirectory,
@@ -2242,6 +2243,33 @@ export async function waitRetroFrames(frames = 1): Promise<void> {
 /**
  * After MEMFS sync: WASM `grok64_work_disk_refresh` when present, else libretro option toggle on retro frames.
  */
+/** Hot UI insert (Jiffy / existing work disk): pulse work_disk so 1541 sees new bytes. */
+export async function pulseViceDriveAfterHotDiskSwap(
+  emu: EjsInstance | null,
+  unit: IecUnit = 8,
+  opts?: { fileName?: string },
+): Promise<void> {
+  if (!emu) return;
+  const slot = `${unit}_d64`;
+  const label = opts?.fileName ?? sessionDiskOnUnit(unit)?.name ?? "";
+  const geos = /geos|wheels/i.test(label);
+  applyRuntimeOptions(emu, {
+    [`vice_drive${unit}_type`]: geos ? "1542" : "1541",
+    vice_drive_true_emulation: "enabled",
+    vice_virtual_device_traps: "disabled",
+    vice_work_disk: "disabled",
+  });
+  await waitRetroFrames(6);
+  await tickGrok64Iec(emu);
+  applyRuntimeOptions(emu, { vice_work_disk: slot });
+  rememberWorkDisk(slot);
+  for (let i = 0; i < 60; i++) {
+    await waitRetroFrames(1);
+    await tickGrok64Iec(emu);
+  }
+  glog("vice-drive-pulse", { unit, slot, image: viceAttachedImage(emu, unit) });
+}
+
 export async function bumpViceWorkDiskReload(emu: EjsInstance | null, unit: IecUnit = 8): Promise<void> {
   if (!emu) return;
   const before = viceAttachedImage(emu, unit);
@@ -2273,10 +2301,11 @@ export async function bumpViceWorkDiskReload(emu: EjsInstance | null, unit: IecU
   });
 }
 
-export function syncViceWorkD64(emu: EjsInstance | null, data: Uint8Array) {
+export function syncViceWorkD64(emu: EjsInstance | null, data: Uint8Array, unit: IecUnit = 8) {
   if (!isAcceptedD64ByteLength(data.byteLength)) return;
   const saveDir = retroSaveDirFromModule(emu) ?? viceRetroSaveDirectory(emu);
   const targets = [
+    grok64IecAttachD64Path(unit),
     "/data/saves/vice_work.d64",
     "/home/web_user/retroarch/userdata/saves/vice_work.d64",
     "/vice_work/vice_work.d64",
@@ -2914,6 +2943,7 @@ export function attachAutostartDisk(
   _fallbackName?: string | null,
   iec: IecDrive = "1541",
   unit: IecUnit = 8,
+  opts?: { deferViceReattach?: boolean },
 ): boolean {
   if (isCartridgePayload(data, _fallbackName ?? bootFileOf(emu))) return false;
   // Only overwrite the mounted boot image. A new filename leaves unit 8
@@ -2935,11 +2965,11 @@ export function attachAutostartDisk(
     const label = fallback || target;
     setSessionDisk(label, data, unit);
     if (isAcceptedD64ByteLength(data.byteLength) && /\.d64$/i.test(target)) {
-      syncViceWorkD64(emu, data);
+      syncViceWorkD64(emu, data, unit);
     }
     applyIecUnitFloppy(emu, iec, unit, kindOf(target));
     const attachPath = resolveViceDiskAttachPath(emu, unit, label || target);
-    if (attachPath) {
+    if (attachPath && !opts?.deferViceReattach) {
       void runMountStage("autostart-vice-reattach", async () => viceReattachDisk(emu, unit, attachPath)).catch(
         (err) => reportMountFailure("autostart-vice-reattach", err, { unit, attachPath }),
       );
