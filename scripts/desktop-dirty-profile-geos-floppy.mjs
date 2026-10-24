@@ -41,6 +41,12 @@ if (!grok64DatapathFromEnv()) {
 const d64Bytes = readFileSync(d64Path);
 const d64Sha1 = createHash("sha1").update(d64Bytes).digest("hex");
 const d64Name = d64Path.split("/").pop() ?? "GEOS_2.0.d64";
+const g64Path =
+  process.env.GROK64_GEOS_G64_PATH ||
+  [join(process.cwd(), "fixtures", "geos", "324_D1_Geos.g64"), join(process.cwd(), "fixtures", "geos", "GEOS.g64")]
+    .find((p) => existsSync(p)) ||
+  null;
+const requireG64Insert = process.env.GROK64_SKIP_G64 !== "1" && !!g64Path;
 
 async function snapDiag(page, label, trace) {
   const diag = await page.evaluate(async () => window.__g64?.attachDiskDiag?.());
@@ -82,6 +88,21 @@ async function runDisk(page, fileName) {
   await waitRunning(page, 180_000);
 }
 
+async function insertLibraryDisk(page, fileName) {
+  await page.evaluate(() => window.__g64?.resetReady?.());
+  await waitRunning(page, 120_000);
+  await page.waitForTimeout(1500);
+  await page.locator('button[aria-label="Software"]').click({ timeout: 15_000 });
+  await page.waitForTimeout(400);
+  await page.getByRole("button", { name: /On this device/i }).click();
+  await page.waitForTimeout(300);
+  const esc = fileName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  await page.getByRole("button", { name: new RegExp(`^Insert ${esc}$`) }).click({ timeout: 30_000 });
+  await waitRunning(page, 120_000);
+  await page.waitForTimeout(6000);
+  await page.keyboard.press("Escape").catch(() => {});
+}
+
 const trace = [];
 const browser = await chromium.launch({ headless: true });
 const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
@@ -95,20 +116,47 @@ await powerOnDesktop(page, base, { navigate: false });
 await waitRunning(page, 120_000);
 await assertGrok64WasmCore(page, { timeoutMs: 120_000 });
 
-await page.evaluate(() => {
-  sessionStorage.setItem("g64-live-play", "Grok64 Demo Cart");
-  sessionStorage.setItem(
-    "g64-crash-play",
-    JSON.stringify({
-      title: "Grok64 Demo Cart",
-      filename: "grok64.crt",
-      bundlePath: "/software/grok64.crt",
-      libraryId: null,
-      iecUnit: 8,
-      savedAt: Date.now(),
-    }),
-  );
-});
+if (g64Path) {
+  const g64Name = g64Path.split("/").pop() ?? "GEOS.g64";
+  await importFile(page, g64Path);
+  await runDisk(page, g64Name);
+  await snapDiag(page, "after-g64-first-run", trace);
+  const marker = await page.evaluate(async (name) => {
+    const items = await window.__g64?.listLibraryItems?.();
+    const row = items?.find((i) => i.name === name);
+    if (!row) return null;
+    return { title: row.catalogTitle || row.name, filename: name, libraryId: row.id, iecUnit: 8 };
+  }, g64Name);
+  if (marker) {
+    await page.evaluate((m) => {
+      sessionStorage.setItem("g64-live-play", m.title);
+      sessionStorage.setItem("g64-crash-play", JSON.stringify({ ...m, savedAt: Date.now() }));
+    }, marker);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(5000);
+    await snapDiag(page, "after-g64-resume-reload", trace);
+    if (!(await page.evaluate(() => window.__g64?.hasFs?.()))) {
+      await powerOnDesktop(page, base, { navigate: false });
+      await waitRunning(page, 120_000);
+    }
+    await snapDiag(page, "after-g64-resume-ready", trace);
+  }
+} else {
+  await page.evaluate(() => {
+    sessionStorage.setItem("g64-live-play", "Grok64 Demo Cart");
+    sessionStorage.setItem(
+      "g64-crash-play",
+      JSON.stringify({
+        title: "Grok64 Demo Cart",
+        filename: "grok64.crt",
+        bundlePath: "/software/grok64.crt",
+        libraryId: null,
+        iecUnit: 8,
+        savedAt: Date.now(),
+      }),
+    );
+  });
+}
 
 await page.locator('button[aria-label="Software"]').click({ timeout: 15_000 });
 await page.waitForTimeout(400);
@@ -166,6 +214,43 @@ await page.waitForTimeout(2500);
 const list = await page.evaluate(() => window.__g64?.screenText?.() || "");
 await snapDiag(page, "after-list", trace);
 
+let g64Insert = { skipped: true, reason: "no g64 path" };
+if (g64Path) {
+  const g64Name = g64Path.split("/").pop() ?? "GEOS.g64";
+  const g64Bytes = readFileSync(g64Path);
+  const g64Sha1 = createHash("sha1").update(g64Bytes).digest("hex");
+  await importFile(page, g64Path);
+  await insertLibraryDisk(page, g64Name);
+  await snapDiag(page, "g64-insert-finish", trace);
+  for (let i = 0; i < 8; i++) {
+    await page.waitForTimeout(1000);
+    await snapDiag(page, `g64-insert-watch-${i + 1}s`, trace);
+  }
+  await typeBasic(page, 'LOAD"$",8', { afterMs: 15_000 });
+  await page.waitForTimeout(3500);
+  const listG64 = await page.evaluate(() => window.__g64?.screenText?.() || "");
+  await snapDiag(page, "g64-insert-after-list", trace);
+  const insRow = trace.find((r) => r.at === "g64-insert-finish");
+  const insMeta = trace.find((r) => r.at === "g64-insert-after-list");
+  g64Insert = {
+    g64Name,
+    g64ShaOk: insRow?.diag?.session?.sha1 === g64Sha1,
+    playModeDisk: insMeta?.meta?.playMode === "disk",
+    cartLiveOff: insMeta?.meta?.cartLive === false,
+    workDiskDisabled: insRow?.diag?.viceWorkDiskOpt === "disabled",
+    bootIsG64: /\.g64$/i.test(insRow?.diag?.bootFile || insRow?.diag?.emuFileName || ""),
+    listOk: /GEOS/i.test(listG64) && !/^\s*0\s+"WORK DISK"/m.test(listG64) && !/FILE NOT FOUND/i.test(listG64),
+    pass:
+      insRow?.diag?.session?.sha1 === g64Sha1 &&
+      insMeta?.meta?.playMode === "disk" &&
+      insMeta?.meta?.cartLive === false &&
+      insRow?.diag?.viceWorkDiskOpt === "disabled" &&
+      /\.g64$/i.test(insRow?.diag?.bootFile || insRow?.diag?.emuFileName || "") &&
+      /GEOS/i.test(listG64) &&
+      !/FILE NOT FOUND/i.test(listG64),
+  };
+}
+
 const last = trace[trace.length - 1];
 const mount = trace.find((r) => r.at === "mount-finish");
 const dirOk =
@@ -178,12 +263,15 @@ const workReattached =
   /\.g64$/i.test(mount?.diag?.bootFile || "") === false &&
   /WORK DISK/i.test(last?.diag?.bootFile || "");
 
+const d64Pass = shaOk && dirOk && !workReattached;
 const report = {
-  pass: shaOk && dirOk && !workReattached,
+  pass: d64Pass && (!requireG64Insert || (!g64Insert.skipped && g64Insert.pass)),
   d64Sha1,
   dirOk,
   shaOk,
   workReattached,
+  g64Insert,
+  requireG64Insert,
   listSnippet: list.slice(0, 200),
   traceLabels: trace.map((r) => r.at),
 };

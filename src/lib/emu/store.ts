@@ -133,6 +133,8 @@ interface SessionSlice {
   libraryOpen: boolean;
   libraryTab: "catalog" | "library";
   sessionRestoreHint: string | null;
+  /** cart vs floppy/disk — drives resume banner copy. */
+  sessionRestoreKind: "cart" | "floppy" | null;
   settingsOpen: boolean;
   mapperOpen: boolean;
   aboutOpen: boolean;
@@ -153,7 +155,7 @@ interface SessionSlice {
   setBooting: (v: boolean, msg?: string, progress?: number) => void;
   setLibraryOpen: (v: boolean) => void;
   setLibraryTab: (tab: "catalog" | "library") => void;
-  setSessionRestoreHint: (hint: string | null) => void;
+  setSessionRestoreHint: (hint: string | null, kind?: "cart" | "floppy" | null) => void;
   setSettingsOpen: (v: boolean) => void;
   setMapperOpen: (v: boolean) => void;
   setAboutOpen: (v: boolean) => void;
@@ -273,6 +275,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       libraryOpen: false,
       libraryTab: "catalog",
       sessionRestoreHint: null,
+      sessionRestoreKind: null,
       settingsOpen: false,
       mapperOpen: false,
       aboutOpen: false,
@@ -303,7 +306,11 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         set({ booting, bootMsg, bootProgress: booting ? bootProgress : 0 }),
       setLibraryOpen: (libraryOpen) => set({ libraryOpen }),
       setLibraryTab: (libraryTab) => set({ libraryTab }),
-      setSessionRestoreHint: (sessionRestoreHint) => set({ sessionRestoreHint }),
+      setSessionRestoreHint: (sessionRestoreHint, kind) =>
+        set({
+          sessionRestoreHint,
+          sessionRestoreKind: sessionRestoreHint ? (kind ?? null) : null,
+        }),
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
       setMapperOpen: (mapperOpen) => set({ mapperOpen }),
       setAboutOpen: (aboutOpen) => set({ aboutOpen }),

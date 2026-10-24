@@ -248,7 +248,7 @@ import { wrapForDiskSwap, prepareAutostartDisk, screenInvitesCracktroInput } fro
 import { isSid, psidToPrg } from "@/lib/emu/psid";
 import { explodeArchive, pickBootFile, toArrayBuffer } from "@/lib/emu/archive";
 import { BuildId } from "@/components/emu/BuildId";
-import { debugQueryOn, glog, glogFire, setDebugUi, subscribeLog } from "@/lib/emu/debug";
+import { debugQueryOn, drive8LogLines, glog, glogFire, setDebugUi, subscribeLog } from "@/lib/emu/debug";
 import { readBuildId } from "@/lib/emu/build-id";
 import {
   cartAttachResultCode,
@@ -602,6 +602,7 @@ export function Grok64App() {
       reu: () => useEmu.getState().reuSize,
       workDisk: () => lastAppliedWorkDisk(),
       jiffyLive: () => lastAppliedJiffy(),
+      drive8LogLines: (n?: number) => drive8LogLines(n ?? 20),
       fastLoadCart: () => useEmu.getState().fastLoadCart,
       cartLive: () => cartLiveRef.current,
       title: () => useEmu.getState().currentTitle,
@@ -2982,7 +2983,7 @@ export function Grok64App() {
             );
           } else if (plan.kind === "floppy") {
             disarmAutostart(emuRef.current, "disk");
-            await presentFloppyMountReady(emuRef.current, plan.live);
+            await presentFloppyMountReady(emuRef.current, plan.live, { afterDriveRefresh: true });
             applyIecUnitFloppy(emuRef.current, playIec, playAttachUnit, kindOf(filename));
             if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, keepLiveCrt || floppyKeep ? "play-recycle" : "hot-swap");
             void logFloppyAttach("play-hot-swap", {
@@ -3662,7 +3663,10 @@ export function Grok64App() {
         // Attach success re-saves the marker (powerOn cleared it). If the
         // attach failed, say so honestly instead of claiming a restore.
         if (readPlayMarker()) {
-          useEmu.getState().setSessionRestoreHint(marker.title);
+          useEmu.getState().setSessionRestoreHint(
+            marker.title,
+            recoverMountOnly ? "floppy" : recoverCart ? "cart" : "floppy",
+          );
           toast.message(`Restored ${marker.title} — tap for sound`);
         } else {
           clearLivePlay();
@@ -4450,7 +4454,17 @@ export function Grok64App() {
       ) : null}
       {s.powered && s.sessionRestoreHint ? (
         <div className="g64-restore-banner" role="status">
-          Resumed your last session — <strong>{s.sessionRestoreHint}</strong>. Use <strong>CART OUT</strong> to eject; Reset restarts the cartridge.
+          {s.sessionRestoreKind === "cart" ? (
+            <>
+              Resumed your last session — <strong>{s.sessionRestoreHint}</strong>. Use <strong>CART OUT</strong> to
+              eject; Reset restarts the cartridge.
+            </>
+          ) : (
+            <>
+              Resumed your last session — <strong>{s.sessionRestoreHint}</strong>. Open <strong>Software</strong> to Run
+              or Insert again; Reset returns to READY with the mounted disk when attach succeeded.
+            </>
+          )}
         </div>
       ) : null}
       <header className="g64-top" hidden={!s.powered}>

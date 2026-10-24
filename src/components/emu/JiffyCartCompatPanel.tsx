@@ -52,25 +52,43 @@ export function JiffyDosToggleRow() {
   const cart = useEmu((st) => st.fastLoadCart);
   const blocked = cart ? jiffyCartCompat(cart, true).suppressJiffy : false;
   const [jiffyUi, setJiffyUi] = useState(s.jiffyDos);
+  const [jiffyLive, setJiffyLive] = useState(false);
   useEffect(() => {
     setJiffyUi(s.jiffyDos);
   }, [s.jiffyDos]);
+  useEffect(() => {
+    const poll = () => {
+      const live = (window as unknown as { __g64?: { jiffyLive?: () => boolean } }).__g64?.jiffyLive?.();
+      setJiffyLive(!!live);
+    };
+    poll();
+    const id = window.setInterval(poll, 400);
+    return () => window.clearInterval(id);
+  }, []);
+  const switchOn = jiffyUi || jiffyLive;
   return (
     <>
       <JiffyCartCompatBanner />
       <div className="g64-row">
-        <span>JiffyDOS (needs C64 + 1541 ROMs)</span>
+        <span>
+          JiffyDOS (needs C64 + 1541 ROMs)
+          <span className="ml-1 text-xs text-fg-subtle">
+            {jiffyUi ? "on" : "off"}
+            {jiffyLive !== jiffyUi ? ` · live ${jiffyLive ? "on" : "off"}` : ""}
+          </span>
+        </span>
         <button
           type="button"
           className="g64-switch"
-          data-on={jiffyUi ? "true" : "false"}
+          data-on={switchOn ? "true" : "false"}
           onClick={() => {
-            const next = !jiffyUi;
-            setJiffyUi(next);
-            toggleJiffy(jiffyUi, cart, s.setJiffyDos);
+            toggleJiffy(jiffyUi, cart, (on) => {
+              setJiffyUi(on);
+              s.setJiffyDos(on);
+            });
           }}
           role="switch"
-          aria-checked={jiffyUi}
+          aria-checked={switchOn}
           aria-disabled={blocked && !s.jiffyDos}
           title={blocked ? "Incompatible with the loaded fast-load cart — use stock KERNAL" : undefined}
         >

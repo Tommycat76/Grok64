@@ -12,7 +12,7 @@ import {
 } from "@/lib/emu/cart-crt-diag";
 import { listLibrary } from "@/lib/emu/library";
 import { BuildId } from "@/components/emu/BuildId";
-import { setDebugUi } from "@/lib/emu/debug";
+import { drive8LogLines, setDebugUi } from "@/lib/emu/debug";
 import type {
   ActionId,
   CorePref,
@@ -496,6 +496,7 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
             <p className="mt-4 text-sm text-fg-muted">
               Build <BuildId className="font-mono text-fg" /> — hard reload if this does not match the release you expect.
             </p>
+            <Drive8DiagPanel />
             <LastCartPlayDiagPanel />
             <LibraryCartScanPanel />
           </Drawer.Content>
@@ -602,6 +603,63 @@ function LibraryCartScanPanel() {
           {JSON.stringify(rows, null, 2)}
         </pre>
       )}
+    </div>
+  );
+}
+
+function Drive8DiagPanel() {
+  const aboutOpen = useEmu((s) => s.aboutOpen);
+  const [text, setText] = useState("");
+  useEffect(() => {
+    if (!aboutOpen) return;
+    const tick = async () => {
+      const g = (window as unknown as { __g64?: Record<string, unknown> }).__g64;
+      if (!g) {
+        setText("Power on the C64 first, then reopen About.");
+        return;
+      }
+      const attachDiskDiag = g.attachDiskDiag as (() => Promise<Record<string, unknown>>) | undefined;
+      const diag = attachDiskDiag ? await attachDiskDiag() : null;
+      const block = {
+        at: new Date().toISOString(),
+        diag,
+        playMode: (g.playMode as (() => string) | undefined)?.(),
+        cartLive: (g.cartLive as (() => boolean) | undefined)?.(),
+        booting: (g.booting as (() => boolean) | undefined)?.(),
+        jiffyLive: (g.jiffyLive as (() => boolean) | undefined)?.(),
+        workDisk: (g.workDisk as (() => string) | undefined)?.(),
+        bootFile: (g.bootFile as (() => string) | undefined)?.(),
+        logs: drive8LogLines(20),
+      };
+      setText(JSON.stringify(block, null, 2));
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 2000);
+    return () => window.clearInterval(id);
+  }, [aboutOpen]);
+  return (
+    <div className="mt-4 rounded-lg border border-border/60 bg-bg/40 p-3">
+      <h3 className="mb-2 text-sm font-medium text-fg">Drive 8 diagnostics</h3>
+      <p className="mb-2 text-xs leading-5 text-fg-muted">
+        Live attach state for IEC unit 8 (refreshes every 2s). Use after Software → Run when LOAD fails — copy and send
+        this block. Logs: last 20 floppy-attach / play-mount lines.
+      </p>
+      <button
+        type="button"
+        className="g64-btn mb-2 w-full"
+        disabled={!text}
+        onClick={() => {
+          void navigator.clipboard.writeText(text).then(
+            () => toast.message("Drive 8 diagnostics copied"),
+            () => toast.error("Could not copy — select the text below"),
+          );
+        }}
+      >
+        Copy diagnostics
+      </button>
+      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-snug text-fg-muted">
+        {text || "Loading…"}
+      </pre>
     </div>
   );
 }
