@@ -74,7 +74,9 @@ try {
 
   const loads = await page.evaluate(() => window.__GROK64_CORE_LOADS__ ?? []);
   const bustUrlOk =
-    afterBust.coreUrlBuildId === buildId && String(afterBust.blobUrl || "").includes(`grok64core=${buildId}`);
+    afterBust.coreUrlBuildId === buildId &&
+    String(afterBust.blobUrl || "").includes(`grok64core=${buildId}`) &&
+    String(afterBust.blobUrl || "").includes("grok64glue=");
   const legacyUrlOk = afterLegacy.coreUrlBuildId == null && !String(afterLegacy.blobUrl || "").includes("grok64core=");
   trace.loads = loads;
   trace.bustUrlOk = bustUrlOk;

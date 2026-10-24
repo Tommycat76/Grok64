@@ -6,17 +6,26 @@ import { join } from "node:path";
 
 export const GROK64_IEC_CORE_FILE = "vice_x64sc-grok64-iec-wasm.data";
 
-export function grok64CoreBuildIdFromManifest() {
+function readCoreManifest() {
   try {
     const raw = readFileSync(
       join(process.cwd(), "public/system/vice/emulatorjs/data/cores/grok64-core-manifest.json"),
       "utf8",
     );
-    const j = JSON.parse(raw);
-    return j.buildId ? String(j.buildId) : null;
+    return JSON.parse(raw);
   } catch {
     return null;
   }
+}
+
+export function grok64CoreBuildIdFromManifest() {
+  const j = readCoreManifest();
+  return j?.buildId ? String(j.buildId) : null;
+}
+
+export function grok64CoreGlueShaFromManifest() {
+  const j = readCoreManifest();
+  return j?.glueSha12 ? String(j.glueSha12) : null;
 }
 
 export function grok64DatapathFromEnv() {
@@ -37,7 +46,9 @@ export function grok64CoreBlobUrl(baseUrl, { cacheBust = true } = {}) {
   let href = new URL(path, baseUrl).href;
   if (cacheBust) {
     const buildId = grok64CoreBuildIdFromManifest();
+    const glue = grok64CoreGlueShaFromManifest();
     if (buildId) href += `${href.includes("?") ? "&" : "?"}grok64core=${encodeURIComponent(buildId)}`;
+    if (glue) href += `${href.includes("?") ? "&" : "?"}grok64glue=${encodeURIComponent(glue)}`;
   }
   return href;
 }

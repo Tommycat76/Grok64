@@ -2,15 +2,15 @@
  * EmulatorJS stores extracted cores in IndexedDB (`EmulatorJS-Cache`) keyed by download URL.
  * Grok64 library lives in a separate DB (`grok64`) — never touch it here.
  */
-import { GROK64_CORE_BUILD_ID } from "./grok64-core-build.generated";
+import { GROK64_CORE_BUILD_ID, GROK64_CORE_GLUE_SHA12 } from "./grok64-core-build.generated";
 import { grok64CoreBuildIdForUrl } from "./grok64-core-build";
+import { appendGrok64CoreUrlCacheParams, expectedGrok64GlueSha12FromUrl } from "./grok64-core-url";
 import { grok64CoreBuildMatchesExpected, loadedCoreGlueInfo } from "./grok64-core-loaded";
 import { grok64DiskAttachCallableEmu } from "./grok64-wasm-direct";
 
 export const GROK64_IEC_CORE_BLOB = "vice_x64sc-grok64-iec-wasm.data";
 export const GROK64_LIBRARY_DB = "grok64";
 const EJS_CACHE_DB = "EmulatorJS-Cache";
-/** EJS ships with version 1; we bump to 2 so onupgradeneeded can recreate missing stores after a bad open. */
 const EJS_CACHE_DB_VERSION = 2;
 
 const MANIFEST_LS = "grok64.ejsCoreManifestBuildId";
@@ -34,17 +34,11 @@ function grok64ViceCoreRoot(): string | null {
   return null;
 }
 
-function grok64CoreBlobUrl(): string | null {
+export function grok64CoreBlobUrl(): string | null {
   const root = grok64ViceCoreRoot();
   if (!root || typeof window === "undefined" || !window.location?.origin) return null;
   const rel = `${root.startsWith("/") ? root : `/${root}`}/cores/${GROK64_IEC_CORE_BLOB}`;
-  const buildId = grok64CoreBuildIdForUrl();
-  let url = `${window.location.origin}${rel}`;
-  if (buildId) {
-    const sep = url.includes("?") ? "&" : "?";
-    url = `${url}${sep}grok64core=${encodeURIComponent(buildId)}`;
-  }
-  return url;
+  return appendGrok64CoreUrlCacheParams(`${window.location.origin}${rel}`);
 }
 
 function viceCoreUrl(meta: CacheMeta): boolean {
@@ -77,10 +71,6 @@ function ensureEjsCacheStores(db: IDBDatabase): void {
   }
 }
 
-/**
- * EmulatorJS opens `EmulatorJS-Cache` at version 1 without healing empty DBs.
- * Intercept only that database; never alter `grok64` (user library).
- */
 export function patchIndexedDbForEmulatorJsCache(): void {
   if (typeof indexedDB === "undefined") return;
   const w = window as unknown as { __g64IdbOpenPatched?: boolean };
@@ -207,7 +197,44 @@ async function deleteCacheEntry(db: IDBDatabase, key: string): Promise<void> {
 
 export type Grok64EjsCachePurgeResult = { removed: number; reason: string };
 
-/** Drop only stale VICE / Grok64 **Core** rows inside `EmulatorJS-Cache` (never the `grok64` library DB). */
+function isStaleViceCoreMeta(meta: CacheMeta, expectedUrl: string | null, expectedId: string | null): boolean {
+  const u = String(meta.url ?? "");
+  const isCore = meta.type === "Core" || meta.type === "core";
+  if (!isCore && !viceCoreUrl(meta)) return false;
+  if (!viceCoreUrl(meta) && !isCore) return false;
+
+  if (/cdn\.emulatorjs\.org/i.test(u)) return true;
+  if (!u) return true;
+
+  const glue = expectedGrok64GlueSha12FromUrl(u);
+  if (GROK64_CORE_GLUE_SHA12) {
+    if (!glue || glue !== GROK64_CORE_GLUE_SHA12) return true;
+  }
+
+  if (!expectedUrl) return true;
+  if (u !== expectedUrl) return true;
+  if (expectedId && urlBuildId(u) !== expectedId) return true;
+  if (!expectedId && urlBuildId(u) != null) return true;
+  return false;
+}
+
+/** Remove every EmulatorJS **Core** row (VICE/libretro WASM archives only — not ROM/BIOS). */
+export async function purgeAllEmulatorJsCoreRows(reason = "purge-all-core"): Promise<Grok64EjsCachePurgeResult> {
+  const db = await openEjsCacheDb();
+  if (!db) return { removed: 0, reason: `${reason}:no-db` };
+  const metas = await listCacheMetas(db);
+  let removed = 0;
+  for (const meta of metas) {
+    const t = String(meta.type ?? "");
+    if (!/^core$/i.test(t)) continue;
+    await deleteCacheEntry(db, meta.key);
+    removed++;
+  }
+  db.close();
+  return { removed, reason };
+}
+
+/** Drop stale VICE / Grok64 core rows (URL, glue fingerprint, or CDN). */
 export async function purgeEmulatorJsViceCoreCache(reason: string): Promise<Grok64EjsCachePurgeResult> {
   const db = await openEjsCacheDb();
   if (!db) return { removed: 0, reason: `${reason}:no-db` };
@@ -216,20 +243,9 @@ export async function purgeEmulatorJsViceCoreCache(reason: string): Promise<Grok
   const metas = await listCacheMetas(db);
   let removed = 0;
   for (const meta of metas) {
-    const isCore = meta.type === "Core" || meta.type === "core";
-    if (!isCore && !viceCoreUrl(meta)) continue;
-    if (!viceCoreUrl(meta)) continue;
-    const u = String(meta.url ?? "");
-    const staleUrl =
-      !expectedUrl ||
-      u !== expectedUrl ||
-      (expectedId && urlBuildId(u) !== expectedId) ||
-      (!expectedId && urlBuildId(u) != null);
-    const staleCdn = /cdn\.emulatorjs\.org/i.test(u);
-    if (staleUrl || staleCdn || !u) {
-      await deleteCacheEntry(db, meta.key);
-      removed++;
-    }
+    if (!isStaleViceCoreMeta(meta, expectedUrl, expectedId)) continue;
+    await deleteCacheEntry(db, meta.key);
+    removed++;
   }
   db.close();
   return { removed, reason };
@@ -240,16 +256,21 @@ export async function syncEmulatorJsCoreCacheWithManifest(): Promise<Grok64EjsCa
   if (!grok64ViceCoreRoot() || !GROK64_CORE_BUILD_ID) return null;
   patchIndexedDbForEmulatorJsCache();
   const prev = typeof localStorage !== "undefined" ? localStorage.getItem(MANIFEST_LS) : null;
-  const reason = prev !== GROK64_CORE_BUILD_ID ? "manifest-build-id-changed" : "vice-core-url-sync";
-  const purge = await purgeEmulatorJsViceCoreCache(reason);
-  if (prev !== GROK64_CORE_BUILD_ID) {
+  const manifestBump = prev !== GROK64_CORE_BUILD_ID;
+  const reason = manifestBump ? "manifest-build-id-changed" : "vice-core-url-sync";
+  let removed = 0;
+  if (manifestBump) {
+    removed += (await purgeAllEmulatorJsCoreRows(`${reason}:all-core`)).removed;
+  }
+  removed += (await purgeEmulatorJsViceCoreCache(reason)).removed;
+  if (manifestBump) {
     try {
       localStorage.setItem(MANIFEST_LS, GROK64_CORE_BUILD_ID);
     } catch {
       /* ignore */
     }
   }
-  return purge;
+  return { removed, reason };
 }
 
 export function patchFetchNoStoreForGrok64Core(): void {
@@ -272,6 +293,11 @@ export function patchFetchNoStoreForGrok64Core(): void {
     }
     return orig(input, init);
   };
+}
+
+export async function forceFreshGrok64CoreDownloadCache(): Promise<void> {
+  await purgeAllEmulatorJsCoreRows("force-fresh-core");
+  await purgeEmulatorJsViceCoreCache("force-fresh-core");
 }
 
 export async function maybeAutoRefreshStaleEmulatorCore(emu: { Module?: unknown } | null): Promise<boolean> {
@@ -301,7 +327,7 @@ export async function maybeAutoRefreshStaleEmulatorCore(emu: { Module?: unknown 
     !glue.glueHasDiskExports || !matches || (glue.glueHasDiskExports && !exportsOk);
   if (!needsRefresh) return false;
 
-  await purgeEmulatorJsViceCoreCache("stale-loaded-core");
+  await forceFreshGrok64CoreDownloadCache();
   try {
     sessionStorage.setItem(AUTO_RELOAD_SS, "1");
   } catch {

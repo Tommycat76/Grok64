@@ -45,6 +45,7 @@ import { reportMountFailure, runMountStage } from "./disk-mount-stage";
 import { grok64DiskApi, grok64WasmApi } from "./grok64-api";
 import { grok64DiskAttachCallableEmu } from "./grok64-wasm-direct";
 import { grok64CoreBuildIdForUrl, grok64CoreManifestSummary, GROK64_CORE_BUILD_ID } from "./grok64-core-build";
+import { appendGrok64CoreUrlCacheParams } from "./grok64-core-url";
 import {
   grok64CoreBuildIdLoaded,
   grok64CoreBuildMatchesExpected,
@@ -122,10 +123,7 @@ export function emulatorDataPath(): string {
 export const GROK64_IEC_CORE_BLOB = "vice_x64sc-grok64-iec-wasm.data";
 
 function withGrok64CoreCacheBust(url: string): string {
-  const buildId = grok64CoreBuildIdForUrl();
-  if (!buildId) return url;
-  const sep = url.includes("?") ? "&" : "?";
-  return `${url}${sep}grok64core=${encodeURIComponent(buildId)}`;
+  return appendGrok64CoreUrlCacheParams(url);
 }
 
 /** Absolute URL of the Grok64 IEC 7z core (when configured). */
@@ -688,13 +686,19 @@ function patchEjsGrok64CoreDownload() {
     const leaf = path.split("?")[0].split("/").pop() ?? "";
     const isViceCoreData = isGrok64ViceCoreDataLeaf(leaf);
     const filePaths = (this as { config?: { filePaths?: Record<string, string> } }).config?.filePaths;
+    const canonical = grok64CoreBlobUrl();
     if (isViceCoreData) {
-      recordGrok64CoreLoad(leaf, filePaths?.[leaf] ?? url, filePaths?.[leaf] ? "filePaths" : "redirect");
-      // Prefer config.filePaths (bare filename keys). Only rewrite path when unmapped.
+      recordGrok64CoreLoad(leaf, filePaths?.[leaf] ?? canonical ?? url, filePaths?.[leaf] ? "filePaths" : "redirect");
+      if (canonical && filePaths) {
+        for (const name of GROK64_VICE_CORE_DATA_NAMES) {
+          filePaths[name] = canonical;
+        }
+      }
       if (!filePaths?.[leaf]) {
-        args[0] = url;
+        args[0] = canonical ?? url;
         if (args.length > 3) args[3] = true;
       }
+      args[6] = true;
     }
     if (/cdn\.emulatorjs\.org/i.test(path) && /\/cores\/vice_.*wasm\.data/i.test(path)) {
       recordBlockedStockCore(path);

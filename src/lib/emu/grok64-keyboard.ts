@@ -290,6 +290,7 @@ async function playSyntheticShiftedGlyph(fn: RetroFn, glyph: string, emu: Grok64
   downAt.delete(shiftRetro);
   hostShiftChord = false;
   swallowHostShiftUp = true;
+  await sleep(32);
   paintHook?.(emu);
   return true;
 }
