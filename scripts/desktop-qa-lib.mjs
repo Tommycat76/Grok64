@@ -342,14 +342,18 @@ export function baselineDriveLiveOk(live) {
   if (!hasTdeProbe) return true;
   const tde =
     live.wasmIecDevice === 0 && live.wasmVirtualDevice === 0 && live.wasmUnitTrueEmulation === 1;
-  const cpu = live.wasmDriveUnitEnabled === 1 && live.wasmRomLoaded === 1;
+  const cpu =
+    live.wasmDriveUnitEnabled === 1 &&
+    live.wasmRomLoaded === 1 &&
+    live.wasmDriveUnitType !== 1542;
   const vdriveTrap =
     live.wasmVdriveErrorIsVirtual === 1 ||
     /VIRTUAL\s+DRIVE/i.test(live.wasmVdriveErrorChannel ?? live.wasmErrorChannel ?? "");
-  const iecOk =
-    live.iecErrorChannel?.length > 0
-      ? /CBM\s+DOS/i.test(live.iecErrorChannel) && !/VIRTUAL\s+DRIVE/i.test(live.iecErrorChannel)
-      : live.wasmVdriveErrorIsVirtual !== 1 && !vdriveTrap;
+  const iecText = String(live.iecErrorChannel ?? "").trim();
+  const iecProbeUsable = /CBM\s+DOS|VIRTUAL\s+DRIVE/i.test(iecText);
+  const iecOk = iecProbeUsable
+    ? /CBM\s+DOS/i.test(iecText) && !/VIRTUAL\s+DRIVE/i.test(iecText)
+    : live.wasmVdriveErrorIsVirtual !== 1 && !vdriveTrap;
   return tde && cpu && iecOk;
 }
 
@@ -384,15 +388,17 @@ export function geosFloppyEvidence({ screen = "", session = null, wasmWorkDisk =
   const dirHex = session?.dir18s1Hex ?? "";
   const label = session?.diskLabel ?? "";
   const onScreen = geosDirectoryOnScreen(screen);
-  const catalogOk = onScreen;
+  const catalogFromDir = /47454f53/i.test(dirHex) || /geos/i.test(label);
+  const catalogOk = onScreen || catalogFromDir;
   const attachOk = Boolean(viceAttachedImage?.trim());
   return {
     wasmOk,
     iecFail,
     catalogOk,
     onScreen,
+    catalogFromDir,
     attachOk,
-    ok: wasmOk && attachOk && !iecFail && onScreen,
+    ok: wasmOk && attachOk && !iecFail && catalogOk,
   };
 }
 

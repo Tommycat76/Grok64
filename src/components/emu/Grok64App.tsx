@@ -128,6 +128,7 @@ import {
   viceRetroSaveDirectory,
   viceDriveLiveProbe,
   viceWasmWorkDiskDiag,
+  viceAttachRcLabel,
 } from "@/lib/emu/vice-disk";
 import { bindGrok64WasmExports } from "@/lib/emu/grok64-vice-bridge";
 import {
@@ -969,7 +970,10 @@ export function Grok64App() {
           session: sessionFp,
           viceWork: { bytes: viceSize, sha1: viceSha1 },
           viceAttachedImage: viceAttachedImage(emuRef.current, unit),
-          viceLastReattach: lastViceDiskAttach(unit),
+          viceLastReattach: (() => {
+            const last = lastViceDiskAttach(unit);
+            return last ? { ...last, rcLabel: viceAttachRcLabel(last.rc) } : null;
+          })(),
           viceSaveDirectory: viceRetroSaveDirectory(emuRef.current),
           viceDiskExports: grok64DiskExportsReady(emuRef.current),
           diskExportsPresent: grok64DiskAttachExportReady(emuRef.current?.Module),
@@ -1013,6 +1017,7 @@ export function Grok64App() {
           loadedGlueHasDiskExports: grok64CoreStatus(emuRef.current).loadedGlueHasDiskExports,
           coreUrlBuildId: grok64CoreStatus(emuRef.current).coreUrlBuildId,
           grok64Core: grok64CoreStatus(emuRef.current),
+          iecErrorChannelProbe: await probeIecDriveErrorChannel(emuRef.current, unit),
           libraryIdb: await grok64LibraryIdbDiag(),
           cacheEnvironment: await grok64CacheEnvironmentDiag(),
           legacyCoreIdb: await grok64LegacyCoreIdbDiag(),
@@ -1032,7 +1037,7 @@ export function Grok64App() {
       kernalIecTrapActive: () => kernalIecTrapActive(emuRef.current),
       debugWasmIec: (dev, sec) => debugWasmIec(dev, sec),
       iecOpenDollarChannel: (unit = 8) => iecOpenDollarChannel(emuRef.current, unit as 8 | 9 | 10 | 11 | 12),
-      feedBasic: (line) => feedBasicLine(emuRef.current, line),
+      feedBasic: (line, opts) => feedBasicLine(emuRef.current, line, opts),
       iecErrorChannelProbe: (unit = 8) => probeIecDriveErrorChannel(emuRef.current, unit),
       hardReset: () => {
         hardReset(emuRef.current);
@@ -1062,7 +1067,7 @@ export function Grok64App() {
         await ensureViceSessionDiskAttached(emu, 8, "d64");
         await flushEmuFs(emu, 600);
         await new Promise((r) => setTimeout(r, 800));
-        if (!(await feedBasicLine(emu, 'LOAD"$",8'))) {
+        if (!(await feedBasicLine(emu, 'LOAD"$",8', { runcmd: true }))) {
           return { ok: false, reason: "load-fail", text: (readScreenText(emu) ?? "").slice(0, 400) };
         }
         const loadT0 = Date.now();
@@ -1077,7 +1082,7 @@ export function Grok64App() {
         if (/FILE NOT FOUND|DEVICE NOT PRESENT/i.test(loadScreen)) {
           return { ok: false, reason: "load-iec-fail", text: loadScreen.slice(0, 400) };
         }
-        if (!(await feedBasicLine(emu, "LIST"))) {
+        if (!(await feedBasicLine(emu, "LIST", { runcmd: true }))) {
           return { ok: false, reason: "list-fail", text: (readScreenText(emu) ?? "").slice(0, 400) };
         }
         await new Promise((r) => setTimeout(r, 8000));
@@ -3607,8 +3612,8 @@ export function Grok64App() {
     cartLiveRef.current = false;
     setCartLive(false);
     useEmu.getState().setFastLoadCart(null);
-    setC64KeyboardDefer(true);
     const unit = item.iecUnit ?? useEmu.getState().iecUnit;
+    setC64KeyboardDefer(true);
     const iec = useEmu.getState().iecDrive;
     const boot = bootFileName(file.name, kind);
     const mounted = bootFileOf(emuRef.current);
@@ -3625,23 +3630,33 @@ export function Grok64App() {
     } else if (mounted) {
       emuRef.current.fileName = mounted.replace(/^\//, "");
     }
-    detachGrok64Sd2iec(emuRef.current, unit);
-    applyRuntimeOptions(emuRef.current, {
-      vice_drive_true_emulation: "enabled",
-      vice_virtual_device_traps: "disabled",
-    });
-    applyIecUnitFloppy(emuRef.current, iec, unit, kind);
-    await detachLibretroWorkDiskManager(emuRef.current, unit);
-    await applyJiffyThenRefreshWorkDisk(
-      emuRef.current,
-      unit,
-      useEmu.getState().jiffyDos,
-      { fileName: file.name, data: media },
-      { hotSwap: true },
-    );
-    disarmAutostart(emuRef.current, "disk");
-    await presentFloppyMountReady(emuRef.current, { iec, unit }, { afterDriveRefresh: true });
-    await flushEmuFs(emuRef.current, 600);
+    try {
+      detachGrok64Sd2iec(emuRef.current, unit);
+      applyRuntimeOptions(emuRef.current, {
+        vice_drive_true_emulation: "enabled",
+        vice_virtual_device_traps: "disabled",
+        [`vice_drive${unit}_type`]: "1541",
+      });
+      applyIecUnitFloppy(emuRef.current, iec, unit, kind);
+      await detachLibretroWorkDiskManager(emuRef.current, unit);
+      await applyJiffyThenRefreshWorkDisk(
+        emuRef.current,
+        unit,
+        useEmu.getState().jiffyDos,
+        { fileName: file.name, data: media },
+        { hotSwap: true },
+      );
+      disarmAutostart(emuRef.current, "disk");
+      await presentFloppyMountReady(emuRef.current, { iec, unit }, { afterDriveRefresh: true });
+      await flushEmuFs(emuRef.current, 600);
+    } catch (err) {
+      glog("insert-disk-fail", { err: String(err) });
+      toast.error(err instanceof Error ? err.message : "Insert failed — drive attach error");
+      return;
+    } finally {
+      setC64KeyboardDefer(false);
+      flushDeferredC64Keyboard(emuRef.current);
+    }
     await touchPlayed(item.id);
     const bam = d64DiskName(media);
     const genericBam = !bam || /^work\s*disk/i.test(bam) || /^system$/i.test(bam.trim());

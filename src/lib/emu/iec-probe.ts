@@ -27,9 +27,15 @@ export async function probeIecDriveErrorChannel(
     const runcmd = line.startsWith("PRINT A$");
     const ok = await feedBasicLine(emu, line, { runcmd });
     if (!ok) return { ok: false, text: readScreenText(emu), isVirtual: false, isCbmDos: false };
+    if (line.startsWith("INPUT#")) await new Promise((r) => window.setTimeout(r, 1200));
     if (runcmd) await new Promise((r) => window.setTimeout(r, settleMs));
   }
-  const text = lastNonEmptyLine(readScreenText(emu));
+  const screen = readScreenText(emu);
+  const cbmLine = screen
+    .split("\n")
+    .map((l) => l.trim())
+    .find((l) => /CBM\s+DOS/i.test(l) || /VIRTUAL\s+DRIVE/i.test(l));
+  const text = cbmLine ?? lastNonEmptyLine(screen);
   const isVirtual = /VIRTUAL\s+DRIVE/i.test(text);
   const isCbmDos = /CBM\s+DOS/i.test(text);
   return { ok: text.length > 0, text, isVirtual, isCbmDos };

@@ -660,8 +660,10 @@ function Drive8DiagPanel() {
       ) : null}
       <p className="mb-2 text-xs leading-5 text-fg-muted">
         Live attach state for IEC unit 8 (refreshes every 2s). Check{" "}
-        <code className="text-fg">coreBuildIdExpected</code>, <code className="text-fg">coreBuildIdLoaded</code>, and{" "}
-        <code className="text-fg">diskExportsPresent</code>. Use after Software → Run when LOAD fails — copy and send
+        <code className="text-fg">coreBuildIdExpected</code>, <code className="text-fg">coreBuildIdLoaded</code>,{" "}
+        <code className="text-fg">diskExportsPresent</code>, <code className="text-fg">viceLastReattach.rc</code> (0 =
+        ok; negative = WASM errno, see <code className="text-fg">rcLabel</code>), and{" "}
+        <code className="text-fg">iecErrorChannelProbe</code>. Use after Software → Run when LOAD fails — copy and send
         this block. Logs: last 20 floppy-attach / play-mount lines.
       </p>
       <button

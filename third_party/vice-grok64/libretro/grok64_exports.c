@@ -12,8 +12,6 @@
 #include "vdrive/vdrive-bam.h"
 #include "drive/drive.h"
 #include "drive/drivecpu.h"
-#include "drive/drivecpu65c02.h"
-#include "driveimage.h"
 #include "serial.h"
 #include "cbmdos.h"
 #include "vice-event.h"
@@ -85,12 +83,55 @@ static void grok64_disk_route_to_drive(unsigned int unit)
     resources_set_int("VirtualDevices", 0);
 }
 
+static void grok64_clear_stale_vdrive_error(unsigned int unit)
+{
+    vdrive_t *vd;
+    int tde_on = 0;
+
+    if (resources_get_int_sprintf("Drive%uTrueEmulation", &tde_on, unit) != 0 || !tde_on) {
+        return;
+    }
+    vd = file_system_get_vdrive(unit);
+    if (!vd || !vd->buffers[15].buffer || !vd->buffers[15].length) {
+        return;
+    }
+    if (strstr((const char *)vd->buffers[15].buffer, "VIRTUAL DRIVE") != NULL) {
+        vd->buffers[15].length = 0;
+        vd->buffers[15].buffer[0] = '\0';
+        vd->last_code = 0;
+    }
+}
+
+static void grok64_disk_coerce_unit_1541(unsigned int unit)
+{
+    int dtype = 0;
+    unsigned int dnr;
+
+    if (unit < 8 || unit > 11) {
+        return;
+    }
+    if (resources_get_int_sprintf("Drive%uType", &dtype, unit) != 0) {
+        return;
+    }
+    if (dtype == DRIVE_TYPE_1541) {
+        return;
+    }
+    if (dtype != DRIVE_TYPE_NONE && dtype != DRIVE_TYPE_1541II) {
+        return;
+    }
+    resources_set_int_sprintf("Drive%uType", DRIVE_TYPE_1541, unit);
+    dnr = unit - 8;
+    if (diskunit_context[dnr] && diskunit_context[dnr]->type != DRIVE_TYPE_NONE) {
+        drive_set_disk_drive_type(DRIVE_TYPE_1541, diskunit_context[dnr]);
+    }
+}
+
 static void grok64_disk_sync_true_drive(unsigned int unit)
 {
     unsigned int dnr;
-    unsigned int drive;
     diskunit_context_t *ctx;
     int dtype = 0;
+    int tde_on = 0;
 
     if (unit < 8 || unit > 11) {
         return;
@@ -103,37 +144,23 @@ static void grok64_disk_sync_true_drive(unsigned int unit)
         grok64_note_attach_diag("sync-tde: rom_loaded=0");
         return;
     }
+    resources_get_int_sprintf("Drive%uTrueEmulation", &tde_on, unit);
+    if (!tde_on) {
+        resources_set_int_sprintf("Drive%uTrueEmulation", 1, unit);
+        resources_set_int("DriveTrueEmulation", 1);
+    }
     dnr = unit - 8;
     ctx = diskunit_context[dnr];
-    if (!ctx) {
-        grok64_note_attach_diag("sync-tde: no diskunit");
-        return;
-    }
-    if (ctx->type == DRIVE_TYPE_NONE) {
-        snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
-                 "sync-tde: Drive%uType still NONE", unit);
+    if (!ctx || ctx->type == DRIVE_TYPE_NONE) {
+        grok64_note_attach_diag("sync-tde: no drive unit");
         return;
     }
     vdrive_flush(unit);
-    /* Re-run VICE TDE handler (flush, drive CPU reset, serial_trap_truedrive_set). */
-    resources_set_int_sprintf("Drive%uTrueEmulation", 0, unit);
-    resources_set_int_sprintf("Drive%uTrueEmulation", 1, unit);
-    resources_set_int("DriveTrueEmulation", 1);
-    for (drive = 0; drive < NUM_DRIVES; drive++) {
-        if (ctx->drives[drive] && ctx->drives[drive]->image != NULL) {
-            drive_image_attach(ctx->drives[drive]->image, dnr, drive);
-        }
-    }
-    ctx->enable = 1;
-    if (ctx->type == DRIVE_TYPE_2000 || ctx->type == DRIVE_TYPE_4000 || ctx->type == DRIVE_TYPE_CMDHD) {
-        drivecpu65c02_wake_up(ctx);
-    } else {
-        drivecpu_wake_up(ctx);
-    }
     if (drive_enable(ctx) < 0) {
         snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
                  "sync-tde: drive_enable unit=%u failed", unit);
     }
+    grok64_clear_stale_vdrive_error(unit);
 }
 
 static int grok64_fs_size_bytes(const char *path)
@@ -358,11 +385,12 @@ int grok64_disk_attach(int unit, int drive, const char *path)
         last_disk_attach_rc = -1;
         return -1;
     }
+    grok64_disk_coerce_unit_1541((unsigned int)unit);
     fs_bytes = grok64_fs_size_bytes(path);
     if (fs_bytes < 0) {
         snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag), "fs_stat %s errno=%d", path, -fs_bytes);
-        last_disk_attach_rc = -1;
-        return -1;
+        last_disk_attach_rc = fs_bytes;
+        return fs_bytes;
     }
     file_system_detach_disk((unsigned int)unit, (unsigned int)drive);
     last_disk_attach_rc = file_system_attach_disk((unsigned int)unit, (unsigned int)drive, path);
@@ -570,9 +598,13 @@ EMSCRIPTEN_KEEPALIVE
 int grok64_drive_unit_type(int unit)
 {
     unsigned int dnr;
+    int dtype = 0;
 
     if (unit < 8 || unit > 11) {
         return -EINVAL;
+    }
+    if (resources_get_int_sprintf("Drive%uType", &dtype, unit) == 0 && dtype != DRIVE_TYPE_NONE) {
+        return dtype;
     }
     dnr = (unsigned int)unit - 8;
     if (!diskunit_context[dnr]) {
@@ -660,15 +692,10 @@ int grok64_drive_reload_image(int unit, int drive)
     dnr = (unsigned int)unit - 8;
     if (dnr < NUM_DISK_UNITS && diskunit_context[dnr]) {
         drv = diskunit_context[dnr]->drives[drive];
-        if (drv && drv->image) {
+        if (drv && drv->image && drv->image != image) {
             if (disk_image_read_image(drv->image) < 0) {
                 snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
                          "reload: drive disk_image_read_image unit=%d failed", unit);
-                return -EIO;
-            }
-            if (drive_image_attach(drv->image, dnr, (unsigned int)drive) < 0) {
-                snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
-                         "reload: drive_image_attach unit=%d failed", unit);
                 return -EIO;
             }
         }
@@ -679,7 +706,6 @@ int grok64_drive_reload_image(int unit, int drive)
         return -EIO;
     }
     vdrive->last_code = CBMDOS_IPE_OK;
-    grok64_disk_sync_true_drive((unsigned int)unit);
     return 0;
 }
 

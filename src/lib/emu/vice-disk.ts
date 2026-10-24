@@ -147,6 +147,27 @@ function pathExistsOnFs(emu: ViceDiskEmu | null, path: string): boolean {
   }
 }
 
+/** WASM attach rc &lt; 0 is -errno from grok64_fs_stat_bytes / attach (29≈ESPIPE, 44≈ENOENT in Emscripten). */
+export function viceAttachRcLabel(rc: number): string {
+  if (rc >= 0) return String(rc);
+  const e = Math.abs(rc);
+  const names: Record<number, string> = {
+    2: "ENOENT",
+    22: "EINVAL",
+    28: "EINVAL",
+    29: "ESPIPE",
+    44: "ENOENT",
+  };
+  return `${rc} (${names[e] ?? `errno${e}`})`;
+}
+
+export function pathHasAttachableBytes(emu: ViceDiskEmu | null, path: string): boolean {
+  const wasm = viceWasmFsStatBytes(emu, path);
+  if (wasm != null && wasm > 0) return true;
+  const js = pathByteLength(emu, path);
+  return js != null && js > 0;
+}
+
 function pathByteLength(emu: ViceDiskEmu | null, path: string): number | null {
   const FS = fsOf(emu) as { readFile?: (p: string) => Uint8Array | string } | null;
   if (!FS?.readFile) return null;
@@ -327,6 +348,7 @@ export function viceDiskAttachCandidates(
     push(base);
   } else {
     push(grok64IecAttachD64Path(unit));
+    push(`/data/saves/grok64_iec${unit}.d64`);
     push(`/${base}`);
     push(base);
     if (saveDir) push(`${saveDir}/vice_work.d64`);
@@ -334,11 +356,13 @@ export function viceDiskAttachCandidates(
     push("/data/saves/vice_work.d64");
   }
 
-  const filtered = out.filter((p) => pathVisibleToWasm(emu, p));
+  const withBytes = out.filter((p) => pathHasAttachableBytes(emu, p));
+  if (withBytes.length) return withBytes;
+  const filtered = out.filter((p) => pathVisibleToWasm(emu, p) && pathHasAttachableBytes(emu, p));
   if (filtered.length) return filtered;
   const iecPath = grok64IecAttachD64Path(unit);
-  if (pathExistsOnFs(emu, iecPath)) return [iecPath];
-  return out.filter((p) => pathExistsOnFs(emu, p));
+  if (pathHasAttachableBytes(emu, iecPath)) return [iecPath];
+  return [];
 }
 
 /** Preferred MEMFS path for the current session floppy on `unit`. */
@@ -421,7 +445,9 @@ function viceReattachDiskSync(
     if (rc < 0 && typeof attachRc === "number" && attachRc >= 0) rc = attachRc;
     if (rc === 0) {
       const reloadRc = reloadViceDriveImage(emu, unit, drive);
-      if (reloadRc < 0 && reloadRc !== -99) rc = reloadRc;
+      if (reloadRc < 0 && reloadRc !== -99) {
+        glog("vice-disk-reload-warn", { unit, path, reloadRc, label: viceAttachRcLabel(reloadRc) });
+      }
     }
     const after = rc === 0 ? diskNameFromModule(mod, unit, drive) : null;
     lastAttachByUnit.set(unit, { path, rc, before: null, after, at: Date.now() });

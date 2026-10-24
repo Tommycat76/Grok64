@@ -102,7 +102,9 @@ export async function feedBasicLine(
   if (!emu) return false;
   const tail = opts?.cr === false ? "" : "\r";
   const text = `${line}${tail}`;
-  const runcmd = opts?.runcmd ?? /^RUN\b/i.test(line.trim());
+  const runcmd =
+    opts?.runcmd ??
+    /^(RUN|LOAD|LIST|OPEN|CLOSE|INPUT|PRINT|VERIFY|DLOAD|DVERIFY)\b/i.test(line.trim());
   if (await kbdbufFeed(emu as KbdEmu, text, runcmd)) {
     await waitKernalQueueDrain(emu, 12_000);
     return true;

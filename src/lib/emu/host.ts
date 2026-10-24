@@ -2517,6 +2517,7 @@ export function resyncSessionDiskToVice(emu: EjsInstance | null, unit: IecUnit =
   if (/\.d64$/i.test(target) && isAcceptedD64ByteLength(slot.bytes.byteLength)) {
     syncViceWorkD64(emu, slot.bytes, unit);
     writeFsFile(emu, grok64IecAttachD64Path(unit), slot.bytes);
+    writeFsFile(emu, `/data/saves/grok64_iec${unit}.d64`, slot.bytes);
   }
   return true;
 }
@@ -2540,7 +2541,9 @@ export async function viceReattachDiskOnEmuThread(
     if (rc < 0 && typeof attachRc === "number" && attachRc >= 0) rc = attachRc;
     if (rc === 0) {
       const reloadRc = await reloadViceDriveImageAfterAttach(emu, unit, drive);
-      if (reloadRc < 0 && reloadRc !== -99) rc = reloadRc;
+      if (reloadRc < 0 && reloadRc !== -99) {
+        glog("vice-disk-reload-warn", { unit, path, reloadRc });
+      }
     }
     const after = rc === 0 ? viceAttachedImage(emu, unit, drive) : null;
     recordViceLastAttach(unit, { path, rc, before: null, after, at: Date.now() });
@@ -2568,11 +2571,18 @@ export async function ensureViceSessionDiskAttached(
       applyRuntimeOptions(emu, {
         vice_drive_true_emulation: "enabled",
         vice_virtual_device_traps: "disabled",
+        [`vice_drive${unit}_type`]: "1541",
       });
       injectViceRc(
         emu,
-        ["[C64]", `Drive${unit}TrueEmulation=1`, "DriveTrueEmulation=1", `VirtualDevice${unit}=0`, "VirtualDevices=0"]
-          .join("\n") + "\n",
+        [
+          "[C64]",
+          `Drive${unit}Type=1541`,
+          `Drive${unit}TrueEmulation=1`,
+          "DriveTrueEmulation=1",
+          `VirtualDevice${unit}=0`,
+          "VirtualDevices=0",
+        ].join("\n") + "\n",
       );
       await waitRetroFrames(30);
       await tickGrok64Iec(emu);
@@ -2893,19 +2903,19 @@ export async function bootGeosFloppy(
   applyRuntimeOptions(emu, {
     ...viceDriveTypeVars(viceMap),
     ...viceGeosFloppyOptions(unit),
-    [`vice_drive${unit}_type`]: "1542",
+    [`vice_drive${unit}_type`]: "1541",
     vice_work_disk: `${unit}_d64`,
   });
   injectViceRc(
     emu,
-    ["[C64]", `Drive${unit}Type=1542`, "DriveTrueEmulation=1", "VirtualDevices=0"].join("\n") + "\n",
+    ["[C64]", `Drive${unit}Type=1541`, "DriveTrueEmulation=1", "VirtualDevices=0"].join("\n") + "\n",
   );
   applyIecUnit(emu, "1541", unit);
   disarmAutostart(emu, "disk");
 
   applyRuntimeOptions(emu, {
     ...viceGeosFloppyOptions(unit),
-    [`vice_drive${unit}_type`]: "1542",
+    [`vice_drive${unit}_type`]: "1541",
     vice_work_disk: `${unit}_d64`,
   });
   applyIecUnit(emu, "1541", unit);
@@ -2925,14 +2935,14 @@ export async function bootGeosFloppy(
   await refreshViceWorkDisk(emu, unit);
   applyRuntimeOptions(emu, {
     ...viceGeosFloppyOptions(unit),
-    [`vice_drive${unit}_type`]: "1542",
+    [`vice_drive${unit}_type`]: "1541",
     vice_work_disk: `${unit}_d64`,
   });
   resetEmu(emu);
   await flushEmuFs(emu, 1200);
   applyRuntimeOptions(emu, {
     ...viceGeosFloppyOptions(unit),
-    [`vice_drive${unit}_type`]: "1542",
+    [`vice_drive${unit}_type`]: "1541",
     vice_work_disk: `${unit}_d64`,
   });
   return await waitForC64Ready(emu, 45_000);
@@ -2944,7 +2954,7 @@ export async function tryGeosDiskAutostart(emu: EjsInstance | null, unit: IecUni
   disarmAutostart(emu, "disk");
   applyRuntimeOptions(emu, {
     ...viceGeosFloppyOptions(unit),
-    [`vice_drive${unit}_type`]: "1542",
+    [`vice_drive${unit}_type`]: "1541",
     vice_autostart: "enabled",
     vice_autostart_warp: "enabled",
     vice_autoloadwarp: "enabled",

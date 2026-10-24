@@ -14,6 +14,7 @@ import {
 import {
   baselineCoreDiagOk,
   baselineDriveLiveOk,
+  geosDirectoryOnScreen,
   geosFloppyEvidence,
   patchLocalStorage,
   powerOnDesktop,
@@ -81,12 +82,14 @@ try {
   await page.screenshot({ path: join(shotDir, "geos-after-insert.png") });
 
   await page.evaluate(async () => {
-    await window.__g64?.feedBasic?.('LOAD"$",8');
+    await window.__g64?.feedBasic?.('LOAD"$",8', { runcmd: true });
+    await window.__g64?.feedBasic?.("LIST", { runcmd: true });
   });
+  await page.waitForTimeout(12_000);
   const loadWait = await waitForDollarLoad(page, { maxMs: 60_000 });
   trace.loadWait = loadWait;
-  const list = await page.evaluate(async () => window.__g64?.basicDollarList?.());
-  trace.list = list;
+  const screenAfter = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
+  trace.list = { ok: geosDirectoryOnScreen(screenAfter), text: screenAfter.slice(0, 1600) };
   await page.screenshot({ path: join(shotDir, "geos-after-list.png") });
 
   const postDiag = await page.evaluate(async () => window.__g64?.attachDiskDiag?.());
@@ -96,15 +99,18 @@ try {
     ...(postDiag?.viceDriveLive ?? preList?.viceDriveLive),
     iecErrorChannel: iecProbe?.text ?? "",
   };
+  const attachRc = postDiag?.viceLastReattach?.rc ?? preList?.viceLastReattach?.rc ?? -1;
+  trace.attachRc = attachRc;
   const evidence = geosFloppyEvidence({
-    screen: [loadWait?.text, list?.text].filter(Boolean).join("\n"),
+    screen: [loadWait?.text, screenAfter].filter(Boolean).join("\n"),
     session: postDiag?.session ?? preList?.session,
     wasmWorkDisk: postDiag?.wasmWorkDisk,
     viceAttachedImage: postDiag?.viceAttachedImage ?? preList?.viceAttachedImage,
   });
   const pass =
+    attachRc === 0 &&
     evidence.ok &&
-    list?.ok === true &&
+    trace.list?.ok === true &&
     evidence.onScreen === true &&
     loadWait?.done === true &&
     !loadWait?.error &&
@@ -113,7 +119,9 @@ try {
   trace.evidence = evidence;
   trace.pass = pass;
   writeFileSync(join(outDir, "trace.json"), JSON.stringify(trace, null, 2));
-  console.log(JSON.stringify({ pass, listOk: list?.ok, attached: preList?.viceAttachedImage }));
+  console.log(
+    JSON.stringify({ pass, listOk: trace.list?.ok, attachRc, attached: preList?.viceAttachedImage }),
+  );
   process.exit(pass ? 0 : 1);
 } catch (e) {
   trace.error = String(e?.message || e);
