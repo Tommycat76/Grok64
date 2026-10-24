@@ -13,6 +13,7 @@
 #include "drive/drive.h"
 #include "cbmdos.h"
 #include "vice-event.h"
+#include "resources.h"
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -22,8 +23,13 @@
 
 extern char retro_save_directory[];
 
+#ifdef GROK64_SD2IEC
+extern void grok64_sd2iec_disable_unit(int unit);
+#endif
+
 int grok64_disk_attach(int unit, int drive, const char *path);
 int grok64_drive_reload_image(int unit, int drive);
+int grok64_drive_iec_device(int unit);
 
 #define GROK64_DISK_PATH_MAX 4096
 static int pending_disk_unit = 0;
@@ -40,6 +46,22 @@ static void grok64_note_attach_diag(const char *msg)
         return;
     }
     strlcpy(last_disk_attach_diag, msg, sizeof(last_disk_attach_diag));
+}
+
+static void grok64_disk_route_to_drive(unsigned int unit)
+{
+    char res[32];
+
+    if (unit < 8 || unit > 11) {
+        return;
+    }
+#ifdef GROK64_SD2IEC
+    grok64_sd2iec_disable_unit((int)unit);
+#endif
+    snprintf(res, sizeof(res), "IECDevice%u", unit);
+    resources_set_int(res, 0);
+    snprintf(res, sizeof(res), "FileSystemDevice%u", unit);
+    resources_set_int(res, ATTACH_DEVICE_NONE);
 }
 
 static int grok64_fs_size_bytes(const char *path)
@@ -277,6 +299,7 @@ int grok64_disk_attach(int unit, int drive, const char *path)
         snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
                  "file_system_attach_disk unit=%d path=%s fs_bytes=%d", unit, path, fs_bytes);
     } else {
+        grok64_disk_route_to_drive((unsigned int)unit);
         grok64_drive_reload_image(unit, drive);
     }
     return last_disk_attach_rc;
@@ -419,6 +442,24 @@ const char *grok64_drive_error_channel(int unit)
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+int grok64_drive_iec_device(int unit)
+{
+    char res[32];
+    int v = 0;
+
+    if (unit < 8 || unit > 11) {
+        return -EINVAL;
+    }
+    snprintf(res, sizeof(res), "IECDevice%d", unit);
+    if (resources_get_int(res, &v) != 0) {
+        return -1;
+    }
+    return v;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 int grok64_drive_reload_image(int unit, int drive)
 {
     vdrive_t *vdrive;
@@ -438,13 +479,18 @@ int grok64_drive_reload_image(int unit, int drive)
         grok64_note_attach_diag("reload: no vdrive/image");
         return -ENODEV;
     }
+    if (disk_image_read_image(image) < 0) {
+        snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
+                 "reload: vdrive disk_image_read_image unit=%d failed", unit);
+        return -EIO;
+    }
     dnr = (unsigned int)unit - 8;
     if (dnr < NUM_DISK_UNITS && diskunit_context[dnr]) {
         drv = diskunit_context[dnr]->drives[drive];
-        if (drv && drv->image) {
+        if (drv && drv->image && drv->image != image) {
             if (disk_image_read_image(drv->image) < 0) {
                 snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
-                         "reload: disk_image_read_image unit=%d failed", unit);
+                         "reload: drive disk_image_read_image unit=%d failed", unit);
                 return -EIO;
             }
         }

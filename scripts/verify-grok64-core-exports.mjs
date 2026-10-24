@@ -22,6 +22,12 @@ const REQUIRED = [
   "grok64_work_disk_refresh",
   "grok64_fs_stat_bytes",
   "grok64_retro_save_directory",
+  "grok64_drive_image_bytes",
+  "grok64_drive_bam_disk_name",
+  "grok64_drive_last_error_code",
+  "grok64_drive_error_channel",
+  "grok64_drive_reload_image",
+  "grok64_drive_iec_device",
 ];
 
 rmSync(tmp, { recursive: true, force: true });

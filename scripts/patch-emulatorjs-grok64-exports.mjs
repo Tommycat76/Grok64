@@ -33,6 +33,7 @@ const GROK64_EXPORTS = [
   "_grok64_drive_last_error_code",
   "_grok64_drive_error_channel",
   "_grok64_drive_reload_image",
+  "_grok64_drive_iec_device",
 ];
 
 let text = readFileSync(makefile, "utf8");

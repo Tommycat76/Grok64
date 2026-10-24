@@ -283,12 +283,12 @@ export function viceDiskAttachPathUniverse(
     push(`/${base}`);
     push(base);
   } else {
-    if (saveDir) push(`${saveDir}/vice_work.d64`);
-    for (const p of WORK_DISK_PATHS) push(p);
-    push("/data/saves/vice_work.d64");
     push(grok64IecAttachD64Path(unit));
     push(`/${base}`);
     push(base);
+    if (saveDir) push(`${saveDir}/vice_work.d64`);
+    for (const p of WORK_DISK_PATHS) push(p);
+    push("/data/saves/vice_work.d64");
   }
   return out;
 }
@@ -326,12 +326,12 @@ export function viceDiskAttachCandidates(
     push(`/${base}`);
     push(base);
   } else {
-    if (saveDir) push(`${saveDir}/vice_work.d64`);
-    for (const p of WORK_DISK_PATHS) push(p);
-    push("/data/saves/vice_work.d64");
     push(grok64IecAttachD64Path(unit));
     push(`/${base}`);
     push(base);
+    if (saveDir) push(`${saveDir}/vice_work.d64`);
+    for (const p of WORK_DISK_PATHS) push(p);
+    push("/data/saves/vice_work.d64");
   }
 
   const filtered = out.filter((p) => pathVisibleToWasm(emu, p));
@@ -460,6 +460,7 @@ export type ViceDriveLiveProbe = {
   wasmBamLabel: string | null;
   wasmErrorCode: number | null;
   wasmErrorChannel: string | null;
+  wasmIecDevice: number | null;
   sessionLabel: string | null;
 };
 
@@ -493,6 +494,7 @@ export function viceDriveLiveProbe(emu: ViceDiskEmu | null, unit: IecUnit = 8, d
     wasmBamLabel: api?.driveBamDiskName?.(unit, drive) ?? null,
     wasmErrorCode: api?.driveLastErrorCode?.(unit) ?? null,
     wasmErrorChannel: api?.driveErrorChannel?.(unit) ?? "",
+    wasmIecDevice: api?.driveIecDevice?.(unit) ?? null,
     sessionLabel,
   };
 }

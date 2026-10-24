@@ -2515,7 +2515,8 @@ export function resyncSessionDiskToVice(emu: EjsInstance | null, unit: IecUnit =
     return true;
   }
   if (/\.d64$/i.test(target) && isAcceptedD64ByteLength(slot.bytes.byteLength)) {
-    syncViceWorkD64(emu, slot.bytes);
+    syncViceWorkD64(emu, slot.bytes, unit);
+    writeFsFile(emu, grok64IecAttachD64Path(unit), slot.bytes);
   }
   return true;
 }
@@ -2555,6 +2556,8 @@ export async function ensureViceSessionDiskAttached(
   diskKind: ReturnType<typeof kindOf> | null,
 ): Promise<number> {
   if (!emu) return -1;
+  detachGrok64Sd2iec(emu, unit);
+  applyIecUnitFloppy(emu, "1541", unit, diskKind);
   if (diskKind && !isGcrDiskKind(diskKind)) {
     await detachLibretroWorkDiskManager(emu, unit);
     const slot = sessionDiskOnUnit(unit);

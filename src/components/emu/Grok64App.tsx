@@ -100,6 +100,7 @@ import {
   tryGeosDiskAutostart,
   applyIecUnitFloppy,
   applyJiffyThenRefreshWorkDisk,
+  detachLibretroWorkDiskManager,
   ensureViceSessionDiskAttached,
 } from "@/lib/emu/host";
 import {
@@ -166,7 +167,12 @@ import {
   grok64RetroKeyboardFromDom,
   setGrok64KeyboardPaintHook,
 } from "@/lib/emu/grok64-keyboard";
-import { attachGrok64Sd2iec, tickGrok64Iec, wireGrok64ViceHost } from "@/lib/emu/grok64-vice-bridge";
+import {
+  attachGrok64Sd2iec,
+  detachGrok64Sd2iec,
+  tickGrok64Iec,
+  wireGrok64ViceHost,
+} from "@/lib/emu/grok64-vice-bridge";
 import { readC64Byte, readC64Bytes, writeC64Byte, writeC64Bytes } from "@/lib/emu/c64-memory";
 import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor } from "@/lib/emu/vice-extras";
 import {
@@ -3607,11 +3613,12 @@ export function Grok64App() {
     } else if (mounted) {
       emuRef.current.fileName = mounted.replace(/^\//, "");
     }
+    detachGrok64Sd2iec(emuRef.current, unit);
     applyRuntimeOptions(emuRef.current, {
       vice_drive_true_emulation: "enabled",
       vice_virtual_device_traps: "disabled",
     });
-    const { detachLibretroWorkDiskManager } = await import("@/lib/emu/host");
+    applyIecUnitFloppy(emuRef.current, iec, unit, kind);
     await detachLibretroWorkDiskManager(emuRef.current, unit);
     await applyJiffyThenRefreshWorkDisk(
       emuRef.current,

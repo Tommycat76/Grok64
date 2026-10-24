@@ -70,8 +70,10 @@ export function JiffyDosToggleRow() {
     jiffyLive !== jiffyUi
       ? jiffyUi
         ? " · applying ROMs…"
-        : " · KERNAL still Jiffy until power cycle"
-      : "";
+        : " · stock KERNAL until power cycle"
+      : jiffyLive && jiffyUi
+        ? " · live"
+        : "";
   return (
     <>
       <JiffyCartCompatBanner />

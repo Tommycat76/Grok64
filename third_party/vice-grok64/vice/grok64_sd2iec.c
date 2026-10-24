@@ -16,10 +16,15 @@ static int grok64_units[16];
 
 void grok64_sd2iec_disable_unit(int unit)
 {
+    char res[24];
     if (unit < 4 || unit > 11) {
         return;
     }
     grok64_units[unit] = 0;
+    snprintf(res, sizeof res, "IECDevice%d", unit);
+    resources_set_int(res, 0);
+    snprintf(res, sizeof res, "FileSystemDevice%d", unit);
+    resources_set_int(res, 0);
 }
 
 void grok64_sd2iec_enable_unit(int unit)
