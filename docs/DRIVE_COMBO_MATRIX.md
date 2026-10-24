@@ -1,8 +1,8 @@
 # Drive combination matrix (Grok64)
 
-**Status: PARKED** — do **not** start this matrix until Tom signs off that the emulator baseline is proven (cart + Jiffy replay, no spurious `LOAD"*",8,1`, disk mount policy per `docs/DISK_MOUNT_POLICY.md`). Queued **after** the active cart fix work; it must not interrupt that line of work.
+**Status: PARKED** — Tom **hands-on PASS** on cart + Jiffy baseline (`ab220c7`+, library bytes intact, 2026-10-24). **Do not unpark** this matrix, SuperCPU, or RAMLink-style RAMdisk rows until Tom explicitly says so. No merge/deploy from the cart PR without Tom.
 
-**Last updated:** 2026-10-23 (spec only — no QA run yet)
+**Last updated:** 2026-10-24 (spec only — no drive-combo QA run yet)
 
 ---
 

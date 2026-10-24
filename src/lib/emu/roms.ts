@@ -52,13 +52,13 @@ export const ROM_CATALOG: RomDef[] = [
   },
 ];
 
-const ROM_FETCH: { id: string; urls: string[] }[] = [
+/** Bundled on the host — safe to probe at boot. */
+const ROM_FETCH_REQUIRED: { id: string; urls: string[] }[] = [
   { id: "jiffy-c64", urls: ["/system/vice/JiffyDOS_C64.bin", "/system/vice/JiffyDOS_C64_6.01.bin"] },
   { id: "jiffy-1541", urls: ["/system/vice/JiffyDOS_1541-II.bin"] },
-  { id: "jiffy-1571", urls: ["/system/vice/JiffyDOS_1571.bin", "/system/vice/JiffyDOS_1571_repl310654.bin"] },
-  { id: "jiffy-1581", urls: ["/system/vice/JiffyDOS_1581.bin"] },
-  { id: "cmdhd", urls: ["/system/vice/dosCMDHD.bin", "/system/vice/cmdhd.bin"] },
 ];
+
+/** 1571 / 1581 / CMD HD ROMs are user-upload only (no bundled URLs — avoids 404 noise). */
 
 export async function listRoms(): Promise<Omit<StoredRom, "data">[]> {
   const db = await openExpansionDb();
@@ -193,7 +193,7 @@ export async function hasCmdRom(): Promise<boolean> {
 export async function prefetchBundledRoms(): Promise<string[]> {
   const have = new Set((await listRoms()).map((r) => r.id));
   const added: string[] = [];
-  for (const entry of ROM_FETCH) {
+  for (const entry of ROM_FETCH_REQUIRED) {
     if (have.has(entry.id)) continue;
     for (const url of entry.urls) {
       try {

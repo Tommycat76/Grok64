@@ -342,10 +342,40 @@ try {
 } catch (e) {
   push({ id: "suite-error", pass: false, detail: String(e) });
 }
+function mergeMatrixRows(newRows, priorPath) {
+  const merged = new Map();
+  if (existsSync(priorPath)) {
+    try {
+      const prior = JSON.parse(readFileSync(priorPath, "utf8"));
+      for (const r of prior.rows ?? []) {
+        if (r.id && r.id !== "suite-error") merged.set(r.id, r);
+      }
+    } catch {
+      /* fresh */
+    }
+  }
+  for (const r of newRows) {
+    if (r.id && r.id !== "suite-error") merged.set(r.id, r);
+  }
+  const suiteErr = newRows.find((r) => r.id === "suite-error" && !r.pass);
+  const out = [...merged.values()];
+  if (suiteErr) out.push(suiteErr);
+  return out;
+}
+
 try {
   if (rows.length) {
-    writeFileSync(join(outDir, "results.json"), JSON.stringify({ generatedAt: new Date().toISOString(), rows }, null, 2));
-    writeCartCompatMatrixDoc(rows, join(process.cwd(), "docs", "CART_COMPAT_MATRIX.md"));
+    const resultsPath = join(outDir, "results.json");
+    const mergedRows = ONLY ? mergeMatrixRows(rows, resultsPath) : rows.filter((r) => r.id !== "suite-error");
+    writeFileSync(
+      resultsPath,
+      JSON.stringify({ generatedAt: new Date().toISOString(), rows: mergedRows, partial: Boolean(ONLY) }, null, 2),
+    );
+    if (!ONLY) {
+      writeCartCompatMatrixDoc(mergedRows, join(process.cwd(), "docs", "CART_COMPAT_MATRIX.md"));
+    } else {
+      writeFileSync(join(outDir, "results-partial.json"), JSON.stringify({ generatedAt: new Date().toISOString(), rows: mergedRows }, null, 2));
+    }
   }
 } catch {
   /* doc */

@@ -6,7 +6,7 @@ Automated **real-UI** runs: Chromium under Xvfb with **xdotool** host keys for f
 
 **Regenerate:** `npm run test:desktop-xdotool-cart-matrix`
 
-_Last run: 2026-10-23T12:58:35.946Z_
+_Last run: 2026-10-23T12:58:35.946Z (full matrix). **2026-10-24 batch:** SS4, Epyx FastLoad, FC3 — stock + Jiffy PASS (`artifacts/desktop-xdotool-cart-matrix/results.json`)._
 
 ## Pass / fail (per cart × KERNAL)
 
