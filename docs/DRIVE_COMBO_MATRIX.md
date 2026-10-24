@@ -2,7 +2,7 @@
 
 **Status: PARKED** — Full IEC matrix (`GROK64_DRIVE_COMBO_UNPARK=1`) stays off until Tom signs off **emulator baseline** (cart + Jiffy + library floppy Play/Insert on dirty profiles).
 
-**Baseline track (2026-10-24):** **`3c8d33f21799`** core (PR #68) — IEC bus reconcile + About `viceDriveBus` probes — **manifest lock:** `grok64-core-manifest.json` + `grok64-core-build.generated.ts` must match shipped `vice_x64sc-grok64-iec-wasm.data` (`npm run test:grok64-core-manifest`); current core **`buildId` `89af7f0a060d`**, glue **`9d75da2c9d15`**. Bind rev **`diskapi-v13-tde-gcr-sync`**. **TDE/GCR:** `grok64_drive_sync_tde_image` uses `drive_image_attach` only (no broken `machine_drive_image_attach` re-sync); sync failures set **`viceLastReattach.rc` &lt; 0** and `viceLastAttachDiag` (no swallowed rc 0). About: `wasmTdeImageBytes` **175531**, `wasmGcrLoaded` **1**, `wasmVdriveImageSame` **1**. **Tom hands-on:** dirty profile + Jiffy on/off, hard refresh until About shows **`89af7f0a060d`**. No merge/deploy without Tom.
+**Baseline track (2026-10-24):** **`5161717155f4`** core (PR #68) — **`grok64_serial_layer_true_iec`** after attach/reconcile (`serial_device_type` **REAL**, `VirtualDevices` off, truedrive on) + About **`viceDriveBus`** (`wasmFilesystemDevice` **0**, **`serialDeviceLabel` ≠ `virt`**, drive CPU clock advancing). **Manifest lock:** `grok64-core-manifest.json` + `grok64-core-build.generated.ts` match `vice_x64sc-grok64-iec-wasm.data` (`npm run test:grok64-core-manifest`). Glue bind rev **`diskapi-v15-serial-real-route`**. **Tom hands-on (required before unpark):** Power off/on → Software **Insert** GEOS on 8 → type `LOAD"$",8` / LIST on CRT with Jiffy off then on (`npm run test:desktop-geos-insert-user-dirty`, `npm run test:desktop-geos-insert-ui-jiffy`). No merge/deploy without Tom.
 
 **Last updated:** 2026-10-24 (spec + harness; **no matrix PASS/FAIL rows** until unpark)
 
@@ -25,7 +25,8 @@ Results are **PASS / FAIL per row**, with **hands-on Chromium** click-through an
 | Cart + Jiffy UI gate green | Cart fix PR | `npm run test:desktop-cart-jiffy-ui-gate` + manual screenshots |
 | Jiffy + floppy directory (generic path) | Agent gate | `npm run test:desktop-jiffy-floppy-dir` — GEOS + boulder-dash, Jiffy on/off (`cf5c6e6` pairs 1541 ROM before work-disk refresh) |
 | Tom hands-on Jiffy + REU Play | Tom | Same path as gate; sign-off before unpark |
-| Library row Play/Insert (not `playBytes`) | Agent + Tom | `npm run test:desktop-library-geos-floppy-ui` + `npm run test:desktop-dirty-profile-geos` — Software → **Run**, sha1 + `LOAD"$",8`; console `__g64.attachDiskDiag()` at mount and ~8s after |
+| Library **Insert** + typed LOAD (not Run / `playBytes`) | Agent + Tom | `npm run test:desktop-geos-insert-user-dirty` (+ Jiffy alias gate); `attachDiskDiag().viceDriveBus` after Insert |
+| Library row Play (legacy) | Agent | `npm run test:desktop-library-geos-floppy-ui` + `npm run test:desktop-dirty-profile-geos` |
 | Floppy mount policy | Done | `docs/DISK_MOUNT_POLICY.md` — mount READY, named LOAD only |
 | CMD Boot ROM 2.80 | QA | User-uploaded; matrix uses real CMD HD behavior |
 | Jiffy ROM pair (+ 1571 ROM if 1571 rows) | QA | Settings upload; synthetic pair OK for automation only if Tom agrees |
