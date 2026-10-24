@@ -3454,10 +3454,13 @@ export function Grok64App() {
       vice_drive_true_emulation: "enabled",
       vice_virtual_device_traps: "disabled",
     });
-    await applyJiffyThenRefreshWorkDisk(emuRef.current, unit, useEmu.getState().jiffyDos, {
-      fileName: file.name,
-      data: media,
-    });
+    await applyJiffyThenRefreshWorkDisk(
+      emuRef.current,
+      unit,
+      useEmu.getState().jiffyDos,
+      { fileName: file.name, data: media },
+      { hotSwap: true },
+    );
     disarmAutostart(emuRef.current, "disk");
     await presentFloppyMountReady(emuRef.current, { iec, unit }, { afterDriveRefresh: true });
     await flushEmuFs(emuRef.current, 600);
