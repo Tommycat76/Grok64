@@ -93,7 +93,7 @@ try {
   trace.list = { ok: geosDirectoryOnScreen(screenAfter), text: screenAfter.slice(0, 1600) };
   await page.screenshot({ path: join(shotDir, "geos-after-list.png") });
 
-  const postDiag = await page.evaluate(async () => window.__g64?.attachDiskDiag?.({ light: true }));
+  const postDiag = await page.evaluate(async () => window.__g64?.attachDiskDiag?.());
   trace.iecWasm = await page.evaluate(() => window.__g64?.iecErrorChannelProbe?.(8));
   const live = await liveWithIecErrorProbe(page, postDiag?.viceDriveLive ?? preList?.viceDriveLive);
   const attachRc = postDiag?.viceLastReattach?.rc ?? preList?.viceLastReattach?.rc ?? -1;

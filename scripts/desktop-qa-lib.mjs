@@ -390,9 +390,11 @@ export function geosDirectoryOnScreen(screen = "") {
 }
 
 export function geosFloppyEvidence({ screen = "", session = null, wasmWorkDisk = null, viceAttachedImage = null }) {
-  const wasmOk = Boolean(
-    wasmWorkDisk?.some((r) => r.matchesSession && (r.wasmFsStat ?? 0) > 0 && (r.moduleFsBytes ?? 0) > 0),
-  );
+  const wasmOk = wasmWorkDisk?.length
+    ? Boolean(
+        wasmWorkDisk.some((r) => r.matchesSession && (r.wasmFsStat ?? 0) > 0 && (r.moduleFsBytes ?? 0) > 0),
+      )
+    : Boolean(viceAttachedImage?.trim());
   const iecFail = /FILE NOT FOUND|DEVICE NOT PRESENT|\?FILE/i.test(screen);
   const dirHex = session?.dir18s1Hex ?? "";
   const label = session?.diskLabel ?? "";
