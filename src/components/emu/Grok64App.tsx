@@ -976,19 +976,23 @@ export function Grok64App() {
         if (!emu) return { ok: false, reason: "no-emu" };
         setWarp(emu, false);
         useEmu.getState().setWarped(false);
-        hardReset(emu);
-        const t0 = Date.now();
-        while (Date.now() - t0 < 90_000) {
-          if (!useEmu.getState().booting) {
-            const t = readScreenText(emu) ?? "";
-            if (/READY/i.test(t)) break;
+        let head = readScreenText(emu) ?? "";
+        if (!/READY/i.test(head)) {
+          hardReset(emu);
+          const t0 = Date.now();
+          while (Date.now() - t0 < 90_000) {
+            if (!useEmu.getState().booting) {
+              head = readScreenText(emu) ?? "";
+              if (/READY/i.test(head)) break;
+            }
+            await new Promise((r) => setTimeout(r, 400));
           }
-          await new Promise((r) => setTimeout(r, 400));
         }
-        const head = readScreenText(emu) ?? "";
         if (!/READY/i.test(head)) {
           return { ok: false, reason: "not-ready", text: head.slice(0, 400) };
         }
+        await refreshViceWorkDisk(emu);
+        await new Promise((r) => setTimeout(r, 1200));
         if (!(await feedBasicLine(emu, 'LOAD"$",8'))) {
           return { ok: false, reason: "load-fail", text: (readScreenText(emu) ?? "").slice(0, 400) };
         }

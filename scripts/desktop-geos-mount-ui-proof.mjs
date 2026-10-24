@@ -4,7 +4,8 @@
  * Jiffy on, REU 2MB. GEOS D64 dir + deskTop; second library Run; About Escape.
  */
 import { chromium } from "playwright";
-import { createHash, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { patchLocalStorage, powerOnDesktop, typeBasic, waitRunning, waitForG64 } from "./desktop-qa-lib.mjs";
