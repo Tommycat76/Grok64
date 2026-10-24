@@ -7,6 +7,7 @@ import { chromium } from "playwright";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  isBasicReadyScreen,
   patchLocalStorage,
   powerOnDesktop,
   waitRunning,
@@ -50,6 +51,17 @@ async function importBoth(page) {
   );
 }
 
+async function waitBasicReady(page, maxMs = 90_000) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < maxMs) {
+    const text = await page.evaluate(() => window.__g64?.screenText?.() || "");
+    const booting = await page.evaluate(() => Boolean(window.__g64?.booting?.()));
+    if (!booting && isBasicReadyScreen(text)) return true;
+    await page.waitForTimeout(800);
+  }
+  return false;
+}
+
 async function playCart(page, displayName) {
   await page.evaluate(async (name) => {
     if (window.__g64?.playLibraryByName) {
@@ -88,6 +100,11 @@ await page.screenshot({ path: join(out, "tom-lib-integrity-00-imported.png"), fu
 
 let baseSs5 = snapByName(baseline, /Super_Snapshot/i);
 let baseAr6 = snapByName(baseline, /Action_Replay/i);
+if (!baseSs5?.ok || !baseAr6?.ok) {
+  console.log(JSON.stringify({ pass: false, reason: "baseline_scan_failed", baseline }, null, 2));
+  await browser.close();
+  process.exit(1);
+}
 
 await playCart(page, ss5Name);
 await page.screenshot({ path: join(out, "tom-lib-integrity-01-ss5-play.png"), fullPage: true });
@@ -102,16 +119,16 @@ await page.waitForTimeout(8000);
 await page.screenshot({ path: join(out, "tom-lib-integrity-03-reset.png"), fullPage: true });
 
 await page.evaluate(() => window.__g64?.hwPress?.("cart-out", "short"));
-await waitRunning(page, 120_000);
-await page.waitForTimeout(6000);
+await waitBasicReady(page, 120_000);
+await page.waitForTimeout(3000);
 await page.screenshot({ path: join(out, "tom-lib-integrity-04-cart-out.png"), fullPage: true });
 
 await playCart(page, ar6Name);
 await page.screenshot({ path: join(out, "tom-lib-integrity-05-ar6-play.png"), fullPage: true });
 
 await page.evaluate(() => window.__g64?.hwPress?.("cart-out", "short"));
-await waitRunning(page, 120_000);
-await page.waitForTimeout(6000);
+await waitBasicReady(page, 120_000);
+await page.waitForTimeout(3000);
 
 await playCart(page, ss5Name);
 await page.screenshot({ path: join(out, "tom-lib-integrity-06-ss5-second.png"), fullPage: true });

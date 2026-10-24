@@ -228,7 +228,6 @@ import {
   isDiskKind,
   isWorkDiskImage,
   isLikelyBlankD64Payload,
-  isDiskKind,
   kindOf,
   needsTypedBoot,
 } from "@/lib/emu/formats";
@@ -2371,6 +2370,7 @@ export function Grok64App() {
       const playUnit = opts.iecUnit ?? useEmu.getState().iecUnit;
       setIecDevice(playUnit);
       let payload = data;
+      let bootNameOverride = opts.bootName ?? null;
       const raw = new Uint8Array(data);
       const work = isWorkDisk(mediaName) || opts.title === "BASIC" || opts.title === "BASIC READY";
       if (!work && isWorkDiskImage(raw)) {
@@ -2388,7 +2388,7 @@ export function Grok64App() {
         try {
           const prg = psidToPrg(raw);
           payload = toArrayBuffer(prg);
-          bootName = bootFileName(filename.replace(/\.sid$/i, "") + ".prg", "prg");
+          bootNameOverride = bootFileName(filename.replace(/\.sid$/i, "") + ".prg", "prg");
         } catch (err) {
           toast.error(err instanceof Error ? err.message : "Could not play SID");
           return;
@@ -2426,7 +2426,7 @@ export function Grok64App() {
             [`${base}.reu`]: raw,
           });
           payload = toArrayBuffer(zip);
-          bootName = boot;
+          bootNameOverride = boot;
           mediaName = `${base}.zip`;
         } catch (err) {
           toast.error(err instanceof Error ? err.message : "Could not open REU / NUVIE");
@@ -2463,7 +2463,7 @@ export function Grok64App() {
         return;
       }
       const payloadView = new Uint8Array(safe);
-      const bootName = resolvePlayBootName(mediaName, payloadView, opts.bootName);
+      const bootName = resolvePlayBootName(mediaName, payloadView, bootNameOverride);
       const origKind = kindOf(bootName);
       basicRunAfterLoadRef.current =
         !work && opts.autostart !== false && (origKind === "prg" || origKind === "p00") && isBasicPrg(payloadView);
