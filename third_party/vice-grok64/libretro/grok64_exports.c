@@ -94,7 +94,6 @@ static void grok64_kbdbuf_ensure(void)
 #ifdef GROK64_SD2IEC
 
 extern void grok64_sd2iec_enable_unit(int unit);
-extern void grok64_sd2iec_disable_unit(int unit);
 
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
