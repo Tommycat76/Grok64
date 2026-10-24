@@ -12,7 +12,7 @@ export function logLines() {
 }
 
 const DRIVE8_LOG =
-  /floppy-attach|play-mount|gcr-disk|play-recycle|jiffy-floppy|geos-work|start-recycle|boot-recover|crash-recover/;
+  /floppy-attach|floppy-mount-ready|play-mount|gcr-disk|play-recycle|jiffy-floppy|geos-work|start-recycle|boot-recover|crash-recover/;
 
 /** Last N glog lines related to unit-8 floppy attach (for About → Drive 8 diagnostics). */
 export function drive8LogLines(max = 20): string[] {

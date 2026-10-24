@@ -3418,7 +3418,8 @@ export function Grok64App() {
       fileName: file.name,
       data: media,
     });
-    applyIecUnitFloppy(emuRef.current, iec, unit, kind);
+    disarmAutostart(emuRef.current, "disk");
+    await presentFloppyMountReady(emuRef.current, { iec, unit }, { afterDriveRefresh: true });
     await flushEmuFs(emuRef.current, 600);
     await touchPlayed(item.id);
     const bam = d64DiskName(media);
