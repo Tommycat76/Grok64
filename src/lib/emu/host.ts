@@ -2565,6 +2565,15 @@ export async function ensureViceSessionDiskAttached(
     await flushEmuFs(emu, isIosPhone() ? 2000 : 1200);
     const rc = await viceReattachSessionDisk(emu, unit);
     if (rc === 0) {
+      applyRuntimeOptions(emu, {
+        vice_drive_true_emulation: "enabled",
+        vice_virtual_device_traps: "disabled",
+      });
+      injectViceRc(
+        emu,
+        ["[C64]", `Drive${unit}TrueEmulation=1`, "DriveTrueEmulation=1", `VirtualDevice${unit}=0`, "VirtualDevices=0"]
+          .join("\n") + "\n",
+      );
       await waitRetroFrames(30);
       await tickGrok64Iec(emu);
     }

@@ -461,6 +461,8 @@ export type ViceDriveLiveProbe = {
   wasmErrorCode: number | null;
   wasmErrorChannel: string | null;
   wasmIecDevice: number | null;
+  wasmVirtualDevice: number | null;
+  wasmUnitTrueEmulation: number | null;
   sessionLabel: string | null;
 };
 
@@ -495,6 +497,8 @@ export function viceDriveLiveProbe(emu: ViceDiskEmu | null, unit: IecUnit = 8, d
     wasmErrorCode: api?.driveLastErrorCode?.(unit) ?? null,
     wasmErrorChannel: api?.driveErrorChannel?.(unit) ?? "",
     wasmIecDevice: api?.driveIecDevice?.(unit) ?? null,
+    wasmVirtualDevice: api?.driveVirtualDevice?.(unit) ?? null,
+    wasmUnitTrueEmulation: api?.driveUnitTrueEmulation?.(unit) ?? null,
     sessionLabel,
   };
 }

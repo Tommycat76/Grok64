@@ -5,9 +5,10 @@
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
-const root = process.cwd();
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const corePath = join(root, "public/system/vice/emulatorjs/data/cores/vice_x64sc-grok64-iec-wasm.data");
 const bytes = readFileSync(corePath);
 const sha256 = createHash("sha256").update(bytes).digest("hex");

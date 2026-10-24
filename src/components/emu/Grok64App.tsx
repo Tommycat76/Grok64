@@ -1079,6 +1079,7 @@ export function Grok64App() {
         await new Promise((r) => setTimeout(r, 8000));
         const text = readScreenText(emu) ?? "";
         const unit = 8;
+        const session = sessionDiskOnUnit(unit);
         const sessionFp = session ? await diskAttachFingerprint(session.bytes, session.name) : null;
         const catalogOk =
           /GEOS/i.test(text) ||

@@ -6,6 +6,14 @@ import { readFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
+const manifestGate = spawnSync(process.execPath, ["scripts/check-grok64-core-manifest.mjs"], {
+  encoding: "utf8",
+});
+if (manifestGate.status !== 0) {
+  console.error(manifestGate.stdout || manifestGate.stderr);
+  process.exit(1);
+}
+
 const dataPath =
   process.argv[2] ||
   join(process.cwd(), "public/system/vice/emulatorjs/data/cores/vice_x64sc-grok64-iec-wasm.data");
@@ -28,6 +36,8 @@ const REQUIRED = [
   "grok64_drive_error_channel",
   "grok64_drive_reload_image",
   "grok64_drive_iec_device",
+  "grok64_drive_virtual_device",
+  "grok64_drive_unit_true_emulation",
 ];
 
 rmSync(tmp, { recursive: true, force: true });

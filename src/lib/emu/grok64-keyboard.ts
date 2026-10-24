@@ -195,10 +195,10 @@ function resolveHostStroke(
 ): { code: string; key: string; mods: KbdMods; swallowUp?: boolean; hostShiftChord?: boolean } {
   let shift = !!mods.shift;
 
-  if (shift && (code === "Digit2" || key === "@")) {
+  if (shift && (code === "Digit2" || key === "@" || key === '"')) {
     return { code: "Digit2", key: '"', mods: { ...mods, shift: false }, swallowUp: true };
   }
-  if (shift && code === "Digit4") {
+  if (shift && (code === "Digit4" || key === "$")) {
     return { code: "Digit4", key: "$", mods: { ...mods, shift: false }, swallowUp: true };
   }
   if (shift && (code === "Quote" || code === "Apostrophe" || key === "'")) {
@@ -293,7 +293,7 @@ async function playSyntheticShiftedGlyph(fn: RetroFn, glyph: string, emu: Grok64
   downAt.delete(shiftRetro);
   hostShiftChord = false;
   swallowHostShiftUp = true;
-  await sleep(32);
+  await sleep(72);
   paintHook?.(emu);
   return true;
 }
@@ -373,7 +373,18 @@ function scheduleDomKey(
       }
       await playSyntheticShiftedGlyph(fn, stroke.key, emu);
       eatKeyUp.add(eventTag(stroke.code, stroke.key));
+      eatKeyUp.add(eventTag(code, key));
+      await sleep(48);
       return;
+    }
+
+    if (
+      down &&
+      mods.shift &&
+      /^Key[A-Z]$/.test(code) &&
+      deliveryDepth > 0
+    ) {
+      await sleep(effectiveHoldMs());
     }
 
     const retro = domCodeToRetrok(stroke.code);

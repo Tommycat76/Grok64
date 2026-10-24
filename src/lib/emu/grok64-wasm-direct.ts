@@ -58,6 +58,8 @@ const EXPECTED_GROK64_EXPORTS = [
   "grok64_drive_error_channel",
   "grok64_drive_reload_image",
   "grok64_drive_iec_device",
+  "grok64_drive_virtual_device",
+  "grok64_drive_unit_true_emulation",
 ] as const;
 
 /** JS wrapper failed to marshal a UTF-8 path (distinct from C errno). */
@@ -428,6 +430,16 @@ export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
     },
     driveIecDevice: (unit) => {
       const fn = resolveWasmExport(mod, "grok64_drive_iec_device");
+      if (!fn) return null;
+      return Number(fn(unit));
+    },
+    driveVirtualDevice: (unit) => {
+      const fn = resolveWasmExport(mod, "grok64_drive_virtual_device");
+      if (!fn) return null;
+      return Number(fn(unit));
+    },
+    driveUnitTrueEmulation: (unit) => {
+      const fn = resolveWasmExport(mod, "grok64_drive_unit_true_emulation");
       if (!fn) return null;
       return Number(fn(unit));
     },

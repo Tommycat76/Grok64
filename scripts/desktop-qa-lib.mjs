@@ -22,21 +22,31 @@ export async function powerOnDesktop(page, base, { navigate = true } = {}) {
     return true;
   }
   await page.locator(".g64-power").waitFor({ timeout: 30000 });
+  const safeHasFs = async () => {
+    try {
+      return await page.evaluate(() => Boolean(window.__g64?.hasFs?.()));
+    } catch {
+      return false;
+    }
+  };
   for (let attempt = 0; attempt < 4; attempt++) {
-    await page.evaluate(() => {
-      document.querySelector(".g64-power")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-      document.querySelector(".g64-splash")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
-    });
+    try {
+      await page.evaluate(() => {
+        document.querySelector(".g64-power")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+        document.querySelector(".g64-splash")?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      });
+    } catch {
+      await waitForG64(page, 8000);
+    }
     for (let i = 0; i < 50; i++) {
-      if (await page.evaluate(() => window.__g64?.hasFs?.())) break;
+      if (await safeHasFs()) break;
       await page.waitForTimeout(300);
     }
-    if (await page.evaluate(() => window.__g64?.hasFs?.())) break;
+    if (await safeHasFs()) break;
     await page.waitForTimeout(500);
   }
   for (let i = 0; i < 60; i++) {
-    const fs = await page.evaluate(() => window.__g64?.hasFs?.());
-    if (fs) break;
+    if (await safeHasFs()) break;
     await page.waitForTimeout(300);
   }
   await page.waitForTimeout(2500);
@@ -312,6 +322,29 @@ export async function ensureReal1541Timing(page) {
       },
     };
   });
+}
+
+/** GEOS insert/list evidence when CRT screenText omits ASCII "GEOS" (PETSCII). */
+export function geosFloppyEvidence({ screen = "", session = null, wasmWorkDisk = null, viceAttachedImage = null }) {
+  const wasmOk = Boolean(
+    wasmWorkDisk?.some((r) => r.matchesSession && (r.wasmFsStat ?? 0) > 0 && (r.moduleFsBytes ?? 0) > 0),
+  );
+  const iecFail = /FILE NOT FOUND|DEVICE NOT PRESENT/i.test(screen);
+  const dirHex = session?.dir18s1Hex ?? "";
+  const label = session?.diskLabel ?? "";
+  const catalogOk =
+    /GEOS/i.test(screen) ||
+    /47454f53/i.test(dirHex) ||
+    /geos/i.test(label) ||
+    (/PRG|SEQ|DEL|BLOCKS FREE/i.test(screen) && !/^work\s*disk/i.test(label));
+  const attachOk = Boolean(viceAttachedImage?.trim());
+  return {
+    wasmOk,
+    iecFail,
+    catalogOk,
+    attachOk,
+    ok: wasmOk && attachOk && !iecFail && catalogOk,
+  };
 }
 
 /** Wait for LOAD"$" to finish (SEARCHING/LOADING cleared or IEC error). */

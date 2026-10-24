@@ -34,6 +34,8 @@ const GROK64_EXPORTS = [
   "_grok64_drive_error_channel",
   "_grok64_drive_reload_image",
   "_grok64_drive_iec_device",
+  "_grok64_drive_virtual_device",
+  "_grok64_drive_unit_true_emulation",
 ];
 
 let text = readFileSync(makefile, "utf8");

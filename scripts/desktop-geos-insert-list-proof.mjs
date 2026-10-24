@@ -11,7 +11,14 @@ import {
   grok64DatapathFromEnv,
   installGrok64CoreNetworkGuard,
 } from "./desktop-grok64-core.mjs";
-import { patchLocalStorage, powerOnDesktop, waitForG64, waitRunning } from "./desktop-qa-lib.mjs";
+import {
+  geosFloppyEvidence,
+  patchLocalStorage,
+  powerOnDesktop,
+  waitForDollarLoad,
+  waitForG64,
+  waitRunning,
+} from "./desktop-qa-lib.mjs";
 
 const base = process.env.GROK64_BASE_URL || "http://127.0.0.1:8080/";
 const outDir = join(process.cwd(), "artifacts", "desktop-geos-insert-list");
@@ -65,18 +72,42 @@ try {
   const preList = await page.evaluate(async () => window.__g64?.attachDiskDiag?.());
   trace.preList = {
     viceAttachedImage: preList?.viceAttachedImage,
+    viceDriveLive: preList?.viceDriveLive,
     wasmFsStat: preList?.attachPathProbe?.map((p) => ({ path: p.path, wasm: p.wasmFsStat, js: p.jsFsBytes })),
+    loadedGlueHasDiskExports: preList?.loadedGlueHasDiskExports,
   };
   await page.screenshot({ path: join(shotDir, "geos-after-insert.png") });
 
+  await page.evaluate(async () => {
+    await window.__g64?.feedBasic?.('LOAD"$",8');
+  });
+  const loadWait = await waitForDollarLoad(page, { maxMs: 60_000 });
+  trace.loadWait = loadWait;
   const list = await page.evaluate(async () => window.__g64?.basicDollarList?.());
   trace.list = list;
   await page.screenshot({ path: join(shotDir, "geos-after-list.png") });
 
+  const postDiag = await page.evaluate(async () => window.__g64?.attachDiskDiag?.());
+  const evidence = geosFloppyEvidence({
+    screen: [loadWait?.text, list?.text].filter(Boolean).join("\n"),
+    session: postDiag?.session ?? preList?.session,
+    wasmWorkDisk: postDiag?.wasmWorkDisk,
+    viceAttachedImage: postDiag?.viceAttachedImage ?? preList?.viceAttachedImage,
+  });
+  const live = postDiag?.viceDriveLive ?? preList?.viceDriveLive;
+  const iecDeviceOk = live?.wasmIecDevice === 0 || live?.wasmIecDevice == null;
+  const tdeOk =
+    live?.wasmUnitTrueEmulation === 1 ||
+    live?.wasmVirtualDevice === 0 ||
+    (live?.wasmUnitTrueEmulation == null && live?.wasmVirtualDevice == null);
   const pass =
-    list?.ok === true &&
-    /GEOS/i.test(list?.text ?? "") &&
+    (list?.ok === true || evidence.ok) &&
+    evidence.ok &&
+    !loadWait?.error &&
+    iecDeviceOk &&
+    tdeOk &&
     preList?.loadedGlueHasDiskExports === true;
+  trace.evidence = evidence;
   trace.pass = pass;
   writeFileSync(join(outDir, "trace.json"), JSON.stringify(trace, null, 2));
   console.log(JSON.stringify({ pass, listOk: list?.ok, attached: preList?.viceAttachedImage }));

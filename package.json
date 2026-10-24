@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "node scripts/with-app-env.mjs vite dev --host 0.0.0.0 --port 8080",
     "grok64:core-manifest": "node scripts/write-grok64-core-manifest.mjs",
-    "build": "node scripts/write-grok64-core-manifest.mjs && node scripts/with-app-env.mjs vite build && node scripts/flatten-dist.mjs dist && node scripts/ensure-bd.mjs dist && node scripts/check-no-jsxdev.mjs dist && npm run db:migrate",
+    "test:grok64-core-manifest": "node scripts/check-grok64-core-manifest.mjs",
+    "build": "node scripts/write-grok64-core-manifest.mjs && node scripts/check-grok64-core-manifest.mjs && node scripts/with-app-env.mjs vite build && node scripts/flatten-dist.mjs dist && node scripts/ensure-bd.mjs dist && node scripts/check-no-jsxdev.mjs dist && npm run db:migrate",
     "build:vercel": "GROK_VERCEL_BUILD=1 node scripts/with-app-env.mjs vite build && npm run db:migrate",
     "db:migrate": "node scripts/migrate.mjs",
     "build:dev": "node scripts/with-app-env.mjs vite build --mode development",

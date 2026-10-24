@@ -13,6 +13,7 @@ import {
   installGrok64CoreNetworkGuard,
 } from "./desktop-grok64-core.mjs";
 import {
+  geosFloppyEvidence,
   openSoftware,
   patchLocalStorage,
   powerOnDesktop,
@@ -99,7 +100,7 @@ try {
   await page.waitForTimeout(3000);
   await page.screenshot({ path: join(shotDir, "geos-ui-insert-jiffy-ready.png") });
 
-  const diag = await page.evaluate(async () => window.__g64?.attachDiskDiag?.());
+  let diag = await page.evaluate(async () => window.__g64?.attachDiskDiag?.());
   trace.diag = {
     jiffyWant: diag?.jiffyWant,
     jiffyLive: diag?.jiffyLive,
@@ -107,26 +108,37 @@ try {
     wasmWorkDisk: diag?.wasmWorkDisk,
     viceAttachedImage: diag?.viceAttachedImage,
     viceLastReattach: diag?.viceLastReattach,
+    session: diag?.session,
+    utf8MarshalProbe: diag?.utf8MarshalProbe,
   };
 
   await typeBasic(page, 'LOAD"$",8', { afterMs: 12_000 });
   await page.waitForTimeout(3000);
   const screen = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
+  diag = await page.evaluate(async () => window.__g64?.attachDiskDiag?.());
   await page.screenshot({ path: join(shotDir, "geos-ui-insert-jiffy-list.png") });
 
-  const wasmOk = diag?.wasmWorkDisk?.some(
-    (r) => r.matchesSession && ((r.wasmFsStat ?? 0) > 0 || (r.moduleFsBytes ?? 0) > 0),
-  );
-  const listOk =
-    /GEOS/i.test(screen) &&
-    !/FILE NOT FOUND/i.test(screen) &&
-    !/DEVICE NOT PRESENT/i.test(screen) &&
-    !/^work\s*disk/i.test(screen.slice(0, 120));
-  const pass = listOk && wasmOk === true && diag?.jiffyLive === true;
+  const evidence = geosFloppyEvidence({
+    screen,
+    session: diag?.session,
+    wasmWorkDisk: diag?.wasmWorkDisk,
+    viceAttachedImage: diag?.viceAttachedImage,
+  });
+  const attachRcOk = (diag?.viceLastReattach?.rc ?? -1) === 0;
+  const pass = evidence.ok && attachRcOk && diag?.jiffyLive === true;
   trace.pass = pass;
+  trace.evidence = evidence;
   trace.screen = screen.slice(0, 500);
   writeFileSync(join(outDir, "trace.json"), JSON.stringify(trace, null, 2));
-  console.log(JSON.stringify({ pass, listOk, wasmOk, jiffyLive: diag?.jiffyLive }));
+  console.log(
+    JSON.stringify({
+      pass,
+      evidence,
+      attachRcOk,
+      jiffyLive: diag?.jiffyLive,
+      wasmFsStat: diag?.attachPathProbe?.[0]?.wasmFsStat,
+    }),
+  );
   process.exit(pass ? 0 : 1);
 } catch (e) {
   trace.error = String(e?.message || e);

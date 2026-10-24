@@ -30,6 +30,8 @@ extern void grok64_sd2iec_disable_unit(int unit);
 int grok64_disk_attach(int unit, int drive, const char *path);
 int grok64_drive_reload_image(int unit, int drive);
 int grok64_drive_iec_device(int unit);
+int grok64_drive_virtual_device(int unit);
+int grok64_drive_unit_true_emulation(int unit);
 
 #define GROK64_DISK_PATH_MAX 4096
 static int pending_disk_unit = 0;
@@ -62,6 +64,12 @@ static void grok64_disk_route_to_drive(unsigned int unit)
     resources_set_int(res, 0);
     snprintf(res, sizeof(res), "FileSystemDevice%u", unit);
     resources_set_int(res, ATTACH_DEVICE_NONE);
+    /* KERNAL traps must hit true 1541 DOS, not vdrive fast path (error ch. CBM DOS V2.6). */
+    resources_set_int("DriveTrueEmulation", 1);
+    snprintf(res, sizeof(res), "Drive%uTrueEmulation", unit);
+    resources_set_int(res, 1);
+    snprintf(res, sizeof(res), "VirtualDevice%u", unit);
+    resources_set_int(res, 0);
 }
 
 static int grok64_fs_size_bytes(const char *path)
@@ -450,6 +458,42 @@ int grok64_drive_iec_device(int unit)
         return -EINVAL;
     }
     snprintf(res, sizeof(res), "IECDevice%d", unit);
+    if (resources_get_int(res, &v) != 0) {
+        return -1;
+    }
+    return v;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int grok64_drive_virtual_device(int unit)
+{
+    char res[32];
+    int v = 0;
+
+    if (unit < 8 || unit > 11) {
+        return -EINVAL;
+    }
+    snprintf(res, sizeof(res), "VirtualDevice%d", unit);
+    if (resources_get_int(res, &v) != 0) {
+        return -1;
+    }
+    return v;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int grok64_drive_unit_true_emulation(int unit)
+{
+    char res[32];
+    int v = 0;
+
+    if (unit < 8 || unit > 11) {
+        return -EINVAL;
+    }
+    snprintf(res, sizeof(res), "Drive%dTrueEmulation", unit);
     if (resources_get_int(res, &v) != 0) {
         return -1;
     }
