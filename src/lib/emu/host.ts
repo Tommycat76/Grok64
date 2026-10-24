@@ -41,6 +41,12 @@ import {
   wireGrok64ViceHost,
 } from "./grok64-vice-bridge";
 import { grok64RetroKeyboardAvailable } from "./grok64-keyboard";
+import {
+  grok64DiskExportsReady,
+  resolveViceDiskAttachPath,
+  viceAttachedImage,
+  viceReattachDisk,
+} from "./vice-disk";
 import { writeC64Bytes } from "./c64-memory";
 import {
   isAcceptedD64ByteLength,
@@ -149,6 +155,7 @@ export type Grok64CoreStatus = {
   blockedStock: string[];
   attach: boolean;
   c64read: boolean;
+  diskAttach: boolean;
   iecBackend: string;
 };
 
@@ -164,6 +171,7 @@ export function grok64CoreStatus(emu: EjsInstance | null): Grok64CoreStatus {
     blockedStock: (w.__GROK64_STOCK_CORE_BLOCKED__ as string[]) ?? [],
     attach: typeof mod?._grok64_sd2iec_attach === "function",
     c64read: typeof mod?._grok64_c64_read === "function",
+    diskAttach: grok64DiskExportsReady(emu),
     iecBackend: grok64ViceCoreRoot() ? "grok64-datapath" : "cdn-stock",
   };
 }
@@ -1839,7 +1847,7 @@ export function sd2iecFreeze(
   return { ok: false, kind: "empty", index: 0, count: disks.length };
 }
 
-function fsOf(emu: EjsInstance | null): EmscriptenFS | null {
+export function fsOf(emu: EjsInstance | null): EmscriptenFS | null {
   return emu?.gameManager?.FS ?? emu?.Module?.FS ?? null;
 }
 
@@ -2148,6 +2156,7 @@ export async function refreshViceGcrDisk(
   await flushEmuFs(emu, 1500);
   bumpCrtPaint(emu);
   await new Promise((r) => setTimeout(r, 250));
+  await viceReattachSessionDisk(emu, unit);
   glog("gcr-disk-refresh", { unit, file: base, bytes: data.byteLength });
 }
 
@@ -2213,6 +2222,7 @@ export async function refreshViceWorkDisk(emu: EjsInstance | null, unit: IecUnit
   bumpCrtPaint(emu);
   await new Promise((r) => setTimeout(r, 250));
   resyncSessionDiskToVice(emu, unit);
+  await viceReattachSessionDisk(emu, unit);
 }
 
 /** After VICE reset, rewrite session floppy bytes to MEMFS + vice_work.d64 mirror. */
@@ -2231,6 +2241,22 @@ export function resyncSessionDiskToVice(emu: EjsInstance | null, unit: IecUnit =
     syncViceWorkD64(emu, slot.bytes);
   }
   return true;
+}
+
+/** file_system_detach_disk + file_system_attach_disk for the live session image on `unit`. */
+export async function viceReattachSessionDisk(emu: EjsInstance | null, unit: IecUnit = 8): Promise<number> {
+  if (!emu) return -1;
+  const slot = sessionDiskOnUnit(unit);
+  const name = slot?.name ?? bootFileOf(emu) ?? unitMounts.get(unit);
+  if (!name) return -1;
+  const path = resolveViceDiskAttachPath(emu, unit, name);
+  if (!path) return -1;
+  await flushEmuFs(emu, 400);
+  const rc = viceReattachDisk(emu, unit, path);
+  if (rc === -99) {
+    glog("vice-disk-reattach-skip", { reason: "exports-missing", unit, name });
+  }
+  return rc;
 }
 
 /** QA: bytes on MEMFS path VICE opens for `8_d64` work disk attach. */
@@ -2598,6 +2624,10 @@ export function attachAutostartDisk(
       syncViceWorkD64(emu, data);
     }
     applyIecUnitFloppy(emu, iec, unit, kindOf(target));
+    const attachPath = resolveViceDiskAttachPath(emu, unit, label || target);
+    if (attachPath) {
+      viceReattachDisk(emu, unit, attachPath);
+    }
   }
   return wrote;
 }

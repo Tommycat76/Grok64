@@ -40,6 +40,9 @@ fi
 if ! grep -q '_grok64_retro_keyboard' "${MAKEFILE}"; then
   sed -i 's|_grok64_cartridge_trigger_freeze|_grok64_cartridge_trigger_freeze,_grok64_retro_keyboard|' "${MAKEFILE}"
 fi
+if ! grep -q '_grok64_disk_attach' "${MAKEFILE}"; then
+  sed -i 's|_grok64_retro_keyboard|_grok64_retro_keyboard,_grok64_disk_attach,_grok64_disk_detach,_grok64_disk_get_name|' "${MAKEFILE}"
+fi
 
 cd "${RA}"
 emmake make -f Makefile.emulatorjs HAVE_7ZIP=1 HAVE_CHD=1 HAVE_THREADS=0 PTHREAD_POOL_SIZE=0 ASYNC=0 \

@@ -12,6 +12,7 @@ import {
   type EjsLike,
   type IecDeviceNumber,
 } from "./sd2iec";
+import { bindGrok64DiskExports } from "./vice-disk";
 
 export type Grok64Emu = EjsLike;
 const asSd = (emu: Grok64Emu | null): EjsLike | null => emu;
@@ -85,6 +86,7 @@ export function bindGrok64WasmExports(mod: Grok64Module & { cwrap?: (...args: un
         "number",
       ]) as (code: number, down: number, character: number, mod: number) => void;
     }
+    bindGrok64DiskExports(mod as Parameters<typeof bindGrok64DiskExports>[0]);
     const modAny = mod as {
       _retro_get_memory_data?: (id: number) => number;
       _retro_get_memory_size?: (id: number) => number;

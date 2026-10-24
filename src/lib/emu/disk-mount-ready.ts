@@ -7,6 +7,7 @@ import {
   flushEmuFs,
   hardReset,
   resyncSessionDiskToVice,
+  viceReattachSessionDisk,
 } from "./host";
 import { sessionDiskOnUnit } from "./session-media";
 import { isGcrDiskKind, kindOf } from "./formats";
@@ -30,6 +31,8 @@ export async function presentFloppyMountReady(
   applyIecUnitFloppy(emu, live.iec, live.unit, diskKind);
   if (opts?.afterDriveRefresh) {
     glog("floppy-mount-ready", { afterDriveRefresh: true, kind: diskKind, unit: live.unit });
+    resyncSessionDiskToVice(emu, live.unit);
+    await viceReattachSessionDisk(emu, live.unit);
     await flushEmuFs(emu, isIosPhone() ? 2000 : 400);
     bumpCrtPaint(emu);
     return;
@@ -47,5 +50,6 @@ export async function presentFloppyMountReady(
     await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
   }
   resyncSessionDiskToVice(emu, live.unit);
+  await viceReattachSessionDisk(emu, live.unit);
   bumpCrtPaint(emu);
 }

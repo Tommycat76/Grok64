@@ -3,9 +3,11 @@
 #endif
 
 #include "libretro.h"
+#include "attach.h"
 #include "kbdbuf.h"
 #include "machine.h"
 #include <stdint.h>
+#include <string.h>
 
 extern void cartridge_trigger_freeze(void);
 extern void retro_keyboard_event(bool down, unsigned code, uint32_t character, uint16_t mod);
@@ -118,4 +120,51 @@ EMSCRIPTEN_KEEPALIVE
 void grok64_retro_keyboard(unsigned code, int down, unsigned character, unsigned mod)
 {
     retro_keyboard_event(down != 0, code, character, (uint16_t)mod);
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+const char *grok64_disk_get_name(int unit, int drive)
+{
+    if (unit < 8 || unit > 11) {
+        return "";
+    }
+    if (drive < 0 || drive > 1) {
+        drive = 0;
+    }
+    const char *name = file_system_get_disk_name((unsigned int)unit, (unsigned int)drive);
+    return name ? name : "";
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void grok64_disk_detach(int unit, int drive)
+{
+    if (unit < 8 || unit > 11) {
+        return;
+    }
+    if (drive < 0 || drive > 1) {
+        drive = 0;
+    }
+    file_system_detach_disk((unsigned int)unit, (unsigned int)drive);
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int grok64_disk_attach(int unit, int drive, const char *path)
+{
+    if (!path || !path[0]) {
+        return -1;
+    }
+    if (unit < 8 || unit > 11) {
+        return -1;
+    }
+    if (drive < 0 || drive > 1) {
+        drive = 0;
+    }
+    file_system_detach_disk((unsigned int)unit, (unsigned int)drive);
+    return file_system_attach_disk((unsigned int)unit, (unsigned int)drive, path);
 }

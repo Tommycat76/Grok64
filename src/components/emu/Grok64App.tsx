@@ -104,6 +104,7 @@ import {
   diskAttachFingerprint,
   validateFloppyLibraryPayload,
 } from "@/lib/emu/disk-attach-diag";
+import { grok64DiskExportsReady, viceAttachedImage } from "@/lib/emu/vice-disk";
 import {
   c64KeyboardShouldDefer,
   enqueueC64KeyboardStroke,
@@ -882,6 +883,7 @@ export function Grok64App() {
           /* optional */
         }
         const opts = runtimeViceOpts();
+        const unit = 8;
         return {
           bootFile: bootFileOf(emuRef.current),
           emuFileName: emuRef.current?.fileName ?? null,
@@ -895,6 +897,8 @@ export function Grok64App() {
           jiffyOpt: opts.vice_jiffydos ?? null,
           session: session ? await diskAttachFingerprint(session.bytes, session.name) : null,
           viceWork: { bytes: viceSize, sha1: viceSha1 },
+          viceAttachedImage: viceAttachedImage(emuRef.current, unit),
+          viceDiskExports: grok64DiskExportsReady(emuRef.current),
         };
       },
       kbdDrain: () => grok64KeyboardDrain(),

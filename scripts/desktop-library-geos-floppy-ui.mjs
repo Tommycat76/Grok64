@@ -128,6 +128,11 @@ for (const jiffyTag of jiffyModes) {
     !/FILE NOT FOUND|DEVICE NOT PRESENT/i.test(listD64) &&
     (/GEOS/i.test(listD64) || /47454f53/i.test(diagD64?.session?.dir18s1Hex ?? ""));
   const d64ShaOk = diagD64?.session?.sha1 === d64Sha1 && diagD64?.session?.size === d64Bytes.byteLength;
+  const d64ViceAttachOk =
+    diagD64?.viceDiskExports === true &&
+    typeof diagD64?.viceAttachedImage === "string" &&
+    diagD64.viceAttachedImage.length > 0 &&
+    !/WORK DISK/i.test(diagD64.viceAttachedImage);
 
   await typeBasic(page, 'LOAD"GEOS",8,1', { afterMs: 35_000 });
   await page.waitForTimeout(3000);
@@ -170,7 +175,14 @@ for (const jiffyTag of jiffyModes) {
 
   report.rows.push({
     jiffy: jiffyTag,
-    d64: { pass: d64ShaOk && d64DirOk && geosBootOk, d64ShaOk, d64DirOk, geosBootOk, diag: diagD64 },
+    d64: {
+      pass: d64ShaOk && d64DirOk && geosBootOk && d64ViceAttachOk,
+      d64ShaOk,
+      d64DirOk,
+      d64ViceAttachOk,
+      geosBootOk,
+      diag: diagD64,
+    },
     g64: g64Row,
   });
   await browser.close();

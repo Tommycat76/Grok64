@@ -41,7 +41,7 @@ try {
   core = await assertGrok64WasmCore(page, { timeoutMs: 120000 });
   await page.waitForTimeout(3000);
   const text = await page.evaluate(() => window.__g64?.screenText?.() || "");
-  const pass = Boolean(core?.attach && core?.c64read);
+  const pass = Boolean(core?.attach && core?.c64read && core?.diskAttach);
   const report = { pass, core, screenTextLen: text.length, screenPrefix: text.slice(0, 60) };
   writeFileSync(join(outDir, "results.json"), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report));
