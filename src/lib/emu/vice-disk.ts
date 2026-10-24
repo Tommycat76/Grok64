@@ -31,7 +31,7 @@ type DiskModule = {
   _grok64_disk_attach_deferred?: (unit: number, drive: number, path: string) => number;
   _grok64_sd2iec_poll?: () => void;
   _grok64_disk_detach?: (unit: number, drive: number) => void;
-  _grok64_disk_get_name?: (unit: number, drive: number) => string;
+  _grok64_disk_get_name?: (unit: number, drive: number) => number;
   _grok64_retro_save_directory?: () => number;
   _grok64_disk_last_attach_rc?: () => number;
   UTF8ToString?: (ptr: number) => string;
@@ -67,8 +67,8 @@ export function recordViceLastAttach(unit: IecUnit, record: ViceDiskAttachRecord
 export function grok64DiskExportsReady(emu: ViceDiskEmu | null): boolean {
   const mod = diskMod(emu);
   if (!mod) return false;
-  bindGrok64DiskExports(mod);
-  return typeof mod._grok64_disk_attach === "function" && typeof mod._grok64_disk_get_name === "function";
+  if (!mod._grok64_disk_attach) bindGrok64DiskExports(mod);
+  return typeof mod._grok64_disk_attach === "function";
 }
 
 let bindingDiskExports = false;
@@ -102,12 +102,11 @@ export function bindGrok64DiskExports(mod: DiskModule): void {
         drive: number,
       ) => void;
     }
-    if (!mod._grok64_disk_get_name) {
-      mod._grok64_disk_get_name = wrap("grok64_disk_get_name", "string", ["number", "number"]) as (
-        unit: number,
-        drive: number,
-      ) => string;
-    }
+    // Always refresh: stale "string" cwrap from an older bundle causes attach/get_name recursion.
+    mod._grok64_disk_get_name = wrap("grok64_disk_get_name", "number", ["number", "number"]) as (
+      unit: number,
+      drive: number,
+    ) => number;
     if (!mod._grok64_retro_save_directory) {
       mod._grok64_retro_save_directory = wrap("grok64_retro_save_directory", "number", []) as () => number;
     }
@@ -121,16 +120,28 @@ export function bindGrok64DiskExports(mod: DiskModule): void {
   }
 }
 
-/** VICE's view of the image path on IEC unit N (file_system_get_disk_name). */
-export function viceAttachedImage(emu: ViceDiskEmu | null, unit: IecUnit = 8, drive = 0): string | null {
-  if (!grok64DiskExportsReady(emu)) return null;
-  const mod = diskMod(emu)!;
+function diskNameFromModule(
+  mod: DiskModule & { UTF8ToString?: (ptr: number) => string },
+  unit: number,
+  drive: number,
+): string | null {
+  if (!mod._grok64_disk_get_name) return null;
   try {
-    const name = mod._grok64_disk_get_name?.(unit, drive) ?? "";
-    return name.trim() ? name : null;
+    const ptr = mod._grok64_disk_get_name(unit, drive);
+    if (!ptr) return null;
+    const raw = mod.UTF8ToString ? mod.UTF8ToString(ptr) : "";
+    const name = raw.trim();
+    return name || null;
   } catch {
     return null;
   }
+}
+
+/** VICE's view of the image path on IEC unit N (file_system_get_disk_name). */
+export function viceAttachedImage(emu: ViceDiskEmu | null, unit: IecUnit = 8, drive = 0): string | null {
+  const mod = diskMod(emu) as DiskModule & { UTF8ToString?: (ptr: number) => string };
+  if (!mod?._grok64_disk_get_name) return null;
+  return diskNameFromModule(mod, unit, drive);
 }
 
 function pathExistsOnFs(emu: ViceDiskEmu | null, path: string): boolean {
@@ -145,13 +156,18 @@ function pathExistsOnFs(emu: ViceDiskEmu | null, path: string): boolean {
 }
 
 export function viceRetroSaveDirectory(emu: ViceDiskEmu | null): string | null {
-  if (!grok64DiskExportsReady(emu)) return null;
-  const mod = diskMod(emu)!;
+  const mod = diskMod(emu) as DiskModule & { UTF8ToString?: (ptr: number) => string; cwrap?: (...a: unknown[]) => unknown };
+  if (!mod) return null;
+  if (!mod._grok64_retro_save_directory && mod.cwrap) bindGrok64DiskExports(mod);
   if (!mod._grok64_retro_save_directory) return null;
-  const ptr = mod._grok64_retro_save_directory();
-  const raw = mod.UTF8ToString && ptr ? mod.UTF8ToString(ptr) : "";
-  const dir = raw.trim().replace(/\/$/, "");
-  return dir || null;
+  try {
+    const ptr = mod._grok64_retro_save_directory();
+    const raw = mod.UTF8ToString && ptr ? mod.UTF8ToString(ptr) : "";
+    const dir = raw.trim().replace(/\/$/, "");
+    return dir || null;
+  } catch {
+    return null;
+  }
 }
 
 /** Candidate MEMFS paths to try for file_system_attach_disk on `unit`. */
@@ -180,8 +196,11 @@ export function viceDiskAttachCandidates(
   if (isGcrDiskKind(kind)) {
     push(`/${base}`);
     push(base);
-  } else if (!saveDir) {
-    for (const p of WORK_DISK_PATHS) push(p);
+  } else {
+    push(`/${base}`);
+    if (!saveDir) {
+      for (const p of WORK_DISK_PATHS) push(p);
+    }
   }
 
   return out.filter((p) => pathExistsOnFs(emu, p));
@@ -209,30 +228,26 @@ export function viceReattachDisk(
   if (!path?.trim()) return -1;
   if (!grok64DiskExportsReady(emu)) return -99;
   const mod = diskMod(emu)!;
-  const before = viceAttachedImage(emu, unit, drive);
   try {
-    const defer = mod._grok64_disk_attach_deferred;
-    const poll = mod._grok64_sd2iec_poll;
-    let rc = -1;
-    if (defer && poll) {
-      rc = defer(unit, drive, path);
-      for (let i = 0; i < 240 && rc === 0; i++) {
-        poll();
-      }
+    let rc = mod._grok64_disk_attach?.(unit, drive, path) ?? -1;
+    if (rc < 0) {
       const attachRc = mod._grok64_disk_last_attach_rc?.();
-      rc = typeof attachRc === "number" && attachRc >= 0 ? attachRc : -1;
-      if (rc < 0 && viceAttachedImage(emu, unit, drive)) {
-        rc = 0;
-      }
-    } else {
-      rc = mod._grok64_disk_attach?.(unit, drive, path) ?? -1;
+      if (typeof attachRc === "number" && attachRc >= 0) rc = attachRc;
     }
-    const after = viceAttachedImage(emu, unit, drive);
-    lastAttachByUnit.set(unit, { path, rc, before, after, at: Date.now() });
-    glog("vice-disk-reattach", { unit, path, rc, before, after });
+    const after =
+      rc === 0 ? diskNameFromModule(mod as DiskModule & { UTF8ToString?: (p: number) => string }, unit, drive) : null;
+    lastAttachByUnit.set(unit, { path, rc, before: null, after, at: Date.now() });
+    glog("vice-disk-reattach", { unit, path, rc, after, sync: true });
     return rc;
   } catch (e) {
-    glog("vice-disk-reattach-err", { unit, path, err: String(e) });
+    const stack =
+      e instanceof Error && e.stack
+        ? e.stack.split("\n").slice(0, 30).join("\n")
+        : undefined;
+    glog("vice-disk-reattach-err", { unit, path, err: String(e), stack });
+    if (e instanceof RangeError || (e instanceof Error && /call stack/i.test(e.message))) {
+      throw e;
+    }
     return -1;
   }
 }

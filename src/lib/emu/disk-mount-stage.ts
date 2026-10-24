@@ -1,6 +1,11 @@
 import { toast } from "sonner";
 import { glog } from "./debug";
 
+export function mountErrorStack(err: unknown, maxLines = 30): string | undefined {
+  if (!(err instanceof Error) || !err.stack) return undefined;
+  return err.stack.split("\n").slice(0, maxLines).join("\n");
+}
+
 export class MountStageTimeoutError extends Error {
   readonly stage: string;
   constructor(stage: string, timeoutMs: number) {
@@ -27,7 +32,12 @@ export async function runMountStage<T>(
     glog("mount-stage", { stage, phase: "ok" });
     return out;
   } catch (err) {
-    glog("mount-stage", { stage, phase: "fail", err: String(err instanceof Error ? err.message : err) });
+    glog("mount-stage", {
+      stage,
+      phase: "fail",
+      err: String(err instanceof Error ? err.message : err),
+      stack: mountErrorStack(err),
+    });
     throw err;
   } finally {
     if (timer) clearTimeout(timer);
@@ -39,6 +49,11 @@ export function reportMountFailure(stage: string, err: unknown, detail?: Record<
     err instanceof MountStageTimeoutError
       ? err.message
       : `Mount failed at “${stage}”: ${err instanceof Error ? err.message : String(err)}`;
-  glog("mount-fail", { stage, ...detail, err: String(err instanceof Error ? err.message : err) });
+  glog("mount-fail", {
+    stage,
+    ...detail,
+    err: String(err instanceof Error ? err.message : err),
+    stack: mountErrorStack(err),
+  });
   toast.error(msg, { duration: 12_000 });
 }

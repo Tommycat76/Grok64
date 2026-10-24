@@ -890,18 +890,24 @@ export function Grok64App() {
           /* optional */
         }
         const opts = runtimeViceOpts();
+        const st = useEmu.getState();
         const unit = 8;
+        const jiffyLive = lastAppliedJiffy();
+        const jiffyWant = st.jiffyDos;
         return {
           bootFile: bootFileOf(emuRef.current),
           emuFileName: emuRef.current?.fileName ?? null,
           playMode: playModeRef.current,
           cartLive: cartLiveRef.current,
           inGameplay: inGameplayRef.current,
-          booting: useEmu.getState().booting,
+          booting: st.booting,
           workDiskVar: lastAppliedWorkDisk(),
           viceWorkDiskOpt: opts.vice_work_disk ?? null,
           drive8Type: opts.vice_drive8_type ?? null,
           jiffyOpt: opts.vice_jiffydos ?? null,
+          jiffyWant,
+          jiffyLive,
+          jiffyStale: jiffyWant !== jiffyLive,
           session: session ? await diskAttachFingerprint(session.bytes, session.name) : null,
           viceWork: { bytes: viceSize, sha1: viceSha1 },
           viceAttachedImage: viceAttachedImage(emuRef.current, unit),

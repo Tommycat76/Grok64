@@ -2340,7 +2340,6 @@ export async function viceReattachDiskOnEmuThread(
     _grok64_disk_attach?: (u: number, d: number, p: string) => number;
     _grok64_disk_last_attach_rc?: () => number;
   };
-  const before = viceAttachedImage(emu, unit, drive);
   const defer = mod._grok64_disk_attach_deferred;
   let rc = -1;
   if (defer) {
@@ -2361,12 +2360,11 @@ export async function viceReattachDiskOnEmuThread(
       }
     }
   } else {
-    rc = mod._grok64_disk_attach?.(unit, drive, path) ?? -1;
+    rc = viceReattachDisk(emu, unit, path, drive);
   }
-  const after = viceAttachedImage(emu, unit, drive);
-  if (rc < 0 && after) rc = 0;
-  recordViceLastAttach(unit, { path, rc, before, after, at: Date.now() });
-  glog("vice-disk-reattach", { unit, path, rc, before, after, emuThread: Boolean(defer) });
+  const after = rc === 0 ? viceAttachedImage(emu, unit, drive) : null;
+  recordViceLastAttach(unit, { path, rc, before: null, after, at: Date.now() });
+  glog("vice-disk-reattach", { unit, path, rc, after, emuThread: Boolean(defer) });
   return rc;
 }
 
@@ -2383,7 +2381,8 @@ export async function viceReattachSessionDisk(emu: EjsInstance | null, unit: Iec
   if (!candidates.length) return -1;
   let lastRc = -1;
   for (const candidate of candidates) {
-    lastRc = await viceReattachDiskOnEmuThread(emu, unit, candidate);
+    // Synchronous poll loop — deferred attach is flushed inside grok64_sd2iec_poll().
+    lastRc = viceReattachDisk(emu, unit, candidate);
     if (lastRc === 0) return 0;
     await new Promise((r) => setTimeout(r, 80));
   }

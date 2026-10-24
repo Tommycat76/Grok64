@@ -109,11 +109,15 @@ try {
   await importOnce(page);
   const first = await runFromLibrary(page, "hot-swap-run");
   const diag = await page.evaluate(async () => window.__g64?.attachDiskDiag?.());
+  const attachOk =
+    diag?.viceLastReattach?.rc === 0 ||
+    (typeof diag?.viceAttachedImage === "string" && diag.viceAttachedImage.length > 0);
   report.steps.push({
     id: "hot-swap-mount",
-    pass: first.cleared && !first.overflow,
+    pass: first.cleared && !first.overflow && attachOk,
     diskExportsPresent: diag?.diskExportsPresent,
     viceAttachedImage: diag?.viceAttachedImage,
+    viceLastReattach: diag?.viceLastReattach,
     ...first,
   });
 

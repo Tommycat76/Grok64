@@ -35,7 +35,10 @@ export async function presentFloppyMountReady(
     await runMountStage("resync-session-disk", async () => {
       resyncSessionDiskToVice(emu, live.unit);
     });
-    await runMountStage("vice-reattach-session", () => viceReattachSessionDisk(emu, live.unit), 60_000);
+    const rc = await runMountStage("vice-reattach-session", () => viceReattachSessionDisk(emu, live.unit), 60_000);
+    if (rc !== 0) {
+      throw new Error(`VICE disk reattach failed (rc=${rc})`);
+    }
     await runMountStage("flush-after-reattach", () => flushEmuFs(emu, isIosPhone() ? 2000 : 400));
     bumpCrtPaint(emu);
     return;
@@ -57,6 +60,9 @@ export async function presentFloppyMountReady(
   await runMountStage("resync-session-disk", async () => {
     resyncSessionDiskToVice(emu, live.unit);
   });
-  await runMountStage("vice-reattach-session", () => viceReattachSessionDisk(emu, live.unit), 60_000);
+  const rcCold = await runMountStage("vice-reattach-session", () => viceReattachSessionDisk(emu, live.unit), 60_000);
+  if (rcCold !== 0) {
+    throw new Error(`VICE disk reattach failed (rc=${rcCold})`);
+  }
   bumpCrtPaint(emu);
 }
