@@ -63,22 +63,24 @@ async function waitBasicReady(page, maxMs = 90_000) {
 }
 
 async function playCart(page, displayName) {
-  await page.evaluate(async (name) => {
-    if (window.__g64?.playLibraryByName) {
-      await window.__g64.playLibraryByName(name);
-      return;
+  const kicked = await page.evaluate((name) => {
+    if (typeof window.__g64?.playLibraryByName === "function") {
+      void window.__g64.playLibraryByName(name);
+      return "api";
     }
-    await window.__g64?.openSoftware?.();
-    await new Promise((r) => setTimeout(r, 500));
-    document.querySelectorAll("button").forEach((b) => {
-      if (/On this device/i.test(b.textContent || "")) b.click();
-    });
-    await new Promise((r) => setTimeout(r, 500));
-    const card = [...document.querySelectorAll(".g64-card")].find((el) =>
-      el.textContent?.includes(name.slice(0, 20)),
-    );
-    card?.querySelector('button[aria-label^="Play"]')?.click();
+    return "ui";
   }, displayName);
+  if (kicked === "ui") {
+    await page.locator('button[aria-label="Software"]').click({ timeout: 15_000 });
+    await page.waitForTimeout(400);
+    await page.getByRole("button", { name: /On this device/i }).click();
+    await page.waitForTimeout(400);
+    const esc = displayName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    await page
+      .getByRole("button", { name: new RegExp(`^Play ${esc}$`) })
+      .first()
+      .click({ timeout: 30_000 });
+  }
   await waitRunning(page, 180_000);
   await page.waitForTimeout(4000);
 }
