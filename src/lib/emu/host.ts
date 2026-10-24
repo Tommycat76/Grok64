@@ -68,6 +68,7 @@ import {
   resolveViceDiskAttachPath,
   viceAttachedImage,
   viceDiskAttachCandidates,
+  probeViceAttachPaths,
   viceReattachDisk,
   viceRetroSaveDirectory,
   recordViceLastAttach,
@@ -1624,31 +1625,39 @@ export function applyRuntimeOptions(emu: EjsInstance | null, opts: Record<string
 
 /** Flush MEMFS/IDBFS so CriOS sees the disk bytes before Autostart types LOAD. */
 export async function flushEmuFs(emu: EjsInstance | null, timeoutMs = 1500): Promise<boolean> {
-  const FS = fsOf(emu);
-  if (!FS) return false;
-  const sync = FS.syncfs;
-  if (!sync) {
+  const surfaces = emuFsSurfaces(emu);
+  if (!surfaces.length) return false;
+  let anySync = false;
+  let allOk = true;
+  for (const FS of surfaces) {
+    const sync = FS.syncfs;
+    if (!sync) continue;
+    anySync = true;
+    const ok = await new Promise<boolean>((resolve) => {
+      let settled = false;
+      const done = (v: boolean) => {
+        if (settled) return;
+        settled = true;
+        resolve(v);
+      };
+      const timer = setTimeout(() => done(false), timeoutMs);
+      try {
+        sync(false, (err?: unknown) => {
+          clearTimeout(timer);
+          done(!err);
+        });
+      } catch {
+        clearTimeout(timer);
+        done(false);
+      }
+    });
+    if (!ok) allOk = false;
+  }
+  if (!anySync) {
     if (isIosPhone()) await new Promise((r) => setTimeout(r, 80));
     return true;
   }
-  return await new Promise((resolve) => {
-    let settled = false;
-    const done = (ok: boolean) => {
-      if (settled) return;
-      settled = true;
-      resolve(ok);
-    };
-    const timer = setTimeout(() => done(false), timeoutMs);
-    try {
-      sync(false, (err?: unknown) => {
-        clearTimeout(timer);
-        done(!err);
-      });
-    } catch {
-      clearTimeout(timer);
-      done(false);
-    }
-  });
+  return allOk;
 }
 
 export function hardReset(emu: EjsInstance | null) {
@@ -1944,8 +1953,36 @@ export function sd2iecFreeze(
   return { ok: false, kind: "empty", index: 0, count: disks.length };
 }
 
+/** Every Emscripten FS surface (Module + GameManager may differ on CDN EmulatorJS). */
+export function emuFsSurfaces(emu: EjsInstance | null): EmscriptenFS[] {
+  const out: EmscriptenFS[] = [];
+  const mod = emu?.Module?.FS;
+  const gm = emu?.gameManager?.FS;
+  if (mod?.writeFile) out.push(mod);
+  if (gm?.writeFile && gm !== mod) out.push(gm);
+  return out;
+}
+
+/** Prefer Module.FS — WASM `stat()` / grok64_disk_attach only see this tree. */
 export function fsOf(emu: EjsInstance | null): EmscriptenFS | null {
-  return emu?.gameManager?.FS ?? emu?.Module?.FS ?? null;
+  return emu?.Module?.FS ?? emu?.gameManager?.FS ?? null;
+}
+
+/** Write the same bytes to every FS surface so WASM and JS agree on MEMFS paths. */
+export function writeFsFile(emu: EjsInstance | null, path: string, data: Uint8Array): boolean {
+  const norm = path.startsWith("/") ? path : `/${path}`;
+  const dir = norm.slice(0, norm.lastIndexOf("/"));
+  let wrote = false;
+  for (const FS of emuFsSurfaces(emu)) {
+    try {
+      if (dir.length > 1) mkdirFs(FS, dir);
+      FS.writeFile!(norm, data);
+      wrote = true;
+    } catch {
+      /* try other surface */
+    }
+  }
+  return wrote;
 }
 
 export function mkdirFs(FS: EmscriptenFS, path: string) {
@@ -2237,24 +2274,21 @@ export async function bumpViceWorkDiskReload(emu: EjsInstance | null, unit: IecU
 }
 
 export function syncViceWorkD64(emu: EjsInstance | null, data: Uint8Array) {
-  const FS = fsOf(emu);
-  if (!FS?.writeFile || !isAcceptedD64ByteLength(data.byteLength)) return;
+  if (!isAcceptedD64ByteLength(data.byteLength)) return;
   const saveDir = retroSaveDirFromModule(emu) ?? viceRetroSaveDirectory(emu);
   const targets = [
-    ...(saveDir ? [`${saveDir}/vice_work.d64`] : []),
     "/data/saves/vice_work.d64",
     "/home/web_user/retroarch/userdata/saves/vice_work.d64",
     "/vice_work/vice_work.d64",
     "/home/web_user/retroarch/userdata/saves/vice_work/vice_work.d64",
+    ...(saveDir ? [`${saveDir}/vice_work.d64`] : []),
   ];
+  const seen = new Set<string>();
   for (const path of targets) {
-    try {
-      const dir = path.slice(0, path.lastIndexOf("/"));
-      mkdirFs(FS, dir);
-      FS.writeFile(path, data);
-    } catch {
-      /* optional */
-    }
+    const norm = path.startsWith("/") ? path : `/${path}`;
+    if (seen.has(norm)) continue;
+    seen.add(norm);
+    writeFsFile(emu, norm, data);
   }
 }
 
@@ -2506,9 +2540,25 @@ export async function viceReattachSessionDisk(emu: EjsInstance | null, unit: Iec
   const slot = sessionDiskOnUnit(unit);
   const name = slot?.name ?? bootFileOf(emu) ?? unitMounts.get(unit);
   if (!name) return -1;
+  if (slot?.bytes) {
+    resyncSessionDiskToVice(emu, unit);
+    syncViceWorkD64(emu, slot.bytes);
+  }
+  await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
   const path = resolveViceDiskAttachPath(emu, unit, name);
-  await flushEmuFs(emu, 400);
-  const candidates = viceDiskAttachCandidates(emu, unit, name);
+  let candidates = viceDiskAttachCandidates(emu, unit, name);
+  if (!candidates.length) {
+    for (const fallback of [
+      "/data/saves/vice_work.d64",
+      viceRetroSaveDirectory(emu) ? `${viceRetroSaveDirectory(emu)}/vice_work.d64` : null,
+      path,
+    ]) {
+      if (fallback && probeViceAttachPaths(emu, unit, name).some((p) => p.path === fallback && (p.wasmFsStat ?? 0) > 0)) {
+        candidates = [fallback];
+        break;
+      }
+    }
+  }
   if (!candidates.length && path) candidates.push(path);
   if (!candidates.length) return -1;
   let lastRc = -1;
@@ -2948,8 +2998,7 @@ export function writeCompanionMedia(
 }
 
 export function writeBootFile(emu: EjsInstance | null, data: Uint8Array, preferred?: string | null): boolean {
-  const FS = fsOf(emu);
-  if (!FS?.writeFile) return false;
+  if (!emuFsSurfaces(emu).length) return false;
   const name = preferred || bootFileOf(emu);
   const candidates: string[] = [];
   if (name) {
@@ -2960,12 +3009,7 @@ export function writeBootFile(emu: EjsInstance | null, data: Uint8Array, preferr
   for (const p of candidates) {
     if (tried.has(p)) continue;
     tried.add(p);
-    try {
-      FS.writeFile(p, data);
-      return true;
-    } catch {
-      /* try next path */
-    }
+    if (writeFsFile(emu, p.startsWith("/") ? p : `/${p}`, data)) return true;
   }
   return false;
 }

@@ -379,6 +379,7 @@ export function Grok64App() {
   const persistTimer = useRef(null);
   const playBufferRef = useRef(async () => {});
   const playLocalRef = useRef(async (_item) => {});
+  const insertDiskRef = useRef(async (_item: { id: string; name: string }) => {});
   const bootHoldRef = useRef(false);
   const bootKickRef = useRef(false);
   const recoverOnceRef = useRef(false);
@@ -861,6 +862,12 @@ export function Grok64App() {
         const item = items.find((i) => i.name === name);
         if (!item) throw new Error(`On this device has no file named “${name}”.`);
         await playLocalRef.current(item);
+      },
+      insertLibraryByName: async (name) => {
+        const items = await listLibrary();
+        const item = items.find((i) => i.name === name);
+        if (!item) throw new Error(`On this device has no file named “${name}”.`);
+        await insertDiskRef.current(item);
       },
       importLibraryBytes: async (name, bytes) => {
         const u8 =
@@ -3586,8 +3593,10 @@ export function Grok64App() {
     await flushEmuFs(emuRef.current, 600);
     await touchPlayed(item.id);
     const bam = d64DiskName(media);
-    const label =
-      bam && /^[\x20-\x7e]+$/.test(bam) && !/^work\s*disk/i.test(bam)
+    const genericBam = !bam || /^work\s*disk/i.test(bam) || /^system$/i.test(bam.trim());
+    const label = genericBam
+      ? item.name.replace(/\.[a-z0-9]{2,4}$/i, "")
+      : bam && /^[\x20-\x7e]+$/.test(bam)
         ? bam
         : item.name.replace(/\.[a-z0-9]{2,4}$/i, "");
     setSessionDisk(item.name, media, unit);
@@ -3597,6 +3606,7 @@ export function Grok64App() {
     finishFloppyMountReady();
     toast.success(`Inserted ${label} on drive ${unit}`);
   }, [finishFloppyMountReady, logFloppyAttach, s]);
+  insertDiskRef.current = insertDisk;
   const toggleWarp = useCallback(() => {
     const next = !useEmu.getState().warped;
     useEmu.getState().setWarped(next);

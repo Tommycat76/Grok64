@@ -25,6 +25,11 @@ function fsOf(emu: ViceDiskEmu | null): EmuFs | null {
   return e?.Module?.FS ?? e?.gameManager?.FS ?? null;
 }
 
+function pathVisibleToWasm(emu: ViceDiskEmu | null, path: string): boolean {
+  const n = viceWasmFsStatBytes(emu, path);
+  return n != null && n > 0;
+}
+
 function diskMod(emu: ViceDiskEmu | null): Grok64ModuleBag | null {
   const bags = emuWasmModuleBags(emu);
   const e = emu as { Module?: Grok64ModuleBag & { UTF8ToString?: (ptr: number) => string } } | null;
@@ -206,9 +211,6 @@ export function viceDiskAttachCandidates(
   };
 
   const saveDir = viceRetroSaveDirectory(emu);
-  if (saveDir) {
-    push(`${saveDir}/vice_work.d64`);
-  }
 
   if (isGcrDiskKind(kind)) {
     push(`/${base}`);
@@ -221,7 +223,11 @@ export function viceDiskAttachCandidates(
     push(base);
   }
 
-  return out.filter((p) => pathExistsOnFs(emu, p));
+  return out.filter((p) => {
+    if (pathVisibleToWasm(emu, p)) return true;
+    if (!pathExistsOnFs(emu, p)) return false;
+    return pathVisibleToWasm(emu, p);
+  });
 }
 
 /** Preferred MEMFS path for the current session floppy on `unit`. */
