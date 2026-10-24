@@ -3379,6 +3379,11 @@ export function Grok64App() {
       toast.error("Power on first, then insert the next disk.");
       return;
     }
+    playModeRef.current = "disk";
+    cartLiveRef.current = false;
+    setCartLive(false);
+    useEmu.getState().setFastLoadCart(null);
+    setC64KeyboardDefer(true);
     const unit = item.iecUnit ?? useEmu.getState().iecUnit;
     const iec = useEmu.getState().iecDrive;
     const boot = bootFileName(file.name, kind);
@@ -3412,6 +3417,7 @@ export function Grok64App() {
       fileName: file.name,
       data: media,
     });
+    applyIecUnitFloppy(emuRef.current, iec, unit, kind);
     await flushEmuFs(emuRef.current, 600);
     await touchPlayed(item.id);
     const bam = d64DiskName(media);
