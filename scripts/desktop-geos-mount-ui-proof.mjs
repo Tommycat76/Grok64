@@ -115,10 +115,19 @@ try {
     attached.length > 0 &&
     !/\/blank\.d64$/i.test(attached) &&
     !/^work\s*disk/i.test(attached);
+  const bindOk =
+    diag?.workDiskRefreshExport === true &&
+    diag?.grok64WasmBindRev === "diskapi-v2-direct" &&
+    diag?.diskAttachExport === true;
   report.steps.push({
     id: "hot-swap-mount",
-    pass: first.cleared && !first.overflow && attachOk,
+    pass: first.cleared && !first.overflow && attachOk && bindOk,
     diskExportsPresent: diag?.diskExportsPresent,
+    workDiskRefreshExport: diag?.workDiskRefreshExport,
+    diskAttachExport: diag?.diskAttachExport,
+    wasmExportNames: diag?.wasmExportNames,
+    grok64WasmBindRev: diag?.grok64WasmBindRev,
+    appBuildId: diag?.appBuildId,
     viceAttachedImage: diag?.viceAttachedImage,
     viceLastReattach: diag?.viceLastReattach,
     ...first,

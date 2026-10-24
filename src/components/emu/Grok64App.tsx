@@ -104,7 +104,14 @@ import {
   diskAttachFingerprint,
   validateFloppyLibraryPayload,
 } from "@/lib/emu/disk-attach-diag";
-import { grok64DiskApi, grok64WasmApi, grok64WorkDiskRefreshExportReady } from "@/lib/emu/grok64-api";
+import {
+  GROK64_WASM_BIND_REV,
+  grok64DiskApi,
+  grok64DiskAttachExportReady,
+  grok64WasmApi,
+  grok64WorkDiskRefreshExportReady,
+} from "@/lib/emu/grok64-api";
+import { grok64WasmExportDiag } from "@/lib/emu/grok64-wasm-direct";
 import {
   bindGrok64DiskExports,
   grok64DiskExportsReady,
@@ -928,8 +935,11 @@ export function Grok64App() {
           diskAttachDiagExport: (() => {
             const mod = emuRef.current?.Module;
             if (mod) bindGrok64DiskExports(mod as Parameters<typeof bindGrok64DiskExports>[0]);
-            return typeof grok64DiskApi(mod)?.diskLastAttachDiag === "function";
+            return grok64WasmExportDiag(mod).callable.grok64_disk_last_attach_diag === true;
           })(),
+          diskAttachExport: grok64DiskAttachExportReady(emuRef.current?.Module),
+          wasmExportNames: grok64WasmExportDiag(emuRef.current?.Module).wasmExportNames,
+          wasmExportCallable: grok64WasmExportDiag(emuRef.current?.Module).callable,
           viceLastAttachDiag: viceDiskLastAttachDiag(emuRef.current),
           attachPathProbe: probeViceAttachPaths(
             emuRef.current,
@@ -939,6 +949,8 @@ export function Grok64App() {
           coreBuildId: grok64CoreStatus(emuRef.current).coreBuildId,
           coreUrlBuildId: grok64CoreStatus(emuRef.current).coreUrlBuildId,
           grok64Core: grok64CoreStatus(emuRef.current),
+          appBuildId: readBuildId(),
+          grok64WasmBindRev: GROK64_WASM_BIND_REV,
         };
       },
       kbdDrain: () => grok64KeyboardDrain(),

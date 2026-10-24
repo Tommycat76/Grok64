@@ -10,12 +10,8 @@ import {
   grok64WorkDiskRefreshExportReady,
   type Grok64ModuleBag,
 } from "./grok64-api";
-import {
-  grok64PristineCwrap,
-  type Grok64WasmModule,
-  isGrok64DiskExportsBound,
-  markGrok64DiskExportsBound,
-} from "./grok64-wasm-bind";
+import { bindGrok64DiskApiDirect, grok64DiskAttachCallable } from "./grok64-wasm-direct";
+import { isGrok64DiskExportsBound, markGrok64DiskExportsBound } from "./grok64-wasm-bind";
 
 type EmuFs = { stat?: (p: string) => unknown };
 
@@ -65,48 +61,14 @@ export function recordViceLastAttach(unit: IecUnit, record: ViceDiskAttachRecord
 
 export function bindGrok64DiskExports(mod: Grok64ModuleBag): void {
   if (isGrok64DiskExportsBound(mod)) return;
-  const wrap = grok64PristineCwrap(mod as Grok64WasmModule);
-  if (!wrap) return;
-  try {
-    if (!mod.grok64DiskApi) {
-      mod.grok64DiskApi = {
-        diskAttach: wrap("grok64_disk_attach", "number", ["number", "number", "string"]) as (
-          unit: number,
-          drive: number,
-          path: string,
-        ) => number,
-        diskAttachDeferred: wrap("grok64_disk_attach_deferred", "number", [
-          "number",
-          "number",
-          "string",
-        ]) as (unit: number, drive: number, path: string) => number,
-        sd2iecPoll: wrap("grok64_sd2iec_poll", null, []) as () => void,
-        diskDetach: wrap("grok64_disk_detach", null, ["number", "number"]) as (
-          unit: number,
-          drive: number,
-        ) => void,
-        diskGetName: wrap("grok64_disk_get_name", "number", ["number", "number"]) as (
-          unit: number,
-          drive: number,
-        ) => number,
-        retroSaveDirectory: wrap("grok64_retro_save_directory", "number", []) as () => number,
-        diskLastAttachRc: wrap("grok64_disk_last_attach_rc", "number", []) as () => number,
-        workDiskRefresh: wrap("grok64_work_disk_refresh", "number", ["number"]) as (unit: number) => number,
-        diskLastAttachDiag: wrap("grok64_disk_last_attach_diag", "number", []) as () => number,
-        fsStatBytes: wrap("grok64_fs_stat_bytes", "number", ["string"]) as (path: string) => number,
-      };
-    }
-    markGrok64DiskExportsBound(mod);
-  } catch {
-    /* stock core */
-  }
+  if (bindGrok64DiskApiDirect(mod)) markGrok64DiskExportsBound(mod);
 }
 
 export function grok64DiskExportsReady(emu: ViceDiskEmu | null): boolean {
   const mod = diskMod(emu);
   if (!mod) return false;
-  if (!grok64DiskApi(mod)) bindGrok64DiskExports(mod);
-  return typeof grok64DiskApi(mod)?.diskAttach === "function";
+  if (!grok64DiskAttachCallable(mod)) bindGrok64DiskExports(mod);
+  return grok64DiskAttachCallable(mod);
 }
 
 export { grok64WorkDiskRefreshExportReady };
@@ -163,7 +125,7 @@ function pathByteLength(emu: ViceDiskEmu | null, path: string): number | null {
 export function viceDiskLastAttachDiag(emu: ViceDiskEmu | null): string | null {
   const mod = diskMod(emu);
   if (!mod) return null;
-  if (!grok64DiskApi(mod)?.diskLastAttachDiag && mod.cwrap) bindGrok64DiskExports(mod);
+  if (!grok64DiskApi(mod)?.diskLastAttachDiag) bindGrok64DiskExports(mod);
   const diag = grok64DiskApi(mod)?.diskLastAttachDiag;
   if (!diag) return null;
   try {
@@ -180,7 +142,7 @@ export function viceDiskLastAttachDiag(emu: ViceDiskEmu | null): string | null {
 export function viceWasmFsStatBytes(emu: ViceDiskEmu | null, path: string): number | null {
   const mod = diskMod(emu);
   if (!mod || !path?.trim()) return null;
-  if (!grok64DiskApi(mod)?.fsStatBytes && mod.cwrap) bindGrok64DiskExports(mod);
+  if (!grok64DiskApi(mod)?.fsStatBytes) bindGrok64DiskExports(mod);
   const stat = grok64DiskApi(mod)?.fsStatBytes;
   if (!stat) return null;
   try {
@@ -193,7 +155,7 @@ export function viceWasmFsStatBytes(emu: ViceDiskEmu | null, path: string): numb
 export function viceRetroSaveDirectory(emu: ViceDiskEmu | null): string | null {
   const mod = diskMod(emu);
   if (!mod) return null;
-  if (!grok64DiskApi(mod)?.retroSaveDirectory && mod.cwrap) bindGrok64DiskExports(mod);
+  if (!grok64DiskApi(mod)?.retroSaveDirectory) bindGrok64DiskExports(mod);
   const dirFn = grok64DiskApi(mod)?.retroSaveDirectory;
   if (!dirFn) return null;
   try {

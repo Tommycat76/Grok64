@@ -1,7 +1,7 @@
 import { openExpansionDb, STORES, txDone } from "./expansion-db";
 import { c64RamView } from "./c64-memory";
 import { grok64WasmApi, type Grok64ModuleBag } from "./grok64-api";
-import { grok64PristineCwrap, type Grok64WasmModule } from "./grok64-wasm-bind";
+import { resolveWasmExport } from "./grok64-wasm-direct";
 import { listD64Directory, readD64Prg } from "./d64";
 import type { IecUnit } from "./types";
 
@@ -1406,11 +1406,7 @@ export function iecOpenDollarChannel(emu: EjsLike | null, unit: IecDeviceNumber 
   const mod = emu.Module as Grok64ModuleBag;
   const bound = grok64WasmApi(mod)?.sd2iecAttach;
   if (bound) bound(unit);
-  else {
-    const wrap = grok64PristineCwrap(mod as Grok64WasmModule);
-    const attach = wrap?.("grok64_sd2iec_attach", null, ["number"]) as ((u: number) => void) | undefined;
-    attach?.(unit);
-  }
+  else resolveWasmExport(mod, "grok64_sd2iec_attach")?.(unit);
   wasmOpenFileOnChannel(unit, 0, "$");
   return wasmCh(unit, 0).data.length;
 }

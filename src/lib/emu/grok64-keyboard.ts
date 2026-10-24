@@ -195,6 +195,13 @@ function resolveHostStroke(
 ): { code: string; key: string; mods: KbdMods; swallowUp?: boolean; hostShiftChord?: boolean } {
   let shift = !!mods.shift;
 
+  if (shift && code === "Digit4") {
+    return { code: "Digit4", key: "$", mods: { ...mods, shift: false }, swallowUp: true };
+  }
+  if (shift && (code === "Quote" || code === "Apostrophe" || key === "'")) {
+    return { code: "Digit2", key: '"', mods: { ...mods, shift: false }, swallowUp: true };
+  }
+
   if (key === '"') {
     return { code: "Digit2", key: '"', mods: { ...mods, shift: false }, swallowUp: true };
   }

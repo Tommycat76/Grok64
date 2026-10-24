@@ -4,7 +4,14 @@
  * ccall → cwrap → ccall infinite recursion (Tom c8674de / blob line 11 ~221041).
  */
 
+import {
+  grok64DiskAttachCallable,
+  grok64WorkDiskRefreshCallable,
+} from "./grok64-wasm-direct";
 import type { Grok64WasmModule } from "./grok64-wasm-bind";
+
+/** Bumped when WASM bind strategy changes; About / QA can detect stale app JS. */
+export const GROK64_WASM_BIND_REV = "diskapi-v2-direct";
 
 export type Grok64DiskApi = {
   diskAttach: (unit: number, drive: number, path: string) => number;
@@ -48,7 +55,12 @@ export function grok64WasmApi(mod: Grok64ModuleBag | null | undefined): Grok64Wa
   return mod?.grok64WasmApi ?? null;
 }
 
-/** True when the custom core exports grok64_work_disk_refresh (bound on grok64DiskApi). */
+/** True when the WASM module exposes grok64_work_disk_refresh (callable, not just JS wrapper). */
 export function grok64WorkDiskRefreshExportReady(mod: Grok64ModuleBag | null | undefined): boolean {
-  return typeof mod?.grok64DiskApi?.workDiskRefresh === "function";
+  return grok64WorkDiskRefreshCallable(mod);
+}
+
+/** True when grok64_disk_attach resolves to a WASM function. */
+export function grok64DiskAttachExportReady(mod: Grok64ModuleBag | null | undefined): boolean {
+  return grok64DiskAttachCallable(mod);
 }
