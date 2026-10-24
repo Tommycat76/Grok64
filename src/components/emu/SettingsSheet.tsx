@@ -53,17 +53,19 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
   const c64Family = (mac?.family ?? "c64") === "c64";
 
   useEffect(() => {
-    if (!s.settingsOpen) return;
+    if (!s.settingsOpen && !s.aboutOpen && !s.mapperOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (e.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
-      s.setSettingsOpen(false);
+      if (s.aboutOpen) s.setAboutOpen(false);
+      else if (s.settingsOpen) s.setSettingsOpen(false);
+      else if (s.mapperOpen) s.setMapperOpen(false);
       e.preventDefault();
       e.stopPropagation();
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [s.settingsOpen, s.setSettingsOpen]);
+  }, [s.settingsOpen, s.aboutOpen, s.mapperOpen, s.setAboutOpen, s.setSettingsOpen, s.setMapperOpen]);
 
   return (
     <>

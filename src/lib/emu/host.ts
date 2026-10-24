@@ -41,6 +41,7 @@ import {
   wireGrok64ViceHost,
 } from "./grok64-vice-bridge";
 import { grok64RetroKeyboardAvailable } from "./grok64-keyboard";
+import { runMountStage } from "./disk-mount-stage";
 import { grok64CoreBuildIdForUrl, grok64CoreManifestSummary, GROK64_CORE_BUILD_ID } from "./grok64-core-build";
 import {
   grok64DiskExportsReady,
@@ -2206,9 +2207,10 @@ export async function applyJiffyThenRefreshWorkDisk(
   unit: IecUnit,
   jiffyWant: boolean,
   image?: FloppyImageRef | null,
+  opts?: { hotSwap?: boolean },
 ): Promise<boolean> {
   if (!emu) return false;
-  const landed = await applyJiffyDos(emu, jiffyWant);
+  const landed = await runMountStage("jiffy-apply", () => applyJiffyDos(emu, jiffyWant), 30_000);
   if (jiffyWant && !landed) {
     glog("jiffy-floppy-pair-miss");
   }
@@ -2218,10 +2220,23 @@ export async function applyJiffyThenRefreshWorkDisk(
     const data = image?.data ?? session?.bytes;
     const name = image?.fileName ?? session?.name;
     if (data && name) {
-      await refreshViceGcrDisk(emu, unit, data, name);
+      await runMountStage("gcr-refresh", () => refreshViceGcrDisk(emu, unit, data, name), 60_000);
     }
+  } else if (opts?.hotSwap) {
+    await runMountStage(
+      "hot-swap-work-disk",
+      async () => {
+        const session = sessionDiskOnUnit(unit);
+        const data = image?.data ?? session?.bytes;
+        if (data) syncViceWorkD64(emu, data);
+        resyncSessionDiskToVice(emu, unit);
+        await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
+        await viceReattachSessionDisk(emu, unit);
+      },
+      60_000,
+    );
   } else {
-    await refreshViceWorkDisk(emu, unit);
+    await runMountStage("work-disk-refresh", () => refreshViceWorkDisk(emu, unit), 90_000);
   }
   applyIecUnitFloppy(emu, "1541", unit, diskKind);
   return jiffyWant ? landed : true;

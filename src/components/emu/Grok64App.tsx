@@ -117,6 +117,7 @@ import {
   setC64KeyboardDefer,
 } from "@/lib/emu/deferred-c64-keys";
 import { presentFloppyMountReady } from "@/lib/emu/disk-mount-ready";
+import { reportMountFailure, runMountStage } from "@/lib/emu/disk-mount-stage";
 import { hasCmdRom, hasJiffyPair, prefetchBundledRoms } from "@/lib/emu/roms";
 import {
   addSdFile,
@@ -2959,20 +2960,33 @@ export function Grok64App() {
           const flushed = await flushEmuFs(emuRef.current, isIosPhone() ? 2000 : 800);
           glog("play-mount", { flushed, workDisk: lastAppliedWorkDisk(), ios: isIosPhone(), gcrFloppy });
           const jiffyWantPlay = resolveJiffyWant(stNow.jiffyDos, stNow.fastLoadCart);
-          if (attach && plan.kind === "floppy") {
-            await applyJiffyThenRefreshWorkDisk(emuRef.current, playAttachUnit, jiffyWantPlay, {
-              fileName: filename,
-              data: payloadDisk,
-            });
-          } else {
-            await prepareCore(emuRef.current, {
-              live: plan.live,
-              user: plan.user,
-              jiffyWant: jiffyWantPlay,
-              skipJiffy: true,
-              driveMap: stNow.iecMap,
-            });
-            await applyJiffyDos(emuRef.current, jiffyWantPlay);
+          try {
+            if (attach && plan.kind === "floppy") {
+              await applyJiffyThenRefreshWorkDisk(
+                emuRef.current,
+                playAttachUnit,
+                jiffyWantPlay,
+                { fileName: filename, data: payloadDisk },
+                { hotSwap: true },
+              );
+            } else {
+              await runMountStage("prepare-core", () =>
+                prepareCore(emuRef.current, {
+                  live: plan.live,
+                  user: plan.user,
+                  jiffyWant: jiffyWantPlay,
+                  skipJiffy: true,
+                  driveMap: stNow.iecMap,
+                }),
+              );
+              await runMountStage("jiffy-apply", () => applyJiffyDos(emuRef.current, jiffyWantPlay));
+            }
+          } catch (err) {
+            reportMountFailure("play-hot-swap-prep", err, { filename, title });
+            useEmu.getState().setBooting(false);
+            setC64KeyboardDefer(false);
+            playLockRef.current = false;
+            return;
           }
           if (plan.kind === "floppy" && !work) {
             useEmu.getState().setInsertedDiskName(filename);
@@ -2999,7 +3013,17 @@ export function Grok64App() {
             );
           } else if (plan.kind === "floppy") {
             disarmAutostart(emuRef.current, "disk");
-            await presentFloppyMountReady(emuRef.current, plan.live, { afterDriveRefresh: true });
+            try {
+              await runMountStage("present-floppy-ready", () =>
+                presentFloppyMountReady(emuRef.current, plan.live, { afterDriveRefresh: true }),
+              );
+            } catch (err) {
+              reportMountFailure("present-floppy-ready", err, { filename, title });
+              useEmu.getState().setBooting(false);
+              setC64KeyboardDefer(false);
+              playLockRef.current = false;
+              return;
+            }
             applyIecUnitFloppy(emuRef.current, playIec, playAttachUnit, kindOf(filename));
             if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, keepLiveCrt || floppyKeep ? "play-recycle" : "hot-swap");
             void logFloppyAttach("play-hot-swap", {
@@ -3819,6 +3843,8 @@ export function Grok64App() {
     if (!s.running) return;
     const onHostKey = (e: KeyboardEvent) => {
       if (!useEmu.getState().running) return;
+      const ui = useEmu.getState();
+      if (ui.settingsOpen || ui.aboutOpen || ui.libraryOpen || ui.mapperOpen || ui.snapsOpen) return;
       const freezerFn = /^F[1-8]$/.test(e.code) && (cartLiveRef.current || useEmu.getState().fastLoadCart);
       if (!grok64RetroKeyboardAvailable(emuRef.current)) return;
       const target = e.target;

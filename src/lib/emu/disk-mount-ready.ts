@@ -14,6 +14,7 @@ import { isGcrDiskKind, kindOf } from "./formats";
 import type { IecDrive, IecUnit } from "./types";
 import { isIosPhone } from "./detect";
 import { glog } from "./debug";
+import { runMountStage } from "./disk-mount-stage";
 
 /**
  * After a disk image is on unit 8: true drive, hard reset to bare READY.
@@ -31,9 +32,11 @@ export async function presentFloppyMountReady(
   applyIecUnitFloppy(emu, live.iec, live.unit, diskKind);
   if (opts?.afterDriveRefresh) {
     glog("floppy-mount-ready", { afterDriveRefresh: true, kind: diskKind, unit: live.unit });
-    resyncSessionDiskToVice(emu, live.unit);
-    await viceReattachSessionDisk(emu, live.unit);
-    await flushEmuFs(emu, isIosPhone() ? 2000 : 400);
+    await runMountStage("resync-session-disk", async () => {
+      resyncSessionDiskToVice(emu, live.unit);
+    });
+    await runMountStage("vice-reattach-session", () => viceReattachSessionDisk(emu, live.unit), 60_000);
+    await runMountStage("flush-after-reattach", () => flushEmuFs(emu, isIosPhone() ? 2000 : 400));
     bumpCrtPaint(emu);
     return;
   }
@@ -46,10 +49,14 @@ export async function presentFloppyMountReady(
     vice_virtual_device_traps: "disabled",
   });
   if (!diskKind || !isGcrDiskKind(diskKind)) {
-    hardReset(emu);
-    await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
+    await runMountStage("hard-reset-ready", async () => {
+      hardReset(emu);
+      await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
+    });
   }
-  resyncSessionDiskToVice(emu, live.unit);
-  await viceReattachSessionDisk(emu, live.unit);
+  await runMountStage("resync-session-disk", async () => {
+    resyncSessionDiskToVice(emu, live.unit);
+  });
+  await runMountStage("vice-reattach-session", () => viceReattachSessionDisk(emu, live.unit), 60_000);
   bumpCrtPaint(emu);
 }
