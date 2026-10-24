@@ -1,6 +1,6 @@
 # Drive combination matrix (Grok64)
 
-**Status: PARKED** — Tom **hands-on PASS** on cart + Jiffy baseline (`ab220c7`+, library bytes intact). **Floppy library Play/Insert** failed on `cf5c6e6` (real UI); agent fix `edcf1dd` + gate `test:desktop-library-geos-floppy-ui` — **await Tom re-test** before unpark. No merge/deploy without Tom.
+**Status: PARKED** — Tom **hands-on PASS** on cart + Jiffy baseline (`ab220c7`+, library bytes intact). **Floppy library Play/Insert** failed on clean gate + dirty profile (`cf5c6e6` / `4d02255`); fixes through **`69fd5bf`** (in-place mount must not re-run `prepareCore` / `applyIecUnit` after disk refresh; skip desktop persist during `playMode: disk`). Gates: `test:desktop-library-geos-floppy-ui`, `test:desktop-dirty-profile-geos` — **await Tom hands-on re-test** before unpark. No merge/deploy without Tom.
 
 **Last updated:** 2026-10-24 (spec + harness; **no matrix PASS/FAIL rows** until Tom unparks)
 
@@ -23,7 +23,7 @@ Results are **PASS / FAIL per row**, with **hands-on Chromium** click-through an
 | Cart + Jiffy UI gate green | Cart fix PR | `npm run test:desktop-cart-jiffy-ui-gate` + manual screenshots |
 | Jiffy + floppy directory (generic path) | Agent gate | `npm run test:desktop-jiffy-floppy-dir` — GEOS + boulder-dash, Jiffy on/off (`cf5c6e6` pairs 1541 ROM before work-disk refresh) |
 | Tom hands-on Jiffy + REU Play | Tom | Same path as gate; sign-off before unpark |
-| Library row Play/Insert (not `playBytes`) | Agent + Tom | `npm run test:desktop-library-geos-floppy-ui` — Software → **Run**, sha1 + `LOAD"$",8`; console `__g64.attachDiskDiag()` |
+| Library row Play/Insert (not `playBytes`) | Agent + Tom | `npm run test:desktop-library-geos-floppy-ui` + `npm run test:desktop-dirty-profile-geos` — Software → **Run**, sha1 + `LOAD"$",8`; console `__g64.attachDiskDiag()` at mount and ~8s after |
 | Floppy mount policy | Done | `docs/DISK_MOUNT_POLICY.md` — mount READY, named LOAD only |
 | CMD Boot ROM 2.80 | QA | User-uploaded; matrix uses real CMD HD behavior |
 | Jiffy ROM pair (+ 1571 ROM if 1571 rows) | QA | Settings upload; synthetic pair OK for automation only if Tom agrees |
