@@ -17,7 +17,7 @@ import {
   rowNeeds1571,
   rowTouchesCmdHd,
 } from "./drive-combo-catalog.mjs";
-import { patchLocalStorage, powerOnDesktop, waitRunning } from "./desktop-qa-lib.mjs";
+import { patchLocalStorage, powerOnDesktop, seedTomReusedProfile, waitRunning } from "./desktop-qa-lib.mjs";
 import {
   assertGrok64WasmCore,
   clearEmulatorJsCache,
@@ -95,11 +95,19 @@ for (const row of rows) {
 
   await page.goto(base, { waitUntil: "domcontentloaded" });
   await clearEmulatorJsCache(page);
+  await seedTomReusedProfile(page, { jiffyDos: row.kernal === "jiffy" });
   await patchLocalStorage(page, {
-    video: "pal",
-    jiffy: false,
+    video: "auto",
+    jiffy: row.kernal === "jiffy",
     reu: row.reu === "none" ? "none" : row.reu,
+    drive: "cmd-layout",
+    machineId: "c64-auto",
+    coreMode: "auto",
+    driveMode: "auto",
+    mouse: true,
     iecMap,
+    iecDrive: iecMap[9] === "cmdhd" ? "cmdhd" : "1541",
+    iecUnit: iecMap[9] === "cmdhd" ? 9 : 8,
   });
   await page.reload({ waitUntil: "domcontentloaded" });
   await powerOnDesktop(page, base, { navigate: false });
@@ -135,11 +143,9 @@ for (const row of rows) {
     const bytes = [...readFileSync(testDisk)];
     const fileName = "boulder-dash.d64";
     await ensureLibraryFixture(page, fileName, bytes);
-    await insertFloppyViaLibraryUI(page, { filePath: testDisk, fileName, unit: row.pairFrom });
+    await insertFloppyViaLibraryUI(page, { fileName, unit: row.pairFrom });
     await waitRunning(page, 120_000);
     await page.waitForTimeout(2000);
-    await page.evaluate(async (u) => window.__g64?.iecBusReconcile?.(u), row.pairFrom);
-    await page.waitForTimeout(1500);
     const busSnap = await captureViceDriveBus(page);
     Object.assign(rec, busSnap);
     rec.coreBuildIdExpected = expectedCoreBuildId;

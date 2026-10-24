@@ -39,30 +39,68 @@ export async function powerCycleDesktop(page) {
   await waitRunning(page, 120_000);
 }
 
-/** Software → On this device → Insert on unit (user path; no playBytes). */
-export async function insertFloppyViaLibraryUI(page, { filePath, fileName, unit }) {
-  const esc = fileName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  await page.locator('button[aria-label="Software"]').click({ timeout: 15_000 });
-  await page.waitForTimeout(400);
-  await page.getByRole("button", { name: /On this device/i }).click();
+/** Software → On this device → unit seg → Insert (Tom path; library must already contain fileName). */
+export async function insertFloppyViaLibraryUI(page, { fileName, unit, importPath = null }) {
+  if (importPath) {
+    await page.evaluate(() => window.__g64?.openSoftwareLibrary?.() ?? window.__g64?.openSoftware?.());
+    await page.locator(".g64-sheet").waitFor({ state: "visible", timeout: 15_000 });
+    await page.locator('input[type="file"]').setInputFiles(importPath);
+    await page.waitForTimeout(2000);
+    await page.keyboard.press("Escape").catch(() => {});
+    await page.waitForTimeout(400);
+  }
+  await page.evaluate(() => window.__g64?.openSoftwareLibrary?.() ?? window.__g64?.openSoftware?.());
+  await page.locator(".g64-sheet").waitFor({ state: "visible", timeout: 15_000 });
+  await page.locator(".g64-seg button").filter({ hasText: /^On this device/ }).click({ force: true }).catch(() => {});
+  const card = page.locator(".g64-card").filter({ hasText: fileName }).first();
+  await card.waitFor({ state: "visible", timeout: 30_000 });
+  await card.scrollIntoViewIfNeeded({ timeout: 15_000 });
+  await card
+    .getByRole("group", { name: /IEC drive unit/i })
+    .getByRole("button", { name: String(unit), exact: true })
+    .click({ force: true, timeout: 15_000 });
   await page.waitForTimeout(300);
-  await page.locator('input[type="file"]').setInputFiles(filePath);
-  await page.waitForTimeout(1500);
-  await page.keyboard.press("Escape").catch(() => {});
-  await page.waitForTimeout(400);
-  await page.locator('button[aria-label="Software"]').click({ timeout: 15_000 });
-  await page.waitForTimeout(400);
-  await page.getByRole("button", { name: /On this device/i }).click();
-  await page.waitForTimeout(300);
-  await page
-    .getByRole("button", { name: new RegExp(`Insert ${esc}`) })
-    .first()
-    .click({ timeout: 60_000 });
+  const insertBtn = page.getByRole("button", { name: `Insert ${fileName}`, exact: true });
+  await insertBtn.waitFor({ state: "visible", timeout: 30_000 });
+  await insertBtn.click({ timeout: 60_000, force: true });
   await waitRunning(page, 180_000);
   await page.waitForTimeout(4000);
   await page.keyboard.press("Escape").catch(() => {});
   await page.waitForTimeout(300);
 }
+
+/** Post-insert IEC: reconcile when serial is not REAL or TDE is missing (Tom path skips reconcile when both are good). */
+export async function ensureIecRoutingAfterInsert(page, unit = 8) {
+  const before = await page.evaluate(async (u) => {
+    const d = await window.__g64?.attachDiskDiag?.({ light: true });
+    const bus = d?.viceDriveBus;
+    return {
+      serial: bus?.serialDeviceLabel ?? null,
+      tdeBytes: bus?.wasmTdeImageBytes ?? 0,
+      gcr: bus?.wasmGcrLoaded ?? 0,
+      fsDev: bus?.wasmFilesystemDevice ?? null,
+    };
+  }, unit);
+  const tdeOk = before.tdeBytes > 174_000 && before.gcr === 1;
+  const serialOk = before.serial === "real";
+  if (serialOk && tdeOk) return { reconciled: false, before, after: before };
+  await page.evaluate(async (u) => window.__g64?.iecBusReconcile?.(u), unit);
+  await page.waitForTimeout(1500);
+  const after = await page.evaluate(async (u) => {
+    const d = await window.__g64?.attachDiskDiag?.({ light: true });
+    const bus = d?.viceDriveBus;
+    return {
+      serial: bus?.serialDeviceLabel ?? null,
+      tdeBytes: bus?.wasmTdeImageBytes ?? 0,
+      gcr: bus?.wasmGcrLoaded ?? 0,
+      fsDev: bus?.wasmFilesystemDevice ?? null,
+    };
+  }, unit);
+  return { reconciled: true, before, after };
+}
+
+/** @deprecated use ensureIecRoutingAfterInsert */
+export const iecReconcileIfTdeMiss = ensureIecRoutingAfterInsert;
 
 /** Dismiss overlays and focus the CRT before per-char typing. */
 export async function focusC64ForTyping(page) {

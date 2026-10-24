@@ -1722,20 +1722,30 @@ export async function finishFloppyInsertIec(
 ): Promise<number> {
   if (!emu) return -1;
   if (iecMapUnitIsSd2iec(iecMap, unit)) return 0;
+  const busBefore = viceDriveBusProbe(emu, unit);
+  const tdeOkBefore =
+    (busBefore.wasmTdeImageBytes ?? 0) > 174_000 && busBefore.wasmGcrLoaded === 1;
+  const serialOkBefore = busBefore.serialDeviceLabel === "real";
   if (iecMap) {
     const merged: IecMap = { ...defaultIecMap(), ...iecMap, [unit]: "1541" };
     restoreUserDriveVicerc(emu, merged);
     await waitRetroFrames(18);
   }
+  if (!serialOkBefore || !tdeOkBefore) {
+    const busRc = await ensureIecBusReconcile(emu, unit, iecMap, {
+      lightVicerc: true,
+      skipReload: tdeOkBefore,
+    });
+    if (busRc < 0) return busRc;
+  }
   const bus = viceDriveBusProbe(emu, unit);
   if ((bus.wasmTdeImageBytes ?? 0) < 174_000 || bus.wasmGcrLoaded !== 1) {
-    const busRc = await ensureIecBusReconcile(emu, unit, iecMap, { lightVicerc: true, skipReload: false });
-    if (busRc < 0) return busRc;
-    const busAfter = viceDriveBusProbe(emu, unit);
-    if ((busAfter.wasmTdeImageBytes ?? 0) < 174_000 || busAfter.wasmGcrLoaded !== 1) {
-      glog("finish-floppy-insert-iec-tde-miss", { unit, bus: busAfter });
-      return -1;
-    }
+    glog("finish-floppy-insert-iec-tde-miss", { unit, bus, busBefore });
+    return -1;
+  }
+  if (bus.serialDeviceLabel !== "real") {
+    glog("finish-floppy-insert-iec-serial-miss", { unit, bus });
+    return -1;
   }
   ensureViceLastAttachRecorded(emu, unit);
   return 0;

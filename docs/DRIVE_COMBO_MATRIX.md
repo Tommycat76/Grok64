@@ -2,7 +2,7 @@
 
 **Status: PARKED** — Full IEC matrix (`GROK64_DRIVE_COMBO_UNPARK=1`) stays off until Tom signs off **emulator baseline** (cart + Jiffy + library floppy Play/Insert on dirty profiles).
 
-**Baseline track (2026-10-24):** **`faaf40949509`** core (attach without nested iec reconcile; JS never double-reconciles) — serial **REAL** route, BMC64-style **unit‑8 flush** (detach/reattach + reconcile + **`viceRcSafeFloppyProfile` restore** for CMD/secondary drives), runtime **floppy isolate** only during reconcile; **SD2IEC unit skipped**. About **`viceLoadDollarDiag`** + **`profilePersistDiff`**. Comparison + no-regression smokes: `docs/GEOS_REFERENCE_EMULATOR_COMPARISON.md`, `npm run test:desktop-grok64-feature-smoke`. Gates: `test:desktop-geos-insert-user-dirty`, `test:desktop-sd2iec-iec`. No merge/deploy without Tom.
+**Baseline track (2026-10-24):** Grok64 IEC core per `grok64-core-manifest.json` (`buildId` in manifest). **Software Insert:** `finishFloppyInsertIec` restores CMD `vicerc`, probes TDE, and runs **`iecBusReconcile` + reload only on TDE miss** (unconditional reconcile after insert broke `LOAD"$",8` on Tom’s path). Tom hand gate: `npm run test:desktop-geos-insert-tom-hand` (`GROK64_TOM_TYPING_MS=400`). Stock dirty gate: `test:desktop-geos-insert-user-dirty` (same typing env). Harness uses `ensureIecRoutingAfterInsert`: reconcile when `serialDeviceLabel` ≠ **real** or TDE miss; skip when both match Tom’s good post-insert state. Comparison: `docs/GEOS_REFERENCE_EMULATOR_COMPARISON.md`, `npm run test:desktop-grok64-feature-smoke`. No merge/deploy without Tom.
 
 **Last updated:** 2026-10-24 (spec + harness; **no matrix PASS/FAIL rows** until unpark)
 
@@ -63,7 +63,7 @@ Tom wants **every unit order**: for each **injective assignment** of distinct dr
    - Map C: CMD HD on 8 vs 9 (regression class from play-session)  
 3. **Full matrix** — expand to all permutations once smoke is green.
 
-**Harness (unpark slice):** `desktop-drive-combo-matrix.mjs` uses Software **Insert** (not `playBytes`), power cycle before insert, `iecBusReconcile`, and fails rows when `serialDeviceLabel` is `virt` or core `buildId` ≠ manifest. First smoke row (SM-01) still tracks typed `LOAD"$",8` / named LOAD quality separately from IEC routing.
+**Harness (unpark slice):** `desktop-drive-combo-matrix.mjs` uses **`importLibraryBytes` + library-row Insert** (unit seg + disc icon), power cycle before insert, **`iecReconcileIfTdeMiss` only**, and fails rows when `serialDeviceLabel` is `virt` or core `buildId` ≠ manifest. SM-01 tracks typed `LOAD"$",8` / named LOAD on CRT.
 
 Store each map as a row group key, e.g. `8:1541|9:1571|10:1581|11:cmdhd`.
 
