@@ -21,6 +21,7 @@ static int pending_disk_unit = 0;
 static int pending_disk_drive = 0;
 static char pending_disk_path[GROK64_DISK_PATH_MAX];
 static int pending_disk_attach = 0;
+static int last_disk_attach_rc = -1;
 
 extern void cartridge_trigger_freeze(void);
 extern void retro_keyboard_event(bool down, unsigned code, uint32_t character, uint16_t mod);
@@ -217,7 +218,16 @@ int grok64_disk_attach(int unit, int drive, const char *path)
         drive = 0;
     }
     file_system_detach_disk((unsigned int)unit, (unsigned int)drive);
-    return file_system_attach_disk((unsigned int)unit, (unsigned int)drive, path);
+    last_disk_attach_rc = file_system_attach_disk((unsigned int)unit, (unsigned int)drive, path);
+    return last_disk_attach_rc;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int grok64_disk_last_attach_rc(void)
+{
+    return last_disk_attach_rc;
 }
 
 #ifdef __EMSCRIPTEN__

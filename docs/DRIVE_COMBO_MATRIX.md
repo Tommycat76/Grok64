@@ -1,8 +1,10 @@
 # Drive combination matrix (Grok64)
 
-**Status: PARKED** — Tom **hands-on PASS** on cart + Jiffy baseline (`ab220c7`+, library bytes intact). **Floppy library Play/Insert** failed on clean gate + dirty profile (`cf5c6e6` / `4d02255`); fixes through **`69fd5bf`** (in-place mount must not re-run `prepareCore` / `applyIecUnit` after disk refresh; skip desktop persist during `playMode: disk`). Gates: `test:desktop-library-geos-floppy-ui`, `test:desktop-dirty-profile-geos` — **await Tom hands-on re-test** before unpark. No merge/deploy without Tom.
+**Status: PARKED** — Full IEC matrix (`GROK64_DRIVE_COMBO_UNPARK=1`) stays off until Tom signs off **emulator baseline** (cart + Jiffy + library floppy Play/Insert on dirty profiles).
 
-**Last updated:** 2026-10-24 (spec + harness; **no matrix PASS/FAIL rows** until Tom unparks)
+**Baseline track (2026-10-24):** VICE unit-8 **detach/attach** via custom core (`703438b` / `3a7693e+`) — `file_system_attach_disk` after MEMFS sync; About diag: `viceAttachedImage`, `viceLastReattach`, `viceSaveDirectory`. Agent gates: `test:desktop-library-geos-floppy-ui`, `test:desktop-dirty-profile-geos` (with `GROK64_SKIP_G64=1` if no `.g64` fixture). **Tom hands-on re-test** on `3a7693e+` with EmulatorJS cache cleared. No merge/deploy without Tom.
+
+**Last updated:** 2026-10-24 (spec + harness; **no matrix PASS/FAIL rows** until unpark)
 
 ---
 

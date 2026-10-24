@@ -34,6 +34,7 @@ type DiskModule = {
   _grok64_disk_detach?: (unit: number, drive: number) => void;
   _grok64_disk_get_name?: (unit: number, drive: number) => string;
   _grok64_retro_save_directory?: () => number;
+  _grok64_disk_last_attach_rc?: () => number;
   UTF8ToString?: (ptr: number) => string;
   cwrap?: (...args: unknown[]) => unknown;
 };
@@ -104,6 +105,9 @@ export function bindGrok64DiskExports(mod: DiskModule): void {
     if (!mod._grok64_retro_save_directory) {
       mod._grok64_retro_save_directory = wrap("grok64_retro_save_directory", "number", []) as () => number;
     }
+    if (!mod._grok64_disk_last_attach_rc) {
+      mod._grok64_disk_last_attach_rc = wrap("grok64_disk_last_attach_rc", "number", []) as () => number;
+    }
   } catch {
     /* stock core */
   }
@@ -170,8 +174,6 @@ export function viceDiskAttachCandidates(
     push(base);
   } else {
     for (const p of WORK_DISK_PATHS) push(p);
-    push(`/${base}`);
-    push(base);
   }
 
   return out.filter((p) => pathExistsOnFs(emu, p));
@@ -209,8 +211,11 @@ export function viceReattachDisk(
       for (let i = 0; i < 240 && rc === 0; i++) {
         poll();
       }
-      const attached = viceAttachedImage(emu, unit, drive);
-      rc = attached ? 0 : -1;
+      const attachRc = mod._grok64_disk_last_attach_rc?.();
+      rc = typeof attachRc === "number" && attachRc >= 0 ? attachRc : -1;
+      if (rc < 0 && viceAttachedImage(emu, unit, drive)) {
+        rc = 0;
+      }
     } else {
       rc = mod._grok64_disk_attach?.(unit, drive, path) ?? -1;
     }
