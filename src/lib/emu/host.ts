@@ -2867,19 +2867,11 @@ export function swapBootDisk(emu: EjsInstance | null, data: Uint8Array, fallback
  * #60 wrote a *new* filename instead of this overwrite — unit 8 stayed
  * the blank work disk and Autostart typed FILE NOT FOUND (not DNP).
  */
-/** PETSCII 147 — CLR screen (HOME/CLR keys); leaves cursor at READY. */
+/** C64 CLR via Shift+HOME (libretro path). */
 export function clearC64ScreenPetscii(emu: EjsInstance | null): boolean {
-  const mod = emu?.Module as Parameters<typeof bindGrok64WasmExports>[0] | undefined;
-  if (!mod) return false;
-  bindGrok64WasmExports(mod);
-  const feed = grok64WasmApi(mod)?.kbdbufFeed;
-  if (!feed) return false;
-  try {
-    feed(String.fromCharCode(147));
-    return true;
-  } catch {
-    return false;
-  }
+  if (!emu) return false;
+  void import("./grok64-keyboard").then(({ clearC64ScreenRetro }) => clearC64ScreenRetro(emu));
+  return true;
 }
 
 /** Wait until KERNAL prints READY (after hard reset / GEOS mount). */

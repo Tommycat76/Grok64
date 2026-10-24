@@ -1,8 +1,8 @@
 {
   "blob": "vice_x64sc-grok64-iec-wasm.data",
-  "sha256": "60596420dc79396fe3358b98d2b9463ee4f4811990874719121d05bb98f7ba7b",
-  "buildId": "60596420dc79",
-  "glueSha12": "fecae5a81c8d",
-  "bytes": 2441623,
-  "generatedAt": "2026-10-24T10:59:49.133Z"
+  "sha256": "89af7f0a060d1e53cdc41a25805274e4de2afa19dce9e318ea8de8668545806b",
+  "buildId": "89af7f0a060d",
+  "glueSha12": "9d75da2c9d15",
+  "bytes": 2442504,
+  "generatedAt": "2026-10-24T11:55:00.453Z"
 }

@@ -407,8 +407,14 @@ int grok64_disk_attach(int unit, int drive, const char *path)
         snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
                  "file_system_attach_disk unit=%d path=%s fs_bytes=%d", unit, path, fs_bytes);
     } else {
+        int sync_rc;
+
         grok64_disk_sync_true_drive((unsigned int)unit);
-        grok64_drive_reload_image(unit, drive);
+        sync_rc = grok64_drive_reload_image(unit, drive);
+        if (sync_rc < 0) {
+            last_disk_attach_rc = sync_rc;
+            return sync_rc;
+        }
     }
     return last_disk_attach_rc;
 }
@@ -674,10 +680,25 @@ int grok64_drive_vdrive_error_is_virtual(int unit)
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+static drive_t *grok64_unit_drive(unsigned int unit, unsigned int drive)
+{
+    unsigned int dnr;
+
+    if (unit < 8 || unit > 11) {
+        return NULL;
+    }
+    dnr = unit - 8;
+    if (dnr >= NUM_DISK_UNITS || !diskunit_context[dnr]) {
+        return NULL;
+    }
+    return diskunit_context[dnr]->drives[drive];
+}
+
 int grok64_drive_sync_tde_image(int unit, int drive)
 {
     vdrive_t *vdrive;
     disk_image_t *image;
+    drive_t *drv;
     int tde_on = 0;
 
     if (unit < 8 || unit > 11) {
@@ -697,17 +718,29 @@ int grok64_drive_sync_tde_image(int unit, int drive)
         grok64_note_attach_diag("sync-tde: no vdrive image");
         return -ENOENT;
     }
+    drv = grok64_unit_drive((unsigned int)unit, (unsigned int)drive);
+    if (drv && drv->image == image && drv->GCR_image_loaded) {
+        if (disk_image_read_image(image) < 0) {
+            snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
+                     "sync-tde: disk_image_read_image unit=%d failed", unit);
+            return -EIO;
+        }
+        return 0;
+    }
+    if (drv && drv->image && drv->image != image) {
+        drive_image_detach(drv->image, (unsigned int)unit, (unsigned int)drive);
+    }
     if (drive_image_attach(image, (unsigned int)unit, (unsigned int)drive) < 0) {
         snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
                  "sync-tde: drive_image_attach unit=%d failed", unit);
         return -EIO;
     }
-    if (machine_drive_image_attach(image, (unsigned int)unit, (unsigned int)drive) < 0) {
+    drv = grok64_unit_drive((unsigned int)unit, (unsigned int)drive);
+    if (!drv || !drv->GCR_image_loaded) {
         snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
-                 "sync-tde: machine_drive_image_attach unit=%d failed", unit);
+                 "sync-tde: GCR not loaded unit=%d", unit);
         return -EIO;
     }
-    grok64_disk_sync_true_drive((unsigned int)unit);
     return 0;
 }
 

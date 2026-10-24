@@ -442,17 +442,7 @@ function viceReattachDiskSync(
     api.diskDetach?.(unit, drive);
     let rc = api.diskAttach(unit, drive, path) ?? -1;
     const attachRc = api.diskLastAttachRc?.();
-    if (rc < 0 && typeof attachRc === "number" && attachRc >= 0) rc = attachRc;
-    if (rc === 0) {
-      const syncTde = api?.driveSyncTdeImage?.(unit, drive);
-      if (typeof syncTde === "number" && syncTde < 0 && syncTde !== -99) {
-        glog("vice-disk-sync-tde-warn", { unit, path, syncTde, label: viceAttachRcLabel(syncTde) });
-      }
-      const reloadRc = reloadViceDriveImage(emu, unit, drive);
-      if (reloadRc < 0 && reloadRc !== -99) {
-        glog("vice-disk-reload-warn", { unit, path, reloadRc, label: viceAttachRcLabel(reloadRc) });
-      }
-    }
+    if (typeof attachRc === "number") rc = attachRc;
     const after = rc === 0 ? diskNameFromModule(mod, unit, drive) : null;
     lastAttachByUnit.set(unit, { path, rc, before: null, after, at: Date.now() });
     const jsSize = pathExistsOnFs(emu, path) ? pathByteLength(emu, path) : null;

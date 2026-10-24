@@ -119,6 +119,7 @@ import {
   grok64DiskAttachExportReady,
   grok64WasmApi,
   grok64WorkDiskRefreshExportReady,
+  type Grok64ModuleBag,
 } from "@/lib/emu/grok64-api";
 import { grok64Utf8PathMarshalProbe, grok64WasmExportDiagEmu } from "@/lib/emu/grok64-wasm-direct";
 import {
@@ -1085,16 +1086,8 @@ export function Grok64App() {
           }
         }
         if (!screenTextHasReady(head)) {
-          await feedBasicLine(emu, "PRINT CHR$(147)", { runcmd: true });
-          await new Promise((r) => setTimeout(r, 900));
-          head = readScreenText(emu) ?? "";
-        }
-        if (!screenTextHasReady(head)) {
           hardReset(emu);
           await waitForC64Ready(emu, 60_000);
-          clearC64ScreenPetscii(emu);
-          await feedBasicLine(emu, "PRINT CHR$(147)", { runcmd: true });
-          await new Promise((r) => setTimeout(r, 900));
           head = readScreenText(emu) ?? "";
         }
         if (!screenTextHasReady(head)) {
@@ -2074,6 +2067,7 @@ export function Grok64App() {
       if (emu) {
         grok64KeyboardReleaseAll(emu);
         clearDeferredC64Keyboard();
+        grok64WasmApi(emu.Module as Grok64ModuleBag)?.kbdbufFlush?.();
         disarmAutostart(emu, "disk");
         const unit = sessionUnitRef.current ?? 8;
         const slot = sessionDiskOnUnit(unit);
@@ -2098,13 +2092,8 @@ export function Grok64App() {
         if (slot?.bytes) {
           try {
             await presentFloppyMountReady(emu, { iec: "1541", unit }, { afterDriveRefresh: true });
-            clearC64ScreenPetscii(emu);
             await flushEmuFs(emu, 300);
             await waitForC64Ready(emu, 45_000);
-            if (!screenTextHasReady(readScreenText(emu) ?? "")) {
-              await feedBasicLine(emu, "PRINT CHR$(147)", { runcmd: true });
-              await waitForC64Ready(emu, 20_000);
-            }
             glog("reset-reattach", {
               rc: lastViceDiskAttach(unit)?.rc ?? -1,
               path: viceAttachedImage(emu, unit),

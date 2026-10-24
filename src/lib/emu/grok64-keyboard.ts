@@ -126,6 +126,25 @@ export function grok64KeyboardReleaseAll(emu: Grok64Emu | null) {
   flushAllKeys(fn);
 }
 
+/** C64 CLR (Shift+HOME) via libretro keys — never queues BASIC into kbdbuf. */
+export function clearC64ScreenRetro(emu: Grok64Emu | null): Promise<void> {
+  return enqueueDelivery(async () => {
+    const mod = emu?.Module as Grok64KbdMod | undefined;
+    if (!mod) return;
+    bindGrok64WasmExports(mod);
+    const fn = grok64WasmApi(mod)?.retroKeyboard;
+    if (!fn) return;
+    const home = RETROK.Home;
+    fn(RETROK.ShiftLeft, 1, 0, 0);
+    await sleep(24);
+    fn(home, 1, 0, 0);
+    await sleep(effectiveHoldMs());
+    fn(home, 0, 0, 0);
+    fn(RETROK.ShiftLeft, 0, 0, 0);
+    paintHook?.(emu);
+  });
+}
+
 /**
  * C64 key positions for symbols (aligned with `keys.ts` EXTRA / C64_ROWS).
  * DOM `code: "Minus"` → libretro `RETROK_MINUS` is the C64 **+** key (left of −).
