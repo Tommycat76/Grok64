@@ -83,12 +83,12 @@ try {
   });
   if (!seeded) {
     trace.warn = "no grok64 localStorage — seeding minimal dirty profile in-page";
-    await page.evaluate(() => {
+    await page.evaluate((wantJiffy) => {
       const key = "grok64-emu";
       const data = {
         state: {
           powered: false,
-          jiffyDos: true,
+          jiffyDos: wantJiffy,
           reuSize: "2048kB",
           videoStandard: "pal",
           iecMap: { 8: "1541", 9: "cmdhd", 10: "none", 11: "none" },
@@ -98,7 +98,7 @@ try {
         version: 0,
       };
       localStorage.setItem(key, JSON.stringify(data));
-    });
+    }, jiffyOn);
   }
   await page.reload({ waitUntil: "domcontentloaded" });
   await waitForG64(page);

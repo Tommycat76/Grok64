@@ -1,7 +1,13 @@
 /**
  * Shared Playwright helpers for drive-combo matrix (see docs/DRIVE_COMBO_MATRIX.md).
  */
-import { typeBasic, typeC64Screen, waitForDollarLoad, waitRunning } from "./desktop-qa-lib.mjs";
+import {
+  typeBasic,
+  typeC64RealKeyboard,
+  typeC64Screen,
+  waitForDollarLoad,
+  waitRunning,
+} from "./desktop-qa-lib.mjs";
 
 export function synthJiffyPair() {
   const c64 = new Uint8Array(8192);
@@ -117,10 +123,11 @@ export async function mountFloppyOnUnit(page, { fileName, bytes, unit, title }) 
  * @param {import('playwright').Page} page
  * @param {number} unit
  */
-export async function dirOnUnit(page, unit, { requireWorkBytes = true, typed = true } = {}) {
+export async function dirOnUnit(page, unit, { requireWorkBytes = true, typed = true, realKeyboard = true } = {}) {
   if (typed) {
     await focusC64ForTyping(page);
-    await typeC64Screen(page, `LOAD"$",${unit}`, { keyDelayMs: 85, lineEndMs: 800 });
+    const typeLine = realKeyboard ? typeC64RealKeyboard : typeC64Screen;
+    await typeLine(page, `LOAD"$",${unit}`, { keyDelayMs: 85, lineEndMs: 800 });
     const loadWait = await waitForDollarLoad(page, { maxMs: 55_000 });
     if (loadWait.error) {
       return {
@@ -180,7 +187,8 @@ export async function loadSmokeOnUnit(page, unit, { typed = true } = {}) {
   const prg = firstPrgNameFromListing(dir.list);
   if (!prg) return { ...dir, loadOk: false, prg: null, reason: "no PRG in directory listing" };
   if (typed) {
-    await typeC64Screen(page, `LOAD"${prg}",${unit}`);
+    await focusC64ForTyping(page);
+    await typeC64RealKeyboard(page, `LOAD"${prg}",${unit}`, { keyDelayMs: 85, lineEndMs: 800 });
     await page.waitForTimeout(20_000);
   } else {
     await typeBasic(page, `LOAD"${prg}",${unit}`, { afterMs: 25_000 });

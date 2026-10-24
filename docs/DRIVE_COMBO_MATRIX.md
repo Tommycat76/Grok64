@@ -2,7 +2,7 @@
 
 **Status: PARKED** — Full IEC matrix (`GROK64_DRIVE_COMBO_UNPARK=1`) stays off until Tom signs off **emulator baseline** (cart + Jiffy + library floppy Play/Insert on dirty profiles).
 
-**Baseline track (2026-10-24):** **`5161717155f4`** core (PR #68) — **`grok64_serial_layer_true_iec`** after attach/reconcile (`serial_device_type` **REAL**, `VirtualDevices` off, truedrive on) + About **`viceDriveBus`** (`wasmFilesystemDevice` **0**, **`serialDeviceLabel` ≠ `virt`**, drive CPU clock advancing). **Manifest lock:** `grok64-core-manifest.json` + `grok64-core-build.generated.ts` match `vice_x64sc-grok64-iec-wasm.data` (`npm run test:grok64-core-manifest`). Glue bind rev **`diskapi-v15-serial-real-route`**. **Tom hands-on (required before unpark):** Power off/on → Software **Insert** GEOS on 8 → type `LOAD"$",8` / LIST on CRT with Jiffy off then on (`npm run test:desktop-geos-insert-user-dirty`, `npm run test:desktop-geos-insert-ui-jiffy`). No merge/deploy without Tom.
+**Baseline track (2026-10-24):** **`c90e30171313`** core (PR #68) — serial **REAL** route + About **`viceLoadDollarDiag`** (BASIC `$0200`, KERNAL `$C3` filename bytes, vdrive error / IEC lines, track‑18 BAM, TDE half‑track). **`viceDriveBus`:** `wasmFilesystemDevice` **0**, **`serialDeviceLabel` ≠ `virt`**. Glue **`diskapi-v16-load-dollar-diag`**. Gates: `npm run test:desktop-geos-insert-user-dirty` (Playwright **`keyboard.press`** on canvas only), `npm run test:desktop-geos-insert-ui-jiffy`. On hands-on **FILE NOT FOUND** with green About, copy **`viceLoadDollarDiag`** for (a)/(b)/(c). No merge/deploy without Tom.
 
 **Last updated:** 2026-10-24 (spec + harness; **no matrix PASS/FAIL rows** until unpark)
 
