@@ -48,6 +48,23 @@ async function iaMetadata(identifier) {
   return res.json();
 }
 
+async function fetchGeosG64() {
+  const url = process.env.GROK64_GEOS_G64_URL;
+  const dest = join(dirs.geos, process.env.GROK64_GEOS_G64_NAME || "324_D1_Geos.g64");
+  if (url) {
+    await fetchTo(url, dest, { force: false });
+    return;
+  }
+  const id = "geos-64-2.0";
+  try {
+    const meta = await iaMetadata(id);
+    const g64 = (meta.files ?? []).find((f) => /\.g64$/i.test(f.name) && /geos|324/i.test(f.name));
+    if (g64) await iaDownload(id, g64.name, dest);
+  } catch (e) {
+    console.warn("GEOS g64:", e.message);
+  }
+}
+
 async function fetchGeos() {
   const id = "geos-64-2.0";
   const meta = await iaMetadata(id);
@@ -273,6 +290,7 @@ async function fetchBoulderDisk() {
 
 console.log("Fetching fixtures →", root);
 await fetchGeos();
+await fetchGeosG64();
 await fetchWheelsOptional();
 await fetchWheelsDisk();
 await fetchCarts();

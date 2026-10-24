@@ -109,6 +109,27 @@ export function resolvePlayBootName(
 
 /** Standard 35-track C64 .d64 size (also bundled blank.d64 / WORK DISK). */
 export const D64_STANDARD_SIZE = 174848;
+/** 35-track D64 + error-channel sector (683 bytes). */
+export const D64_SIZE_35_WITH_ERROR = 175531;
+/** 40-track D64. */
+export const D64_SIZE_40 = 196608;
+/** 40-track D64 + error sector. */
+export const D64_SIZE_40_WITH_ERROR = 197376;
+
+const ACCEPTED_D64_SIZES = new Set([
+  D64_STANDARD_SIZE,
+  D64_SIZE_35_WITH_ERROR,
+  D64_SIZE_40,
+  D64_SIZE_40_WITH_ERROR,
+]);
+
+export function isAcceptedD64ByteLength(byteLength: number): boolean {
+  return ACCEPTED_D64_SIZES.has(byteLength);
+}
+
+export function isGcrDiskKind(kind: MediaKind): boolean {
+  return kind === "g64" || kind === "g71";
+}
 
 const D64_BAM = 17 * 21 * 256;
 

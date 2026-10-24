@@ -42,7 +42,12 @@ import {
 } from "./grok64-vice-bridge";
 import { grok64RetroKeyboardAvailable } from "./grok64-keyboard";
 import { writeC64Bytes } from "./c64-memory";
-import { isCartridgePayload, kindOf } from "./formats";
+import {
+  isAcceptedD64ByteLength,
+  isCartridgePayload,
+  isGcrDiskKind,
+  kindOf,
+} from "./formats";
 import type { FastLoadCartKind } from "./jiffy-cart-compat";
 import { jiffyAllowedDuringCartBoot } from "./jiffy-cart-compat";
 import { readScreenText } from "./screen-text";
@@ -2078,7 +2083,7 @@ const WORK_DISK_NAMES = new Set(["WORK DISK.D64", "work disk.d64"]);
  */
 export function syncViceWorkD64(emu: EjsInstance | null, data: Uint8Array) {
   const FS = fsOf(emu);
-  if (!FS?.writeFile || data.byteLength < 174848) return;
+  if (!FS?.writeFile || !isAcceptedD64ByteLength(data.byteLength)) return;
   const targets = [
     "/data/saves/vice_work.d64",
     "/home/web_user/retroarch/userdata/saves/vice_work.d64",
@@ -2102,18 +2107,92 @@ export function syncViceWorkD64(emu: EjsInstance | null, data: Uint8Array) {
  * re-attaches `vice_work_disk`. Refreshing first with stock drive DOS then
  * flipping vice_jiffydos leaves unit 8 unreadable (FILE NOT FOUND on LOAD"$").
  */
+export type FloppyImageRef = { fileName: string; data: Uint8Array };
+
+function floppyKindFromRef(
+  image: FloppyImageRef | null | undefined,
+  unit: IecUnit,
+): ReturnType<typeof kindOf> | null {
+  if (image?.fileName) return kindOf(image.fileName);
+  const slot = sessionDiskOnUnit(unit);
+  return slot ? kindOf(slot.name) : null;
+}
+
+/** GCR (.g64/.g71): content file is the drive image — never mirror into vice_work.d64. */
+export async function refreshViceGcrDisk(
+  emu: EjsInstance | null,
+  unit: IecUnit,
+  data: Uint8Array,
+  fileName: string,
+): Promise<void> {
+  if (!emu) return;
+  const base = fileName.replace(/^\//, "");
+  const disarm = {
+    vice_autostart: "disabled",
+    vice_autostart_warp: "disabled",
+    vice_autoloadwarp: "disabled",
+  };
+  writeBootFile(emu, data, base);
+  emu.fileName = base;
+  unitMounts.set(unit, base);
+  setSessionDisk(base, data, unit);
+  applyRuntimeOptions(emu, {
+    ...disarm,
+    vice_work_disk: "disabled",
+    [`vice_drive${unit}_type`]: "1541",
+    vice_drive_true_emulation: "enabled",
+    vice_virtual_device_traps: "disabled",
+    vice_reset: "hard",
+  });
+  resetEmu(emu);
+  await flushEmuFs(emu, 1500);
+  bumpCrtPaint(emu);
+  await new Promise((r) => setTimeout(r, 250));
+  glog("gcr-disk-refresh", { unit, file: base, bytes: data.byteLength });
+}
+
+export function applyIecUnitFloppy(
+  emu: EjsInstance | null,
+  iec: IecDrive,
+  unit: IecUnit,
+  diskKind: ReturnType<typeof kindOf> | null,
+) {
+  if (diskKind && isGcrDiskKind(diskKind)) {
+    applyRuntimeOptions(emu, {
+      [`vice_drive${unit}_type`]: iec === "1581" ? "1581" : "1541",
+      vice_work_disk: "disabled",
+      vice_drive_true_emulation: "enabled",
+      vice_virtual_device_traps: "disabled",
+    });
+    rememberWorkDisk("disabled");
+    return;
+  }
+  applyIecUnit(emu, iec, unit);
+}
+
 export async function applyJiffyThenRefreshWorkDisk(
   emu: EjsInstance | null,
   unit: IecUnit,
   jiffyWant: boolean,
+  image?: FloppyImageRef | null,
 ): Promise<boolean> {
   if (!emu) return false;
   const landed = await applyJiffyDos(emu, jiffyWant);
   if (jiffyWant && !landed) {
     glog("jiffy-floppy-pair-miss");
   }
-  await refreshViceWorkDisk(emu, unit);
-  applyIecUnit(emu, "1541", unit);
+  const diskKind = floppyKindFromRef(image, unit);
+  if (diskKind && isGcrDiskKind(diskKind)) {
+    const session = sessionDiskOnUnit(unit);
+    const data = image?.data ?? session?.bytes;
+    const name = image?.fileName ?? session?.name;
+    if (data && name) {
+      await refreshViceGcrDisk(emu, unit, data, name);
+    }
+  } else {
+    await refreshViceWorkDisk(emu, unit);
+  }
+  applyIecUnitFloppy(emu, "1541", unit, diskKind);
   return jiffyWant ? landed : true;
 }
 
@@ -2143,7 +2222,12 @@ export function resyncSessionDiskToVice(emu: EjsInstance | null, unit: IecUnit =
   const target = slot.name.replace(/^\//, "");
   if (!writeBootFile(emu, slot.bytes, target)) return false;
   emu.fileName = target;
-  if (/\.d64$/i.test(target) && slot.bytes.byteLength >= 174848) {
+  const k = kindOf(target);
+  if (isGcrDiskKind(k)) {
+    applyIecUnitFloppy(emu, "1541", unit, k);
+    return true;
+  }
+  if (/\.d64$/i.test(target) && isAcceptedD64ByteLength(slot.bytes.byteLength)) {
     syncViceWorkD64(emu, slot.bytes);
   }
   return true;
@@ -2339,7 +2423,7 @@ export function mountDiskOnUnit(
   if (wrote) {
     unitMounts.set(unit, base);
     setSessionDisk(base, data, unit);
-    if (/\.d64$/i.test(base) && data.byteLength >= 174848) {
+    if (/\.d64$/i.test(base) && isAcceptedD64ByteLength(data.byteLength)) {
       syncViceWorkD64(emu, data);
     }
     pruneExtraDisks(emu);
@@ -2364,7 +2448,7 @@ function pruneExtraDisks(emu: EjsInstance | null) {
 export function swapBootDisk(emu: EjsInstance | null, data: Uint8Array, fallbackName?: string | null): boolean {
   const target = bootFileOf(emu) ?? fallbackName ?? null;
   const wrote = writeBootFile(emu, data, target);
-  if (wrote && target && /\.d64$/i.test(target) && data.byteLength >= 174848) {
+  if (wrote && target && /\.d64$/i.test(target) && isAcceptedD64ByteLength(data.byteLength)) {
     syncViceWorkD64(emu, data);
     setSessionDisk(target.replace(/^\//, ""), data, 8);
   }
@@ -2509,7 +2593,7 @@ export function attachAutostartDisk(
     applyIecUnit(emu, iec, unit);
     const label = fallback || target;
     setSessionDisk(label, data, unit);
-    if (data.byteLength >= 174848 && /\.d64$/i.test(target)) {
+    if (isAcceptedD64ByteLength(data.byteLength) && /\.d64$/i.test(target)) {
       syncViceWorkD64(emu, data);
     }
   }

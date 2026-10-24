@@ -1,4 +1,5 @@
 import type { MediaKind } from "./types";
+import { isAcceptedD64ByteLength } from "./formats";
 
 const D64_SIZE = 174848;
 const SECTORS = [0, ...Array(17).fill(21), ...Array(7).fill(19), ...Array(6).fill(18), ...Array(5).fill(17)];
@@ -357,8 +358,11 @@ export function screenInvitesCracktroInput(screen: string): boolean {
 
 export function wrapForDiskSwap(kind: MediaKind, data: Uint8Array, name: string): Uint8Array | null {
   if (kind === "d64") {
-    if (data.byteLength < 174848) return null;
+    if (!isAcceptedD64ByteLength(data.byteLength)) return null;
     return data;
+  }
+  if (kind === "g64" || kind === "g71") {
+    return data.byteLength >= 4 ? data : null;
   }
   try {
     if (kind === "prg" || kind === "sid") return prgToD64(data, name);

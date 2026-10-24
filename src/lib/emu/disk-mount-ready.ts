@@ -1,6 +1,6 @@
 import type { EjsInstance } from "./host";
 import {
-  applyIecUnit,
+  applyIecUnitFloppy,
   applyRuntimeOptions,
   bumpCrtPaint,
   disarmAutostart,
@@ -8,6 +8,8 @@ import {
   hardReset,
   resyncSessionDiskToVice,
 } from "./host";
+import { sessionDiskOnUnit } from "./session-media";
+import { kindOf } from "./formats";
 import type { IecDrive, IecUnit } from "./types";
 import { isIosPhone } from "./detect";
 
@@ -29,7 +31,8 @@ export async function presentFloppyMountReady(
     vice_virtual_device_traps: "disabled",
     vice_reset: "hard",
   });
-  applyIecUnit(emu, live.iec, live.unit);
+  const slot = sessionDiskOnUnit(live.unit);
+  applyIecUnitFloppy(emu, live.iec, live.unit, slot ? kindOf(slot.name) : null);
   hardReset(emu);
   await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
   resyncSessionDiskToVice(emu, live.unit);

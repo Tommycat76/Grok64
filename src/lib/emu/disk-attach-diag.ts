@@ -1,4 +1,12 @@
-import { d64DiskName, D64_STANDARD_SIZE, isLikelyBlankD64Payload, isWorkDiskImage, kindOf } from "./formats";
+import {
+  d64DiskName,
+  D64_STANDARD_SIZE,
+  isAcceptedD64ByteLength,
+  isGcrDiskKind,
+  isLikelyBlankD64Payload,
+  isWorkDiskImage,
+  kindOf,
+} from "./formats";
 import { lbaDirectorySector1Offset } from "./d64-layout";
 
 export type DiskAttachFingerprint = {
@@ -51,13 +59,13 @@ export function validateFloppyLibraryPayload(
     return { ok: false, reason: "blank-or-work-disk" };
   }
   if (kind === "d64") {
-    if (bytes.byteLength !== D64_STANDARD_SIZE) return { ok: false, reason: "d64-wrong-size" };
+    if (!isAcceptedD64ByteLength(bytes.byteLength)) return { ok: false, reason: "d64-wrong-size" };
     if (isG64Payload(bytes)) return { ok: false, reason: "gcr-bytes-with-d64-name" };
     const label = d64DiskName(bytes);
     if (!label || /^work\s*disk/i.test(label)) return { ok: false, reason: "missing-disk-label" };
   }
-  if (kind === "g64" && !isG64Payload(bytes) && bytes.byteLength === D64_STANDARD_SIZE) {
-    return { ok: false, reason: "d64-bytes-with-g64-name" };
+  if (isGcrDiskKind(kind)) {
+    if (!isG64Payload(bytes)) return { ok: false, reason: "g64-bad-header" };
   }
   return { ok: true };
 }

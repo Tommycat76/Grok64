@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Drawer } from "vaul";
 import { Cloud, Disc3, FolderOpen, Play, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
@@ -31,6 +31,19 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
   const [busy, setBusy] = useState(false);
   const tab = useEmu((st) => st.libraryTab);
   const setTab = useEmu((st) => st.setLibraryTab);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (e.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+      setOpen(false);
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open, setOpen]);
 
   async function refresh() {
     setLibrary(await listLibrary());
@@ -109,7 +122,10 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
   return (
     <Drawer.Root open={open} onOpenChange={setOpen}>
       <Drawer.Portal>
-        <Drawer.Overlay className="fixed inset-0 z-[900] bg-black/60" />
+        <Drawer.Overlay
+          className="fixed inset-0 z-[900] bg-black/60"
+          onClick={() => setOpen(false)}
+        />
         <Drawer.Content className="g64-sheet fixed right-0 bottom-0 left-0 z-[950]">
           <div className="g64-handle" />
           <Drawer.Title asChild>

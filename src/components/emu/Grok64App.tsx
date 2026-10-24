@@ -97,6 +97,7 @@ import {
   injectViceRc,
   bumpCrtPaint,
   tryGeosDiskAutostart,
+  applyIecUnitFloppy,
   applyJiffyThenRefreshWorkDisk,
 } from "@/lib/emu/host";
 import {
@@ -2921,7 +2922,10 @@ export function Grok64App() {
           });
           const jiffyWantPlay = resolveJiffyWant(stNow.jiffyDos, stNow.fastLoadCart);
           if (attach && plan.kind === "floppy") {
-            await applyJiffyThenRefreshWorkDisk(emuRef.current, playAttachUnit, jiffyWantPlay);
+            await applyJiffyThenRefreshWorkDisk(emuRef.current, playAttachUnit, jiffyWantPlay, {
+              fileName: filename,
+              data: payloadDisk,
+            });
           } else {
             await applyJiffyDos(emuRef.current, jiffyWantPlay);
           }
@@ -2951,7 +2955,7 @@ export function Grok64App() {
           } else if (plan.kind === "floppy") {
             disarmAutostart(emuRef.current, "disk");
             await presentFloppyMountReady(emuRef.current, plan.live);
-            applyIecUnit(emuRef.current, playIec, playAttachUnit);
+            applyIecUnitFloppy(emuRef.current, playIec, playAttachUnit, kindOf(filename));
             if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, keepLiveCrt || floppyKeep ? "play-recycle" : "hot-swap");
             void logFloppyAttach("play-hot-swap", {
               name: filename,
@@ -3323,6 +3327,7 @@ export function Grok64App() {
   );
   playLocalRef.current = playLocal;
   const insertDisk = useCallback(async (item) => {
+    s.setLibraryOpen(false);
     const file = await getFile(item.id);
     if (!file) {
       toast.error("Missing disk");
@@ -3371,7 +3376,10 @@ export function Grok64App() {
       vice_drive_true_emulation: "enabled",
       vice_virtual_device_traps: "disabled",
     });
-    await applyJiffyThenRefreshWorkDisk(emuRef.current, unit, useEmu.getState().jiffyDos);
+    await applyJiffyThenRefreshWorkDisk(emuRef.current, unit, useEmu.getState().jiffyDos, {
+      fileName: file.name,
+      data: media,
+    });
     await flushEmuFs(emuRef.current, 600);
     await touchPlayed(item.id);
     const bam = d64DiskName(media);
@@ -3385,7 +3393,7 @@ export function Grok64App() {
     void logFloppyAttach("insert-disk", { name: item.name, bytes: media, libraryId: item.id });
     finishFloppyMountReady();
     toast.success(`Inserted ${label} on drive ${unit}`);
-  }, [finishFloppyMountReady, logFloppyAttach]);
+  }, [finishFloppyMountReady, logFloppyAttach, s]);
   const toggleWarp = useCallback(() => {
     const next = !useEmu.getState().warped;
     useEmu.getState().setWarped(next);

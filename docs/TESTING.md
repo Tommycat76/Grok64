@@ -81,7 +81,7 @@ Automated by `npm run test:desktop-regression` unless noted **manual**.
 | SuperCPU + SIMM + turbo | **manual** |
 | IEC #8–#11 slots (Off, 1541, 1581, SD2IEC, CMD) | `sd2iec-disk-swap`, matrix `sd2iec-slot` |
 | **Drive combo matrix** (1541/1571/1581/CMD/SD2IEC/REU, all unit orders, LOAD/COPY pairs, Jiffy/warp) | **PARKED** — `npm run test:desktop-drive-combo-matrix` (no-op until `GROK64_DRIVE_COMBO_UNPARK=1`); spec `docs/DRIVE_COMBO_MATRIX.md` |
-| Library GEOS floppy (UI Run path) | `npm run test:desktop-library-geos-floppy-ui` — import + Software Run + sha1/`LOAD"$",8` |
+| Library GEOS floppy (UI import/Run/Insert) | `node scripts/prepare-floppy-fixtures.mjs` then `npm run test:desktop-library-geos-floppy-ui` — needs `GEOS_2.0.d64` (175531) + `GROK64_GEOS_G64_PATH` for `.g64` |
 | GEOS deskTop proof | `npm run test:desktop-geos-proof` — canvas + pointer nudge |
 | Wheels + REU | `npm run test:desktop-wheels-proof` — needs `fixtures/geos/Wheels64.d64` or `GROK64_WHEELS_URL` |
 | Cart matrix (stock vs Jiffy) | `npm run test:desktop-xdotool-cart-matrix`; partial: `CART_MATRIX_ONLY=ss4,fc3,epyx-fl` |
