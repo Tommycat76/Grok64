@@ -2096,6 +2096,26 @@ export function syncViceWorkD64(emu: EjsInstance | null, data: Uint8Array) {
 }
 
 /** Force libretro to detach/reattach the work disk image after MEMFS/IDBFS bytes change. */
+/**
+ * Jiffy C64 KERNAL must be paired with Jiffy 1541 ROM *before* libretro
+ * re-attaches `vice_work_disk`. Refreshing first with stock drive DOS then
+ * flipping vice_jiffydos leaves unit 8 unreadable (FILE NOT FOUND on LOAD"$").
+ */
+export async function applyJiffyThenRefreshWorkDisk(
+  emu: EjsInstance | null,
+  unit: IecUnit,
+  jiffyWant: boolean,
+): Promise<boolean> {
+  if (!emu) return false;
+  const landed = await applyJiffyDos(emu, jiffyWant);
+  if (jiffyWant && !landed) {
+    glog("jiffy-floppy-pair-miss");
+  }
+  await refreshViceWorkDisk(emu, unit);
+  applyIecUnit(emu, "1541", unit);
+  return jiffyWant ? landed : true;
+}
+
 export async function refreshViceWorkDisk(emu: EjsInstance | null, unit: IecUnit = 8): Promise<void> {
   if (!emu) return;
   const slot = `${unit}_d64`;

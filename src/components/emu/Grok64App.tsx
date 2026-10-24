@@ -97,8 +97,7 @@ import {
   injectViceRc,
   bumpCrtPaint,
   tryGeosDiskAutostart,
-  waitForC64Ready,
-  ensureStockKernal,
+  applyJiffyThenRefreshWorkDisk,
 } from "@/lib/emu/host";
 import { presentFloppyMountReady } from "@/lib/emu/disk-mount-ready";
 import { hasCmdRom, hasJiffyPair, prefetchBundledRoms } from "@/lib/emu/roms";
@@ -1858,14 +1857,13 @@ export function Grok64App() {
         );
       }
       const coldBasicAfterCart = Boolean(spec.coldBasicAfterCart);
-      const geosFamilyMount = Boolean(spec.geosFamilyMount);
       const prep = await prepareCore(emu, {
         live: spec.live,
         user: spec.user,
         jiffyWant: coldBasicAfterCart ? false : jiffyForCart,
         sdParts: parts,
         driveMap: st.iecMap,
-        skipJiffy: cartBoot || coldBasicAfterCart || geosFamilyMount,
+        skipJiffy: cartBoot || coldBasicAfterCart,
       });
       if (loadGenRef.current !== gen) return;
       if (crtBootName && emu && !/\.(crt|bin)$/i.test(bootFileOf(emu) || "")) {
@@ -2059,32 +2057,9 @@ export function Grok64App() {
         }
         if (spec.diskMountReady) {
           setBusy("Disk on unit 8 · READY…", 68);
-          if (spec.geosFamilyMount) {
-            const stGeos = useEmu.getState();
-            const reu = reuForGeosFamilyDisk(spec.bootName ?? spec.title ?? "", stGeos.reuSize);
-            if (reu !== stGeos.reuSize) {
-              stGeos.setReuSize(reu);
-              applyRuntimeOptions(emu, { vice_ram_expansion_unit: reu });
-            }
-            stGeos.setIecSlot(8, "1541");
-            const geosMap = { ...stGeos.iecMap, 8: "1541" };
-            const disk =
-              readMountedMedia(emu).find((m) => /\.(d64|d81)$/i.test(m.name) && m.data.byteLength >= 174848) ??
-              readMountedMedia(emu).find((m) => m.data.byteLength >= 174848);
-            if (disk) {
-              await bootGeosFloppy(
-                emu,
-                disk.data instanceof Uint8Array ? disk.data : new Uint8Array(disk.data),
-                spec.bootName ?? disk.name,
-                8,
-                geosMap,
-              );
-            } else {
-              await presentFloppyMountReady(emu, spec.live);
-            }
-          } else {
-            await presentFloppyMountReady(emu, spec.live);
-          }
+          const jiffyDisk = resolveJiffyWant(st.jiffyDos, st.fastLoadCart);
+          await applyJiffyThenRefreshWorkDisk(emu, spec.live.unit, jiffyDisk);
+          await presentFloppyMountReady(emu, spec.live);
           if (loadGenRef.current !== gen) return;
           markSessionPlay(spec.title);
           s.setRunning(true);
@@ -2348,7 +2323,6 @@ export function Grok64App() {
                 !opts.diskLoad &&
                 opts.playKind !== "cart",
               diskMountReady: Boolean(opts.diskLoad),
-              geosFamilyMount: isGeosFamilyDiskName(gameName) || isGeosFamilyDiskName(opts.title ?? ""),
               coldBasicAfterCart: Boolean(opts.coldBasicAfterCart),
               live: {
                 iec: opts.iec ?? sessionIecRef.current ?? useEmu.getState().iecDrive,
@@ -2491,10 +2465,8 @@ export function Grok64App() {
       const payloadView = new Uint8Array(safe);
       const bootName = resolvePlayBootName(mediaName, payloadView, bootNameOverride);
       const forceCartEarly = isCartridgePayload(payloadView, bootName);
-      const geosFamilyDisk =
-        !work && (isGeosFamilyDiskName(bootName) || isGeosFamilyDiskName(filename) || isGeosFamilyDiskName(opts.title ?? ""));
       const detected =
-        work || forceCartEarly || geosFamilyDisk
+        work || forceCartEarly
           ? null
           : detectSoftwareStandard({ names: [mediaName, opts.title, bootName], data: raw });
       softwareStdRef.current = detected;
@@ -2769,48 +2741,6 @@ export function Grok64App() {
         kind: plan.kind,
       });
       const floppyKeep = mustKeep && plan.kind === "floppy";
-      if (geosFamilyDisk && emuRef.current && coreHasFs(emuRef.current)) {
-        playModeRef.current = "disk";
-        sessionIecRef.current = "1541";
-        sessionUnitRef.current = 8;
-        const stGeos = useEmu.getState();
-        const reu = reuForGeosFamilyDisk(bootName, stGeos.reuSize);
-        if (reu !== stGeos.reuSize) {
-          stGeos.setReuSize(reu);
-          applyRuntimeOptions(emuRef.current, { vice_ram_expansion_unit: reu });
-        }
-        stGeos.setIecSlot(8, "1541");
-        const geosMap = { ...stGeos.iecMap, 8: "1541" };
-        s.setBooting(true, `Mounting ${title}…`, 40);
-        persistGateRef.current = false;
-        playLockGen.current += 1;
-        clearBootTimers();
-        const ok = await bootGeosFloppy(emuRef.current, payloadView, bootName, 8, geosMap);
-        if (!ok) {
-          s.setBooting(false);
-          toast.error("GEOS disk did not mount on unit 8 — try Reset, then Play again.");
-          return;
-        }
-        setSessionDisk(bootName, payloadView, 8);
-        useEmu.getState().setInsertedDiskName(filename);
-        s.setCurrentTitle(title);
-        markSessionPlay(title);
-        notePlayMarker();
-        await waitForC64Ready(emuRef.current, 60_000);
-        playLockRef.current = false;
-        muteC64Space(false);
-        inGameplayRef.current = true;
-        persistGateRef.current = true;
-        s.setBooting(false);
-        s.setRunning(true);
-        bumpCrtPaint(emuRef.current);
-        glog("geos-family-play-mount", {
-          bootName,
-          workBytes: viceWorkD64ByteLength(emuRef.current),
-          jiffySetting: stGeos.jiffyDos,
-        });
-        return;
-      }
       let media = payloadView;
       if (plan.kind === "floppy" && origKind === "d64" && !forceCart) {
         media = prepareAutostartDisk(media, bootName, title);
@@ -2896,7 +2826,6 @@ export function Grok64App() {
             vice_autostart: "disabled",
             vice_autostart_warp: "disabled",
             vice_autoloadwarp: "disabled",
-            vice_reset: keepCartAcrossDisk ? "autostart" : "hard",
             vice_ram_expansion_unit: stNow.reuSize,
             ...(plan.trueDrive || attach
               ? {
@@ -2911,9 +2840,6 @@ export function Grok64App() {
           });
           if (attach) applyIecUnit(emuRef.current, playIec, playAttachUnit);
           const flushed = await flushEmuFs(emuRef.current, isIosPhone() ? 2000 : 800);
-          if (attach && plan.kind === "floppy") {
-            await refreshViceWorkDisk(emuRef.current, playAttachUnit);
-          }
           glog("play-mount", { flushed, workDisk: lastAppliedWorkDisk(), ios: isIosPhone() });
           await prepareCore(emuRef.current, {
             live: plan.live,
@@ -2922,10 +2848,11 @@ export function Grok64App() {
             skipJiffy: true,
             driveMap: stNow.iecMap,
           });
-          if (geosFamilyDisk) {
-            await ensureStockKernal(emuRef.current);
+          const jiffyWantPlay = resolveJiffyWant(stNow.jiffyDos, stNow.fastLoadCart);
+          if (attach && plan.kind === "floppy") {
+            await applyJiffyThenRefreshWorkDisk(emuRef.current, playAttachUnit, jiffyWantPlay);
           } else {
-            await applyJiffyDos(emuRef.current, resolveJiffyWant(stNow.jiffyDos, stNow.fastLoadCart));
+            await applyJiffyDos(emuRef.current, jiffyWantPlay);
           }
           if (plan.kind === "floppy" && !work) {
             useEmu.getState().setInsertedDiskName(filename);
@@ -3324,17 +3251,9 @@ export function Grok64App() {
     const iec = useEmu.getState().iecDrive;
     const boot = bootFileName(file.name, kind);
     const mounted = bootFileOf(emuRef.current);
-    let ok = false;
-    if (isGeosFamilyDiskName(file.name)) {
-      const stGeos = useEmu.getState();
-      const geosMap = { ...stGeos.iecMap, [unit]: "1541" };
-      stGeos.setIecSlot(unit, "1541");
-      ok = await bootGeosFloppy(emuRef.current, media, file.name, unit, geosMap);
-    } else {
-      ok = mounted
-        ? attachAutostartDisk(emuRef.current, media, mounted, iec, unit)
-        : mountDiskOnUnit(emuRef.current, unit, media, boot, iec);
-    }
+    const ok = mounted
+      ? attachAutostartDisk(emuRef.current, media, mounted, iec, unit)
+      : mountDiskOnUnit(emuRef.current, unit, media, boot, iec);
     if (!ok) {
       toast.error("Could not mount that disk");
       return;
@@ -3353,6 +3272,7 @@ export function Grok64App() {
       vice_drive_true_emulation: "enabled",
       vice_virtual_device_traps: "disabled",
     });
+    await applyJiffyThenRefreshWorkDisk(emuRef.current, unit, useEmu.getState().jiffyDos);
     await flushEmuFs(emuRef.current, 600);
     await touchPlayed(item.id);
     const label = d64DiskName(media) ?? item.name.replace(/\.[a-z0-9]{2,4}$/i, "");

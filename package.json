@@ -40,7 +40,7 @@
     "test:desktop-catalog-play": "node scripts/desktop-catalog-play.mjs",
     "test:desktop-geos": "node scripts/desktop-geos-e2e.mjs",
     "test:desktop-geos-proof": "node scripts/desktop-geos-desktop-proof.mjs",
-    "test:desktop-geos-jiffy-disk": "node scripts/desktop-geos-jiffy-disk-proof.mjs",
+    "test:desktop-jiffy-floppy-dir": "node scripts/desktop-jiffy-floppy-dir-proof.mjs",
     "test:desktop-wheels-proof": "node scripts/desktop-wheels-proof.mjs",
     "test:desktop-drive-combo-matrix": "node scripts/desktop-drive-combo-matrix.mjs",
     "test:cart-matrix-ss-proof": "node scripts/cart-matrix-ss-headless-proof.mjs",
