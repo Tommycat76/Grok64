@@ -30,6 +30,7 @@
     "test:desktop-geos-insert-list": "node scripts/desktop-geos-insert-list-proof.mjs",
     "test:desktop-geos-insert-ui-jiffy": "node scripts/desktop-geos-insert-ui-jiffy-proof.mjs",
     "test:desktop-geos-insert-ui-stock": "node scripts/desktop-geos-insert-ui-stock-proof.mjs",
+    "test:desktop-tde-dirty-hands-on": "node scripts/desktop-tde-dirty-hands-on-proof.mjs",
     "test:desktop-custom-matrix": "NODE_OPTIONS=--max-old-space-size=6144 node scripts/desktop-custom-core-matrix.mjs",
     "test:desktop-a1bacdc": "NODE_OPTIONS=--max-old-space-size=6144 node scripts/desktop-a1bacdc-qa.mjs",
     "test:desktop-real-keyboard": "node scripts/desktop-real-keyboard-qa.mjs",

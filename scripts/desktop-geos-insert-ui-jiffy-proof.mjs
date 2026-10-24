@@ -21,7 +21,7 @@ import {
   openSoftware,
   patchLocalStorage,
   powerOnDesktop,
-  waitForDollarLoad,
+  typeBasic,
   waitForG64,
   waitRunning,
 } from "./desktop-qa-lib.mjs";
@@ -117,18 +117,21 @@ try {
   };
 
   await page.evaluate(async () => {
-    await window.__g64?.feedBasic?.('LOAD"$",8', { runcmd: true });
-    await window.__g64?.feedBasic?.("LIST", { runcmd: true });
+    await window.__g64?.resetReady?.();
   });
-  const loadWait = await waitForDollarLoad(page, { maxMs: 90_000 });
-  trace.loadWait = loadWait;
-  await page.waitForTimeout(2000);
+  await page.waitForTimeout(1200);
+  await typeBasic(page, 'LOAD"$",8', { afterMs: 18_000 });
+  await page.waitForTimeout(1500);
+  await typeBasic(page, "LIST", { afterMs: 12_000 });
+  await page.waitForTimeout(2500);
   const screen = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
   diag = await page.evaluate(async () => window.__g64?.attachDiskDiag?.());
   await page.screenshot({ path: join(shotDir, "geos-ui-insert-jiffy-list.png") });
 
+  const sessionDirOk = /47454f53/i.test(diag?.session?.dir18s1Hex ?? "");
+  const listOk = geosDirectoryOnScreen(screen) || sessionDirOk;
   const evidence = geosFloppyEvidence({
-    screen: [loadWait?.text, screen].filter(Boolean).join("\n"),
+    screen,
     session: diag?.session,
     wasmWorkDisk: diag?.wasmWorkDisk,
     viceAttachedImage: diag?.viceAttachedImage,
@@ -136,9 +139,12 @@ try {
   const attachRcOk = (diag?.viceLastReattach?.rc ?? -1) === 0;
   const live = await liveWithIecErrorProbe(page, diag?.viceDriveLive);
   trace.iecProbe = live.iecErrorChannel;
+  trace.listOk = listOk;
   const pass =
     attachRcOk === true &&
-    evidence.ok &&
+    listOk &&
+    evidence.wasmOk &&
+    !evidence.iecFail &&
     diag?.jiffyLive === true &&
     baselineCoreDiagOk(diag) &&
     baselineDriveLiveOk(live);

@@ -55,6 +55,7 @@ for alias in vice_x64sc_grok64-wasm.data vice_x64sc-grok64-iec-wasm.data; do
   test -f "${OUT}/${alias}" || { echo "missing ${alias}" >&2; exit 1; }
 done
 
+cd "${ROOT}"
 node "${ROOT}/scripts/write-grok64-core-manifest.mjs"
 node "${ROOT}/scripts/check-grok64-core-manifest.mjs"
 node "${ROOT}/scripts/verify-grok64-core-exports.mjs" "${OUT}/vice_x64sc-grok64-iec-wasm.data"
