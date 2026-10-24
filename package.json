@@ -43,6 +43,7 @@
     "test:desktop-wheels-proof": "node scripts/desktop-wheels-proof.mjs",
     "test:cart-matrix-ss-proof": "node scripts/cart-matrix-ss-headless-proof.mjs",
     "test:disk-mount-no-load": "node scripts/disk-mount-no-load-proof.mjs",
+    "test:tom-library-integrity": "node scripts/tom-library-integrity-qa.mjs",
     "test:browser-smoke-powered": "node scripts/browser-smoke-powered.mjs",
     "test:browser-smoke-404": "node scripts/browser-smoke-powered.mjs",
     "test:desktop-demo": "node scripts/desktop-demo-e2e.mjs",

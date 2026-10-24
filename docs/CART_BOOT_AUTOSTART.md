@@ -54,7 +54,8 @@ When **Play** lands on stock BASIC but QA passes elsewhere, compare **data** (li
 | **Play gate** | Invalid CRT header, &lt;4096 bytes, or library `size` ≠ loaded bytes → **error toast**, boot aborted |
 | **Import gate** | Same CRT rules when saving to **On this device** (re-import if an old row was truncated) |
 | **Library scan** | About → **Scan library CRTs** — flags rows overwritten with a blank 174848-byte `.d64`; **Delete corrupt rows** one-click |
-| **Autosave guard** | Periodic library save only updates **disk** rows (`*.d64` / …), never CRT/PRG — fixes older bug that wrote WORK DISK zeros into `.crt` names |
+| **Autosave guard** | `persistLibIdRef` only targets **floppy** library rows; `updateFileData` refuses CRT names / blank D64; no persist during **cart** play mode |
+| **Import** | Multi-file **On this device** import does not auto-Play (single-file GEOS pick still can) |
 
 **`attachCode`:** `-1` = boot file write failed; `0` = CRT not visible as mounted boot/media; `>0` = CRT hardware type byte from the header (e.g. `2` = Super Snapshot v5) when attach succeeded.
 

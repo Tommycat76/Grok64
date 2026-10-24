@@ -331,7 +331,8 @@ export function Grok64App() {
   const emuRef = useRef(null);
   const blobRef = useRef(null);
   const joyRef = useRef({ x: 0, y: 0, fire: false });
-  const libIdRef = useRef(null);
+  /** IndexedDB row that may receive floppy autosave — never CRT/PRG library ids. */
+  const persistLibIdRef = useRef(null);
   const persistTimer = useRef(null);
   const playBufferRef = useRef(async () => {});
   const playLocalRef = useRef(async (_item) => {});
@@ -775,6 +776,27 @@ export function Grok64App() {
       closeSoftware: () => useEmu.getState().setLibraryOpen(false),
       libraryCount: async () => (await listLibrary()).length,
       listLibraryItems: () => listLibrary(),
+      librarySnapshot: async () => {
+        const items = await listLibrary();
+        const snap = [];
+        for (const item of items) {
+          if (isWorkDisk(item.name)) continue;
+          const file = await getFile(item.id);
+          if (!file) continue;
+          const u8 = new Uint8Array(file.data);
+          snap.push({
+            id: item.id,
+            name: item.name,
+            size: file.size,
+            byteLength: u8.byteLength,
+            kind: item.kind,
+            headHex16: [...u8.subarray(0, 16)]
+              .map((b) => b.toString(16).padStart(2, "0"))
+              .join(" "),
+          });
+        }
+        return snap;
+      },
       playLibraryByName: async (name) => {
         const items = await listLibrary();
         const item = items.find((i) => i.name === name);
@@ -1361,7 +1383,7 @@ export function Grok64App() {
     ) {
       return;
     }
-    const id = libIdRef.current;
+    const id = persistLibIdRef.current;
     const emu = emuRef.current;
     if (!id || !emu) return;
     const file = await getFile(id);
@@ -1571,6 +1593,7 @@ export function Grok64App() {
     setCartLive(false);
     st.setFastLoadCart(null);
     removeSessionCart();
+    persistLibIdRef.current = null;
     persistGateRef.current = false;
     pendingKickRef.current = false;
     playLockRef.current = false;
@@ -2344,7 +2367,6 @@ export function Grok64App() {
     async (filename, data, opts = {}) => {
       await persistNow();
       let mediaName = filename;
-      libIdRef.current = opts.libraryId ?? null;
       playPayloadRef.current = { filename: mediaName, data, opts };
       const playUnit = opts.iecUnit ?? useEmu.getState().iecUnit;
       setIecDevice(playUnit);
@@ -2467,6 +2489,10 @@ export function Grok64App() {
         jiffyWant: jiffyWantSetting,
         jiffyLive,
       });
+      persistLibIdRef.current =
+        opts.libraryId && !work && plan.kind === "floppy" && isDiskKind(kindOf(bootName))
+          ? opts.libraryId
+          : null;
       if (!work && (plan.kind === "cart" || forceCart)) {
         const cartValidation = validateCartForPlay(
           payloadView,
@@ -3303,7 +3329,7 @@ export function Grok64App() {
       .then(() => {
         void ensureWorkDisk()
           .then(async (disk) => {
-            libIdRef.current = disk.id;
+            persistLibIdRef.current = disk.id;
             st.setLibrary(await listLibrary());
           })
           .catch(() => undefined);
@@ -3329,6 +3355,7 @@ export function Grok64App() {
     cartLiveRef.current = false;
     setCartLive(false);
     st.setFastLoadCart(null);
+    persistLibIdRef.current = null;
     muteC64Space(false);
     const el = document.getElementById("grok64-player");
     destroyEmu(emuRef.current, el);

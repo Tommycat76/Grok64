@@ -68,7 +68,8 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
       }
       await refresh();
       toast.success(list.length === 1 ? `Saved ${list[0]!.name}` : `Saved ${list.length} files`);
-      if (!runSaved(saved)) setTab("library");
+      if (saved.length === 1 && !runSaved(saved)) setTab("library");
+      else setTab("library");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not import");
     } finally {
@@ -96,7 +97,8 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
       await refresh();
       setUrl("");
       toast.success(`Saved ${res.name}`);
-      if (!runSaved(saved)) setTab("library");
+      if (saved.length === 1 && !runSaved(saved)) setTab("library");
+      else setTab("library");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Download failed");
     } finally {

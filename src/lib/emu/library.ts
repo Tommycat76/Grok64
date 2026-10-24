@@ -1,5 +1,6 @@
 import type { LibraryItem, StoredFile, IecUnit } from "./types";
 import { kindOf } from "./formats";
+import { libraryRowAllowsDiskWriteBack } from "./library-writeback";
 import { publicUrl } from "@/lib/public-url";
 
 const DB_NAME = "grok64";
@@ -90,15 +91,28 @@ export async function putFile(
   return row;
 }
 
-export async function updateFileData(id: string, data: ArrayBuffer): Promise<void> {
+/** Persist mounted disk bytes — refuses CRT/PRG rows and type/size morph (e.g. blank D64 → .crt name). */
+export async function updateFileData(id: string, data: ArrayBuffer): Promise<boolean> {
   const file = await getFile(id);
-  if (!file) return;
+  if (!file) return false;
+  if (!libraryRowAllowsDiskWriteBack(file.name, data)) {
+    if (typeof console !== "undefined") {
+      console.warn("[grok64] refused library write-back", {
+        name: file.name,
+        storedSize: file.size,
+        bytes: data.byteLength,
+      });
+    }
+    return false;
+  }
   file.data = data;
   file.size = data.byteLength;
+  file.kind = kindOf(file.name);
   const db = await openDb();
   const tx = db.transaction(STORE, "readwrite");
   tx.objectStore(STORE).put(file);
   await txDone(tx);
+  return true;
 }
 
 export async function putSaveState(id: string, data: ArrayBuffer, title?: string): Promise<void> {
