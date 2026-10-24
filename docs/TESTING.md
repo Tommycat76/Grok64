@@ -80,7 +80,7 @@ Automated by `npm run test:desktop-regression` unless noted **manual**.
 | Model (C64 Auto, PAL, NTSC, C64C, Fast, SCPU, C128, …) | **manual** per model |
 | SuperCPU + SIMM + turbo | **manual** |
 | IEC #8–#11 slots (Off, 1541, 1581, SD2IEC, CMD) | `sd2iec-disk-swap`, matrix `sd2iec-slot` |
-| **Drive combo matrix** (1541/1571/1581/CMD/SD2IEC/REU, all unit orders, LOAD/COPY pairs, Jiffy/warp) | **PARKED** — spec `docs/DRIVE_COMBO_MATRIX.md`; Tom hands-on baseline PASS 2026-10-24; unpark only when Tom says so |
+| **Drive combo matrix** (1541/1571/1581/CMD/SD2IEC/REU, all unit orders, LOAD/COPY pairs, Jiffy/warp) | **PARKED** — `npm run test:desktop-drive-combo-matrix` (no-op until `GROK64_DRIVE_COMBO_UNPARK=1`); spec `docs/DRIVE_COMBO_MATRIX.md` |
 | GEOS deskTop proof | `npm run test:desktop-geos-proof` — canvas + pointer nudge |
 | Wheels + REU | `npm run test:desktop-wheels-proof` — needs `fixtures/geos/Wheels64.d64` or `GROK64_WHEELS_URL` |
 | Cart matrix (stock vs Jiffy) | `npm run test:desktop-xdotool-cart-matrix`; partial: `CART_MATRIX_ONLY=ss4,fc3,epyx-fl` |

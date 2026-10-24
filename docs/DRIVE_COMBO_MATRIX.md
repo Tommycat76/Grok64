@@ -106,7 +106,7 @@ Do **not** block IEC matrix on S/R; link rows as `SKIP (not modeled)` until then
 3. Optional: `window.__g64?.screenText?.()` snippet in report JSON.
 4. Console: no uncaught errors.
 
-Artifact root: `screenshots/drive-matrix/` and `artifacts/desktop-drive-combo-matrix/` (script TBD when unparked).
+Artifact root: `screenshots/drive-matrix/` and `artifacts/desktop-drive-combo-matrix/`. Harness: `npm run test:desktop-drive-combo-matrix` (exits 0 while **PARKED**; set `GROK64_DRIVE_COMBO_UNPARK=1` when Tom unparks). Catalog: `scripts/drive-combo-catalog.mjs`.
 
 ---
 
