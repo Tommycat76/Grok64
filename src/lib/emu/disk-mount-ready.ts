@@ -15,6 +15,7 @@ import type { IecDrive, IecUnit } from "./types";
 import { isIosPhone } from "./detect";
 import { glog } from "./debug";
 import { runMountStage } from "./disk-mount-stage";
+import { lastViceDiskAttach } from "./vice-disk";
 
 /**
  * After a disk image is on unit 8: true drive, hard reset to bare READY.
@@ -37,7 +38,8 @@ export async function presentFloppyMountReady(
     });
     const rc = await runMountStage("vice-reattach-session", () => viceReattachSessionDisk(emu, live.unit), 60_000);
     if (rc !== 0) {
-      throw new Error(`VICE disk reattach failed (rc=${rc})`);
+      const last = lastViceDiskAttach(live.unit);
+      throw new Error(`VICE disk reattach failed (rc=${rc})${last ? ` path=${last.path} attachRc=${last.rc}` : ""}`);
     }
     await runMountStage("flush-after-reattach", () => flushEmuFs(emu, isIosPhone() ? 2000 : 400));
     bumpCrtPaint(emu);

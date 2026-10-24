@@ -73,7 +73,7 @@ async function runFromLibrary(page, label) {
   const logs = await page.evaluate(() =>
     (window.__g64log ?? []).filter((l) => /mount-stage|mount-fail|hot-swap|gcr-hot/.test(l)),
   );
-  const overflow = logs.some((l) => /stack|RangeError/i.test(l));
+  const overflow = logs.some((l) => /Maximum call stack|RangeError/i.test(l));
   await page.screenshot({ path: join(shotDir, `${label}-after-run.png`), fullPage: true });
   return { cleared, overflow, logs: logs.slice(-16) };
 }
@@ -109,9 +109,12 @@ try {
   await importOnce(page);
   const first = await runFromLibrary(page, "hot-swap-run");
   const diag = await page.evaluate(async () => window.__g64?.attachDiskDiag?.());
+  const attached = typeof diag?.viceAttachedImage === "string" ? diag.viceAttachedImage : "";
   const attachOk =
-    diag?.viceLastReattach?.rc === 0 ||
-    (typeof diag?.viceAttachedImage === "string" && diag.viceAttachedImage.length > 0);
+    diag?.viceLastReattach?.rc === 0 &&
+    attached.length > 0 &&
+    !/\/blank\.d64$/i.test(attached) &&
+    !/^work\s*disk/i.test(attached);
   report.steps.push({
     id: "hot-swap-mount",
     pass: first.cleared && !first.overflow && attachOk,

@@ -2360,7 +2360,9 @@ export async function viceReattachDiskOnEmuThread(
       }
     }
   } else {
-    rc = viceReattachDisk(emu, unit, path, drive);
+    rc = mod._grok64_disk_attach?.(unit, drive, path) ?? -1;
+    const attachRc = mod._grok64_disk_last_attach_rc?.();
+    if (rc < 0 && typeof attachRc === "number" && attachRc >= 0) rc = attachRc;
   }
   const after = rc === 0 ? viceAttachedImage(emu, unit, drive) : null;
   recordViceLastAttach(unit, { path, rc, before: null, after, at: Date.now() });
@@ -2381,8 +2383,7 @@ export async function viceReattachSessionDisk(emu: EjsInstance | null, unit: Iec
   if (!candidates.length) return -1;
   let lastRc = -1;
   for (const candidate of candidates) {
-    // Synchronous poll loop — deferred attach is flushed inside grok64_sd2iec_poll().
-    lastRc = viceReattachDisk(emu, unit, candidate);
+    lastRc = await viceReattachDiskOnEmuThread(emu, unit, candidate);
     if (lastRc === 0) return 0;
     await new Promise((r) => setTimeout(r, 80));
   }

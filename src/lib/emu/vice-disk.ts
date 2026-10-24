@@ -197,10 +197,11 @@ export function viceDiskAttachCandidates(
     push(`/${base}`);
     push(base);
   } else {
+    for (const p of WORK_DISK_PATHS) push(p);
+    push("/data/saves/vice_work.d64");
+    if (saveDir) push(`${saveDir}/vice_work.d64`);
     push(`/${base}`);
-    if (!saveDir) {
-      for (const p of WORK_DISK_PATHS) push(p);
-    }
+    push(base);
   }
 
   return out.filter((p) => pathExistsOnFs(emu, p));
@@ -230,14 +231,12 @@ export function viceReattachDisk(
   const mod = diskMod(emu)!;
   try {
     let rc = mod._grok64_disk_attach?.(unit, drive, path) ?? -1;
-    if (rc < 0) {
-      const attachRc = mod._grok64_disk_last_attach_rc?.();
-      if (typeof attachRc === "number" && attachRc >= 0) rc = attachRc;
-    }
+    const attachRc = mod._grok64_disk_last_attach_rc?.();
+    if (rc < 0 && typeof attachRc === "number" && attachRc >= 0) rc = attachRc;
     const after =
       rc === 0 ? diskNameFromModule(mod as DiskModule & { UTF8ToString?: (p: number) => string }, unit, drive) : null;
     lastAttachByUnit.set(unit, { path, rc, before: null, after, at: Date.now() });
-    glog("vice-disk-reattach", { unit, path, rc, after, sync: true });
+    glog("vice-disk-reattach", { unit, path, rc, after, attachRc: mod._grok64_disk_last_attach_rc?.() });
     return rc;
   } catch (e) {
     const stack =
