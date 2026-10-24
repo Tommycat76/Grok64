@@ -104,7 +104,9 @@ import {
   diskAttachFingerprint,
   validateFloppyLibraryPayload,
 } from "@/lib/emu/disk-attach-diag";
+import { grok64DiskApi, grok64WasmApi, grok64WorkDiskRefreshExportReady } from "@/lib/emu/grok64-api";
 import {
+  bindGrok64DiskExports,
   grok64DiskExportsReady,
   lastViceDiskAttach,
   probeViceAttachPaths,
@@ -112,6 +114,7 @@ import {
   viceDiskLastAttachDiag,
   viceRetroSaveDirectory,
 } from "@/lib/emu/vice-disk";
+import { bindGrok64WasmExports } from "@/lib/emu/grok64-vice-bridge";
 import {
   c64KeyboardShouldDefer,
   enqueueC64KeyboardStroke,
@@ -917,12 +920,16 @@ export function Grok64App() {
           viceSaveDirectory: viceRetroSaveDirectory(emuRef.current),
           viceDiskExports: grok64DiskExportsReady(emuRef.current),
           diskExportsPresent: grok64DiskExportsReady(emuRef.current),
-          workDiskRefreshExport: Boolean(
-            (emuRef.current?.Module as { _grok64_work_disk_refresh?: unknown })?._grok64_work_disk_refresh,
-          ),
-          diskAttachDiagExport: Boolean(
-            (emuRef.current?.Module as { _grok64_disk_last_attach_diag?: unknown })?._grok64_disk_last_attach_diag,
-          ),
+          workDiskRefreshExport: (() => {
+            const mod = emuRef.current?.Module;
+            if (mod) bindGrok64DiskExports(mod as Parameters<typeof bindGrok64DiskExports>[0]);
+            return grok64WorkDiskRefreshExportReady(mod);
+          })(),
+          diskAttachDiagExport: (() => {
+            const mod = emuRef.current?.Module;
+            if (mod) bindGrok64DiskExports(mod as Parameters<typeof bindGrok64DiskExports>[0]);
+            return typeof grok64DiskApi(mod)?.diskLastAttachDiag === "function";
+          })(),
           viceLastAttachDiag: viceDiskLastAttachDiag(emuRef.current),
           attachPathProbe: probeViceAttachPaths(
             emuRef.current,
@@ -1338,8 +1345,9 @@ export function Grok64App() {
           const unit = Number(Object.entries(st.iecMap).find(([, v]) => v === "sd2iec")?.[0] ?? 8) as 8 | 9 | 10 | 11;
           wireGrok64ViceHost(emu);
           remountSd2iecFromParts(emu, unit);
-          const mod = emu.Module as { _grok64_sd2iec_attach?: unknown } | undefined;
-          if (typeof mod?._grok64_sd2iec_attach !== "function") setSd2iecWasmIecOnly(false);
+          const mod = emu.Module as Parameters<typeof bindGrok64WasmExports>[0] | undefined;
+          if (mod) bindGrok64WasmExports(mod);
+          if (!mod || typeof grok64WasmApi(mod)?.sd2iecAttach !== "function") setSd2iecWasmIecOnly(false);
           attachSd2iecBus(emu, unit);
         }
       },

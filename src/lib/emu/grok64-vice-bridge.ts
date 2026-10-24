@@ -13,6 +13,7 @@ import {
   type IecDeviceNumber,
 } from "./sd2iec";
 import { bindGrok64DiskExports } from "./vice-disk";
+import { grok64WasmApi, type Grok64ModuleBag } from "./grok64-api";
 import {
   grok64PristineCwrap,
   type Grok64WasmModule,
@@ -23,16 +24,7 @@ import {
 export type Grok64Emu = EjsLike;
 const asSd = (emu: Grok64Emu | null): EjsLike | null => emu;
 
-type Grok64Module = {
-  _grok64_sd2iec_attach?: (unit: number) => void;
-  _grok64_sd2iec_poll?: () => void;
-  _grok64_c64_read?: (addr: number) => number;
-  _grok64_c64_write?: (addr: number, value: number) => void;
-  _grok64_kbdbuf_feed?: (text: string) => void;
-  _grok64_kbdbuf_feed_runcmd?: (text: string) => void;
-  _grok64_sd2iec_detach?: (unit: number) => void;
-  _grok64_cartridge_trigger_freeze?: () => void;
-  _grok64_retro_keyboard?: (code: number, down: number, character: number, mod: number) => void;
+type Grok64Module = Grok64ModuleBag & {
   grok64Sd2iecHost?: {
     poll: () => void;
     attach: (unit: number) => void;
@@ -49,76 +41,53 @@ export function grok64IecBackend(): Grok64IecBackend {
 
 export function probeGrok64ViceModule(emu: Grok64Emu | null): boolean {
   const mod = emu?.Module as Grok64Module | undefined;
-  return Boolean(mod?._grok64_sd2iec_poll || mod?._grok64_sd2iec_attach || mod?.grok64Sd2iecHost);
+  const api = grok64WasmApi(mod);
+  return Boolean(api?.sd2iecPoll || api?.sd2iecAttach || mod?.grok64Sd2iecHost);
 }
 
 /** Bind Emscripten exports onto Module (idempotent, once per Module). */
-export function bindGrok64WasmExports(mod: Grok64Module & { cwrap?: (...args: unknown[]) => unknown }): void {
+export function bindGrok64WasmExports(mod: Grok64ModuleBag): void {
   if (isGrok64WasmExportsBound(mod)) return;
   const wrap = grok64PristineCwrap(mod as Grok64WasmModule);
   if (!wrap) return;
-  markGrok64WasmExportsBound(mod);
   try {
-    if (!mod._grok64_sd2iec_attach) {
-      mod._grok64_sd2iec_attach = wrap("grok64_sd2iec_attach", null, ["number"]) as (unit: number) => void;
+    if (!mod.grok64WasmApi) {
+      mod.grok64WasmApi = {
+        sd2iecAttach: wrap("grok64_sd2iec_attach", null, ["number"]) as (unit: number) => void,
+        sd2iecPoll: wrap("grok64_sd2iec_poll", null, []) as () => void,
+        sd2iecDetach: wrap("grok64_sd2iec_detach", null, ["number"]) as (unit: number) => void,
+        c64Read: wrap("grok64_c64_read", "number", ["number"]) as (addr: number) => number,
+        c64Write: wrap("grok64_c64_write", null, ["number", "number"]) as (
+          addr: number,
+          value: number,
+        ) => void,
+        kbdbufFeed: wrap("grok64_kbdbuf_feed", "number", ["string"]) as (text: string) => number,
+        kbdbufFeedRuncmd: wrap("grok64_kbdbuf_feed_runcmd", "number", ["string"]) as (text: string) => number,
+        kbdbufFlush: wrap("grok64_kbdbuf_flush", null, []) as () => void,
+        cartridgeTriggerFreeze: wrap("grok64_cartridge_trigger_freeze", null, []) as () => void,
+        retroKeyboard: wrap("grok64_retro_keyboard", null, [
+          "number",
+          "number",
+          "number",
+          "number",
+        ]) as (code: number, down: number, character: number, mod: number) => void,
+        retroGetMemoryData: wrap("retro_get_memory_data", "number", ["number"]) as (id: number) => number,
+        retroGetMemorySize: wrap("retro_get_memory_size", "number", ["number"]) as (id: number) => number,
+      };
     }
-    if (!mod._grok64_sd2iec_poll) {
-      mod._grok64_sd2iec_poll = wrap("grok64_sd2iec_poll", null, []) as () => void;
-    }
-    if (!mod._grok64_c64_read) {
-      mod._grok64_c64_read = wrap("grok64_c64_read", "number", ["number"]) as (addr: number) => number;
-    }
-    if (!mod._grok64_c64_write) {
-      mod._grok64_c64_write = wrap("grok64_c64_write", null, ["number", "number"]) as (
-        addr: number,
-        value: number,
-      ) => void;
-    }
-    if (!mod._grok64_kbdbuf_feed) {
-      mod._grok64_kbdbuf_feed = wrap("grok64_kbdbuf_feed", null, ["string"]) as (text: string) => void;
-    }
-    if (!mod._grok64_kbdbuf_feed_runcmd) {
-      mod._grok64_kbdbuf_feed_runcmd = wrap("grok64_kbdbuf_feed_runcmd", null, ["string"]) as (text: string) => void;
-    }
-    if (!mod._grok64_sd2iec_detach) {
-      mod._grok64_sd2iec_detach = wrap("grok64_sd2iec_detach", null, ["number"]) as (unit: number) => void;
-    }
-    if (!mod._grok64_cartridge_trigger_freeze) {
-      mod._grok64_cartridge_trigger_freeze = wrap("grok64_cartridge_trigger_freeze", null, []) as () => void;
-    }
-    if (!mod._grok64_retro_keyboard) {
-      mod._grok64_retro_keyboard = wrap("grok64_retro_keyboard", null, [
-        "number",
-        "number",
-        "number",
-        "number",
-      ]) as (code: number, down: number, character: number, mod: number) => void;
-    }
-    bindGrok64DiskExports(mod as Parameters<typeof bindGrok64DiskExports>[0]);
-    const modAny = mod as {
-      _retro_get_memory_data?: (id: number) => number;
-      _retro_get_memory_size?: (id: number) => number;
-    };
-    if (!modAny._retro_get_memory_data) {
-      modAny._retro_get_memory_data = wrap("retro_get_memory_data", "number", ["number"]) as (
-        id: number,
-      ) => number;
-    }
-    if (!modAny._retro_get_memory_size) {
-      modAny._retro_get_memory_size = wrap("retro_get_memory_size", "number", ["number"]) as (
-        id: number,
-      ) => number;
-    }
+    bindGrok64DiskExports(mod);
+    markGrok64WasmExportsBound(mod);
   } catch {
     /* stock core */
   }
 }
 
 export function ensureGrok64WasmExports(emu: Grok64Emu | null): boolean {
-  const mod = emu?.Module as Grok64Module & { cwrap?: (...args: unknown[]) => unknown };
+  const mod = emu?.Module as Grok64ModuleBag | undefined;
   if (!mod) return false;
   bindGrok64WasmExports(mod);
-  return Boolean(mod._grok64_sd2iec_attach && mod._grok64_c64_read);
+  const api = grok64WasmApi(mod);
+  return Boolean(api?.sd2iecAttach && api?.c64Read);
 }
 
 export function wireGrok64ViceHost(emu: Grok64Emu | null): Grok64IecBackend {
@@ -135,7 +104,8 @@ export function wireGrok64ViceHost(emu: Grok64Emu | null): Grok64IecBackend {
     };
   };
   bindGrok64WasmExports(mod);
-  const hasWasmExports = Boolean(mod._grok64_sd2iec_attach);
+  const api = grok64WasmApi(mod);
+  const hasWasmExports = Boolean(api?.sd2iecAttach);
   setSd2iecWasmIecOnly(hasWasmExports);
   mod.grok64Host = {
     ...grok64WasmIecHost,
@@ -149,15 +119,15 @@ export function wireGrok64ViceHost(emu: Grok64Emu | null): Grok64IecBackend {
       writeC64Byte(emu, addr, value);
     },
   };
-  if (hasWasmExports) {
+  if (hasWasmExports && api) {
     mod.grok64Sd2iecHost = {
       attach: (unit: number) => {
         attachSd2iecBus(asSd(emu), unit as IecDeviceNumber);
-        mod._grok64_sd2iec_attach?.(unit);
+        api.sd2iecAttach(unit);
       },
       poll: () => {
         void tickSd2iec(asSd(emu)!);
-        mod._grok64_sd2iec_poll?.();
+        api.sd2iecPoll();
       },
     };
     backend = "wasm-sd2iec";
@@ -171,8 +141,9 @@ export function wireGrok64ViceHost(emu: Grok64Emu | null): Grok64IecBackend {
 export async function tickGrok64Iec(emu: Grok64Emu | null): Promise<void> {
   if (!emu) return;
   const mod = emu.Module as Grok64Module;
-  if (backend === "wasm-sd2iec" && mod._grok64_sd2iec_poll) {
-    mod._grok64_sd2iec_poll();
+  const api = grok64WasmApi(mod);
+  if (backend === "wasm-sd2iec" && api?.sd2iecPoll) {
+    api.sd2iecPoll();
     return;
   }
   await tickSd2iec(asSd(emu)!);
@@ -181,9 +152,9 @@ export async function tickGrok64Iec(emu: Grok64Emu | null): Promise<void> {
 export function attachGrok64Sd2iec(emu: Grok64Emu | null, unit: IecDeviceNumber): boolean {
   if (!emu) return false;
   wireGrok64ViceHost(emu);
-  const mod = emu.Module as Grok64Module;
-  if (backend === "wasm-sd2iec" && mod._grok64_sd2iec_attach) {
-    mod._grok64_sd2iec_attach(unit);
+  const api = grok64WasmApi(emu.Module as Grok64Module);
+  if (backend === "wasm-sd2iec" && api?.sd2iecAttach) {
+    api.sd2iecAttach(unit);
     attachSd2iecBus(asSd(emu), unit);
     return true;
   }
@@ -194,7 +165,7 @@ export function detachGrok64Sd2iec(emu: Grok64Emu | null, unit: IecDeviceNumber)
   if (!emu) return;
   const mod = emu.Module as Grok64Module;
   bindGrok64WasmExports(mod);
-  mod._grok64_sd2iec_detach?.(unit);
+  grok64WasmApi(mod)?.sd2iecDetach?.(unit);
 }
 
 export { grok64RetroKeyboardAvailable, grok64RetroKeyboardFromDom } from "./grok64-keyboard";

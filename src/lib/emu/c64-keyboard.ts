@@ -1,7 +1,8 @@
 /** Inject BASIC lines via VICE kbdbuf (or C64 KERNAL queue at $0277 / $C6). */
 
 import { readC64Byte, writeC64Byte, type RamEmu } from "./c64-memory";
-import { grok64PristineCwrap, type Grok64WasmModule } from "./grok64-wasm-bind";
+import { grok64WasmApi, type Grok64ModuleBag } from "./grok64-api";
+import { bindGrok64WasmExports } from "./grok64-vice-bridge";
 import { dispatchC64Key, typeC64 } from "./keys";
 
 const KBD_BUF = 0x0277;
@@ -9,10 +10,7 @@ const KBD_CNT = 0x00c6;
 const KBD_MAX = 10;
 
 type KbdEmu = RamEmu & {
-  Module?: {
-    _grok64_kbdbuf_feed?: (text: string) => number;
-    _grok64_kbdbuf_feed_runcmd?: (text: string) => number;
-    _grok64_kbdbuf_flush?: () => void;
+  Module?: Grok64ModuleBag & {
     cwrap?: (name: string, ret: string | null, args: string[]) => (...a: unknown[]) => unknown;
   };
 };
@@ -29,42 +27,27 @@ function sleep(ms: number) {
   });
 }
 
-function bindKbdExports(emu: KbdEmu | null): KbdEmu["Module"] | null {
+function bindKbdExports(emu: KbdEmu | null) {
   const mod = emu?.Module;
-  const wrap = grok64PristineCwrap(mod as Grok64WasmModule);
-  if (!mod || !wrap) return mod ?? null;
-  try {
-    if (!mod._grok64_kbdbuf_feed_runcmd) {
-      mod._grok64_kbdbuf_feed_runcmd = wrap("grok64_kbdbuf_feed_runcmd", "number", ["string"]) as (
-        t: string,
-      ) => number;
-    }
-    if (!mod._grok64_kbdbuf_flush) {
-      mod._grok64_kbdbuf_flush = wrap("grok64_kbdbuf_flush", null, []) as () => void;
-    }
-    if (!mod._grok64_kbdbuf_feed) {
-      mod._grok64_kbdbuf_feed = wrap("grok64_kbdbuf_feed", "number", ["string"]) as (t: string) => number;
-    }
-  } catch {
-    /* stock core */
-  }
-  return mod;
+  if (!mod) return null;
+  if (!grok64WasmApi(mod) && mod.cwrap) bindGrok64WasmExports(mod);
+  return grok64WasmApi(mod);
 }
 
 async function pumpKbdbuf(emu: KbdEmu | null, ms = 6000): Promise<void> {
-  const mod = bindKbdExports(emu);
-  if (!mod?._grok64_kbdbuf_flush) return;
+  const api = bindKbdExports(emu);
+  if (!api?.kbdbufFlush) return;
   const t0 = Date.now();
   while (Date.now() - t0 < ms) {
-    mod._grok64_kbdbuf_flush!();
+    api.kbdbufFlush();
     await sleep(16);
   }
 }
 
 async function kbdbufFeed(emu: KbdEmu | null, text: string, runcmd = false): Promise<boolean> {
-  const mod = bindKbdExports(emu);
-  if (!mod) return false;
-  const fn = runcmd ? mod._grok64_kbdbuf_feed_runcmd : mod._grok64_kbdbuf_feed;
+  const api = bindKbdExports(emu);
+  if (!api) return false;
+  const fn = runcmd ? api.kbdbufFeedRuncmd : api.kbdbufFeed;
   if (typeof fn !== "function") return false;
   const rc = fn(text);
   if (rc !== 0) return false;
@@ -109,7 +92,7 @@ async function feedViaCanvasKeys(line: string): Promise<boolean> {
 
 /**
  * Type a BASIC line as the user would (ends with RETURN).
- * Prefer VICE `kbdbuf_feed_string`; fall back to $0277/$C6 via `_grok64_c64_write`, then canvas keys.
+ * Prefer VICE `kbdbuf_feed_string`; fall back to $0277/$C6 via grok64 c64_write, then canvas keys.
  */
 export async function feedBasicLine(
   emu: RamEmu | null,

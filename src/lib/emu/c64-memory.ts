@@ -1,17 +1,25 @@
 /** C64 system RAM via libretro RETRO_MEMORY_SYSTEM_RAM (64 KiB). */
 
+import { grok64WasmApi, type Grok64ModuleBag } from "./grok64-api";
+import { bindGrok64WasmExports } from "./grok64-vice-bridge";
+
 export type RamEmu = {
-  Module?: {
+  Module?: Grok64ModuleBag & {
     HEAPU8?: Uint8Array;
     HEAP8?: Int8Array;
     wasmMemory?: WebAssembly.Memory;
-    _retro_get_memory_data?: (n: number) => number;
-    _retro_get_memory_size?: (n: number) => number;
     cwrap?: (name: string, ret: string | null, args: string[]) => (...a: unknown[]) => unknown;
   };
 };
 
 const RETRO_MEMORY_SYSTEM_RAM = 2;
+
+function wasmApiFor(emu: RamEmu | null) {
+  const mod = emu?.Module;
+  if (!mod) return null;
+  if (!grok64WasmApi(mod) && mod.cwrap) bindGrok64WasmExports(mod);
+  return grok64WasmApi(mod);
+}
 
 export function c64RamView(emu: RamEmu | null): Uint8Array | null {
   const mod = emu?.Module;
@@ -24,9 +32,10 @@ export function c64RamView(emu: RamEmu | null): Uint8Array | null {
   let ptr = 0;
   let size = 0;
   try {
-    if (typeof mod._retro_get_memory_data === "function") {
-      ptr = mod._retro_get_memory_data(RETRO_MEMORY_SYSTEM_RAM) as number;
-      size = (mod._retro_get_memory_size as (n: number) => number)?.(RETRO_MEMORY_SYSTEM_RAM) ?? 0;
+    const api = wasmApiFor(emu);
+    if (api?.retroGetMemoryData && api.retroGetMemorySize) {
+      ptr = api.retroGetMemoryData(RETRO_MEMORY_SYSTEM_RAM) as number;
+      size = api.retroGetMemorySize(RETRO_MEMORY_SYSTEM_RAM) ?? 0;
     } else if (mod.cwrap) {
       const getData = mod.cwrap("retro_get_memory_data", "number", ["number"]);
       const getSize = mod.cwrap("retro_get_memory_size", "number", ["number"]);
@@ -41,9 +50,9 @@ export function c64RamView(emu: RamEmu | null): Uint8Array | null {
 }
 
 export function readC64Byte(emu: RamEmu | null, addr: number): number | null {
-  const mod = emu?.Module as { _grok64_c64_read?: (a: number) => number } | undefined;
-  if (typeof mod?._grok64_c64_read === "function" && addr >= 0 && addr < 65536) {
-    return mod._grok64_c64_read(addr) & 0xff;
+  const api = wasmApiFor(emu);
+  if (typeof api?.c64Read === "function" && addr >= 0 && addr < 65536) {
+    return api.c64Read(addr) & 0xff;
   }
   const ram = c64RamView(emu);
   if (!ram || addr < 0 || addr >= 65536) return null;
@@ -51,9 +60,9 @@ export function readC64Byte(emu: RamEmu | null, addr: number): number | null {
 }
 
 export function writeC64Byte(emu: RamEmu | null, addr: number, value: number): boolean {
-  const mod = emu?.Module as { _grok64_c64_write?: (a: number, v: number) => void } | undefined;
-  if (typeof mod?._grok64_c64_write === "function" && addr >= 0 && addr < 65536) {
-    mod._grok64_c64_write(addr, value & 0xff);
+  const api = wasmApiFor(emu);
+  if (typeof api?.c64Write === "function" && addr >= 0 && addr < 65536) {
+    api.c64Write(addr, value & 0xff);
     return true;
   }
   const ram = c64RamView(emu);

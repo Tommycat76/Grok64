@@ -2,11 +2,10 @@
  * Grok64 custom core: deliver keys through libretro `retro_keyboard_event`
  * (single path). Avoids EmulatorJS DOM glue + VICE pass-through double delivery.
  */
+import { grok64WasmApi, type Grok64ModuleBag } from "./grok64-api";
 import { bindGrok64WasmExports, type Grok64Emu } from "./grok64-vice-bridge";
 
-type Grok64KbdMod = {
-  _grok64_retro_keyboard?: (code: number, down: number, character: number, mod: number) => void;
-};
+type Grok64KbdMod = Grok64ModuleBag;
 
 /** ~2 C64 frames at PAL — matrix needs the key held long enough to scan. */
 const MIN_HOLD_MS = 40;
@@ -122,8 +121,9 @@ export function grok64KeyboardReleaseAll(emu: Grok64Emu | null) {
   deliveryChain = Promise.resolve();
   deliveryDepth = 0;
   const mod = emu?.Module as Grok64KbdMod | undefined;
-  if (!mod?._grok64_retro_keyboard) return;
-  flushAllKeys(mod._grok64_retro_keyboard);
+  const fn = grok64WasmApi(mod)?.retroKeyboard;
+  if (!fn) return;
+  flushAllKeys(fn);
 }
 
 /**
@@ -401,7 +401,7 @@ export function grok64RetroKeyboardAvailable(emu: Grok64Emu | null): boolean {
   const mod = emu?.Module as Grok64KbdMod | undefined;
   if (!mod) return false;
   bindGrok64WasmExports(mod);
-  return typeof mod._grok64_retro_keyboard === "function";
+  return typeof grok64WasmApi(mod)?.retroKeyboard === "function";
 }
 
 /** Wait until enqueued key events (incl. synthetic shift) have finished. */
@@ -419,7 +419,7 @@ export function grok64RetroKeyboardFromDom(
   if (!emu?.Module) return false;
   const mod = emu.Module as Grok64KbdMod;
   bindGrok64WasmExports(mod);
-  const fn = mod._grok64_retro_keyboard;
+  const fn = grok64WasmApi(mod)?.retroKeyboard;
   if (!fn) return false;
 
   const stroke = resolveHostStroke(code, key, mods);

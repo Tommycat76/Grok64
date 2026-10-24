@@ -41,7 +41,8 @@ import {
   wireGrok64ViceHost,
 } from "./grok64-vice-bridge";
 import { grok64RetroKeyboardAvailable } from "./grok64-keyboard";
-import { runMountStage } from "./disk-mount-stage";
+import { reportMountFailure, runMountStage } from "./disk-mount-stage";
+import { grok64DiskApi, grok64WasmApi } from "./grok64-api";
 import { grok64CoreBuildIdForUrl, grok64CoreManifestSummary, GROK64_CORE_BUILD_ID } from "./grok64-core-build";
 import {
   grok64DiskExportsReady,
@@ -178,8 +179,9 @@ export type Grok64CoreStatus = {
 
 export function grok64CoreStatus(emu: EjsInstance | null): Grok64CoreStatus {
   const w = typeof window !== "undefined" ? (window as unknown as Record<string, unknown>) : {};
-  const mod = emu?.Module as { _grok64_sd2iec_attach?: unknown; _grok64_c64_read?: unknown } | undefined;
-  if (emu?.Module) bindGrok64WasmExports(emu.Module as Parameters<typeof bindGrok64WasmExports>[0]);
+  const mod = emu?.Module as Parameters<typeof bindGrok64WasmExports>[0] | undefined;
+  if (mod) bindGrok64WasmExports(mod);
+  const wasmApi = grok64WasmApi(mod);
   const manifest = grok64CoreManifestSummary();
   const diskExportsPresent = grok64DiskExportsReady(emu);
   return {
@@ -188,8 +190,8 @@ export function grok64CoreStatus(emu: EjsInstance | null): Grok64CoreStatus {
     datapath: grok64ViceCoreRoot(),
     loads: (w.__GROK64_CORE_LOADS__ as Grok64CoreLoadRecord[]) ?? [],
     blockedStock: (w.__GROK64_STOCK_CORE_BLOCKED__ as string[]) ?? [],
-    attach: typeof mod?._grok64_sd2iec_attach === "function",
-    c64read: typeof mod?._grok64_c64_read === "function",
+    attach: typeof wasmApi?.sd2iecAttach === "function",
+    c64read: typeof wasmApi?.c64Read === "function",
     diskAttach: diskExportsPresent,
     diskExportsPresent,
     coreBuildId: GROK64_CORE_BUILD_ID || manifest.buildId || null,
@@ -1590,14 +1592,12 @@ export function hardReset(emu: EjsInstance | null) {
  */
 export function cartFreeze(emu: EjsInstance | null): boolean {
   if (!emu?.gameManager?.setVariable && !emu?.gameManager?.restart) return false;
-  const mod = emu.Module as {
-    cwrap?: (name: string, ret: string | null, args: string[]) => () => void;
-    _grok64_cartridge_trigger_freeze?: () => void;
-  };
+  const mod = emu.Module as Parameters<typeof bindGrok64WasmExports>[0];
   try {
-    const direct = mod._grok64_cartridge_trigger_freeze;
-    if (typeof direct === "function") {
-      direct();
+    bindGrok64WasmExports(mod);
+    const freezeDirect = grok64WasmApi(mod)?.cartridgeTriggerFreeze;
+    if (typeof freezeDirect === "function") {
+      freezeDirect();
       repaintAfterCartFreeze(emu);
       return true;
     }
@@ -2112,19 +2112,7 @@ const WORK_DISK_NAMES = new Set(["WORK DISK.D64", "work disk.d64"]);
  * RetroArch save dir is `/data/saves` → `vice_work.d64` is what file_system_attach_disk(8,…) opens.
  */
 function retroSaveDirFromModule(emu: EjsInstance | null): string | null {
-  const mod = emu?.Module as {
-    _grok64_retro_save_directory?: () => number;
-    UTF8ToString?: (ptr: number) => string;
-  };
-  if (!mod?._grok64_retro_save_directory || !mod.UTF8ToString) return null;
-  try {
-    const ptr = mod._grok64_retro_save_directory();
-    const raw = ptr ? mod.UTF8ToString(ptr) : "";
-    const dir = raw.trim().replace(/\/$/, "");
-    return dir || null;
-  } catch {
-    return null;
-  }
+  return viceRetroSaveDirectory(emu);
 }
 
 /** Yield real retro_run frames (setVariable / work_disk updates apply on the main loop). */
@@ -2382,12 +2370,8 @@ export async function viceReattachDiskOnEmuThread(
 ): Promise<number> {
   if (!emu || !path?.trim()) return -1;
   if (!grok64DiskExportsReady(emu)) return -99;
-  const mod = emu.Module as {
-    _grok64_disk_attach_deferred?: (u: number, d: number, p: string) => number;
-    _grok64_disk_attach?: (u: number, d: number, p: string) => number;
-    _grok64_disk_last_attach_rc?: () => number;
-  };
-  const defer = mod._grok64_disk_attach_deferred;
+  const api = grok64DiskApi(emu.Module as Parameters<typeof bindGrok64WasmExports>[0]);
+  const defer = api?.diskAttachDeferred;
   let rc = -1;
   if (defer) {
     rc = defer(unit, drive, path);
@@ -2395,20 +2379,20 @@ export async function viceReattachDiskOnEmuThread(
       for (let i = 0; i < 90; i++) {
         await waitRetroFrames(1);
         await tickGrok64Iec(emu);
-        const attachRc = mod._grok64_disk_last_attach_rc?.();
+        const attachRc = api?.diskLastAttachRc?.();
         if (typeof attachRc === "number" && attachRc >= 0) {
           rc = attachRc;
           break;
         }
       }
       if (rc < 0) {
-        const attachRc = mod._grok64_disk_last_attach_rc?.();
+        const attachRc = api?.diskLastAttachRc?.();
         rc = typeof attachRc === "number" && attachRc >= 0 ? attachRc : -1;
       }
     }
   } else {
-    rc = mod._grok64_disk_attach?.(unit, drive, path) ?? -1;
-    const attachRc = mod._grok64_disk_last_attach_rc?.();
+    rc = api?.diskAttach?.(unit, drive, path) ?? -1;
+    const attachRc = api?.diskLastAttachRc?.();
     if (rc < 0 && typeof attachRc === "number" && attachRc >= 0) rc = attachRc;
   }
   const after = rc === 0 ? viceAttachedImage(emu, unit, drive) : null;
@@ -2831,7 +2815,9 @@ export function attachAutostartDisk(
     applyIecUnitFloppy(emu, iec, unit, kindOf(target));
     const attachPath = resolveViceDiskAttachPath(emu, unit, label || target);
     if (attachPath) {
-      viceReattachDisk(emu, unit, attachPath);
+      void runMountStage("autostart-vice-reattach", async () => viceReattachDisk(emu, unit, attachPath)).catch(
+        (err) => reportMountFailure("autostart-vice-reattach", err, { unit, attachPath }),
+      );
     }
   }
   return wrote;
