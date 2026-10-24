@@ -52,6 +52,11 @@ const EXPECTED_GROK64_EXPORTS = [
   "grok64_work_disk_refresh",
   "grok64_disk_last_attach_diag",
   "grok64_fs_stat_bytes",
+  "grok64_drive_image_bytes",
+  "grok64_drive_bam_disk_name",
+  "grok64_drive_last_error_code",
+  "grok64_drive_error_channel",
+  "grok64_drive_reload_image",
 ] as const;
 
 /** JS wrapper failed to marshal a UTF-8 path (distinct from C errno). */
@@ -383,6 +388,43 @@ export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
       return Number(fn());
     },
     fsStatBytes: (path) => callWithPath("grok64_fs_stat_bytes", (fn, ptr) => Number(fn(ptr)), path),
+    driveImageBytes: (unit, drive) => {
+      const fn = resolveWasmExport(mod, "grok64_drive_image_bytes");
+      if (!fn) return null;
+      return Number(fn(unit, drive));
+    },
+    driveBamDiskName: (unit, drive) => {
+      const fn = resolveWasmExport(mod, "grok64_drive_bam_disk_name");
+      if (!fn) return null;
+      const rt = mergedWasmRuntime(boundEmu(), mod);
+      const alloc = resolveAlloc(rt);
+      if (!alloc) return null;
+      const ptr = alloc.malloc(32);
+      try {
+        const n = Number(fn(unit, drive, ptr, 32));
+        if (n < 0) return null;
+        return mod.UTF8ToString ? mod.UTF8ToString(ptr).trim() : null;
+      } finally {
+        alloc.free(ptr);
+      }
+    },
+    driveLastErrorCode: (unit) => {
+      const fn = resolveWasmExport(mod, "grok64_drive_last_error_code");
+      if (!fn) return null;
+      return Number(fn(unit));
+    },
+    driveErrorChannel: (unit) => {
+      const fn = resolveWasmExport(mod, "grok64_drive_error_channel");
+      if (!fn) return null;
+      const ptr = Number(fn(unit));
+      if (!ptr) return "";
+      return mod.UTF8ToString ? mod.UTF8ToString(ptr).trim() : "";
+    },
+    driveReloadImage: (unit, drive) => {
+      const fn = resolveWasmExport(mod, "grok64_drive_reload_image");
+      if (!fn) return -99;
+      return Number(fn(unit, drive));
+    },
   };
   return true;
 }

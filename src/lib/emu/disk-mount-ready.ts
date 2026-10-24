@@ -3,6 +3,7 @@ import {
   applyIecUnitFloppy,
   applyRuntimeOptions,
   bumpCrtPaint,
+  detachLibretroWorkDiskManager,
   disarmAutostart,
   flushEmuFs,
   hardReset,
@@ -33,6 +34,7 @@ export async function presentFloppyMountReady(
   applyIecUnitFloppy(emu, live.iec, live.unit, diskKind);
   if (opts?.afterDriveRefresh) {
     glog("floppy-mount-ready", { afterDriveRefresh: true, kind: diskKind, unit: live.unit });
+    await runMountStage("work-disk-manager-off", () => detachLibretroWorkDiskManager(emu, live.unit));
     await runMountStage("resync-session-disk", async () => {
       resyncSessionDiskToVice(emu, live.unit);
     });

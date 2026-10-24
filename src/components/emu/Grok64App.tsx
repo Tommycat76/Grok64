@@ -122,6 +122,7 @@ import {
   viceAttachedImage,
   viceDiskLastAttachDiag,
   viceRetroSaveDirectory,
+  viceDriveLiveProbe,
   viceWasmWorkDiskDiag,
 } from "@/lib/emu/vice-disk";
 import { bindGrok64WasmExports } from "@/lib/emu/grok64-vice-bridge";
@@ -991,8 +992,9 @@ export function Grok64App() {
               mod,
               `/data/saves/grok64_iec${unit}.d64`,
             );
-            return { blank, iec };
+            return { blank, iec, blankNote: "ENOENT (-errno) after Insert if /blank.d64 was unlinked — expected" };
           })(),
+          viceDriveLive: viceDriveLiveProbe(emuRef.current, unit),
           wasmWorkDisk: await viceWasmWorkDiskDiag(emuRef.current, unit, sessionFp),
           coreBuildId: grok64CoreStatus(emuRef.current).coreBuildId,
           coreBuildIdExpected: grok64CoreStatus(emuRef.current).coreBuildIdExpected,
@@ -1071,11 +1073,22 @@ export function Grok64App() {
         await new Promise((r) => setTimeout(r, 8000));
         const text = readScreenText(emu) ?? "";
         const unit = 8;
+        const sessionFp = session ? await diskAttachFingerprint(session.bytes, session.name) : null;
+        const catalogOk =
+          /GEOS/i.test(text) ||
+          /47454f53/i.test(sessionFp?.dir18s1Hex ?? "") ||
+          /geos/i.test(sessionFp?.diskLabel ?? "");
         return {
-          ok: /GEOS/i.test(text) && !/FILE NOT FOUND/i.test(text) && !/^work\s*disk/i.test(text),
+          ok:
+            catalogOk &&
+            !/FILE NOT FOUND/i.test(text) &&
+            !/DEVICE NOT PRESENT/i.test(text) &&
+            !/^work\s*disk/i.test(text) &&
+            Boolean(viceAttachedImage(emu, unit)),
           text: text.slice(0, 1600),
           viceAttachedImage: viceAttachedImage(emu, unit),
           viceLastReattach: lastViceDiskAttach(unit),
+          session: sessionFp,
         };
       },
       printTi: async () => readPrintTi(emuRef.current, () => readScreenText(emuRef.current)),
@@ -3594,18 +3607,12 @@ export function Grok64App() {
     } else if (mounted) {
       emuRef.current.fileName = mounted.replace(/^\//, "");
     }
-    const FS = emuRef.current?.Module?.FS ?? emuRef.current?.gameManager?.FS;
-    for (const stale of ["blank.d64", "/blank.d64", "BLANK.D64"]) {
-      try {
-        FS?.unlink?.(stale);
-      } catch {
-        /* missing */
-      }
-    }
     applyRuntimeOptions(emuRef.current, {
       vice_drive_true_emulation: "enabled",
       vice_virtual_device_traps: "disabled",
     });
+    const { detachLibretroWorkDiskManager } = await import("@/lib/emu/host");
+    await detachLibretroWorkDiskManager(emuRef.current, unit);
     await applyJiffyThenRefreshWorkDisk(
       emuRef.current,
       unit,
@@ -3999,7 +4006,7 @@ export function Grok64App() {
   }, []);
   useEffect(() => {
     if (!s.running) return;
-    const onHostKey = (e: KeyboardEvent) => {
+    const onHostKey = async (e: KeyboardEvent) => {
       if (!useEmu.getState().running) return;
       const ui = useEmu.getState();
       if (ui.settingsOpen || ui.aboutOpen || ui.libraryOpen || ui.mapperOpen || ui.snapsOpen) return;
@@ -4025,6 +4032,9 @@ export function Grok64App() {
         return;
       }
       if (down && e.repeat) return;
+      if (down && e.shiftKey && /^Digit[0-9]$/.test(e.code)) {
+        await grok64KeyboardDrain();
+      }
       const handled = grok64RetroKeyboardFromDom(emuRef.current, e.code, e.key, down, {
         shift: e.shiftKey,
         ctrl: e.ctrlKey,

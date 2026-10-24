@@ -77,6 +77,7 @@ import {
   grok64DiskModule,
   runSerializedDiskAttach,
   bindGrok64DiskExports,
+  viceDiskLastAttachDiag,
 } from "./vice-disk";
 import { writeC64Bytes } from "./c64-memory";
 import {
@@ -2246,21 +2247,61 @@ export async function waitRetroFrames(frames = 1): Promise<void> {
 /**
  * After MEMFS sync: WASM `grok64_work_disk_refresh` when present, else libretro option toggle on retro frames.
  */
+/**
+ * Stop libretro `update_work_disk()` from re-attaching `vice_work.d64` over a manual
+ * `grok64_disk_attach` (rc 0 but IEC FILE NOT FOUND when work-disk slot fights unit 8).
+ */
+export async function detachLibretroWorkDiskManager(emu: EjsInstance | null, unit: IecUnit = 8): Promise<void> {
+  if (!emu) return;
+  applyRuntimeOptions(emu, {
+    vice_work_disk: "disabled",
+    vice_drive_true_emulation: "enabled",
+    vice_virtual_device_traps: "disabled",
+  });
+  rememberWorkDisk("disabled");
+  await waitRetroFrames(12);
+  await tickGrok64Iec(emu);
+  glog("vice-work-disk-manager-off", { unit });
+}
+
+async function reloadViceDriveImageAfterAttach(
+  emu: EjsInstance | null,
+  unit: IecUnit,
+  drive = 0,
+): Promise<number> {
+  if (!emu) return -1;
+  const mod = grok64DiskModule(emu);
+  if (!mod) return -99;
+  bindGrok64DiskExports(mod, emu);
+  const reload = grok64DiskApi(mod)?.driveReloadImage;
+  if (!reload) return -99;
+  const rc = reload(unit, drive);
+  if (rc === 0) {
+    await waitRetroFrames(45);
+    await tickGrok64Iec(emu);
+  }
+  glog("vice-drive-reload-image", { unit, drive, rc, diag: viceDiskLastAttachDiag(emu) });
+  return rc;
+}
+
 export async function bumpViceWorkDiskReload(emu: EjsInstance | null, unit: IecUnit = 8): Promise<void> {
   if (!emu) return;
+  const sessionSlot = sessionDiskOnUnit(unit);
+  if (sessionSlot?.bytes) syncViceWorkD64(emu, sessionSlot.bytes);
+  await flushEmuFs(emu, isIosPhone() ? 2000 : 1200);
   const before = viceAttachedImage(emu, unit);
   const wasmRc = refreshViceWorkDiskAttached(emu, unit);
   if (wasmRc === 0) {
     glog("vice-work-disk-reload", { unit, mode: "wasm-export", before, after: viceAttachedImage(emu, unit) });
     return;
   }
-  const slot = `${unit}_d64`;
+  const workSlot = `${unit}_d64`;
   applyRuntimeOptions(emu, { vice_work_disk: "9_d64" });
   await waitRetroFrames(6);
   applyRuntimeOptions(emu, { vice_work_disk: "disabled" });
   await waitRetroFrames(6);
-  applyRuntimeOptions(emu, { vice_work_disk: slot });
-  rememberWorkDisk(slot);
+  applyRuntimeOptions(emu, { vice_work_disk: workSlot });
+  rememberWorkDisk(workSlot);
   for (let i = 0; i < 90; i++) {
     await waitRetroFrames(1);
     await tickGrok64Iec(emu);
@@ -2269,7 +2310,7 @@ export async function bumpViceWorkDiskReload(emu: EjsInstance | null, unit: IecU
   }
   glog("vice-work-disk-reload", {
     unit,
-    slot,
+    slot: workSlot,
     mode: wasmRc === -99 ? "core-option" : "core-option-after-wasm-fail",
     wasmRc,
     before,
@@ -2426,7 +2467,11 @@ export async function applyJiffyThenRefreshWorkDisk(
         const data = image?.data ?? session?.bytes;
         if (data) syncViceWorkD64(emu, data);
         resyncSessionDiskToVice(emu, unit);
-        await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
+        await flushEmuFs(emu, isIosPhone() ? 2000 : 1200);
+        if (jiffyWant && landed) {
+          await waitRetroFrames(60);
+          await tickGrok64Iec(emu);
+        }
       },
       45_000,
     );
@@ -2488,39 +2533,22 @@ export async function viceReattachDiskOnEmuThread(
     const mod = grok64DiskModule(emu) ?? (emu.Module as Parameters<typeof bindGrok64WasmExports>[0]);
     bindGrok64DiskExports(mod, emu);
     const api = grok64DiskApi(mod);
-    const defer = api?.diskAttachDeferred;
     api?.diskDetach?.(unit, drive);
-    let rc = -1;
-    if (defer) {
-      rc = defer(unit, drive, path);
-      if (rc === 0) {
-        for (let i = 0; i < 90; i++) {
-          await waitRetroFrames(1);
-          await tickGrok64Iec(emu);
-          const attachRc = api?.diskLastAttachRc?.();
-          if (typeof attachRc === "number" && attachRc >= 0) {
-            rc = attachRc;
-            break;
-          }
-        }
-        if (rc < 0) {
-          const attachRc = api?.diskLastAttachRc?.();
-          rc = typeof attachRc === "number" && attachRc >= 0 ? attachRc : -1;
-        }
-      }
-    } else {
-      rc = api?.diskAttach?.(unit, drive, path) ?? -1;
-      const attachRc = api?.diskLastAttachRc?.();
-      if (rc < 0 && typeof attachRc === "number" && attachRc >= 0) rc = attachRc;
+    let rc = api?.diskAttach?.(unit, drive, path) ?? -1;
+    const attachRc = api?.diskLastAttachRc?.();
+    if (rc < 0 && typeof attachRc === "number" && attachRc >= 0) rc = attachRc;
+    if (rc === 0) {
+      const reloadRc = await reloadViceDriveImageAfterAttach(emu, unit, drive);
+      if (reloadRc < 0 && reloadRc !== -99) rc = reloadRc;
     }
     const after = rc === 0 ? viceAttachedImage(emu, unit, drive) : null;
     recordViceLastAttach(unit, { path, rc, before: null, after, at: Date.now() });
-    glog("vice-disk-reattach", { unit, path, rc, after, emuThread: Boolean(defer) });
+    glog("vice-disk-reattach", { unit, path, rc, after, syncAttach: true });
     return rc;
   });
 }
 
-/** Hot-swap D64: libretro work-disk refresh first; GCR / fallback uses grok64_disk_attach. */
+/** Hot-swap D64: flush MEMFS, re-attach on emu thread (Jiffy 1541 ROM must see fresh image). */
 export async function ensureViceSessionDiskAttached(
   emu: EjsInstance | null,
   unit: IecUnit,
@@ -2528,18 +2556,16 @@ export async function ensureViceSessionDiskAttached(
 ): Promise<number> {
   if (!emu) return -1;
   if (diskKind && !isGcrDiskKind(diskKind)) {
-    await bumpViceWorkDiskReload(emu, unit);
-    const attached = viceAttachedImage(emu, unit);
-    if (attached && !/blank\.d64/i.test(attached)) {
-      recordViceLastAttach(unit, {
-        path: attached,
-        rc: 0,
-        before: null,
-        after: attached,
-        at: Date.now(),
-      });
-      return 0;
+    await detachLibretroWorkDiskManager(emu, unit);
+    const slot = sessionDiskOnUnit(unit);
+    if (slot?.bytes) syncViceWorkD64(emu, slot.bytes);
+    await flushEmuFs(emu, isIosPhone() ? 2000 : 1200);
+    const rc = await viceReattachSessionDisk(emu, unit);
+    if (rc === 0) {
+      await waitRetroFrames(30);
+      await tickGrok64Iec(emu);
     }
+    return rc;
   }
   return viceReattachSessionDisk(emu, unit);
 }

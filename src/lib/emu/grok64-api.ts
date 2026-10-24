@@ -12,7 +12,7 @@ import {
 import type { Grok64WasmModule } from "./grok64-wasm-bind";
 
 /** Bumped when WASM bind strategy changes; About / QA can detect stale app JS. */
-export const GROK64_WASM_BIND_REV = "diskapi-v3-utf8-marshal";
+export const GROK64_WASM_BIND_REV = "diskapi-v5-workdisk-off-reload";
 
 export type Grok64DiskApi = {
   diskAttach: (unit: number, drive: number, path: string) => number;
@@ -25,6 +25,11 @@ export type Grok64DiskApi = {
   workDiskRefresh: (unit: number) => number;
   diskLastAttachDiag: () => number;
   fsStatBytes: (path: string) => number;
+  driveImageBytes?: (unit: number, drive: number) => number | null;
+  driveBamDiskName?: (unit: number, drive: number) => string | null;
+  driveLastErrorCode?: (unit: number) => number | null;
+  driveErrorChannel?: (unit: number) => string | null;
+  driveReloadImage?: (unit: number, drive: number) => number;
 };
 
 export type Grok64WasmApi = {

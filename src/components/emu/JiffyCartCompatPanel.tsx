@@ -65,7 +65,13 @@ export function JiffyDosToggleRow() {
     const id = window.setInterval(poll, 400);
     return () => window.clearInterval(id);
   }, []);
-  const switchOn = jiffyUi || jiffyLive;
+  const switchOn = jiffyUi;
+  const liveHint =
+    jiffyLive !== jiffyUi
+      ? jiffyUi
+        ? " · applying ROMs…"
+        : " · KERNAL still Jiffy until power cycle"
+      : "";
   return (
     <>
       <JiffyCartCompatBanner />
@@ -74,7 +80,7 @@ export function JiffyDosToggleRow() {
           JiffyDOS (needs C64 + 1541 ROMs)
           <span className="ml-1 text-xs text-fg-subtle">
             {jiffyUi ? "on" : "off"}
-            {jiffyLive !== jiffyUi ? ` · live ${jiffyLive ? "on" : "off"}` : ""}
+            {liveHint}
           </span>
         </span>
         <button

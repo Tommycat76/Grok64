@@ -4,7 +4,7 @@
  */
 import { glog } from "./debug";
 import type { IecUnit } from "./types";
-import { isGcrDiskKind, kindOf } from "./formats";
+import { d64DiskName, isGcrDiskKind, kindOf } from "./formats";
 import { diskAttachFingerprint, type DiskAttachFingerprint } from "./disk-attach-diag";
 import {
   grok64DiskApi,
@@ -18,6 +18,7 @@ import {
   grok64DiskAttachCallableEmu,
 } from "./grok64-wasm-direct";
 import { isGrok64DiskExportsBound, markGrok64DiskExportsBound } from "./grok64-wasm-bind";
+import { sessionDiskOnUnit } from "./session-media";
 
 type EmuFs = { stat?: (p: string) => unknown };
 
@@ -392,6 +393,15 @@ export function viceReattachDisk(
   return viceReattachDiskSync(emu, unit, path, drive);
 }
 
+export function reloadViceDriveImage(emu: ViceDiskEmu | null, unit: IecUnit, drive = 0): number {
+  const mod = diskMod(emu);
+  if (!mod) return -99;
+  bindGrok64DiskExports(mod, emu);
+  const reload = grok64DiskApi(mod)?.driveReloadImage;
+  if (!reload) return -99;
+  return reload(unit, drive);
+}
+
 function viceReattachDiskSync(
   emu: ViceDiskEmu | null,
   unit: IecUnit,
@@ -409,6 +419,10 @@ function viceReattachDiskSync(
     let rc = api.diskAttach(unit, drive, path) ?? -1;
     const attachRc = api.diskLastAttachRc?.();
     if (rc < 0 && typeof attachRc === "number" && attachRc >= 0) rc = attachRc;
+    if (rc === 0) {
+      const reloadRc = reloadViceDriveImage(emu, unit, drive);
+      if (reloadRc < 0 && reloadRc !== -99) rc = reloadRc;
+    }
     const after = rc === 0 ? diskNameFromModule(mod, unit, drive) : null;
     lastAttachByUnit.set(unit, { path, rc, before: null, after, at: Date.now() });
     const jsSize = pathExistsOnFs(emu, path) ? pathByteLength(emu, path) : null;
@@ -438,6 +452,51 @@ function viceReattachDiskSync(
 }
 
 /** Async attach — waits for serialized queue (use from mount / emu thread). */
+export type ViceDriveLiveProbe = {
+  attachPath: string | null;
+  fsPathLabel: string | null;
+  fsPathBytes: number | null;
+  wasmImageBytes: number | null;
+  wasmBamLabel: string | null;
+  wasmErrorCode: number | null;
+  wasmErrorChannel: string | null;
+  sessionLabel: string | null;
+};
+
+/** What VICE's vdrive actually has vs MEMFS path (IEC FILE NOT FOUND debug). */
+export function viceDriveLiveProbe(emu: ViceDiskEmu | null, unit: IecUnit = 8, drive = 0): ViceDriveLiveProbe {
+  const mod = diskMod(emu);
+  if (mod) bindGrok64DiskExports(mod, emu);
+  const api = grok64DiskApi(mod);
+  const attachPath = viceAttachedImage(emu, unit, drive);
+  let fsPathLabel: string | null = null;
+  let fsPathBytes: number | null = null;
+  if (attachPath) {
+    fsPathBytes = pathByteLength(emu, attachPath);
+    const FS = fsOf(emu) as { readFile?: (p: string) => Uint8Array } | null;
+    try {
+      const raw = FS?.readFile?.(attachPath);
+      if (raw instanceof Uint8Array && raw.byteLength >= 174848) {
+        fsPathLabel = d64DiskName(raw);
+      }
+    } catch {
+      /* */
+    }
+  }
+  const ses = sessionDiskOnUnit(unit);
+  const sessionLabel = ses?.bytes ? d64DiskName(ses.bytes) : null;
+  return {
+    attachPath,
+    fsPathLabel,
+    fsPathBytes,
+    wasmImageBytes: api?.driveImageBytes?.(unit, drive) ?? null,
+    wasmBamLabel: api?.driveBamDiskName?.(unit, drive) ?? null,
+    wasmErrorCode: api?.driveLastErrorCode?.(unit) ?? null,
+    wasmErrorChannel: api?.driveErrorChannel?.(unit) ?? "",
+    sessionLabel,
+  };
+}
+
 export async function viceReattachDiskAsync(
   emu: ViceDiskEmu | null,
   unit: IecUnit,

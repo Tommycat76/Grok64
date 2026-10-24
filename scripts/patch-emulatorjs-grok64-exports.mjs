@@ -28,6 +28,11 @@ const GROK64_EXPORTS = [
   "_grok64_work_disk_refresh",
   "_grok64_disk_last_attach_diag",
   "_grok64_fs_stat_bytes",
+  "_grok64_drive_image_bytes",
+  "_grok64_drive_bam_disk_name",
+  "_grok64_drive_last_error_code",
+  "_grok64_drive_error_channel",
+  "_grok64_drive_reload_image",
 ];
 
 let text = readFileSync(makefile, "utf8");

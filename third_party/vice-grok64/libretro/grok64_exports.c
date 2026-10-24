@@ -9,6 +9,9 @@
 #include "kbdbuf.h"
 #include "machine.h"
 #include "vdrive/vdrive.h"
+#include "vdrive/vdrive-bam.h"
+#include "drive/drive.h"
+#include "cbmdos.h"
 #include "vice-event.h"
 #include <errno.h>
 #include <stdint.h>
@@ -20,6 +23,7 @@
 extern char retro_save_directory[];
 
 int grok64_disk_attach(int unit, int drive, const char *path);
+int grok64_drive_reload_image(int unit, int drive);
 
 #define GROK64_DISK_PATH_MAX 4096
 static int pending_disk_unit = 0;
@@ -272,6 +276,8 @@ int grok64_disk_attach(int unit, int drive, const char *path)
     if (last_disk_attach_rc < 0) {
         snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
                  "file_system_attach_disk unit=%d path=%s fs_bytes=%d", unit, path, fs_bytes);
+    } else {
+        grok64_drive_reload_image(unit, drive);
     }
     return last_disk_attach_rc;
 }
@@ -298,6 +304,158 @@ EMSCRIPTEN_KEEPALIVE
 int grok64_fs_stat_bytes(const char *path)
 {
     return grok64_fs_size_bytes(path);
+}
+
+static int grok64_unit_vdrive_image(int unit, int drive, vdrive_t **vd_out, disk_image_t **img_out)
+{
+    vdrive_t *vd;
+    disk_image_t *img;
+
+    if (unit < 8 || unit > 11) {
+        return -EINVAL;
+    }
+    if (drive < 0 || drive > 1) {
+        drive = 0;
+    }
+    vd = file_system_get_vdrive((unsigned int)unit);
+    if (!vd) {
+        return -ENODEV;
+    }
+    img = vdrive_get_image(vd, (unsigned int)drive);
+    if (!img) {
+        return -ENOENT;
+    }
+    if (vd_out) {
+        *vd_out = vd;
+    }
+    if (img_out) {
+        *img_out = img;
+    }
+    return 0;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int grok64_drive_image_bytes(int unit, int drive)
+{
+    disk_image_t *img = NULL;
+    off_t sz;
+
+    if (grok64_unit_vdrive_image(unit, drive, NULL, &img) != 0) {
+        return -1;
+    }
+    sz = disk_image_size(img);
+    if (sz < 0 || sz > 0x7fffffff) {
+        return -1;
+    }
+    return (int)sz;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int grok64_drive_bam_disk_name(int unit, int drive, char *out, int out_len)
+{
+    disk_image_t *img = NULL;
+    disk_addr_t adr;
+    uint8_t sec[256];
+    int i, n;
+
+    if (!out || out_len < 2) {
+        return -EINVAL;
+    }
+    if (grok64_unit_vdrive_image(unit, drive, NULL, &img) != 0) {
+        return -ENODEV;
+    }
+    adr.track = 18;
+    adr.sector = 0;
+    if (disk_image_read_sector(img, sec, &adr) != 0) {
+        return -EIO;
+    }
+    n = 0;
+    for (i = 0; i < 16 && n < out_len - 1; i++) {
+        uint8_t c = sec[0x90 + i];
+        if (c == 0xa0 || c == 0) {
+            break;
+        }
+        out[n++] = (char)c;
+    }
+    out[n] = '\0';
+    return n;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int grok64_drive_last_error_code(int unit)
+{
+    vdrive_t *vd = file_system_get_vdrive((unsigned int)unit);
+
+    if (!vd) {
+        return -1;
+    }
+    return vd->last_code;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+const char *grok64_drive_error_channel(int unit)
+{
+    vdrive_t *vd = file_system_get_vdrive((unsigned int)unit);
+    bufferinfo_t *p;
+
+    if (!vd) {
+        return "";
+    }
+    p = &vd->buffers[15];
+    if (!p->length) {
+        return "";
+    }
+    return (const char *)p->buffer;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int grok64_drive_reload_image(int unit, int drive)
+{
+    vdrive_t *vdrive;
+    disk_image_t *image;
+    unsigned int dnr;
+    drive_t *drv;
+
+    if (unit < 8 || unit > 11) {
+        return -EINVAL;
+    }
+    if (drive < 0 || drive > 1) {
+        drive = 0;
+    }
+    vdrive = file_system_get_vdrive((unsigned int)unit);
+    image = vdrive ? vdrive_get_image(vdrive, (unsigned int)drive) : NULL;
+    if (!vdrive || !image) {
+        grok64_note_attach_diag("reload: no vdrive/image");
+        return -ENODEV;
+    }
+    dnr = (unsigned int)unit - 8;
+    if (dnr < NUM_DISK_UNITS && diskunit_context[dnr]) {
+        drv = diskunit_context[dnr]->drives[drive];
+        if (drv && drv->image) {
+            if (disk_image_read_image(drv->image) < 0) {
+                snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
+                         "reload: disk_image_read_image unit=%d failed", unit);
+                return -EIO;
+            }
+        }
+    }
+    if (vdrive_bam_read_bam(vdrive) != 0) {
+        snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
+                 "reload: vdrive_bam_read_bam unit=%d failed", unit);
+        return -EIO;
+    }
+    vdrive->last_code = CBMDOS_IPE_OK;
+    return 0;
 }
 
 #ifdef __EMSCRIPTEN__
