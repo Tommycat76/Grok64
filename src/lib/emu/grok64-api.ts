@@ -12,7 +12,7 @@ import {
 import type { Grok64WasmModule } from "./grok64-wasm-bind";
 
 /** Bumped when WASM bind strategy changes; About / QA can detect stale app JS. */
-export const GROK64_WASM_BIND_REV = "diskapi-v7-tde-manifest";
+export const GROK64_WASM_BIND_REV = "diskapi-v9-tde-sync";
 
 export type Grok64DiskApi = {
   diskAttach: (unit: number, drive: number, path: string) => number;
@@ -33,6 +33,11 @@ export type Grok64DiskApi = {
   driveIecDevice?: (unit: number) => number | null;
   driveVirtualDevice?: (unit: number) => number | null;
   driveUnitTrueEmulation?: (unit: number) => number | null;
+  driveUnitType?: (unit: number) => number | null;
+  driveUnitEnabled?: (unit: number) => number | null;
+  romLoaded?: () => number | null;
+  driveSerialDeviceType?: (unit: number) => number | null;
+  driveVdriveErrorIsVirtual?: (unit: number) => number | null;
 };
 
 export type Grok64WasmApi = {

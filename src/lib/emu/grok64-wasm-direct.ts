@@ -60,6 +60,11 @@ const EXPECTED_GROK64_EXPORTS = [
   "grok64_drive_iec_device",
   "grok64_drive_virtual_device",
   "grok64_drive_unit_true_emulation",
+  "grok64_drive_unit_type",
+  "grok64_drive_unit_enabled",
+  "grok64_rom_loaded",
+  "grok64_drive_serial_device_type",
+  "grok64_drive_vdrive_error_is_virtual",
 ] as const;
 
 /** JS wrapper failed to marshal a UTF-8 path (distinct from C errno). */
@@ -440,6 +445,31 @@ export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
     },
     driveUnitTrueEmulation: (unit) => {
       const fn = resolveWasmExport(mod, "grok64_drive_unit_true_emulation");
+      if (!fn) return null;
+      return Number(fn(unit));
+    },
+    driveUnitType: (unit) => {
+      const fn = resolveWasmExport(mod, "grok64_drive_unit_type");
+      if (!fn) return null;
+      return Number(fn(unit));
+    },
+    driveUnitEnabled: (unit) => {
+      const fn = resolveWasmExport(mod, "grok64_drive_unit_enabled");
+      if (!fn) return null;
+      return Number(fn(unit));
+    },
+    romLoaded: () => {
+      const fn = resolveWasmExport(mod, "grok64_rom_loaded");
+      if (!fn) return null;
+      return Number(fn());
+    },
+    driveSerialDeviceType: (unit) => {
+      const fn = resolveWasmExport(mod, "grok64_drive_serial_device_type");
+      if (!fn) return null;
+      return Number(fn(unit));
+    },
+    driveVdriveErrorIsVirtual: (unit) => {
+      const fn = resolveWasmExport(mod, "grok64_drive_vdrive_error_is_virtual");
       if (!fn) return null;
       return Number(fn(unit));
     },

@@ -90,16 +90,23 @@ try {
   await page.screenshot({ path: join(shotDir, "geos-after-list.png") });
 
   const postDiag = await page.evaluate(async () => window.__g64?.attachDiskDiag?.());
+  const iecProbe = await page.evaluate(async () => window.__g64?.iecErrorChannelProbe?.(8));
+  trace.iecProbe = iecProbe;
+  const live = {
+    ...(postDiag?.viceDriveLive ?? preList?.viceDriveLive),
+    iecErrorChannel: iecProbe?.text ?? "",
+  };
   const evidence = geosFloppyEvidence({
     screen: [loadWait?.text, list?.text].filter(Boolean).join("\n"),
     session: postDiag?.session ?? preList?.session,
     wasmWorkDisk: postDiag?.wasmWorkDisk,
     viceAttachedImage: postDiag?.viceAttachedImage ?? preList?.viceAttachedImage,
   });
-  const live = postDiag?.viceDriveLive ?? preList?.viceDriveLive;
   const pass =
-    (list?.ok === true || evidence.ok) &&
     evidence.ok &&
+    list?.ok === true &&
+    evidence.onScreen === true &&
+    loadWait?.done === true &&
     !loadWait?.error &&
     baselineCoreDiagOk(postDiag ?? preList) &&
     baselineDriveLiveOk(live);

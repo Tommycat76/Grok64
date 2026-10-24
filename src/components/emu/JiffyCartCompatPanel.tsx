@@ -69,7 +69,7 @@ export function JiffyDosToggleRow() {
   const liveHint =
     jiffyLive !== jiffyUi
       ? jiffyUi
-        ? " · applying ROMs…"
+        ? " · power cycle after ROM upload"
         : " · stock KERNAL until power cycle"
       : jiffyLive && jiffyUi
         ? " · live"

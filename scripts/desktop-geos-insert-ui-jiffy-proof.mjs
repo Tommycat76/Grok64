@@ -16,6 +16,7 @@ import {
   baselineCoreDiagOk,
   baselineDriveLiveOk,
   geosFloppyEvidence,
+  liveWithIecErrorProbe,
   openSoftware,
   patchLocalStorage,
   powerOnDesktop,
@@ -127,12 +128,14 @@ try {
     viceAttachedImage: diag?.viceAttachedImage,
   });
   const attachRcOk = (diag?.viceLastReattach?.rc ?? -1) === 0;
+  const live = await liveWithIecErrorProbe(page, diag?.viceDriveLive);
+  trace.iecProbe = live.iecErrorChannel;
   const pass =
     evidence.ok &&
     attachRcOk &&
     diag?.jiffyLive === true &&
     baselineCoreDiagOk(diag) &&
-    baselineDriveLiveOk(diag?.viceDriveLive);
+    baselineDriveLiveOk(live);
   trace.pass = pass;
   trace.evidence = evidence;
   trace.screen = screen.slice(0, 500);

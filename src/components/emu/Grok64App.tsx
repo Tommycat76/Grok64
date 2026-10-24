@@ -102,11 +102,14 @@ import {
   applyJiffyThenRefreshWorkDisk,
   detachLibretroWorkDiskManager,
   ensureViceSessionDiskAttached,
+  resyncSessionDiskToVice,
 } from "@/lib/emu/host";
 import {
   diskAttachFingerprint,
   validateFloppyLibraryPayload,
 } from "@/lib/emu/disk-attach-diag";
+import { geosDirectoryOnScreen } from "@/lib/emu/geos-evidence";
+import { probeIecDriveErrorChannel } from "@/lib/emu/iec-probe";
 import {
   GROK64_WASM_BIND_REV,
   grok64DiskApi,
@@ -1030,6 +1033,7 @@ export function Grok64App() {
       debugWasmIec: (dev, sec) => debugWasmIec(dev, sec),
       iecOpenDollarChannel: (unit = 8) => iecOpenDollarChannel(emuRef.current, unit as 8 | 9 | 10 | 11 | 12),
       feedBasic: (line) => feedBasicLine(emuRef.current, line),
+      iecErrorChannelProbe: (unit = 8) => probeIecDriveErrorChannel(emuRef.current, unit),
       hardReset: () => {
         hardReset(emuRef.current);
         return true;
@@ -1081,13 +1085,10 @@ export function Grok64App() {
         const unit = 8;
         const session = sessionDiskOnUnit(unit);
         const sessionFp = session ? await diskAttachFingerprint(session.bytes, session.name) : null;
-        const catalogOk =
-          /GEOS/i.test(text) ||
-          /47454f53/i.test(sessionFp?.dir18s1Hex ?? "") ||
-          /geos/i.test(sessionFp?.diskLabel ?? "");
+        const onScreen = geosDirectoryOnScreen(text);
         return {
           ok:
-            catalogOk &&
+            onScreen &&
             !/FILE NOT FOUND/i.test(text) &&
             !/DEVICE NOT PRESENT/i.test(text) &&
             !/^work\s*disk/i.test(text) &&
@@ -2026,27 +2027,37 @@ export function Grok64App() {
     setCartLive(false);
     st.setFastLoadCart(null);
     st.setCurrentTitle("BASIC");
-    if (emu) {
-      disarmAutostart(emu, "disk");
-      hardReset(emu);
-      applyRuntimeOptions(emu, {
-        vice_autostart: "disabled",
-        vice_autostart_warp: "disabled",
-        vice_autoloadwarp: "disabled",
-      });
-    }
     markSessionReady();
     inGameplayRef.current = true;
     void (async () => {
-      await syncJiffy(emu, "hard");
+      if (emu) {
+        disarmAutostart(emu, "disk");
+        applyRuntimeOptions(emu, {
+          vice_autostart: "disabled",
+          vice_autostart_warp: "disabled",
+          vice_autoloadwarp: "disabled",
+          vice_work_disk: "disabled",
+          vice_drive_true_emulation: "enabled",
+          vice_virtual_device_traps: "disabled",
+        });
+        const unit = sessionUnitRef.current ?? 8;
+        const slot = sessionDiskOnUnit(unit);
+        hardReset(emu);
+        if (slot?.bytes) {
+          resyncSessionDiskToVice(emu, unit);
+          const rc = await ensureViceSessionDiskAttached(emu, unit, kindOf(slot.name));
+          glog("reset-reattach", { rc, path: viceAttachedImage(emu, unit), name: slot.name });
+        }
+      }
+      await syncJiffy(emu, "none");
       if (isIosPhone()) {
         const playerEl = document.getElementById("grok64-player");
         fitEmu(playerEl, emu);
         presentIosCrt(emu, playerEl, "user-reset", true);
         scheduleIosCrtPresents(emu, playerEl, "user-reset");
       }
+      toast.message("Reset — READY");
     })();
-    toast.message("Reset — READY");
   }, [syncJiffy]);
   resetReadyRef.current = resetReady;
   const resumePlayback = useCallback(() => {

@@ -8,7 +8,7 @@ import { bindGrok64WasmExports, type Grok64Emu } from "./grok64-vice-bridge";
 type Grok64KbdMod = Grok64ModuleBag;
 
 /** ~2 C64 frames at PAL — matrix needs the key held long enough to scan. */
-const MIN_HOLD_MS = 40;
+const MIN_HOLD_MS = 48;
 const MIN_HOLD_FAST_MS = 10;
 
 /** libretro `enum retro_key` — must match libretro.h (not ASCII / legacy keyCodes). */

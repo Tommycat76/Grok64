@@ -38,6 +38,11 @@ const REQUIRED = [
   "grok64_drive_iec_device",
   "grok64_drive_virtual_device",
   "grok64_drive_unit_true_emulation",
+  "grok64_drive_unit_type",
+  "grok64_drive_unit_enabled",
+  "grok64_rom_loaded",
+  "grok64_drive_serial_device_type",
+  "grok64_drive_vdrive_error_is_virtual",
 ];
 
 rmSync(tmp, { recursive: true, force: true });

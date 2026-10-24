@@ -340,28 +340,59 @@ export function baselineDriveLiveOk(live) {
   if (!live) return true;
   const hasTdeProbe = live.wasmVirtualDevice != null || live.wasmUnitTrueEmulation != null;
   if (!hasTdeProbe) return true;
-  return live.wasmIecDevice === 0 && live.wasmVirtualDevice === 0 && live.wasmUnitTrueEmulation === 1;
+  const tde =
+    live.wasmIecDevice === 0 && live.wasmVirtualDevice === 0 && live.wasmUnitTrueEmulation === 1;
+  const cpu = live.wasmDriveUnitEnabled === 1 && live.wasmRomLoaded === 1;
+  const vdriveTrap =
+    live.wasmVdriveErrorIsVirtual === 1 ||
+    /VIRTUAL\s+DRIVE/i.test(live.wasmVdriveErrorChannel ?? live.wasmErrorChannel ?? "");
+  const iecOk =
+    live.iecErrorChannel?.length > 0
+      ? /CBM\s+DOS/i.test(live.iecErrorChannel) && !/VIRTUAL\s+DRIVE/i.test(live.iecErrorChannel)
+      : live.wasmVdriveErrorIsVirtual !== 1 && !vdriveTrap;
+  return tde && cpu && iecOk;
+}
+
+/** Merge attachDiskDiag live probe with C64-side OPEN 15 IEC read. */
+export async function liveWithIecErrorProbe(page, live = null) {
+  const iecProbe = await page.evaluate(async () => window.__g64?.iecErrorChannelProbe?.(8));
+  return {
+    ...(live ?? {}),
+    iecErrorChannel: iecProbe?.text ?? "",
+    iecProbeOk: iecProbe?.ok === true,
+    iecIsCbmDos: iecProbe?.isCbmDos === true,
+  };
+}
+
+/** GEOS 2.0 directory must show a GEOS-named file on screen (not empty BLOCKS FREE). */
+export function geosDirectoryOnScreen(screen = "") {
+  if (!screen?.trim()) return false;
+  if (/FILE NOT FOUND|DEVICE NOT PRESENT|\?FILE/i.test(screen)) return false;
+  return (
+    /"GEOS\b/i.test(screen) ||
+    /\bGEOS\s+SEQ\b/i.test(screen) ||
+    /\bGEOS\s+PRG\b/i.test(screen) ||
+    /GEOS\s{2,}"/i.test(screen)
+  );
 }
 
 export function geosFloppyEvidence({ screen = "", session = null, wasmWorkDisk = null, viceAttachedImage = null }) {
   const wasmOk = Boolean(
     wasmWorkDisk?.some((r) => r.matchesSession && (r.wasmFsStat ?? 0) > 0 && (r.moduleFsBytes ?? 0) > 0),
   );
-  const iecFail = /FILE NOT FOUND|DEVICE NOT PRESENT/i.test(screen);
+  const iecFail = /FILE NOT FOUND|DEVICE NOT PRESENT|\?FILE/i.test(screen);
   const dirHex = session?.dir18s1Hex ?? "";
   const label = session?.diskLabel ?? "";
-  const catalogOk =
-    /GEOS/i.test(screen) ||
-    /47454f53/i.test(dirHex) ||
-    /geos/i.test(label) ||
-    (/PRG|SEQ|DEL|BLOCKS FREE/i.test(screen) && !/^work\s*disk/i.test(label));
+  const onScreen = geosDirectoryOnScreen(screen);
+  const catalogOk = onScreen;
   const attachOk = Boolean(viceAttachedImage?.trim());
   return {
     wasmOk,
     iecFail,
     catalogOk,
+    onScreen,
     attachOk,
-    ok: wasmOk && attachOk && !iecFail && catalogOk,
+    ok: wasmOk && attachOk && !iecFail && onScreen,
   };
 }
 
