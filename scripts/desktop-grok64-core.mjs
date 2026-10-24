@@ -6,6 +6,19 @@ import { join } from "node:path";
 
 export const GROK64_IEC_CORE_FILE = "vice_x64sc-grok64-iec-wasm.data";
 
+export function grok64CoreBuildIdFromManifest() {
+  try {
+    const raw = readFileSync(
+      join(process.cwd(), "public/system/vice/emulatorjs/data/cores/grok64-core-manifest.json"),
+      "utf8",
+    );
+    const j = JSON.parse(raw);
+    return j.buildId ? String(j.buildId) : null;
+  } catch {
+    return null;
+  }
+}
+
 export function grok64DatapathFromEnv() {
   try {
     const raw = readFileSync(join(process.cwd(), ".grok/app-env.json"), "utf8");
@@ -17,11 +30,16 @@ export function grok64DatapathFromEnv() {
   }
 }
 
-export function grok64CoreBlobUrl(baseUrl) {
+export function grok64CoreBlobUrl(baseUrl, { cacheBust = true } = {}) {
   const root = grok64DatapathFromEnv();
   if (!root) return null;
   const path = `${root.startsWith("/") ? root : `/${root}`}/cores/${GROK64_IEC_CORE_FILE}`;
-  return new URL(path, baseUrl).href;
+  let href = new URL(path, baseUrl).href;
+  if (cacheBust) {
+    const buildId = grok64CoreBuildIdFromManifest();
+    if (buildId) href += `${href.includes("?") ? "&" : "?"}grok64core=${encodeURIComponent(buildId)}`;
+  }
+  return href;
 }
 
 /** Block CDN / stock vice *.data; only allow the Grok64 IEC blob. */
@@ -38,6 +56,11 @@ export async function installGrok64CoreNetworkGuard(page, baseUrl) {
         return route.continue({ url: allowed });
       }
       return route.abort("failed");
+    }
+    if (allowed && /\/cores\/vice_x64sc-grok64-iec-wasm\.data/i.test(u) && u.startsWith(new URL(baseUrl).origin)) {
+      if (!u.includes("grok64core=") && allowed.includes("grok64core=")) {
+        return route.continue({ url: allowed });
+      }
     }
     return route.continue();
   });
@@ -65,7 +88,7 @@ export async function assertGrok64WasmCore(page, { timeoutMs = 90000 } = {}) {
   let last = null;
   while (Date.now() - t0 < timeoutMs) {
     last = await readGrok64CoreStatus(page);
-    if (last?.attach && last?.c64read) return last;
+    if (last?.attach && last?.c64read && last?.diskExportsPresent) return last;
     await page.waitForTimeout(500);
   }
   const blocked = await page.evaluate(() => window.__GROK64_STOCK_CORE_BLOCKED__ ?? []);

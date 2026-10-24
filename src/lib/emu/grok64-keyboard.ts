@@ -9,7 +9,8 @@ type Grok64KbdMod = {
 };
 
 /** ~2 C64 frames at PAL — matrix needs the key held long enough to scan. */
-const MIN_HOLD_MS = 48;
+const MIN_HOLD_MS = 40;
+const MIN_HOLD_FAST_MS = 10;
 
 /** libretro `enum retro_key` — must match libretro.h (not ASCII / legacy keyCodes). */
 const RETROK: Record<string, number> = {
@@ -63,6 +64,11 @@ type RetroFn = (code: number, down: number, character: number, mod: number) => v
 
 let paintHook: ((emu: Grok64Emu | null) => void) | null = null;
 let deliveryChain: Promise<void> = Promise.resolve();
+let deliveryDepth = 0;
+
+function effectiveHoldMs() {
+  return deliveryDepth > 2 ? MIN_HOLD_FAST_MS : MIN_HOLD_MS;
+}
 
 /** Host Shift is held for the next US-layout chord (+, ", $) — do not mirror to C64. */
 let hostShiftChord = false;
@@ -77,7 +83,13 @@ function sleep(ms: number) {
 }
 
 function enqueueDelivery(task: () => void | Promise<void>) {
-  deliveryChain = deliveryChain.then(() => Promise.resolve(task())).catch(() => undefined);
+  deliveryDepth += 1;
+  deliveryChain = deliveryChain
+    .then(() => Promise.resolve(task()))
+    .catch(() => undefined)
+    .finally(() => {
+      deliveryDepth = Math.max(0, deliveryDepth - 1);
+    });
 }
 
 export function setGrok64KeyboardPaintHook(fn: ((emu: Grok64Emu | null) => void) | null) {
@@ -108,6 +120,7 @@ function flushAllKeys(fn: RetroFn) {
 
 export function grok64KeyboardReleaseAll(emu: Grok64Emu | null) {
   deliveryChain = Promise.resolve();
+  deliveryDepth = 0;
   const mod = emu?.Module as Grok64KbdMod | undefined;
   if (!mod?._grok64_retro_keyboard) return;
   flushAllKeys(mod._grok64_retro_keyboard);
@@ -228,10 +241,11 @@ function resolveHostStroke(
   return { code, key, mods: { ...mods, shift } };
 }
 
-async function holdRetro(fn: RetroFn, retro: number, emu: Grok64Emu | null) {
+async function holdRetro(fn: RetroFn, retro: number, emu: Grok64Emu | null, holdMs?: number) {
+  const hold = holdMs ?? effectiveHoldMs();
   fn(retro, 1, 0, 0);
   downAt.set(retro, performance.now());
-  await sleep(MIN_HOLD_MS);
+  await sleep(hold);
   fn(retro, 0, 0, 0);
   downAt.delete(retro);
   paintHook?.(emu);
@@ -247,7 +261,7 @@ async function releaseC64Shift(fn: RetroFn, emu: Grok64Emu | null) {
     }
     downAt.delete(retro);
   }
-  await sleep(MIN_HOLD_MS);
+  await sleep(effectiveHoldMs());
   paintHook?.(emu);
 }
 
@@ -300,7 +314,8 @@ function scheduleDomKey(
         downAt.set(retro, performance.now());
       } else {
         const started = downAt.get(retro) ?? performance.now();
-        await sleep(Math.max(0, MIN_HOLD_MS - (performance.now() - started)));
+        const hold = effectiveHoldMs();
+        await sleep(Math.max(0, hold - (performance.now() - started)));
         fn(retro, 0, 0, 0);
         downAt.delete(retro);
       }
@@ -311,6 +326,10 @@ function scheduleDomKey(
     const stroke = resolveHostStroke(code, key, mods);
     const tag = eventTag(code, key);
 
+    if (down && key.length === 1 && !mods.shift && !isHostShiftCode(code)) {
+      hostShiftChord = false;
+    }
+
     if (!down) {
       if (stroke.swallowUp || eatKeyUp.has(tag)) {
         eatKeyUp.delete(tag);
@@ -319,7 +338,8 @@ function scheduleDomKey(
       const retro = domCodeToRetrok(stroke.code);
       if (retro == null) return;
       const started = downAt.get(retro) ?? performance.now();
-      await sleep(Math.max(0, MIN_HOLD_MS - (performance.now() - started)));
+      const hold = effectiveHoldMs();
+      await sleep(Math.max(0, hold - (performance.now() - started)));
       fn(retro, 0, 0, 0);
       downAt.delete(retro);
       paintHook?.(emu);

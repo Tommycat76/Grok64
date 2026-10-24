@@ -41,6 +41,7 @@ import {
   wireGrok64ViceHost,
 } from "./grok64-vice-bridge";
 import { grok64RetroKeyboardAvailable } from "./grok64-keyboard";
+import { grok64CoreBuildIdForUrl, grok64CoreManifestSummary, GROK64_CORE_BUILD_ID } from "./grok64-core-build";
 import {
   grok64DiskExportsReady,
   resolveViceDiskAttachPath,
@@ -48,6 +49,7 @@ import {
   viceDiskAttachCandidates,
   viceReattachDisk,
   viceRetroSaveDirectory,
+  recordViceLastAttach,
 } from "./vice-disk";
 import { writeC64Bytes } from "./c64-memory";
 import {
@@ -101,15 +103,23 @@ export function emulatorDataPath(): string {
 
 export const GROK64_IEC_CORE_BLOB = "vice_x64sc-grok64-iec-wasm.data";
 
+function withGrok64CoreCacheBust(url: string): string {
+  const buildId = grok64CoreBuildIdForUrl();
+  if (!buildId) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}grok64core=${encodeURIComponent(buildId)}`;
+}
+
 /** Absolute URL of the Grok64 IEC 7z core (when configured). */
 export function grok64CoreBlobUrl(): string | null {
   const root = grok64ViceCoreRoot();
   if (!root) return null;
   const rel = `${root.startsWith("/") ? root : `/${root}`}/cores/${GROK64_IEC_CORE_BLOB}`;
+  let url = rel;
   if (typeof window !== "undefined" && window.location?.origin) {
-    return `${window.location.origin}${rel}`;
+    url = `${window.location.origin}${rel}`;
   }
-  return rel;
+  return withGrok64CoreCacheBust(url);
 }
 
 function grok64LocalDataUrl(rel: string): string | null {
@@ -158,6 +168,9 @@ export type Grok64CoreStatus = {
   attach: boolean;
   c64read: boolean;
   diskAttach: boolean;
+  diskExportsPresent: boolean;
+  coreBuildId: string | null;
+  coreUrlBuildId: string | null;
   iecBackend: string;
 };
 
@@ -165,6 +178,8 @@ export function grok64CoreStatus(emu: EjsInstance | null): Grok64CoreStatus {
   const w = typeof window !== "undefined" ? (window as unknown as Record<string, unknown>) : {};
   const mod = emu?.Module as { _grok64_sd2iec_attach?: unknown; _grok64_c64_read?: unknown } | undefined;
   if (emu?.Module) bindGrok64WasmExports(emu.Module as Parameters<typeof bindGrok64WasmExports>[0]);
+  const manifest = grok64CoreManifestSummary();
+  const diskExportsPresent = grok64DiskExportsReady(emu);
   return {
     kind: "vice_x64sc-grok64-iec",
     blobUrl: grok64CoreBlobUrl(),
@@ -173,7 +188,10 @@ export function grok64CoreStatus(emu: EjsInstance | null): Grok64CoreStatus {
     blockedStock: (w.__GROK64_STOCK_CORE_BLOCKED__ as string[]) ?? [],
     attach: typeof mod?._grok64_sd2iec_attach === "function",
     c64read: typeof mod?._grok64_c64_read === "function",
-    diskAttach: grok64DiskExportsReady(emu),
+    diskAttach: diskExportsPresent,
+    diskExportsPresent,
+    coreBuildId: GROK64_CORE_BUILD_ID || manifest.buildId || null,
+    coreUrlBuildId: manifest.urlBuildId,
     iecBackend: grok64ViceCoreRoot() ? "grok64-datapath" : "cdn-stock",
   };
 }
@@ -2247,6 +2265,50 @@ export function resyncSessionDiskToVice(emu: EjsInstance | null, unit: IecUnit =
   return true;
 }
 
+/** Deferred attach flushed on the live IEC poll / emu thread (not a tight sync poll loop). */
+export async function viceReattachDiskOnEmuThread(
+  emu: EjsInstance | null,
+  unit: IecUnit,
+  path: string,
+  drive = 0,
+): Promise<number> {
+  if (!emu || !path?.trim()) return -1;
+  if (!grok64DiskExportsReady(emu)) return -99;
+  const mod = emu.Module as {
+    _grok64_disk_attach_deferred?: (u: number, d: number, p: string) => number;
+    _grok64_disk_attach?: (u: number, d: number, p: string) => number;
+    _grok64_disk_last_attach_rc?: () => number;
+  };
+  const before = viceAttachedImage(emu, unit, drive);
+  const defer = mod._grok64_disk_attach_deferred;
+  let rc = -1;
+  if (defer) {
+    rc = defer(unit, drive, path);
+    if (rc === 0) {
+      for (let i = 0; i < 60; i++) {
+        await tickGrok64Iec(emu);
+        await new Promise((r) => setTimeout(r, 25));
+        const attachRc = mod._grok64_disk_last_attach_rc?.();
+        if (typeof attachRc === "number" && attachRc >= 0) {
+          rc = attachRc;
+          break;
+        }
+      }
+      if (rc < 0) {
+        const attachRc = mod._grok64_disk_last_attach_rc?.();
+        rc = typeof attachRc === "number" && attachRc >= 0 ? attachRc : -1;
+      }
+    }
+  } else {
+    rc = mod._grok64_disk_attach?.(unit, drive, path) ?? -1;
+  }
+  const after = viceAttachedImage(emu, unit, drive);
+  if (rc < 0 && after) rc = 0;
+  recordViceLastAttach(unit, { path, rc, before, after, at: Date.now() });
+  glog("vice-disk-reattach", { unit, path, rc, before, after, emuThread: Boolean(defer) });
+  return rc;
+}
+
 /** file_system_detach_disk + file_system_attach_disk for the live session image on `unit`. */
 export async function viceReattachSessionDisk(emu: EjsInstance | null, unit: IecUnit = 8): Promise<number> {
   if (!emu) return -1;
@@ -2260,7 +2322,7 @@ export async function viceReattachSessionDisk(emu: EjsInstance | null, unit: Iec
   if (!candidates.length) return -1;
   let lastRc = -1;
   for (const candidate of candidates) {
-    lastRc = viceReattachDisk(emu, unit, candidate);
+    lastRc = await viceReattachDiskOnEmuThread(emu, unit, candidate);
     if (lastRc === 0) return 0;
     await new Promise((r) => setTimeout(r, 80));
   }

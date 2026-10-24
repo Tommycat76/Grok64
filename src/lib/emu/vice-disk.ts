@@ -61,6 +61,10 @@ export function lastViceDiskAttach(unit: IecUnit = 8): ViceDiskAttachRecord | nu
   return lastAttachByUnit.get(unit) ?? null;
 }
 
+export function recordViceLastAttach(unit: IecUnit, record: ViceDiskAttachRecord): void {
+  lastAttachByUnit.set(unit, record);
+}
+
 export function grok64DiskExportsReady(emu: ViceDiskEmu | null): boolean {
   const mod = diskMod(emu);
   if (!mod) return false;
@@ -172,7 +176,7 @@ export function viceDiskAttachCandidates(
   if (isGcrDiskKind(kind)) {
     push(`/${base}`);
     push(base);
-  } else {
+  } else if (!saveDir) {
     for (const p of WORK_DISK_PATHS) push(p);
   }
 

@@ -262,6 +262,15 @@ test("grok64 vice core data leaf names match EmulatorJS", () => {
   assert.ok(!isCoreData("extract7z.js"));
 });
 
+test("grok64 core manifest build id is present", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const p = join(process.cwd(), "public/system/vice/emulatorjs/data/cores/grok64-core-manifest.json");
+  const j = JSON.parse(readFileSync(p, "utf8"));
+  assert.match(j.buildId, /^[a-f0-9]{12}$/);
+  assert.match(j.sha256, /^[a-f0-9]{64}$/);
+});
+
 test("catalog gibberish heuristic", () => {
   const skipIa = (q) => {
     const t = q.trim();

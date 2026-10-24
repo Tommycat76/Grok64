@@ -8,7 +8,8 @@
   },
   "scripts": {
     "dev": "node scripts/with-app-env.mjs vite dev --host 0.0.0.0 --port 8080",
-    "build": "node scripts/with-app-env.mjs vite build && node scripts/flatten-dist.mjs dist && node scripts/ensure-bd.mjs dist && node scripts/check-no-jsxdev.mjs dist && npm run db:migrate",
+    "grok64:core-manifest": "node scripts/write-grok64-core-manifest.mjs",
+    "build": "node scripts/write-grok64-core-manifest.mjs && node scripts/with-app-env.mjs vite build && node scripts/flatten-dist.mjs dist && node scripts/ensure-bd.mjs dist && node scripts/check-no-jsxdev.mjs dist && npm run db:migrate",
     "build:vercel": "GROK_VERCEL_BUILD=1 node scripts/with-app-env.mjs vite build && npm run db:migrate",
     "db:migrate": "node scripts/migrate.mjs",
     "build:dev": "node scripts/with-app-env.mjs vite build --mode development",
@@ -20,6 +21,7 @@
     "test:desktop-sd2iec-iec": "node scripts/desktop-sd2iec-iec-e2e.mjs",
     "test:desktop-sd2iec-card-sources": "node scripts/desktop-sd2iec-card-sources.mjs",
     "test:desktop-grok64-core": "node scripts/desktop-grok64-core-e2e.mjs",
+    "test:desktop-core-cache-bust": "node scripts/desktop-core-cache-bust-proof.mjs",
     "test:desktop-custom-matrix": "NODE_OPTIONS=--max-old-space-size=6144 node scripts/desktop-custom-core-matrix.mjs",
     "test:desktop-a1bacdc": "NODE_OPTIONS=--max-old-space-size=6144 node scripts/desktop-a1bacdc-qa.mjs",
     "test:desktop-real-keyboard": "node scripts/desktop-real-keyboard-qa.mjs",

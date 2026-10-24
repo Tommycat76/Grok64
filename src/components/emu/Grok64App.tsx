@@ -907,6 +907,10 @@ export function Grok64App() {
           viceLastReattach: lastViceDiskAttach(unit),
           viceSaveDirectory: viceRetroSaveDirectory(emuRef.current),
           viceDiskExports: grok64DiskExportsReady(emuRef.current),
+          diskExportsPresent: grok64DiskExportsReady(emuRef.current),
+          coreBuildId: grok64CoreStatus(emuRef.current).coreBuildId,
+          coreUrlBuildId: grok64CoreStatus(emuRef.current).coreUrlBuildId,
+          grok64Core: grok64CoreStatus(emuRef.current),
         };
       },
       kbdDrain: () => grok64KeyboardDrain(),
