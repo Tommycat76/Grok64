@@ -58,6 +58,7 @@ import {
   patchFetchNoStoreForGrok64Core,
   patchIndexedDbForEmulatorJsCache,
   purgeAllEmulatorJsCoreRows,
+  purgeEmulatorJsLegacyCoreViceRows,
   syncEmulatorJsCoreCacheWithManifest,
 } from "./grok64-ejs-core-cache";
 
@@ -704,6 +705,7 @@ function patchEjsGrok64CoreDownload() {
     const canonical = grok64CoreBlobUrl();
     if (isViceCoreData) {
       void purgeAllEmulatorJsCoreRows("pre-vice-download").catch(() => undefined);
+      void purgeEmulatorJsLegacyCoreViceRows("pre-vice-download").catch(() => undefined);
       recordGrok64CoreLoad(leaf, filePaths?.[leaf] ?? canonical ?? url, filePaths?.[leaf] ? "filePaths" : "redirect");
       if (canonical && filePaths) {
         for (const name of GROK64_VICE_CORE_DATA_NAMES) {

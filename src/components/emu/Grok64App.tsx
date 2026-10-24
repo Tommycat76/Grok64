@@ -276,6 +276,8 @@ import {
   qaCountEmulatorJsCoreCacheRows,
   qaSeedStaleEmulatorJsCoreCacheRow,
   qaSeedStaleEmulatorJsCoreCacheWithStockBlob,
+  qaSeedEmulatorJsLegacyCoreStockBlob,
+  grok64LegacyCoreIdbDiag,
 } from "@/lib/emu/grok64-ejs-core-cache";
 import { grok64CacheEnvironmentDiag, patchGrok64DataFetchInstrumentation } from "@/lib/emu/grok64-cache-diag";
 import { readBuildId } from "@/lib/emu/build-id";
@@ -831,6 +833,7 @@ export function Grok64App() {
       libraryIdbDiag: () => grok64LibraryIdbDiag(),
       qaSeedStaleEmulatorJsCoreCache: () => qaSeedStaleEmulatorJsCoreCacheRow(),
       qaSeedStaleEmulatorJsCoreCacheBlob: () => qaSeedStaleEmulatorJsCoreCacheWithStockBlob(),
+      qaSeedEmulatorJsLegacyCore: () => qaSeedEmulatorJsLegacyCoreStockBlob(),
       qaEmulatorJsCoreCacheCount: () => qaCountEmulatorJsCoreCacheRows(),
       librarySnapshot: async () => {
         const items = await listLibrary();
@@ -980,6 +983,7 @@ export function Grok64App() {
           grok64Core: grok64CoreStatus(emuRef.current),
           libraryIdb: await grok64LibraryIdbDiag(),
           cacheEnvironment: await grok64CacheEnvironmentDiag(),
+          legacyCoreIdb: await grok64LegacyCoreIdbDiag(),
           appBuildId: readBuildId(),
           grok64WasmBindRev: GROK64_WASM_BIND_REV,
         };

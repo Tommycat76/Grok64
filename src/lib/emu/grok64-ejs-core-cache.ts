@@ -10,8 +10,25 @@ import { grok64DiskAttachCallableEmu } from "./grok64-wasm-direct";
 
 export const GROK64_IEC_CORE_BLOB = "vice_x64sc-grok64-iec-wasm.data";
 export const GROK64_LIBRARY_DB = "grok64";
+/** CDN stable EmulatorJS legacy per-core WASM cache (keyed by `vice_x64sc-wasm.data`, not URL). */
+export const EJS_LEGACY_CORE_DB = "EmulatorJS-core";
+const EJS_LEGACY_CORE_STORE = "core";
 const EJS_CACHE_DB = "EmulatorJS-Cache";
 const EJS_CACHE_DB_VERSION = 2;
+
+/** Matches EmulatorJS `getCore() + (-thread|-legacy) + "-wasm.data"` for vice_x64sc. */
+export const VICE_X64SC_LEGACY_CORE_KEYS = [
+  "vice_x64sc-wasm.data",
+  "vice_x64sc-legacy-wasm.data",
+  "vice_x64sc-thread-wasm.data",
+  "vice_x64sc-thread-legacy-wasm.data",
+] as const;
+
+export function isLegacyViceX64scCoreStorageKey(key: string): boolean {
+  const k = String(key);
+  if ((VICE_X64SC_LEGACY_CORE_KEYS as readonly string[]).includes(k)) return true;
+  return /^vice_x64sc(-thread|-legacy|-thread-legacy)?-wasm\.data$/i.test(k);
+}
 
 const MANIFEST_LS = "grok64.ejsCoreManifestBuildId";
 const AUTO_RELOAD_SS = "grok64.coreCacheAutoReload";
@@ -276,6 +293,7 @@ export async function syncEmulatorJsCoreCacheWithManifest(): Promise<Grok64EjsCa
   // Every boot: drop EmulatorJS Core IDB rows so stale blobs cannot win over network (dontCache does not skip IDB read).
   removed += (await purgeAllEmulatorJsCoreRows(`${reason}:boot-all-core`)).removed;
   removed += (await purgeEmulatorJsViceCoreCache(reason)).removed;
+  removed += (await purgeEmulatorJsLegacyCoreViceRows(reason)).removed;
   if (manifestBump) {
     try {
       localStorage.setItem(MANIFEST_LS, GROK64_CORE_BUILD_ID);
@@ -311,6 +329,86 @@ export function patchFetchNoStoreForGrok64Core(): void {
 export async function forceFreshGrok64CoreDownloadCache(): Promise<void> {
   await purgeAllEmulatorJsCoreRows("force-fresh-core");
   await purgeEmulatorJsViceCoreCache("force-fresh-core");
+  await purgeEmulatorJsLegacyCoreViceRows("force-fresh-core");
+}
+
+function openLegacyIdbDb(dbName: string, storeName = EJS_LEGACY_CORE_STORE): Promise<IDBDatabase | null> {
+  if (typeof indexedDB === "undefined") return Promise.resolve(null);
+  return new Promise((resolve) => {
+    const req = indexedDB.open(dbName, 1);
+    req.onerror = () => resolve(null);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(storeName)) {
+        db.createObjectStore(storeName);
+      }
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(storeName)) {
+        db.close();
+        resolve(null);
+        return;
+      }
+      resolve(db);
+    };
+  });
+}
+
+async function removeLegacyObjectStoreKey(db: IDBDatabase, store: string, key: string): Promise<void> {
+  await idbDelete(db, store, key);
+  const keys = await idbGet<string[]>(db, store, "?EJS_KEYS!");
+  if (!keys?.length) return;
+  const next = keys.filter((k) => k !== key);
+  await idbPut(db, store, "?EJS_KEYS!", next);
+}
+
+/** Delete stale `vice_x64sc*-wasm.data` rows from EmulatorJS-core only (never deleteDatabase). */
+export async function purgeEmulatorJsLegacyCoreViceRows(reason = "legacy-core"): Promise<Grok64EjsCachePurgeResult> {
+  const db = await openLegacyIdbDb(EJS_LEGACY_CORE_DB);
+  if (!db) return { removed: 0, reason: `${reason}:no-db` };
+  if (!db.objectStoreNames.contains(EJS_LEGACY_CORE_STORE)) {
+    db.close();
+    return { removed: 0, reason: `${reason}:no-store` };
+  }
+  const keys = (await idbGet<string[]>(db, EJS_LEGACY_CORE_STORE, "?EJS_KEYS!")) ?? [];
+  let removed = 0;
+  for (const key of keys) {
+    if (key === "?EJS_KEYS!") continue;
+    if (!isLegacyViceX64scCoreStorageKey(key)) continue;
+    await removeLegacyObjectStoreKey(db, EJS_LEGACY_CORE_STORE, key);
+    removed++;
+  }
+  db.close();
+  return { removed, reason };
+}
+
+export type Grok64LegacyCoreIdbDiag = {
+  db: string;
+  store: string;
+  keys: string[];
+  viceRows: { key: string; version: unknown; byteLength: number | null }[];
+};
+
+export async function grok64LegacyCoreIdbDiag(): Promise<Grok64LegacyCoreIdbDiag | null> {
+  const db = await openLegacyIdbDb(EJS_LEGACY_CORE_DB);
+  if (!db || !db.objectStoreNames.contains(EJS_LEGACY_CORE_STORE)) {
+    db?.close();
+    return null;
+  }
+  const keys = (await idbGet<string[]>(db, EJS_LEGACY_CORE_STORE, "?EJS_KEYS!")) ?? [];
+  const viceRows: Grok64LegacyCoreIdbDiag["viceRows"] = [];
+  for (const key of keys) {
+    if (!isLegacyViceX64scCoreStorageKey(key)) continue;
+    const row = await idbGet<{ version?: unknown; data?: ArrayBuffer }>(db, EJS_LEGACY_CORE_STORE, key);
+    viceRows.push({
+      key,
+      version: row?.version ?? null,
+      byteLength: row?.data && typeof row.data.byteLength === "number" ? row.data.byteLength : null,
+    });
+  }
+  db.close();
+  return { db: EJS_LEGACY_CORE_DB, store: EJS_LEGACY_CORE_STORE, keys, viceRows };
 }
 
 /** QA: rows in EmulatorJS-Cache with type Core. */
@@ -388,6 +486,54 @@ export async function qaSeedStaleEmulatorJsCoreCacheWithStockBlob(): Promise<{
   return { key, url: canonical, bytes: buf.byteLength, stockSha12 };
 }
 
+/**
+ * QA: poison EmulatorJS-core (CDN legacy store) with stock `vice_x64sc-wasm.data` bytes — Tom profile shape.
+ */
+export async function qaSeedEmulatorJsLegacyCoreStockBlob(): Promise<{
+  key: string;
+  version: unknown;
+  bytes: number;
+} | null> {
+  const root = grok64ViceCoreRoot();
+  if (!root || typeof window === "undefined") return null;
+  const origin = window.location.origin;
+  const base = `${root.startsWith("/") ? root : `/${root}`}`;
+  const stockUrl = `${origin}${base}/cores/vice_x64sc-wasm.data`;
+  const reportUrl = `${origin}${base}/cores/reports/vice_x64sc.json`;
+  const [stockRes, reportRes] = await Promise.all([
+    fetch(stockUrl, { cache: "no-store" }),
+    fetch(reportUrl, { cache: "no-store" }),
+  ]);
+  if (!stockRes.ok) return null;
+  const buf = new Uint8Array(await stockRes.arrayBuffer());
+  let version: unknown = 1;
+  if (reportRes.ok) {
+    try {
+      const rep = (await reportRes.json()) as { buildStart?: unknown };
+      if (rep.buildStart != null) version = rep.buildStart;
+    } catch {
+      /* ignore */
+    }
+  }
+  const db = await openLegacyIdbDb(EJS_LEGACY_CORE_DB);
+  if (!db) return null;
+  if (!db.objectStoreNames.contains(EJS_LEGACY_CORE_STORE)) {
+    db.close();
+    return null;
+  }
+  const key = "vice_x64sc-wasm.data";
+  const data =
+    buf.byteOffset === 0 && buf.byteLength === buf.buffer.byteLength
+      ? buf.buffer
+      : buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
+  await idbPut(db, EJS_LEGACY_CORE_STORE, key, { version, data });
+  const keys = (await idbGet<string[]>(db, EJS_LEGACY_CORE_STORE, "?EJS_KEYS!")) ?? [];
+  if (!keys.includes(key)) keys.push(key);
+  await idbPut(db, EJS_LEGACY_CORE_STORE, "?EJS_KEYS!", keys);
+  db.close();
+  return { key, version, bytes: buf.byteLength };
+}
+
 export async function qaSeedStaleEmulatorJsCoreCacheRow(): Promise<{ key: string; url: string } | null> {
   patchIndexedDbForEmulatorJsCache();
   const buildId = grok64CoreBuildIdForUrl();
@@ -434,6 +580,8 @@ export async function maybeAutoRefreshStaleEmulatorCore(emu: { Module?: unknown 
   }
 
   const glue = loadedCoreGlueInfo();
+  if (!glue || glue.glueBytes <= 0) return false;
+
   const exportsOk = grok64DiskAttachCallableEmu(emu);
   const matches = grok64CoreBuildMatchesExpected();
   if (exportsOk && matches) {
@@ -446,13 +594,15 @@ export async function maybeAutoRefreshStaleEmulatorCore(emu: { Module?: unknown 
   }
 
   const glueShaMismatch =
-    Boolean(glue?.glueSha12 && GROK64_CORE_GLUE_SHA12 && glue.glueSha12 !== GROK64_CORE_GLUE_SHA12);
+    Boolean(glue.glueSha12 && GROK64_CORE_GLUE_SHA12 && glue.glueSha12 !== GROK64_CORE_GLUE_SHA12);
   const needsRefresh =
-    !glue ||
     !glue.glueHasDiskExports ||
     glueShaMismatch ||
-    !matches ||
-    !exportsOk;
+    (glue.glueSha12 != null && !matches) ||
+    (glue.glueHasDiskExports &&
+      glue.glueSha12 === GROK64_CORE_GLUE_SHA12 &&
+      GROK64_CORE_GLUE_SHA12 &&
+      !exportsOk);
   if (!needsRefresh) return false;
 
   await forceFreshGrok64CoreDownloadCache();
@@ -483,10 +633,40 @@ type EjsDownloaderLike = {
   __g64Bypass?: boolean;
 };
 
+type EjsLegacyStorageLike = {
+  get?: (key: string) => Promise<unknown>;
+  put?: (key: string, data: unknown) => Promise<void>;
+  __g64LegacyCore?: boolean;
+};
+
+type Grok64PatchedEjsInstance = {
+  downloader?: EjsDownloaderLike;
+  storage?: { core?: EjsLegacyStorageLike };
+};
+
+function wrapEmulatorJsLegacyCoreStorage(inst: Grok64PatchedEjsInstance): void {
+  if (!grok64ViceCoreRoot()) return;
+  const core = inst.storage?.core;
+  if (!core?.get || core.__g64LegacyCore) return;
+  core.__g64LegacyCore = true;
+  const origGet = core.get.bind(core);
+  core.get = async (key: string) => {
+    if (isLegacyViceX64scCoreStorageKey(String(key))) return undefined;
+    return origGet(key);
+  };
+  if (core.put) {
+    const origPut = core.put.bind(core);
+    core.put = async (key: string, data: unknown) => {
+      if (isLegacyViceX64scCoreStorageKey(String(key))) return;
+      return origPut(key, data);
+    };
+  }
+}
+
 export function patchEmulatorJsDownloaderCoreCacheBypass(): void {
   if (typeof window === "undefined") return;
   const w = window as unknown as {
-    EmulatorJS?: new (...a: unknown[]) => { downloader?: EjsDownloaderLike };
+    EmulatorJS?: new (...a: unknown[]) => Grok64PatchedEjsInstance;
     __g64EjsDlBypass?: boolean;
   };
   const EJS = w.EmulatorJS;
@@ -515,8 +695,9 @@ export function patchEmulatorJsDownloaderCoreCacheBypass(): void {
 
   const Orig = EJS;
   const Wrapped = function Grok64PatchedEmulatorJS(this: unknown, ...args: unknown[]) {
-    const inst = Reflect.construct(Orig, args, Wrapped) as { downloader?: EjsDownloaderLike };
+    const inst = Reflect.construct(Orig, args, Wrapped) as Grok64PatchedEjsInstance;
     wrapDownloader(inst.downloader);
+    wrapEmulatorJsLegacyCoreStorage(inst);
     return inst;
   } as unknown as typeof EJS;
   Wrapped.prototype = Orig.prototype;
