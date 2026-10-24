@@ -45,7 +45,9 @@ import {
   grok64DiskExportsReady,
   resolveViceDiskAttachPath,
   viceAttachedImage,
+  viceDiskAttachCandidates,
   viceReattachDisk,
+  viceRetroSaveDirectory,
 } from "./vice-disk";
 import { writeC64Bytes } from "./c64-memory";
 import {
@@ -2092,7 +2094,9 @@ const WORK_DISK_NAMES = new Set(["WORK DISK.D64", "work disk.d64"]);
 export function syncViceWorkD64(emu: EjsInstance | null, data: Uint8Array) {
   const FS = fsOf(emu);
   if (!FS?.writeFile || !isAcceptedD64ByteLength(data.byteLength)) return;
+  const saveDir = viceRetroSaveDirectory(emu);
   const targets = [
+    ...(saveDir ? [`${saveDir}/vice_work.d64`] : []),
     "/data/saves/vice_work.d64",
     "/home/web_user/retroarch/userdata/saves/vice_work.d64",
     "/vice_work/vice_work.d64",
@@ -2250,13 +2254,20 @@ export async function viceReattachSessionDisk(emu: EjsInstance | null, unit: Iec
   const name = slot?.name ?? bootFileOf(emu) ?? unitMounts.get(unit);
   if (!name) return -1;
   const path = resolveViceDiskAttachPath(emu, unit, name);
-  if (!path) return -1;
   await flushEmuFs(emu, 400);
-  const rc = viceReattachDisk(emu, unit, path);
-  if (rc === -99) {
+  const candidates = viceDiskAttachCandidates(emu, unit, name);
+  if (!candidates.length && path) candidates.push(path);
+  if (!candidates.length) return -1;
+  let lastRc = -1;
+  for (const candidate of candidates) {
+    lastRc = viceReattachDisk(emu, unit, candidate);
+    if (lastRc === 0) return 0;
+    await new Promise((r) => setTimeout(r, 80));
+  }
+  if (lastRc === -99) {
     glog("vice-disk-reattach-skip", { reason: "exports-missing", unit, name });
   }
-  return rc;
+  return lastRc;
 }
 
 /** QA: bytes on MEMFS path VICE opens for `8_d64` work disk attach. */

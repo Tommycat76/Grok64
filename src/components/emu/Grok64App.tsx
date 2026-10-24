@@ -104,7 +104,12 @@ import {
   diskAttachFingerprint,
   validateFloppyLibraryPayload,
 } from "@/lib/emu/disk-attach-diag";
-import { grok64DiskExportsReady, viceAttachedImage } from "@/lib/emu/vice-disk";
+import {
+  grok64DiskExportsReady,
+  lastViceDiskAttach,
+  viceAttachedImage,
+  viceRetroSaveDirectory,
+} from "@/lib/emu/vice-disk";
 import {
   c64KeyboardShouldDefer,
   enqueueC64KeyboardStroke,
@@ -868,6 +873,7 @@ export function Grok64App() {
       },
       screenText: () => readScreenText(emuRef.current),
       workD64Bytes: () => viceWorkD64ByteLength(emuRef.current),
+      viceAttachedImage: (unit = 8) => viceAttachedImage(emuRef.current, unit as 8),
       attachDiskDiag: async () => {
         const session = sessionDiskOnUnit(8);
         const FS = emuRef.current?.Module?.FS ?? emuRef.current?.gameManager?.FS;
@@ -898,6 +904,8 @@ export function Grok64App() {
           session: session ? await diskAttachFingerprint(session.bytes, session.name) : null,
           viceWork: { bytes: viceSize, sha1: viceSha1 },
           viceAttachedImage: viceAttachedImage(emuRef.current, unit),
+          viceLastReattach: lastViceDiskAttach(unit),
+          viceSaveDirectory: viceRetroSaveDirectory(emuRef.current),
           viceDiskExports: grok64DiskExportsReady(emuRef.current),
         };
       },

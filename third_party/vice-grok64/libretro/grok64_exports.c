@@ -4,10 +4,23 @@
 
 #include "libretro.h"
 #include "attach.h"
+#include "diskimage.h"
+#include "fliplist.h"
 #include "kbdbuf.h"
 #include "machine.h"
+#include "vdrive/vdrive.h"
 #include <stdint.h>
 #include <string.h>
+
+extern char retro_save_directory[];
+
+int grok64_disk_attach(int unit, int drive, const char *path);
+
+#define GROK64_DISK_PATH_MAX 4096
+static int pending_disk_unit = 0;
+static int pending_disk_drive = 0;
+static char pending_disk_path[GROK64_DISK_PATH_MAX];
+static int pending_disk_attach = 0;
 
 extern void cartridge_trigger_freeze(void);
 extern void retro_keyboard_event(bool down, unsigned code, uint32_t character, uint16_t mod);
@@ -43,6 +56,10 @@ EMSCRIPTEN_KEEPALIVE
 #endif
 void grok64_sd2iec_poll(void)
 {
+    if (pending_disk_attach && pending_disk_path[0] && pending_disk_unit >= 8) {
+        pending_disk_attach = 0;
+        grok64_disk_attach(pending_disk_unit, pending_disk_drive, pending_disk_path);
+    }
 }
 
 #ifdef __EMSCRIPTEN__
@@ -127,14 +144,37 @@ EMSCRIPTEN_KEEPALIVE
 #endif
 const char *grok64_disk_get_name(int unit, int drive)
 {
+    const char *name;
+    vdrive_t *vdrive;
+    disk_image_t *image;
+
     if (unit < 8 || unit > 11) {
         return "";
     }
     if (drive < 0 || drive > 1) {
         drive = 0;
     }
-    const char *name = file_system_get_disk_name((unsigned int)unit, (unsigned int)drive);
-    return name ? name : "";
+
+    name = file_system_get_disk_name((unsigned int)unit, (unsigned int)drive);
+    if (name && name[0]) {
+        return name;
+    }
+
+    vdrive = file_system_get_vdrive((unsigned int)unit);
+    image = vdrive ? vdrive_get_image(vdrive, (unsigned int)drive) : NULL;
+    if (image) {
+        name = disk_image_fsimage_name_get(image);
+        if (name && name[0]) {
+            return name;
+        }
+    }
+
+    name = fliplist_get_head((unsigned int)unit);
+    if (name && name[0]) {
+        return name;
+    }
+
+    return "";
 }
 
 #ifdef __EMSCRIPTEN__
@@ -154,6 +194,17 @@ void grok64_disk_detach(int unit, int drive)
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+const char *grok64_retro_save_directory(void)
+{
+    return retro_save_directory[0] ? retro_save_directory : "";
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
 int grok64_disk_attach(int unit, int drive, const char *path)
 {
     if (!path || !path[0]) {
@@ -167,4 +218,25 @@ int grok64_disk_attach(int unit, int drive, const char *path)
     }
     file_system_detach_disk((unsigned int)unit, (unsigned int)drive);
     return file_system_attach_disk((unsigned int)unit, (unsigned int)drive, path);
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int grok64_disk_attach_deferred(int unit, int drive, const char *path)
+{
+    if (!path || !path[0]) {
+        return -1;
+    }
+    if (unit < 8 || unit > 11) {
+        return -1;
+    }
+    if (drive < 0 || drive > 1) {
+        drive = 0;
+    }
+    pending_disk_unit = unit;
+    pending_disk_drive = drive;
+    strlcpy(pending_disk_path, path, sizeof(pending_disk_path));
+    pending_disk_attach = 1;
+    return 0;
 }
