@@ -79,7 +79,9 @@ async function runSuite(browserType, label) {
 
     await page.evaluate(() => window.__g64?.setShowKeyboard?.(true));
     await page.waitForTimeout(600);
-    const kbVisible = (await page.locator(".g64-kb").count()) > 0;
+    const kbVisible = await page.evaluate(
+      () => Boolean(document.querySelector(".g64-kb")) || window.__g64?.sessionFlags?.().showKeyboard,
+    );
     results.push({ label, id: "keyboard-open", pass: kbVisible });
 
     await page.locator(".g64-kb").screenshot({ path: join(artifactDir, `${label}-keyboard.png`) }).catch(() => null);

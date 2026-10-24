@@ -36,6 +36,16 @@ try {
   push({ id: "catalog-search-field", pass: hasSearch });
 
   await page.locator('.g64-chips button[data-on="true"]').first().waitFor({ timeout: 8000 }).catch(() => null);
+  const t0 = Date.now();
+  await catalogSearch(page, "xqzjwqmvklpp");
+  const nonsenseMs = Date.now() - t0;
+  const nonsenseHits = await page.locator(".g64-hit").count();
+  push({
+    id: "catalog-nonsense-fast",
+    pass: nonsenseMs < 9000 && nonsenseHits === 0,
+    detail: { ms: nonsenseMs, hits: nonsenseHits },
+  });
+
   await catalogSearch(page, "Boulder Dash");
   const hits = await page.locator(".g64-hit").count();
   push({ id: "catalog-search-hits", pass: hits > 0, detail: `hits=${hits}`, optional: hits === 0 });
@@ -62,53 +72,81 @@ try {
     push({ id: "catalog-repeat-download", pass: after2 >= before2, detail: { before2, after2 }, optional: true });
   }
 
+  async function waitCatalogToast(page, pattern, ms = 12000) {
+    const toast = page.locator("[data-sonner-toast]");
+    await toast.first().waitFor({ state: "visible", timeout: ms }).catch(() => null);
+    const texts = await toast.allTextContents().catch(() => []);
+    const joined = texts.join(" ");
+    return { joined, pass: pattern.test(joined) };
+  }
+
+  const isCatalogDownload = (url) =>
+    /\/api\/ia(\?|$)/i.test(url) &&
+    (/hvsc\.de/i.test(url) || /C64Music\//i.test(url) || /download\/C64Music/i.test(url));
+
+  const hvscRoute = async (route) => {
+    const url = route.request().url();
+    if (!isCatalogDownload(url)) {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "text/html",
+      body: "<!doctype html><html><body>nope</body></html>",
+    });
+  };
+
   // Bad file (HTML masquerading as download)
-  await page.route("**/download/C64Music/**", async (route) => {
-    await route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><html><body>nope</body></html>" });
-  });
+  await page.route("**/*", hvscRoute);
   await openSoftware(page);
   await page.locator('.g64-chips button:has-text("SID")').click();
   await page.waitForTimeout(400);
   await catalogSearch(page, "Commando");
+  await page.locator(".g64-hit").first().waitFor({ timeout: 8000 }).catch(() => null);
   const sidHits = await page.locator(".g64-hit").count();
   if (sidHits > 0) {
     await page.locator(".g64-hit").first().locator('button[aria-label^="Play"]').click();
-    await page.waitForTimeout(4000);
-    const toast = await page.locator("[data-sonner-toast]").first().textContent().catch(() => "");
+    const bad = await waitCatalogToast(page, /web page|empty|failed|6\s*MB/i);
     push({
       id: "catalog-bad-file",
-      pass: /web page|empty|failed/i.test(toast || ""),
-      detail: toast,
-      optional: true,
+      pass: /web page|empty/i.test(bad.joined),
+      detail: bad.joined,
     });
   } else {
-    push({ id: "catalog-bad-file", pass: true, skipped: true, reason: "no HVSC hit" });
+    push({ id: "catalog-bad-file", pass: false, reason: "no HVSC hit for Commando" });
   }
-  await page.unroute("**/download/C64Music/**");
+  await page.unroute("**/*", hvscRoute);
 
   // Large file (>6 MB cap)
   const big = new Uint8Array(7 * 1024 * 1024);
   big[0] = 0x43;
   big[1] = 0x36;
-  await page.route("**/download/C64Music/**", async (route) => {
+  const largeRoute = async (route) => {
+    const url = route.request().url();
+    if (!isCatalogDownload(url)) {
+      await route.continue();
+      return;
+    }
     await route.fulfill({ status: 200, body: Buffer.from(big), contentType: "application/octet-stream" });
-  });
+  };
+  await page.route("**/*", largeRoute);
   await openSoftware(page);
+  await page.locator('.g64-chips button:has-text("SID")').click();
+  await page.waitForTimeout(400);
   await catalogSearch(page, "Commando");
   if ((await page.locator(".g64-hit").count()) > 0) {
     await page.locator(".g64-hit").first().locator('button[aria-label^="Play"]').click();
-    await page.waitForTimeout(3000);
-    const toast = await page.locator("[data-sonner-toast]").first().textContent().catch(() => "");
+    const large = await waitCatalogToast(page, /6\s*MB|larger/i);
     push({
       id: "catalog-large-file",
-      pass: /6\s*MB|larger/i.test(toast || ""),
-      detail: toast,
-      optional: true,
+      pass: large.pass,
+      detail: large.joined,
     });
   } else {
-    push({ id: "catalog-large-file", pass: true, skipped: true });
+    push({ id: "catalog-large-file", pass: false, reason: "no HVSC hit" });
   }
-  await page.unroute("**/download/C64Music/**");
+  await page.unroute("**/*", largeRoute);
 
   // Cancel: slow download, close Software drawer (aborts in-flight fetch)
   await page.route("**/download/C64Music/**", async (route) => {

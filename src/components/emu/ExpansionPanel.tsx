@@ -8,11 +8,19 @@ import {
   formatPartition,
   importSdImage,
   listPartitions,
+  mountDirectFatImage,
+  mountHostSdFolder,
   petsciiName,
   removeSdFile,
   runSdCommand,
   type SdPartition,
 } from "@/lib/emu/sd2iec";
+import {
+  getSd2iecCardSourceMeta,
+  hostDirectoryPickerReason,
+  supportsHostDirectoryPicker,
+} from "@/lib/emu/sd2iec-card-source";
+import { JiffyDosToggleRow, JiffyFastloadCartMatrix } from "@/components/emu/JiffyCartCompatPanel";
 import { useEmu } from "@/lib/emu/store";
 
 export function ExpansionPanel() {
@@ -29,7 +37,6 @@ export function ExpansionPanel() {
     await prefetchBundledRoms();
     setRoms(await listRoms());
     setParts(await listPartitions());
-    if (await hasJiffyPair()) s.setJiffyDos(true);
   }
 
   useEffect(() => {
@@ -62,7 +69,18 @@ export function ExpansionPanel() {
                 {stored ? "Replace" : "Upload"}
               </button>
               {stored ? (
-                <button type="button" className="g64-btn" onClick={() => void removeRom(def.id).then(refresh)}>
+                <button
+                  type="button"
+                  className="g64-btn"
+                  onClick={() =>
+                    void removeRom(def.id).then(async () => {
+                      if (def.id === "jiffy-c64" || def.id === "jiffy-1541") {
+                        s.setJiffyDos(await hasJiffyPair());
+                      }
+                      refresh();
+                    })
+                  }
+                >
                   Remove
                 </button>
               ) : null}
@@ -88,26 +106,26 @@ export function ExpansionPanel() {
         />
       </div>
 
-      <div className="g64-row">
-        <span>JiffyDOS (needs C64 + 1541 ROMs)</span>
-        <button
-          type="button"
-          className="g64-switch"
-          data-on={s.jiffyDos ? "true" : "false"}
-          onClick={() => s.setJiffyDos(!s.jiffyDos)}
-          role="switch"
-          aria-checked={s.jiffyDos}
-        >
-          <i />
-        </button>
-      </div>
-      <p className="mb-3 text-xs text-fg-subtle">Applies on next load. Libretro looks for those exact filenames in system/vice.</p>
+      <JiffyFastloadCartMatrix />
+      <JiffyDosToggleRow />
 
       <div className="g64-field">
-        <label>Virtual SD card</label>
+        <label>SD2IEC card</label>
         <p className="text-xs text-fg-subtle">
-          Four FAT partitions (`//0:`–`//3:`). C64 OS Setup looks for `$=P`, then `CD:os`. Drop the C64 OS system files on partition 0 (folder `os`). After READY, device 8 is sd2iec: `LOAD"C64OS",8,1`. File Manager → device 8, driver SD2IEC.
+          Same firmware command set on the IEC bus for every source: <strong>Mount .img</strong> reads FAT16/MBR directly (not repacked into browser storage).{" "}
+          <strong>Open SD folder</strong> uses Chromium&apos;s directory picker on a real card folder (writes go back only when SD writes are enabled). Safari/iOS cannot mount host folders — use .img or the future Windows app for raw block access.
         </p>
+        <p className="text-xs text-fg-muted">
+          Active: {getSd2iecCardSourceMeta().label} ({getSd2iecCardSourceMeta().kind})
+        </p>
+        <label className="flex items-center gap-2 text-sm" style={{ marginTop: 8 }}>
+          <input
+            type="checkbox"
+            checked={s.sd2iecWriteEnabled}
+            onChange={(e) => s.setSd2iecWriteEnabled(e.target.checked)}
+          />
+          Allow SD writes (host folder only; off by default)
+        </label>
         <div className="g64-filerow">
           <span>Put new files in</span>
           <input value={uploadPath} onChange={(e) => setUploadPath(e.target.value)} placeholder="os" />
@@ -203,17 +221,65 @@ export function ExpansionPanel() {
               input.onchange = async () => {
                 const file = input.files?.[0];
                 if (!file) return;
-                await importSdImage(new Uint8Array(await file.arrayBuffer()));
+                await mountDirectFatImage(new Uint8Array(await file.arrayBuffer()), file.name);
                 s.setIecDrive("sd2iec");
                 await refresh();
-                toast.message("SD image imported");
+                toast.message("Mounted .img on SD2IEC (direct FAT)");
               };
               input.click();
             }}
           >
-            Import .img
+            Mount .img
+          </button>
+          <button
+            type="button"
+            className="g64-btn"
+            onClick={() => {
+              const input = document.createElement("input");
+              input.type = "file";
+              input.accept = SD_IMAGE_ACCEPT;
+              input.onchange = async () => {
+                const file = input.files?.[0];
+                if (!file) return;
+                await importSdImage(new Uint8Array(await file.arrayBuffer()));
+                s.setIecDrive("sd2iec");
+                await refresh();
+                toast.message("Copied .img into browser card (IndexedDB)");
+              };
+              input.click();
+            }}
+          >
+            Copy .img to browser
+          </button>
+          <button
+            type="button"
+            className="g64-btn"
+            disabled={!supportsHostDirectoryPicker()}
+            title={hostDirectoryPickerReason() ?? "Open a folder from your SD card reader"}
+            onClick={async () => {
+              const reason = hostDirectoryPickerReason();
+              if (reason) {
+                toast.message(reason);
+                return;
+              }
+              try {
+                const handle = await window.showDirectoryPicker({ mode: "readwrite" });
+                await mountHostSdFolder(handle);
+                s.setIecDrive("sd2iec");
+                await refresh();
+                toast.message(`SD folder: ${handle.name}`);
+              } catch (e) {
+                if (String(e).includes("AbortError")) return;
+                toast.error(String(e));
+              }
+            }}
+          >
+            Open SD folder
           </button>
         </div>
+        {hostDirectoryPickerReason() ? (
+          <p className="text-xs text-fg-subtle" style={{ marginTop: 6 }}>{hostDirectoryPickerReason()}</p>
+        ) : null}
       </div>
     </>
   );

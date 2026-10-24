@@ -215,12 +215,43 @@ export function isJoyFireKey(code: string): boolean {
   return code === FIRE_KEY_CODE;
 }
 
+type C64KeyMods = { shift?: boolean; ctrl?: boolean; alt?: boolean };
+
+let hardwareKeySink: ((code: string, key: string, down: boolean, mods: C64KeyMods) => boolean) | null =
+  null;
+
+/** Grok64 libretro keyboard — single delivery path when the custom core is loaded. */
+export function setC64HardwareKeySink(
+  sink: ((code: string, key: string, down: boolean, mods: C64KeyMods) => boolean) | null,
+) {
+  hardwareKeySink = sink;
+}
+
+/** @deprecated Use setC64HardwareKeySink */
+export function setC64FnKeySink(sink: ((code: string, down: boolean) => boolean) | null) {
+  setC64HardwareKeySink(sink ? (code, key, down, mods) => sink(code, down) : null);
+}
+
+/** Touch / on-screen C64 key — use shift face (e.g. `"` on the 2 key) when shift layer is on. */
+export function touchC64Stroke(k: C64Key, shiftLayer: boolean): { code: string; key: string; shift: boolean } {
+  if (shiftLayer && k.shift && k.shiftPetscii == null) {
+    const extra = EXTRA[k.shift];
+    if (extra) return { code: extra.code, key: extra.key, shift: extra.shift };
+    return { code: k.code, key: k.shift, shift: false };
+  }
+  return { code: k.code, key: k.key, shift: shiftLayer || !!k.forceShift };
+}
+
 export function dispatchC64Key(
   code: string,
   key: string,
   down: boolean,
   mods: { shift?: boolean } = {},
 ) {
+  const sinkMods = { shift: !!mods.shift };
+  if (hardwareKeySink?.(code, key, down, sinkMods)) {
+    return;
+  }
   if (isC64Space(code, key)) {
     if (c64SpaceMuted) return;
     blurHostButtons();
@@ -263,11 +294,14 @@ export function dispatchC64Key(
   } catch {
     /* ignore */
   }
-  parent?.dispatchEvent(make());
   const canvas =
     document.querySelector("#canvas") ??
-    document.querySelector("#grok64-player canvas");
-  canvas?.dispatchEvent(make());
+    document.querySelector("#grok64-player canvas:not(.g64-ios-present)");
+  if (canvas) {
+    canvas.dispatchEvent(make());
+    return;
+  }
+  parent?.dispatchEvent(make());
   // Do not broadcast to window/document. Space on a focused <button>
   // (toolbar Reset) is a click — that used to re-fire Autostart / hard reset
   // and yank Paradroid's cracktro back to BASIC READY.
@@ -283,7 +317,7 @@ const EXTRA: Record<string, C64Stroke> = {
   "\n": { code: "Enter", key: "Enter", shift: false },
   "\r": { code: "Enter", key: "Enter", shift: false },
   " ": { code: "Space", key: " ", shift: false },
-  '"': { code: "Digit2", key: '"', shift: true },
+  '"': { code: "Digit2", key: "2", shift: true },
   "*": { code: "BracketRight", key: "*", shift: false },
   "@": { code: "BracketLeft", key: "@", shift: false },
   ",": { code: "Comma", key: ",", shift: false },
@@ -339,11 +373,18 @@ export async function typeC64(
   const delay = opts.delayMs ?? 70;
   for (const stroke of c64Keystrokes(text)) {
     if (opts.cancelled?.()) return;
-    if (stroke.shift) dispatchC64Key("ShiftLeft", "Shift", true);
+    if (stroke.shift) {
+      dispatchC64Key("ShiftLeft", "Shift", true);
+      await sleep(Math.min(35, Math.max(12, Math.floor(delay / 4))));
+    }
     dispatchC64Key(stroke.code, stroke.key, true, { shift: stroke.shift });
     await sleep(delay);
     dispatchC64Key(stroke.code, stroke.key, false, { shift: stroke.shift });
-    if (stroke.shift) dispatchC64Key("ShiftLeft", "Shift", false);
-    await sleep(Math.max(40, delay - 20));
+    if (stroke.shift) {
+      dispatchC64Key("ShiftLeft", "Shift", false);
+      await sleep(Math.max(55, delay - 10));
+    } else {
+      await sleep(Math.max(40, delay - 20));
+    }
   }
 }

@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { createServer } from "vite";
 
@@ -57,17 +60,12 @@ test("explicit token wins over known-title map", () => {
   assert.equal(detectSoftwareStandard("Boulder Dash (PAL).d64"), "pal");
 });
 
-test("known originals when the dump is untagged", () => {
-  assert.equal(detectSoftwareStandard("M.U.L.E.d64"), "ntsc");
-  assert.equal(detectSoftwareStandard("Archon.d64"), "ntsc");
-  assert.equal(detectSoftwareStandard("The Last Ninja.d64"), "pal");
-  assert.equal(detectSoftwareStandard("Turrican II.d64"), "pal");
-  assert.equal(detectSoftwareStandard("Paradroid.d64"), "pal");
-  assert.equal(detectSoftwareStandard("California Games.d64"), "ntsc");
-  assert.equal(detectSoftwareStandard("Mayhem in Monsterland.d64"), "pal");
-  assert.equal(detectSoftwareStandard("boulderdash-awally.d64"), "ntsc");
-  assert.equal(detectSoftwareStandard("paradroidalldrives.d64"), "pal");
-  assert.equal(detectSoftwareStandard("ghostbusters-c64.d64"), "ntsc");
+test("untagged filenames do not guess NTSC/PAL from title lists", () => {
+  assert.equal(detectSoftwareStandard("M.U.L.E.d64"), null);
+  assert.equal(detectSoftwareStandard("Archon.d64"), null);
+  assert.equal(detectSoftwareStandard("The Last Ninja.d64"), null);
+  assert.equal(detectSoftwareStandard("Epyx_FastLoad_1984_v1.crt"), null);
+  assert.equal(detectSoftwareStandard("epyx fast load.crt"), null);
 });
 
 test("SID header flags", () => {
@@ -103,7 +101,9 @@ test("does not use locale-like names as a signal", () => {
 
 test("work disk BAM name is detected so it cannot replace a game", async () => {
   const { readFileSync } = await import("node:fs");
-  const blank = new Uint8Array(readFileSync("/workspace/public/software/blank.d64"));
+  const blank = new Uint8Array(
+    readFileSync(join(fileURLToPath(new URL(".", import.meta.url)), "..", "public", "software", "blank.d64")),
+  );
   assert.equal(d64DiskName(blank), "WORK DISK");
   assert.equal(isWorkDiskImage(blank), true);
   const other = blank.slice();

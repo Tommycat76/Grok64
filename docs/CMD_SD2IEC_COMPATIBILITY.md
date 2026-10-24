@@ -1,6 +1,8 @@
 # CMD HD / SD2IEC compatibility matrix (Grok64)
 
-This document compares Grok64’s storage emulation against CMD HD/FD manuals, the [sd2iec](https://sd2iec.de) firmware docs, and JiffyDOS behavior. Status keys:
+**Spec source (Tom):** [C64 OS SD2IEC User's Manual](https://www.c64os.com/post/sd2iecdocumentation) for sd2iec command channel, partitions, directories, and disk-image mount/unmount; CMD HD Section 9 (via that manual) for path/error-channel syntax; [Buyer's Guide](https://c64os.com/buyersguide/) for hardware/cart context. See `docs/HARDWARE_SPEC_REFERENCE.md`. No C64 OS software is committed in this repo.
+
+This document compares Grok64’s storage emulation against those guides, the upstream [sd2iec](https://sd2iec.de) README, and JiffyDOS behavior. Status keys:
 
 | Status | Meaning |
 |--------|---------|
@@ -15,7 +17,7 @@ Last reviewed: Grok64 branch `cursor/cmd-sd2iec-ui-f650`.
 
 | Layer | Grok64 behavior |
 |-------|-----------------|
-| **SD2IEC** | IndexedDB card → FAT16 image → VICE `N_fs` work disk **plus** RAM IEC hooks (`sd2iec.ts`) for command channel, `$`, partitions, and fast path loads |
+| **SD2IEC** | Card source A/B/C (`docs/SD2IEC_CARD_SOURCES.md`) → Grok64 software IEC device (`attachSd2iecBus` + `tickSd2iec`). VICE has **no** packed work disk on that unit (`DriveNType=0`; `remountSd2iecFromParts` attach-only). See `docs/SD2IEC_IEC_BUS.md`. |
 | **CMD HD** | VICE true drive + CMD HD DOS ROM (`dosCMDHD.bin`); `vice_work_disk=disabled`; SWAP button via `cmdHdSwap()` |
 | **JiffyDOS** | User-supplied ROMs injected into VICE FS; `vice_jiffydos=enabled` when C64+1541 pair present |
 
@@ -38,13 +40,14 @@ Last reviewed: Grok64 branch `cursor/cmd-sd2iec-ui-f650`.
 | `$` directory | **Implemented** | BASIC-linked listing in RAM hook |
 | `$=P` partition catalog | **Implemented** | |
 | `$=pattern` filtered listing | **Implemented** | Wildcards `*` `?` (this PR) |
-| `.D64/.D71/.D81/.DNP` on card | **Partial** | Files on FAT; freeze button cycles images in VICE playlist |
+| `.D64/.D71/.D81/.DNP` on card | **Partial** | `CD:IMAGE.D64` mounts in software; D64 PRG load/list OK; D81/DNP TBD |
 | P00 wrapper | **Implemented** | Import/export |
 | MBR multi-partition `.img` | **Implemented** | `exportSdImage` / `importSdImage` |
 | Subdir file paths | **Implemented** | `path` field on SD files |
 | Fast loaders / Jiffy on SD2IEC | **Partial** | Depends on VICE traps + Jiffy ROMs; not cycle-exact |
 | Long filename / CBM paths | **Missing** | 8.3 PETSCII names only |
-| `CD←` (PETSCII) | **Partial** | ASCII `CD<-` supported |
+| `CD←` (PETSCII) | **Implemented** | `CD<-`, `CD:_`, and `CD←` / PETSCII back (per C64 OS SD2IEC manual) |
+| `CD//` inside mounted image | **Implemented** | Root of mounted `.D64` without unmount; `CD←` at image root unmounts |
 
 ## CMD HD / FD (DOS 2.8x)
 

@@ -11,6 +11,14 @@ export function logLines() {
   return buf.slice();
 }
 
+const DRIVE8_LOG =
+  /floppy-attach|floppy-mount-ready|play-mount|mount-stage|mount-fail|gcr-disk|play-recycle|jiffy-floppy|geos-work|start-recycle|boot-recover|crash-recover|vice-disk-reattach|vice-work-disk-reload|vice-work-disk-refresh/;
+
+/** Last N glog lines related to unit-8 floppy attach (for About → Drive 8 diagnostics). */
+export function drive8LogLines(max = 20): string[] {
+  return buf.filter((l) => DRIVE8_LOG.test(l)).slice(-max);
+}
+
 export function subscribeLog(fn: (lines: string[]) => void) {
   listeners.add(fn);
   fn(buf.slice());

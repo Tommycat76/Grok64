@@ -1,3 +1,4 @@
+import type { FastLoadCartKind } from "@/lib/emu/jiffy-cart-compat";
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type {
@@ -79,6 +80,8 @@ interface SettingsSlice {
   scpuSimm: ScpuSimm;
   scpuTurbo: boolean;
   jiffyDos: boolean;
+  /** Host folder / mounted .img writes (off by default). */
+  sd2iecWriteEnabled: boolean;
   debugLog: boolean;
   volume: number;
   binds: ControlBinding[];
@@ -111,6 +114,7 @@ interface SettingsSlice {
   setScpuSimm: (v: ScpuSimm) => void;
   setScpuTurbo: (v: boolean) => void;
   setJiffyDos: (v: boolean) => void;
+  setSd2iecWriteEnabled: (v: boolean) => void;
   setDebugLog: (v: boolean) => void;
   setVolume: (v: number) => void;
   setBind: (action: ActionId, patch: Partial<ControlBinding>) => void;
@@ -127,6 +131,10 @@ interface SessionSlice {
   bootMsg: string;
   bootProgress: number;
   libraryOpen: boolean;
+  libraryTab: "catalog" | "library";
+  sessionRestoreHint: string | null;
+  /** cart vs floppy/disk — drives resume banner copy. */
+  sessionRestoreKind: "cart" | "floppy" | null;
   settingsOpen: boolean;
   mapperOpen: boolean;
   aboutOpen: boolean;
@@ -134,13 +142,20 @@ interface SessionSlice {
   padName: string | null;
   library: LibraryItem[];
   currentTitle: string | null;
+  /** Last floppy inserted in-session (shown instead of blank.d64 / WORK DISK path). */
+  insertedDiskName: string | null;
+  /** Active freezer / fast-load CRT this session (for JiffyDOS compatibility). */
+  fastLoadCart: FastLoadCartKind | null;
   powerOn: () => void;
+  powerOff: () => void;
   setRunning: (v: boolean) => void;
   setPaused: (v: boolean) => void;
   setWarped: (v: boolean) => void;
   setMuted: (v: boolean) => void;
   setBooting: (v: boolean, msg?: string, progress?: number) => void;
   setLibraryOpen: (v: boolean) => void;
+  setLibraryTab: (tab: "catalog" | "library") => void;
+  setSessionRestoreHint: (hint: string | null, kind?: "cart" | "floppy" | null) => void;
   setSettingsOpen: (v: boolean) => void;
   setMapperOpen: (v: boolean) => void;
   setAboutOpen: (v: boolean) => void;
@@ -148,6 +163,8 @@ interface SessionSlice {
   setPadName: (n: string | null) => void;
   setLibrary: (items: LibraryItem[]) => void;
   setCurrentTitle: (n: string | null) => void;
+  setInsertedDiskName: (n: string | null) => void;
+  setFastLoadCart: (cart: FastLoadCartKind | null) => void;
 }
 
 function withIecMap(map: IecMap) {
@@ -186,6 +203,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       scpuSimm: "16",
       scpuTurbo: true,
       jiffyDos: false,
+      sd2iecWriteEnabled: false,
       debugLog: false,
       volume: 0.7,
       binds: DEFAULT_BINDS,
@@ -234,6 +252,10 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       setScpuSimm: (scpuSimm) => set({ scpuSimm }),
       setScpuTurbo: (scpuTurbo) => set({ scpuTurbo }),
       setJiffyDos: (jiffyDos) => set({ jiffyDos }),
+      setSd2iecWriteEnabled: (sd2iecWriteEnabled) => {
+        set({ sd2iecWriteEnabled });
+        void import("./sd2iec-card-source").then((m) => m.setSd2iecWriteEnabled(sd2iecWriteEnabled));
+      },
       setDebugLog: (debugLog) => set({ debugLog }),
       setVolume: (volume) => set({ volume }),
       setBind: (action, patch) =>
@@ -251,6 +273,9 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       bootMsg: "",
       bootProgress: 0,
       libraryOpen: false,
+      libraryTab: "catalog",
+      sessionRestoreHint: null,
+      sessionRestoreKind: null,
       settingsOpen: false,
       mapperOpen: false,
       aboutOpen: false,
@@ -258,7 +283,21 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       padName: null,
       library: [],
       currentTitle: null,
+      insertedDiskName: null,
+      fastLoadCart: null,
       powerOn: () => set({ powered: true }),
+      powerOff: () =>
+        set({
+          powered: false,
+          running: false,
+          booting: false,
+          bootMsg: "",
+          bootProgress: 0,
+          paused: false,
+          currentTitle: null,
+          insertedDiskName: null,
+          fastLoadCart: null,
+        }),
       setRunning: (running) => set({ running }),
       setPaused: (paused) => set({ paused }),
       setWarped: (warped) => set({ warped }),
@@ -266,6 +305,12 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       setBooting: (booting, bootMsg = "", bootProgress = booting ? 8 : 0) =>
         set({ booting, bootMsg, bootProgress: booting ? bootProgress : 0 }),
       setLibraryOpen: (libraryOpen) => set({ libraryOpen }),
+      setLibraryTab: (libraryTab) => set({ libraryTab }),
+      setSessionRestoreHint: (sessionRestoreHint, kind) =>
+        set({
+          sessionRestoreHint,
+          sessionRestoreKind: sessionRestoreHint ? (kind ?? null) : null,
+        }),
       setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
       setMapperOpen: (mapperOpen) => set({ mapperOpen }),
       setAboutOpen: (aboutOpen) => set({ aboutOpen }),
@@ -273,6 +318,8 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       setPadName: (padName) => set({ padName }),
       setLibrary: (library) => set({ library }),
       setCurrentTitle: (currentTitle) => set({ currentTitle }),
+      setInsertedDiskName: (insertedDiskName) => set({ insertedDiskName }),
+      setFastLoadCart: (fastLoadCart) => set({ fastLoadCart }),
     }),
     {
       name: "grok64-settings",
@@ -313,6 +360,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         scpuSimm: s.scpuSimm,
         scpuTurbo: s.scpuTurbo,
         jiffyDos: s.jiffyDos,
+        sd2iecWriteEnabled: s.sd2iecWriteEnabled,
         debugLog: s.debugLog,
         volume: s.volume,
         binds: s.binds,
@@ -346,6 +394,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
           "scpuSimm",
           "scpuTurbo",
           "jiffyDos",
+          "sd2iecWriteEnabled",
           "debugLog",
           "volume",
           "binds",
@@ -409,6 +458,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
           if (!["0", "1", "2", "4", "8", "16"].includes(p.scpuSimm as string)) p.scpuSimm = "16";
           if (typeof p.scpuTurbo !== "boolean") p.scpuTurbo = true;
           if (typeof p.jiffyDos !== "boolean") p.jiffyDos = false;
+          if (typeof p.sd2iecWriteEnabled !== "boolean") p.sd2iecWriteEnabled = false;
         }
         delete p.powered;
         delete p.running;

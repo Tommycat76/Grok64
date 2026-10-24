@@ -1,0 +1,26 @@
+--- a/vice/src/diskimage/fsimage-dxx.c
++++ b/vice/src/diskimage/fsimage-dxx.c
+@@ -43,6 +43,17 @@
+ 
+ static log_t fsimage_dxx_log = LOG_DEFAULT;
+ 
++/* D64 error-info tail: byte 0 is used on some images; VICE read path treats 0 like OK. */
++static fdc_err_t fsimage_dxx_fdc_error_for_gcr(fdc_err_t rf)
++{
++    if (rf == 0) {
++        return CBMDOS_FDC_ERR_OK;
++    }
++    return rf;
++}
++
+ int fsimage_dxx_write_half_track(disk_image_t *image, unsigned int half_track,
+                                  const disk_track_t *raw)
+ {
+@@ -272,6 +283,7 @@
+                     if (util_fpread(fsimage->fd, buffer, 256, offset) >= 0) {
+                         if (fsimage->error_info.map != NULL) {
+                             rf = fsimage->error_info.map[sectors];
++                            rf = fsimage_dxx_fdc_error_for_gcr(rf);
+                         }
+                     }
+                     header.sector = sector;

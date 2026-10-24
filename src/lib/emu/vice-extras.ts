@@ -15,11 +15,11 @@ export interface ViceExtrasInput {
 /**
  * VICE libretro `vice_work_disk` for the live unit.
  * CMD HD is a real drive (ROM + DriveNType=4844) — not an `*_fs` virtual card.
- * SD2IEC uses the directory device (`N_fs`) for the FAT card files.
+ * SD2IEC is answered in Grok64 (IEC bus software), not a VICE work disk.
  */
 export function workDiskFor(iec: IecDrive, unit: IecUnit = 8): string {
   if (iec === "cmdhd") return "disabled";
-  if (iec === "sd2iec") return `${unit}_fs`;
+  if (iec === "sd2iec") return "disabled";
   if (iec === "1581") return `${unit}_d81`;
   if (iec === "1541") return `${unit}_d64`;
   return "disabled";
@@ -38,8 +38,10 @@ export function buildViceExtras(input: ViceExtrasInput): Record<string, string> 
     opts.vice_virtual_device_traps = "disabled";
     opts.vice_drive_true_emulation = "enabled";
   } else if (input.iec === "sd2iec") {
-    opts.vice_work_disk = workDiskFor(input.iec, unit);
-    opts.vice_virtual_device_traps = "enabled";
+    opts.vice_work_disk = "disabled";
+    opts.vice_virtual_device_traps = "disabled";
+    opts.vice_drive_true_emulation = "enabled";
+    opts[`vice_drive${unit}_type`] = "None";
   } else {
     opts.vice_work_disk = workDiskFor(input.iec, unit);
     opts.vice_virtual_device_traps = "disabled";

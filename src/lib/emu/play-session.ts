@@ -1,6 +1,13 @@
 import type { IecDrive, IecMap, IecSlot, IecUnit, MediaKind } from "./types";
 import { IEC_UNITS } from "./types";
-import { floppyPlayCanHotSwap, iecForAutostart, isFsWorkDisk, kindOf, needsTypedBoot } from "./formats";
+import {
+  floppyPlayCanHotSwap,
+  iecForAutostart,
+  isCartridgePayload,
+  isFsWorkDisk,
+  kindOf,
+  needsTypedBoot,
+} from "./formats";
 
 /**
  * One play / IEC state machine.
@@ -9,12 +16,12 @@ import { floppyPlayCanHotSwap, iecForAutostart, isFsWorkDisk, kindOf, needsTyped
  * Live attach is what the running VICE core actually has on the bus.
  *
  * C64 OS-class layout (official VICE guide):
- *   - Device 8 is a real 1541/1581 whenever Autostart must LOAD"*",8,1
+ *   - Device 8 is a real 1541/1581 for floppy mount / named LOAD (never LOAD"*")
  *   - CMD HD is a real VICE CMD HD (dosCMDHD.bin on the drive CPU, true
  *     drive ON, virtual traps OFF). Prefer unit 9 so floppy Play does not
  *     evict the HD.
- *   - SD2IEC is the virtual FAT card (VICE `N_fs` + partition files), NOT
- *     KERNAL SoftIEC / C64 Ultimate-style vector patches. Floppy Play may
+ *   - SD2IEC is Grok64 software on the IEC bus (KERNAL vector intercept +
+ *     IndexedDB/FAT card), not a VICE drive type. Floppy Play may
  *     temporarily recycle unit 8 to a 1541; the card preference stays.
  *
  * Autostart is applied only after FS + ROMs + drive attach are ready.
@@ -37,7 +44,7 @@ export interface PlayPlan {
   user: DriveAttach;
   /** What the core must have while this title runs. */
   live: DriveAttach;
-  /** Floppy Autostart attach (1541/1581 @ 8). */
+  /** Floppy attach (1541/1581 @ 8) — mount only, no LOAD"*". */
   attach: DriveAttach | null;
   recycle: boolean;
   /** Always false at core-start; kicked after prepareCore. */
@@ -48,8 +55,33 @@ export interface PlayPlan {
   status: string;
 }
 
-export function playKindOf(filename: string, work: boolean): PlayKind {
+/**
+ * WASM settle / autostart must not treat a CRT boot like floppy Play.
+ *
+ * Grok64 must never arm VICE LOAD"*",8,1 while a cart is booting. That is separate
+ * from cart-native boot-sector logic (e.g. Super Snapshot v5 §11 — track 1 sector 0);
+ * VICE must still allow IEC/drive access for the cart. See docs/CART_BOOT_AUTOSTART.md.
+ */
+export function isCartMediaBoot(input: {
+  playMode?: string | null;
+  bootFile?: string | null;
+  bootName?: string | null;
+  title?: string | null;
+}): boolean {
+  if (input.playMode === "cart") return true;
+  const boot = input.bootFile ?? "";
+  const bootName = input.bootName ?? "";
+  const title = input.title ?? "";
+  return (
+    /\.(crt|bin)$/i.test(boot) ||
+    /\.(crt|bin)$/i.test(bootName) ||
+    /\.(crt|bin)$/i.test(title)
+  );
+}
+
+export function playKindOf(filename: string, work: boolean, data?: Uint8Array | null): PlayKind {
   if (work) return "basic";
+  if (data && isCartridgePayload(data, filename)) return "cart";
   const kind = kindOf(filename);
   if (needsTypedBoot(kind)) return "floppy";
   if (kind === "t64" || kind === "tap") return "tape";
@@ -426,6 +458,7 @@ export function shouldSkipPlayPersist(input: {
   title?: string | null;
   livePlay?: boolean;
 }): boolean {
+  if (input.playMode === "cart" || input.playMode === "disk") return true;
   if (!input.iosPhone && !input.ios) return false;
   if (input.inGameplay || input.playMode !== "basic") return true;
   if (input.livePlay || livePlayTitle()) return true;
@@ -457,6 +490,7 @@ export function floppyNeedsRecycle(
 export function planPlay(input: {
   filename: string;
   work?: boolean;
+  payload?: Uint8Array | null;
   userIec: IecDrive;
   userUnit: IecUnit;
   liveIec: IecDrive;
@@ -467,10 +501,11 @@ export function planPlay(input: {
   jiffyLive?: boolean;
 }): PlayPlan {
   const work = !!input.work;
-  const kind = playKindOf(input.filename, work);
+  const kind = playKindOf(input.filename, work, input.payload);
   const user: DriveAttach = { iec: input.userIec, unit: input.userUnit };
   const attach = work ? null : iecForAutostart(kindOf(input.filename));
-  const autostart = input.autostart !== false && kind !== "basic";
+  const autostart =
+    input.autostart !== false && kind !== "basic" && kind !== "floppy" && kind !== "cart";
 
   if (kind === "floppy" && attach) {
     const recycle = floppyNeedsRecycle(input.liveIec, input.liveWorkDisk, user, {
@@ -521,25 +556,25 @@ export function planPlay(input: {
 /**
  * VICE resources for a live attach.
  * CMD HD: real drive firmware (ROM injected separately), no FS-device, no traps.
- * SD2IEC: VICE directory device (`N_fs`) for the FAT card — not KERNAL patches.
+ * SD2IEC: no VICE drive on that unit — Grok64 answers IEC in software.
  * 1541/1581: true drive + matching work disk.
  */
 export function liveDriveOptions(live: DriveAttach): Record<string, string> {
   const typeKey = `vice_drive${live.unit}_type`;
   const typed = { [typeKey]: viceDriveTypeOption(live.iec) };
+  if (live.iec === "sd2iec") {
+    return {
+      vice_work_disk: "disabled",
+      vice_virtual_device_traps: "disabled",
+      vice_drive_true_emulation: "enabled",
+      [typeKey]: "None",
+    };
+  }
   if (live.iec === "cmdhd") {
     return {
       vice_work_disk: "disabled",
       vice_virtual_device_traps: "disabled",
       vice_drive_true_emulation: "enabled",
-      ...typed,
-    };
-  }
-  if (live.iec === "sd2iec") {
-    return {
-      vice_work_disk: `${live.unit}_fs`,
-      vice_virtual_device_traps: "enabled",
-      vice_drive_true_emulation: "disabled",
       ...typed,
     };
   }
@@ -563,6 +598,7 @@ export function liveDriveOptions(live: DriveAttach): Record<string, string> {
 export function viceDriveTypeCode(iec: IecDrive): number {
   if (iec === "cmdhd") return 4844;
   if (iec === "1581") return 1581;
+  if (iec === "sd2iec") return 0;
   return 1541;
 }
 
@@ -573,6 +609,9 @@ export function viceDriveTypeOption(iec: IecDrive): string {
   if (iec === "sd2iec") return "None";
   return "1541";
 }
+
+export { viceGeosFloppyOptions } from "./vice-geos";
+export { viceReal1541TimingOptions } from "./vice-timing";
 
 export function viceDriveTypeVars(map: Partial<Record<IecUnit, IecDrive>>): Record<string, string> {
   const out: Record<string, string> = {};
@@ -589,10 +628,57 @@ export function viceRcForDrives(map: Partial<Record<IecUnit, IecDrive>>, virtual
   for (const unit of [8, 9, 10, 11] as IecUnit[]) {
     const iec = map[unit];
     lines.push(`Drive${unit}Type=${iec ? viceDriveTypeCode(iec) : 0}`);
+    lines.push(`Drive${unit}TrueEmulation=1`);
+    lines.push(`FileSystemDevice${unit}=0`);
+    lines.push(`IECDevice${unit}=0`);
+    lines.push(`VirtualDevice${unit}=0`);
+    viceRcSafeDriveUnitLines(lines, unit);
   }
   lines.push("DriveTrueEmulation=1");
   lines.push(virtualDevices ? "VirtualDevices=1" : "VirtualDevices=0");
+  lines.push("DriveSoundEmulation=0");
+  lines.push("DriveSoundEmulationVolume=0");
   return `${lines.join("\n")}\n`;
+}
+
+/** Per-unit keys stale IDB vicerc often leaves wrong — force on every floppy reconcile. */
+function viceRcSafeDriveUnitLines(lines: string[], unit: IecUnit) {
+  lines.push(`Drive${unit}ParallelCable=0`);
+  lines.push(`Drive${unit}IdleMethod=0`);
+  lines.push(`Drive${unit}ExtendImagePolicy=0`);
+  for (const ram of ["RAM2000", "RAM4000", "RAM6000", "RAM8000", "RAMA000"]) {
+    lines.push(`Drive${unit}${ram}=0`);
+  }
+}
+
+/**
+ * Runtime-only vicerc while unit `activeUnit` runs a floppy session (LOAD/insert/flush).
+ * Does not change zustand `iecMap` — secondary IEC drives are muted so stale CMD on 9
+ * cannot steal ATN; user drive layout stays in Settings.
+ */
+export function viceRcFloppyIsolateProfile(activeUnit: IecUnit, map?: IecMap): string {
+  const merged: IecMap = { ...defaultIecMap(), ...map };
+  merged[activeUnit] = "1541";
+  const lines = ["[C64]", "DriveTrueEmulation=1", "VirtualDevices=0", "DriveSoundEmulation=0", "DriveSoundEmulationVolume=0"];
+  for (const unit of [8, 9, 10, 11] as IecUnit[]) {
+    const iec = merged[unit];
+    let type = !iec || iec === "none" || iec === "sd2iec" ? 0 : viceDriveTypeCode(iec as IecDrive);
+    if (unit === activeUnit) type = 1541;
+    else if (unit !== activeUnit && type !== 0) type = 0;
+    lines.push(`Drive${unit}Type=${type}`);
+    lines.push(`Drive${unit}TrueEmulation=1`);
+    lines.push(`FileSystemDevice${unit}=0`);
+    lines.push(`IECDevice${unit}=0`);
+    lines.push(`VirtualDevice${unit}=0`);
+    viceRcSafeDriveUnitLines(lines, unit);
+  }
+  return `${lines.join("\n")}\n`;
+}
+
+/** Safe routing lines while honoring the user's IEC map drive types (boot / settings). */
+export function viceRcSafeFloppyProfile(activeUnit: IecUnit, map?: IecMap): string {
+  const viceMap = viceMapFromIecMap({ ...defaultIecMap(), ...map, [activeUnit]: "1541" });
+  return viceRcForDrives(viceMap, false);
 }
 
 /**
@@ -605,7 +691,11 @@ export function viceRcForUser(
   opts?: { cmdRom?: boolean },
 ): string {
   const drive8 =
-    live.unit === 8 && live.iec !== "sd2iec" ? viceDriveTypeCode(live.iec) : 1541;
+    live.unit === 8 && live.iec === "sd2iec"
+      ? 0
+      : live.unit === 8
+        ? viceDriveTypeCode(live.iec)
+        : 1541;
   const lines = ["[C64]", `Drive8Type=${drive8}`];
   const cmdUnit =
     user.iec === "cmdhd" && user.unit !== 8
@@ -620,10 +710,12 @@ export function viceRcForUser(
     /* Floppy Play stole #8 — keep user HD preference out of the live 1541. */
   }
   lines.push("DriveTrueEmulation=1");
-  if (live.iec === "sd2iec") {
-    lines.push("VirtualDevices=1");
-  } else {
-    lines.push("VirtualDevices=0");
+  lines.push("VirtualDevices=0");
+  for (const unit of [8, 9, 10, 11] as IecUnit[]) {
+    lines.push(`FileSystemDevice${unit}=0`);
+    lines.push(`IECDevice${unit}=0`);
+    lines.push(`VirtualDevice${unit}=0`);
+    lines.push(`Drive${unit}TrueEmulation=1`);
   }
   return `${lines.join("\n")}\n`;
 }
@@ -672,6 +764,12 @@ export function setIecSlot(map: IecMap, unit: IecUnit, slot: IecSlot): IecMap {
 export function mapHasDrive(map: IecMap | null | undefined, drive: IecDrive): boolean {
   if (!map) return false;
   return IEC_UNITS.some((u) => map[u] === drive);
+}
+
+/** Settings IEC map has SD2IEC on `unit` — skip BMC64 floppy isolate / flush on that unit. */
+export function iecMapUnitIsSd2iec(map: IecMap | null | undefined, unit: IecUnit): boolean {
+  const merged: IecMap = { ...defaultIecMap(), ...map };
+  return merged[unit] === "sd2iec";
 }
 
 export function unitOfDrive(map: IecMap | null | undefined, drive: IecDrive): IecUnit | null {
@@ -725,6 +823,13 @@ export const PLAY_UNLOCK_VICE_OPTS = {
   vice_autostart_warp: "disabled",
   vice_autoloadwarp: "disabled",
   vice_reset: "hard",
+} as const;
+
+/** Freezer / CRT play — disarm autostart without arming `vice_reset=hard` on a live cart. */
+export const CART_PLAY_UNLOCK_VICE_OPTS = {
+  vice_autostart: "disabled",
+  vice_autostart_warp: "disabled",
+  vice_autoloadwarp: "disabled",
 } as const;
 
 /** Toolbar Reset is always a cold boot to READY — never Autostart re-fire. */

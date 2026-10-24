@@ -29,6 +29,7 @@ Private media (optional, never commit ROMs / commercial disks):
 GROK64_JIFFY_DIR=/path/to/jiffy npm run test:desktop-e2e
 GROK64_CART_DIR=/path/to/crts npm run test:desktop-e2e
 GROK64_GEOS_DIR=/path/to/geos npm run test:desktop-geos
+GROK64_WHEELS_DIR=/path/to/geos npm run test:desktop-xdotool-wheels
 GROK64_DEMO_DIR=/path/to/demo-disks npm run test:desktop-demo
 GROK64_NUVIE_DIR=/path/to/nuvie npm run test:desktop-nuvie
 # optional overrides (defaults: CSDb nuvieplayer + C64ReloadedMK2-Ad.reu)
@@ -79,6 +80,12 @@ Automated by `npm run test:desktop-regression` unless noted **manual**.
 | Model (C64 Auto, PAL, NTSC, C64C, Fast, SCPU, C128, …) | **manual** per model |
 | SuperCPU + SIMM + turbo | **manual** |
 | IEC #8–#11 slots (Off, 1541, 1581, SD2IEC, CMD) | `sd2iec-disk-swap`, matrix `sd2iec-slot` |
+| **Drive combo matrix** (1541/1571/1581/CMD/SD2IEC/REU, all unit orders, LOAD/COPY pairs, Jiffy/warp) | **PARKED** — `npm run test:desktop-drive-combo-matrix` (no-op until `GROK64_DRIVE_COMBO_UNPARK=1`); spec `docs/DRIVE_COMBO_MATRIX.md` |
+| Library GEOS floppy (UI import/Run/Insert) | `node scripts/prepare-floppy-fixtures.mjs` then `npm run test:desktop-library-geos-floppy-ui` — needs `GEOS_2.0.d64` (175531) + `GROK64_GEOS_G64_PATH` for `.g64` |
+| Dirty profile GEOS (cart + settings + power + reload) | `npm run test:desktop-dirty-profile-geos` — screenshots `screenshots/dirty-profile-*.png`, trace `screenshots/dirty-profile-geos-trace.json`; console `__g64.attachDiskDiag()` fields documented in PR #68 |
+| GEOS deskTop proof | `npm run test:desktop-geos-proof` — canvas + pointer nudge |
+| Wheels + REU | `npm run test:desktop-wheels-proof` — needs `fixtures/geos/Wheels64.d64` or `GROK64_WHEELS_URL` |
+| Cart matrix (stock vs Jiffy) | `npm run test:desktop-xdotool-cart-matrix`; partial: `CART_MATRIX_ONLY=ss4,fc3,epyx-fl` |
 | Jump button | **manual** |
 | Freeze / snapshots → sheet | `save-state-freeze-f1` |
 | SID engine / chip / 2nd SID | `test:vice-sid-probe`, `sid-default-single` |

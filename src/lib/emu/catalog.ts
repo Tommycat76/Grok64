@@ -99,6 +99,18 @@ const A64_IDS = ["assembly64", "ultimate", "Spiffy"];
 const MAX_FILE = 6 * 1024 * 1024;
 const C64_FILE = /\.(prg|p00|d64|d71|d81|g64|g71|t64|tap|crt|bin|sid|zip)$/i;
 const TIMEOUT = 15000;
+const A64_SEARCH_TIMEOUT = 5000;
+const IA_SEARCH_TIMEOUT = 5000;
+
+/** Skip slow Internet Archive round-trip for queries unlikely to match titles. */
+export function skipInternetArchiveSearch(query: string, kind: CatalogKind): boolean {
+  if (kind === "sid") return true;
+  const q = query.trim();
+  if (!q) return true;
+  if (q.length >= 7 && !/[aeiouy]/i.test(q)) return true;
+  if (/^[^a-z0-9\s]{6,}$/i.test(q)) return true;
+  return false;
+}
 
 let a64Client: string | null = null;
 
@@ -138,13 +150,21 @@ function kindHintFor(kind: CatalogKind, name: string, category?: number): string
   return "d64";
 }
 
-async function a64Fetch(path: string, accept = "application/json"): Promise<Response> {
+async function a64Fetch(
+  path: string,
+  accept = "application/json",
+  timeoutMs = A64_SEARCH_TIMEOUT,
+  externalSignal?: AbortSignal,
+): Promise<Response> {
   const ids = a64Client ? [a64Client, ...A64_IDS.filter((id) => id !== a64Client)] : A64_IDS;
   let last: Response | null = null;
   for (const id of ids) {
+    const signal = externalSignal
+      ? AbortSignal.any([externalSignal, AbortSignal.timeout(timeoutMs)])
+      : AbortSignal.timeout(timeoutMs);
     const res = await fetch(`${A64}${path}`, {
       headers: { "client-id": id, Accept: accept, "User-Agent": "Grok64Emu/1.0" },
-      signal: AbortSignal.timeout(TIMEOUT),
+      signal,
     });
     if (res.status === 464) {
       last = res;
@@ -174,10 +194,16 @@ function mapA64(rows: A64Item[], kind: CatalogKind): CatalogHit[] {
     });
 }
 
-async function searchAssembly64(query: string, kind: CatalogKind, offset = 0, count = 24): Promise<CatalogHit[]> {
+async function searchAssembly64(
+  query: string,
+  kind: CatalogKind,
+  offset = 0,
+  count = 24,
+  signal?: AbortSignal,
+): Promise<CatalogHit[]> {
   const aql = aqlFor(query, kind);
   const url = `/search/aql/${offset}/${count}?query=${encodeURIComponent(aql)}`;
-  const res = await a64Fetch(url);
+  const res = await a64Fetch(url, "application/json", A64_SEARCH_TIMEOUT, signal);
   if (!res.ok) throw new Error(`Assembly64 search failed (${res.status})`);
   const rows = (await res.json()) as A64Item[];
   if (!Array.isArray(rows)) return [];
@@ -272,7 +298,13 @@ function iaQuery(query: string, kind: CatalogKind): string {
   return `collection:softwarelibrary_c64 AND mediatype:software ${title}`.trim();
 }
 
-async function searchInternetArchiveRaw(query: string, kind: CatalogKind, offset = 0): Promise<CatalogHit[]> {
+async function searchInternetArchiveRaw(
+  query: string,
+  kind: CatalogKind,
+  offset = 0,
+  timeoutMs = IA_SEARCH_TIMEOUT,
+  signal?: AbortSignal,
+): Promise<CatalogHit[]> {
   if (kind === "sid") return [];
   const params = new URLSearchParams();
   params.set("q", iaQuery(query, kind));
@@ -281,9 +313,12 @@ async function searchInternetArchiveRaw(query: string, kind: CatalogKind, offset
   params.set("rows", "20");
   params.set("start", String(offset));
   params.set("output", "json");
+  const abort = signal
+    ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+    : AbortSignal.timeout(timeoutMs);
   const res = await fetch(iaSearchUrl(params.toString()), {
     headers: { Accept: "application/json", "User-Agent": "Grok64Emu/1.0" },
-    signal: AbortSignal.timeout(TIMEOUT),
+    signal: abort,
   });
   if (!res.ok) throw new Error(`Archive search failed (${res.status})`);
   const json = (await res.json()) as {
@@ -392,13 +427,17 @@ function filterSids(query: string): CatalogHit[] {
 const KindEnum = z.enum(["all", "games", "carts", "disks", "sid", "demos"]);
 
 /** Shared catalog search — used by serverFn and static-host client fallback. */
-export async function searchCatalogClient(data: {
-  query: string;
-  kind: CatalogKind;
-  offset?: number;
-}): Promise<{ hits: CatalogHit[]; a64: boolean }> {
+export async function searchCatalogClient(
+  data: {
+    query: string;
+    kind: CatalogKind;
+    offset?: number;
+  },
+  opts?: { signal?: AbortSignal },
+): Promise<{ hits: CatalogHit[]; a64: boolean }> {
   const q = data.query.trim();
   const kind = data.kind;
+  const signal = opts?.signal;
   const jobs: Promise<CatalogHit[]>[] = [];
   let a64ok = false;
 
@@ -417,7 +456,7 @@ export async function searchCatalogClient(data: {
     );
   } else {
     jobs.push(
-      searchAssembly64(q, kind)
+      searchAssembly64(q, kind, 0, 24, signal)
         .then((rows) => {
           a64ok = true;
           return rows;
@@ -426,8 +465,12 @@ export async function searchCatalogClient(data: {
     );
   }
 
-  if (kind !== "sid") {
-    jobs.push(searchInternetArchiveRaw(q, kind, data.offset ?? 0).catch(() => [] as CatalogHit[]));
+  if (kind !== "sid" && !skipInternetArchiveSearch(q, kind)) {
+    jobs.push(
+      searchInternetArchiveRaw(q, kind, data.offset ?? 0, IA_SEARCH_TIMEOUT, signal).catch(
+        () => [] as CatalogHit[],
+      ),
+    );
   }
 
   const parts = await Promise.all(jobs);

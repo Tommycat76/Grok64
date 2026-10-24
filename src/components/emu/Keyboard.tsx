@@ -5,6 +5,7 @@ import {
   TOUCH_ABC,
   TOUCH_SYM,
   dispatchC64Key,
+  touchC64Stroke,
   hasPetsciiLayer,
   type C64Key,
 } from "@/lib/emu/keys";
@@ -18,29 +19,41 @@ function key(id: string): C64Key {
   return BY_ID.get(id)!;
 }
 
+/** Shifted punctuation on the keycap face (not PETSCII graphics). */
+function shiftSecondaryLabel(k: C64Key): string | null {
+  if (!k.shift || k.shiftPetscii != null) return null;
+  if (k.shift.length > 3) return null;
+  return k.shift;
+}
+
 function KeyBtn({
   k,
   className,
   held,
-  glyph,
-  glyphPetscii,
+  shiftLayer,
+  cbmLayer,
   onDown,
   onUp,
 }: {
   k: C64Key;
   className?: string;
   held: boolean;
-  glyph: string;
-  glyphPetscii?: number;
+  shiftLayer: boolean;
+  cbmLayer: boolean;
   onDown: (k: C64Key) => void;
   onUp: (k: C64Key) => void;
 }) {
   const downAt = useRef(0);
   const petscii = hasPetsciiLayer(k);
+  const secondary = shiftSecondaryLabel(k);
+  const cornerPet = 10;
+  const primary = k.label;
+
   return (
     <button
       type="button"
       className={className ? `g64-key ${className}` : "g64-key"}
+      data-key-id={k.id}
       data-mod={held ? "true" : "false"}
       data-petscii={petscii ? "true" : "false"}
       aria-label={k.label}
@@ -56,27 +69,30 @@ function KeyBtn({
       }}
       onPointerCancel={() => onUp(k)}
     >
-      {petscii ? (
-        <span className="g64-key-petscii" aria-hidden="true">
-          <em data-side="cbm">
-            {k.cbmPetscii != null ? <PetsciiGlyph petscii={k.cbmPetscii} size={16} /> : <span className="g64-key-hint">C=</span>}
-          </em>
-          <em data-side="sh">
-            {k.shiftPetscii != null ? (
-              <PetsciiGlyph petscii={k.shiftPetscii} size={16} />
-            ) : k.shift ? (
-              <span className="g64-key-hint">{k.shift}</span>
-            ) : null}
-          </em>
-        </span>
-      ) : null}
-      {glyphPetscii != null ? (
-        <span className="g64-key-main g64-key-main-pet">
-          <PetsciiGlyph petscii={glyphPetscii} size={18} />
-        </span>
-      ) : (
-        <span className="g64-key-main">{glyph}</span>
-      )}
+      <span className="g64-key-cap">
+        {secondary ? (
+          <span className="g64-key-secondary" aria-hidden="true">{secondary}</span>
+        ) : null}
+        {k.shiftPetscii != null ? (
+          <span
+            className="g64-key-corner g64-key-corner--tr"
+            data-active={shiftLayer ? "true" : "false"}
+            aria-hidden="true"
+          >
+            <PetsciiGlyph petscii={k.shiftPetscii} size={cornerPet} />
+          </span>
+        ) : null}
+        {k.cbmPetscii != null ? (
+          <span
+            className="g64-key-corner g64-key-corner--bl"
+            data-active={cbmLayer ? "true" : "false"}
+            aria-hidden="true"
+          >
+            <PetsciiGlyph petscii={k.cbmPetscii} size={cornerPet} />
+          </span>
+        ) : null}
+        <span className="g64-key-primary">{primary}</span>
+      </span>
     </button>
   );
 }
@@ -116,7 +132,8 @@ export function C64Keyboard() {
         dispatchC64Key(k.code, k.key, next);
         return;
       }
-      dispatchC64Key(k.code, k.key, false, { shift: shift || !!k.forceShift });
+      const stroke = touchC64Stroke(k, shift);
+      dispatchC64Key(stroke.code, stroke.key, false, { shift: stroke.shift });
       if (k.forceShift && !shift) dispatchC64Key("ShiftLeft", "Shift", false);
     },
     [shift, cbm, ctrl, lock],
@@ -126,8 +143,10 @@ export function C64Keyboard() {
     (k: C64Key) => {
       setDownId(k.id);
       if (k.modifier) return;
+      const digitOnSym = sym && /^[0-9]$/.test(k.id);
+      const stroke = touchC64Stroke(k, digitOnSym ? false : shift);
       if (k.forceShift && !shift) dispatchC64Key("ShiftLeft", "Shift", true);
-      dispatchC64Key(k.code, k.key, true, { shift: shift || !!k.forceShift });
+      dispatchC64Key(stroke.code, stroke.key, true, { shift: stroke.shift });
       if (k.code === "F5" || k.id === "f5") {
         try {
           window.dispatchEvent(new Event("g64-fit"));
@@ -136,7 +155,7 @@ export function C64Keyboard() {
         }
       }
     },
-    [shift],
+    [shift, sym],
   );
 
   const held = (k: C64Key) =>
@@ -145,13 +164,6 @@ export function C64Keyboard() {
     (k.modifier === "ctrl" && ctrl) ||
     (k.modifier === "lock" && lock) ||
     downId === k.id;
-
-  const face = (k: C64Key): { glyph: string; glyphPetscii?: number } => {
-    if (cbm && k.cbmPetscii != null) return { glyph: k.label, glyphPetscii: k.cbmPetscii };
-    if (shift && k.shiftPetscii != null) return { glyph: k.label, glyphPetscii: k.shiftPetscii };
-    if (shift && k.shift && !k.shiftPetscii) return { glyph: k.shift };
-    return { glyph: k.label };
-  };
 
   const rows = sym ? TOUCH_SYM : TOUCH_ABC;
   const shiftKey = key("lshift");
@@ -172,6 +184,8 @@ export function C64Keyboard() {
       className="g64-kb"
       aria-label="Commodore 64 keyboard"
       data-layer={sym ? "sym" : "abc"}
+      data-shift={shift ? "true" : "false"}
+      data-cbm={cbm ? "true" : "false"}
       onPointerDown={() => {
         window.dispatchEvent(new Event("g64-unlock"));
       }}
@@ -179,43 +193,58 @@ export function C64Keyboard() {
       {rows.map((row, i) => (
         <div className="g64-kb-row" key={i} data-pad={row.length < 10 && i < 3 ? "true" : undefined}>
           {i === 2 && !sym ? (
-            <KeyBtn k={shiftKey} className="mod" held={held(shiftKey)} glyph="SHIFT" onDown={down} onUp={up} />
+            <KeyBtn
+              k={shiftKey}
+              className="mod"
+              held={held(shiftKey)}
+              shiftLayer={shift}
+              cbmLayer={cbm}
+              onDown={down}
+              onUp={up}
+            />
           ) : null}
           {row.map((id) => {
             const k = key(id);
-            const { glyph, glyphPetscii } = face(k);
             return (
               <KeyBtn
                 key={k.id}
                 k={k}
                 held={held(k)}
-                glyph={glyph}
-                glyphPetscii={glyphPetscii}
+                shiftLayer={shift}
+                cbmLayer={cbm}
                 onDown={down}
                 onUp={up}
               />
             );
           })}
           {i === 2 && !sym ? (
-            <KeyBtn k={delKey} className="mod" held={held(delKey)} glyph="DEL" onDown={down} onUp={up} />
+            <KeyBtn k={delKey} className="mod" held={held(delKey)} shiftLayer={shift} cbmLayer={cbm} onDown={down} onUp={up} />
           ) : null}
         </div>
       ))}
 
       <div className="g64-kb-row g64-kb-cursors">
-        <KeyBtn k={leftKey} className="mod" held={held(leftKey)} glyph="←" onDown={down} onUp={up} />
-        <KeyBtn k={upKey} className="mod" held={held(upKey)} glyph="↑" onDown={down} onUp={up} />
-        <KeyBtn k={downKey} className="mod" held={held(downKey)} glyph="↓" onDown={down} onUp={up} />
-        <KeyBtn k={rightKey} className="mod" held={held(rightKey)} glyph="→" onDown={down} onUp={up} />
+        <KeyBtn k={leftKey} className="mod" held={held(leftKey)} shiftLayer={shift} cbmLayer={cbm} onDown={down} onUp={up} />
+        <KeyBtn k={upKey} className="mod" held={held(upKey)} shiftLayer={shift} cbmLayer={cbm} onDown={down} onUp={up} />
+        <KeyBtn k={downKey} className="mod" held={held(downKey)} shiftLayer={shift} cbmLayer={cbm} onDown={down} onUp={up} />
+        <KeyBtn k={rightKey} className="mod" held={held(rightKey)} shiftLayer={shift} cbmLayer={cbm} onDown={down} onUp={up} />
       </div>
 
       {!sym ? (
         <div className="g64-kb-row g64-kb-fn">
           {["f1", "f2", "f3", "f4", "f5", "f6", "f7", "f8"].map((id) => {
             const k = key(id);
-            const { glyph, glyphPetscii } = face(k);
             return (
-              <KeyBtn key={k.id} k={k} className="fn" held={held(k)} glyph={glyph} glyphPetscii={glyphPetscii} onDown={down} onUp={up} />
+              <KeyBtn
+                key={k.id}
+                k={k}
+                className="fn"
+                held={held(k)}
+                shiftLayer={shift}
+                cbmLayer={cbm}
+                onDown={down}
+                onUp={up}
+              />
             );
           })}
         </div>
@@ -228,20 +257,26 @@ export function C64Keyboard() {
           data-mod={sym ? "true" : "false"}
           onPointerDown={(e) => {
             e.preventDefault();
-            setSym((v) => !v);
+            setSym((v) => {
+              const next = !v;
+              if (next) setShift(false);
+              return next;
+            });
           }}
         >
-          {sym ? "ABC" : "123"}
+          <span className="g64-key-cap">
+            <span className="g64-key-primary">{sym ? "ABC" : "123"}</span>
+          </span>
         </button>
-        <KeyBtn k={cbmKey} className="mod" held={held(cbmKey)} glyph="C=" onDown={down} onUp={up} />
+        <KeyBtn k={cbmKey} className="mod" held={held(cbmKey)} shiftLayer={shift} cbmLayer={cbm} onDown={down} onUp={up} />
         {!sym ? (
-          <KeyBtn k={ctrlKey} className="mod" held={held(ctrlKey)} glyph="CTRL" onDown={down} onUp={up} />
+          <KeyBtn k={ctrlKey} className="mod" held={held(ctrlKey)} shiftLayer={shift} cbmLayer={cbm} onDown={down} onUp={up} />
         ) : (
-          <KeyBtn k={lockKey} className="mod" held={held(lockKey)} glyph="LOCK" onDown={down} onUp={up} />
+          <KeyBtn k={lockKey} className="mod" held={held(lockKey)} shiftLayer={shift} cbmLayer={cbm} onDown={down} onUp={up} />
         )}
-        <KeyBtn k={spaceKey} className="space" held={held(spaceKey)} glyph="SPACE" onDown={down} onUp={up} />
-        <KeyBtn k={runKey} className="mod" held={held(runKey)} glyph="RUN" onDown={down} onUp={up} />
-        <KeyBtn k={retKey} className="wide" held={held(retKey)} glyph="RETURN" onDown={down} onUp={up} />
+        <KeyBtn k={spaceKey} className="space" held={held(spaceKey)} shiftLayer={shift} cbmLayer={cbm} onDown={down} onUp={up} />
+        <KeyBtn k={runKey} className="mod" held={held(runKey)} shiftLayer={shift} cbmLayer={cbm} onDown={down} onUp={up} />
+        <KeyBtn k={retKey} className="wide" held={held(retKey)} shiftLayer={shift} cbmLayer={cbm} onDown={down} onUp={up} />
       </div>
     </div>
   );

@@ -4,7 +4,15 @@ import { Drawer } from "vaul";
 import { ExpansionPanel } from "@/components/emu/ExpansionPanel";
 import { detectLine, MACHINES, type ResolvedMachine } from "@/lib/emu/machines";
 import { ACTION_LABEL, useEmu } from "@/lib/emu/store";
-import { setDebugUi } from "@/lib/emu/debug";
+import {
+  deleteLibraryCartRows,
+  getLastCartPlayDiagnostic,
+  scanLibraryCartHealth,
+  type LibraryCartHealthRow,
+} from "@/lib/emu/cart-crt-diag";
+import { listLibrary } from "@/lib/emu/library";
+import { BuildId } from "@/components/emu/BuildId";
+import { drive8LogLines, setDebugUi } from "@/lib/emu/debug";
 import type {
   ActionId,
   CorePref,
@@ -43,6 +51,21 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
   const s = useEmu();
   const mac = MACHINES.find((m) => m.id === s.machineId);
   const c64Family = (mac?.family ?? "c64") === "c64";
+
+  useEffect(() => {
+    if (!s.settingsOpen && !s.aboutOpen && !s.mapperOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (e.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+        if (s.aboutOpen) s.setAboutOpen(false);
+        if (s.settingsOpen) s.setSettingsOpen(false);
+        if (s.mapperOpen) s.setMapperOpen(false);
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [s.settingsOpen, s.aboutOpen, s.mapperOpen, s.setAboutOpen, s.setSettingsOpen, s.setMapperOpen]);
 
   return (
     <>
@@ -196,8 +219,9 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               <label>IEC drives</label>
               <p className="mb-2 text-xs text-fg-subtle">
                 One number is one drive on the serial bus. <code>LOAD"$",8</code> talks to device 8,{" "}
-                <code>LOAD"$",9</code> to device 9. Floppy Play always uses a 1541 on #8 so games can{" "}
-                <code>LOAD"*",8,1</code>. Device 8 cannot be empty.
+                <code>LOAD"$",9</code> to device 9. Floppy Play mounts the image on #8 and stops at bare{" "}
+                <code>READY</code> — Grok64 never auto-types <code>LOAD</code> on mount (no{" "}
+                <code>LOAD"$"</code> or <code>LOAD"*"</code>). Device 8 cannot be empty.
               </p>
               {IEC_UNITS.map((unit) => (
                 <div key={unit} className="g64-iec-row">
@@ -471,10 +495,236 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
             <p className="text-sm leading-6 text-fg-muted">
               PAL vs NTSC follows the title, not your timezone. SuperCPU uses the xscpu64 core when the WASM build is present; otherwise it falls back to C64. JiffyDOS and CMD HD Boot ROM 2.80 are yours to upload — Grok64 never bundles them. C128 dual-screen (VIC-II + VDC) is available by selecting C128.
             </p>
+            <p className="mt-4 text-sm text-fg-muted">
+              Build <BuildId className="font-mono text-fg" /> — hard reload if this does not match the release you expect.
+            </p>
+            <Drive8DiagPanel />
+            <LastCartPlayDiagPanel />
+            <LibraryCartScanPanel />
           </Drawer.Content>
         </Drawer.Portal>
       </Drawer.Root>
     </>
+  );
+}
+
+function LibraryCartScanPanel() {
+  const setLibrary = useEmu((s) => s.setLibrary);
+  const [rows, setRows] = useState<LibraryCartHealthRow[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  async function runScan() {
+    setBusy(true);
+    try {
+      const r = await scanLibraryCartHealth();
+      setRows(r);
+      if (typeof console !== "undefined") console.info("[grok64] libraryCartScan", r);
+      const bad = r.filter((x) => !x.ok);
+      if (bad.length) {
+        toast.error(`${bad.length} library cartridge(s) look corrupt — delete and re-import.`, { duration: 12_000 });
+      } else if (r.length) {
+        toast.message(`All ${r.length} library cartridge(s) passed CRT header checks.`);
+      } else {
+        toast.message("No cartridge rows in On this device.");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Scan failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function deleteBadRows(target?: LibraryCartHealthRow[]) {
+    const bad = (target ?? rows ?? []).filter((r) => !r.ok);
+    if (!bad.length) {
+      toast.message("No corrupt cartridge rows to delete.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await deleteLibraryCartRows(bad.map((r) => r.id));
+      setLibrary(await listLibrary());
+      const remaining = (rows ?? []).filter((r) => r.ok);
+      setRows(remaining.length ? remaining : null);
+      toast.message(`Deleted ${bad.length} corrupt cartridge row(s). Re-import your .crt files.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Delete failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+  const badRows = rows?.filter((r) => !r.ok) ?? [];
+  return (
+    <div className="mt-4 rounded-lg border border-border/60 bg-bg/40 p-3">
+      <h3 className="mb-2 text-sm font-medium text-fg">Library cartridge scan</h3>
+      <p className="mb-2 text-xs leading-5 text-fg-muted">
+        Checks every <strong>On this device</strong> row that looks like a CRT (including old saves without a{" "}
+        <code className="text-fg">.crt</code> extension). Also logged as{" "}
+        <code className="text-fg">[grok64] libraryCartScan</code> or <code className="text-fg">__g64.scanLibraryCarts()</code>.
+      </p>
+      <div className="mb-2 flex flex-wrap gap-2">
+        <button
+          type="button"
+          className="rounded-md border border-border bg-bg px-3 py-1.5 text-xs font-medium text-fg"
+          disabled={busy}
+          onClick={() => void runScan()}
+        >
+          {busy ? "Scanning…" : "Scan library CRTs"}
+        </button>
+        {badRows.length > 0 ? (
+          <button
+            type="button"
+            className="rounded-md border border-red-500/50 bg-red-500/10 px-3 py-1.5 text-xs font-medium text-fg"
+            disabled={busy}
+            onClick={() => void deleteBadRows()}
+          >
+            Delete {badRows.length} corrupt row{badRows.length === 1 ? "" : "s"}
+          </button>
+        ) : null}
+      </div>
+      {rows && badRows.length > 0 ? (
+        <ul className="mb-2 space-y-1 text-xs text-fg-muted">
+          {badRows.map((r) => (
+            <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-border/50 px-2 py-1">
+              <span className="min-w-0 break-all">
+                <strong className="text-fg">{r.name}</strong>
+                {r.issue ? ` · ${r.issue}` : ""} · {r.payloadBytes} bytes
+              </span>
+              <button
+                type="button"
+                className="shrink-0 text-red-400 underline"
+                disabled={busy}
+                onClick={() => void deleteBadRows([r])}
+              >
+                Delete
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {rows && (
+        <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-snug text-fg-muted">
+          {JSON.stringify(rows, null, 2)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+function Drive8DiagPanel() {
+  const aboutOpen = useEmu((s) => s.aboutOpen);
+  const [text, setText] = useState("");
+  useEffect(() => {
+    if (!aboutOpen) return;
+    const g0 = (window as unknown as { __g64?: Record<string, unknown> }).__g64;
+    (g0?.kbdReleaseAll as (() => void) | undefined)?.();
+    const tick = async () => {
+      const g = (window as unknown as { __g64?: Record<string, unknown> }).__g64;
+      if (!g) {
+        setText("Power on the C64 first, then reopen About.");
+        return;
+      }
+      const attachDiskDiag = g.attachDiskDiag as
+        | ((opts?: { light?: boolean }) => Promise<Record<string, unknown>>)
+        | undefined;
+      const diag = attachDiskDiag ? await attachDiskDiag({ light: true }) : null;
+      const block = {
+        at: new Date().toISOString(),
+        diag,
+        playMode: (g.playMode as (() => string) | undefined)?.(),
+        cartLive: (g.cartLive as (() => boolean) | undefined)?.(),
+        booting: (g.booting as (() => boolean) | undefined)?.(),
+        jiffyLive: (g.jiffyLive as (() => boolean) | undefined)?.(),
+        workDisk: (g.workDisk as (() => string) | undefined)?.(),
+        bootFile: (g.bootFile as (() => string) | undefined)?.(),
+        logs: drive8LogLines(20),
+      };
+      setText(JSON.stringify(block, null, 2));
+    };
+    void tick();
+    const id = window.setInterval(() => void tick(), 2000);
+    return () => window.clearInterval(id);
+  }, [aboutOpen]);
+  const exportsMissing =
+    text.includes('"diskExportsPresent": false') || text.includes('"viceDiskExports": false');
+  const coreMismatch =
+    text.includes('"coreBuildMatches": false') ||
+    text.includes('"loadedGlueHasDiskExports": false') ||
+    text.includes('"coreBuildIdLoaded": "stale-no-disk-exports"');
+
+  return (
+    <div className="mt-4 rounded-lg border border-border/60 bg-bg/40 p-3">
+      <h3 className="mb-2 text-sm font-medium text-fg">Drive 8 diagnostics</h3>
+      {exportsMissing || coreMismatch ? (
+        <p className="mb-2 rounded-md border border-amber-500/60 bg-amber-500/15 px-2 py-2 text-xs font-medium leading-5 text-amber-100">
+          Stale or stock VICE core — disk WASM exports are missing or the loaded glue does not match the committed build.
+          Grok64 may purge only stale EmulatorJS core rows and reload once; your Software library uses a separate database — check{" "}
+          <code className="text-fg">libraryIdb</code> in the JSON. Compare{" "}
+          <code className="text-fg">coreBuildIdExpected</code> vs <code className="text-fg">coreBuildIdLoaded</code> in
+          the JSON below. Send this block if it persists after one reload.
+        </p>
+      ) : null}
+      <p className="mb-2 text-xs leading-5 text-fg-muted">
+        Live attach state for IEC unit 8 (refreshes every 2s). Check{" "}
+        <code className="text-fg">coreBuildIdExpected</code>, <code className="text-fg">coreBuildIdLoaded</code>,{" "}
+        <code className="text-fg">diskExportsPresent</code>, <code className="text-fg">viceLastReattach.rc</code> (0 =
+        ok; negative = WASM errno, see <code className="text-fg">rcLabel</code>), and{" "}
+        <code className="text-fg">iecWasmDriveState</code>,{" "}
+        <code className="text-fg">viceDriveLive.wasmTdeImageBytes</code> (1541 GCR image on the IEC bus),{" "}
+        <code className="text-fg">wasmGcrLoaded</code>, <code className="text-fg">wasmVdriveImageSame</code>, and{" "}
+        <code className="text-fg">viceDriveBus</code> (drive CPU clock advancing,{" "}
+        <code className="text-fg">wasmFilesystemDevice</code>=0,{" "}
+        <code className="text-fg">serialDeviceLabel</code> not <code className="text-fg">virt</code>,{" "}
+        <code className="text-fg">viceLoadDollarDiag</code> (captured every About refresh and auto on FILE NOT FOUND; BASIC $0200, KERNAL $C3, vdrive error 62, track-18 BAM, IEC lines).{" "}
+        <code className="text-fg">wasmIecBusAtn</code> false at idle READY (ATN released);{" "}
+        <code className="text-fg">profilePersistDiff</code> diffs localStorage / vicerc / WASM drive resources vs a fresh profile. WASM only — copy and send
+        this block. Logs: last 20 floppy-attach / play-mount lines.
+      </p>
+      <button
+        type="button"
+        className="g64-btn mb-2 w-full"
+        disabled={!text}
+        onClick={() => {
+          void navigator.clipboard.writeText(text).then(
+            () => toast.message("Drive 8 diagnostics copied"),
+            () => toast.error("Could not copy — select the text below"),
+          );
+        }}
+      >
+        Copy diagnostics
+      </button>
+      <pre className="max-h-72 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-snug text-fg-muted">
+        {text || "Loading…"}
+      </pre>
+    </div>
+  );
+}
+
+function LastCartPlayDiagPanel() {
+  const [diag, setDiag] = useState(() => getLastCartPlayDiagnostic());
+  useEffect(() => {
+    const sync = () => setDiag(getLastCartPlayDiagnostic());
+    sync();
+    const t = window.setInterval(sync, 1500);
+    window.addEventListener("focus", sync);
+    return () => {
+      window.clearInterval(t);
+      window.removeEventListener("focus", sync);
+    };
+  }, []);
+  return (
+    <div className="mt-4 rounded-lg border border-border/60 bg-bg/40 p-3">
+      <h3 className="mb-2 text-sm font-medium text-fg">Last cartridge Play</h3>
+      <p className="mb-2 text-xs leading-5 text-fg-muted">
+        Shown after each cart Play — also logged as <code className="text-fg">[grok64] lastCartPlay</code> in the
+        browser console. attachCode: -1 write failed, 0 not mounted, &gt;0 CRT hw type id when known.
+      </p>
+      {diag ? (
+        <pre className="max-h-56 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-snug text-fg-muted">
+          {JSON.stringify(diag, null, 2)}
+        </pre>
+      ) : (
+        <p className="text-xs text-fg-muted">No cartridge Play recorded yet this session.</p>
+      )}
+    </div>
   );
 }
 
