@@ -109,9 +109,7 @@ try {
     viceLastReattach: diag?.viceLastReattach,
   };
 
-  await typeBasic(page, 'LOAD"$",8', { afterMs: 14_000 });
-  await page.waitForTimeout(2000);
-  await typeBasic(page, "LIST", { afterMs: 10_000 });
+  await typeBasic(page, 'LOAD"$",8', { afterMs: 12_000 });
   await page.waitForTimeout(3000);
   const screen = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
   await page.screenshot({ path: join(shotDir, "geos-ui-insert-jiffy-list.png") });

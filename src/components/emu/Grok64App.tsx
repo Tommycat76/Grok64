@@ -1053,7 +1053,18 @@ export function Grok64App() {
         if (!(await feedBasicLine(emu, 'LOAD"$",8'))) {
           return { ok: false, reason: "load-fail", text: (readScreenText(emu) ?? "").slice(0, 400) };
         }
-        await new Promise((r) => setTimeout(r, 14_000));
+        const loadT0 = Date.now();
+        let loadScreen = readScreenText(emu) ?? "";
+        while (Date.now() - loadT0 < 45_000) {
+          await new Promise((r) => setTimeout(r, 1000));
+          loadScreen = readScreenText(emu) ?? "";
+          if (/FILE NOT FOUND|DEVICE NOT PRESENT/i.test(loadScreen)) break;
+          if (/SEARCHING FOR|LOADING/i.test(loadScreen)) continue;
+          if (/BLOCKS FREE/i.test(loadScreen) || /"[\w]/i.test(loadScreen)) break;
+        }
+        if (/FILE NOT FOUND|DEVICE NOT PRESENT/i.test(loadScreen)) {
+          return { ok: false, reason: "load-iec-fail", text: loadScreen.slice(0, 400) };
+        }
         if (!(await feedBasicLine(emu, "LIST"))) {
           return { ok: false, reason: "list-fail", text: (readScreenText(emu) ?? "").slice(0, 400) };
         }
