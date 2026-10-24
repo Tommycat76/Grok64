@@ -1,6 +1,7 @@
 /** Inject BASIC lines via VICE kbdbuf (or C64 KERNAL queue at $0277 / $C6). */
 
 import { readC64Byte, writeC64Byte, type RamEmu } from "./c64-memory";
+import { grok64PristineCwrap, type Grok64WasmModule } from "./grok64-wasm-bind";
 import { dispatchC64Key, typeC64 } from "./keys";
 
 const KBD_BUF = 0x0277;
@@ -30,18 +31,19 @@ function sleep(ms: number) {
 
 function bindKbdExports(emu: KbdEmu | null): KbdEmu["Module"] | null {
   const mod = emu?.Module;
-  if (!mod?.cwrap) return mod ?? null;
+  const wrap = grok64PristineCwrap(mod as Grok64WasmModule);
+  if (!mod || !wrap) return mod ?? null;
   try {
     if (!mod._grok64_kbdbuf_feed_runcmd) {
-      mod._grok64_kbdbuf_feed_runcmd = mod.cwrap("grok64_kbdbuf_feed_runcmd", "number", ["string"]) as (
+      mod._grok64_kbdbuf_feed_runcmd = wrap("grok64_kbdbuf_feed_runcmd", "number", ["string"]) as (
         t: string,
       ) => number;
     }
     if (!mod._grok64_kbdbuf_flush) {
-      mod._grok64_kbdbuf_flush = mod.cwrap("grok64_kbdbuf_flush", null, []) as () => void;
+      mod._grok64_kbdbuf_flush = wrap("grok64_kbdbuf_flush", null, []) as () => void;
     }
     if (!mod._grok64_kbdbuf_feed) {
-      mod._grok64_kbdbuf_feed = mod.cwrap("grok64_kbdbuf_feed", "number", ["string"]) as (t: string) => number;
+      mod._grok64_kbdbuf_feed = wrap("grok64_kbdbuf_feed", "number", ["string"]) as (t: string) => number;
     }
   } catch {
     /* stock core */

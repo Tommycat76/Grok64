@@ -41,9 +41,11 @@ if ! grep -q '_grok64_retro_keyboard' "${MAKEFILE}"; then
   sed -i 's|_grok64_cartridge_trigger_freeze|_grok64_cartridge_trigger_freeze,_grok64_retro_keyboard|' "${MAKEFILE}"
 fi
 if ! grep -q '_grok64_disk_attach' "${MAKEFILE}"; then
-  sed -i 's|_grok64_retro_keyboard|_grok64_retro_keyboard,_grok64_disk_attach,_grok64_disk_attach_deferred,_grok64_disk_detach,_grok64_disk_get_name,_grok64_retro_save_directory,_grok64_disk_last_attach_rc,_grok64_work_disk_refresh|' "${MAKEFILE}"
+  sed -i 's|_grok64_retro_keyboard|_grok64_retro_keyboard,_grok64_disk_attach,_grok64_disk_attach_deferred,_grok64_disk_detach,_grok64_disk_get_name,_grok64_retro_save_directory,_grok64_disk_last_attach_rc,_grok64_work_disk_refresh,_grok64_disk_last_attach_diag,_grok64_fs_stat_bytes|' "${MAKEFILE}"
 elif ! grep -q '_grok64_work_disk_refresh' "${MAKEFILE}"; then
-  sed -i 's|_grok64_disk_last_attach_rc|_grok64_disk_last_attach_rc,_grok64_work_disk_refresh|' "${MAKEFILE}"
+  sed -i 's|_grok64_disk_last_attach_rc|_grok64_disk_last_attach_rc,_grok64_work_disk_refresh,_grok64_disk_last_attach_diag,_grok64_fs_stat_bytes|' "${MAKEFILE}"
+elif ! grep -q '_grok64_disk_last_attach_diag' "${MAKEFILE}"; then
+  sed -i 's|_grok64_work_disk_refresh|_grok64_work_disk_refresh,_grok64_disk_last_attach_diag,_grok64_fs_stat_bytes|' "${MAKEFILE}"
 fi
 
 cd "${RA}"
@@ -59,7 +61,9 @@ STOCK="${ROOT}/package"
   "${RA}/vice_x64sc_libretro.wasm" "${RA}/vice_x64sc_libretro.js" \
   "${STOCK}/license.txt" "${STOCK}/core.json" "${STOCK}/reports/vice_x64sc.json"
 
+IEC_SRC="${OUT}/vice_x64sc-wasm.data"
 for alias in vice_x64sc_grok64-wasm.data vice_x64sc-grok64-iec-wasm.data; do
-  cp -f "${OUT}/vice_x64sc-wasm.data" "${OUT}/${alias}"
+  cp -f "${IEC_SRC}" "${OUT}/${alias}"
+  test -f "${OUT}/${alias}" || { echo "missing ${alias}" >&2; exit 1; }
 done
-echo "Wrote ${OUT}/vice_x64sc-wasm.data (+ grok64 IEC aliases)"
+echo "Wrote ${IEC_SRC} (+ grok64 IEC aliases, bytes=$(wc -c <"${IEC_SRC}"))"

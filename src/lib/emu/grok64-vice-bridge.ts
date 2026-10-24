@@ -13,6 +13,12 @@ import {
   type IecDeviceNumber,
 } from "./sd2iec";
 import { bindGrok64DiskExports } from "./vice-disk";
+import {
+  grok64PristineCwrap,
+  type Grok64WasmModule,
+  isGrok64WasmExportsBound,
+  markGrok64WasmExportsBound,
+} from "./grok64-wasm-bind";
 
 export type Grok64Emu = EjsLike;
 const asSd = (emu: Grok64Emu | null): EjsLike | null => emu;
@@ -46,14 +52,12 @@ export function probeGrok64ViceModule(emu: Grok64Emu | null): boolean {
   return Boolean(mod?._grok64_sd2iec_poll || mod?._grok64_sd2iec_attach || mod?.grok64Sd2iecHost);
 }
 
-let bindingWasmExports = false;
-
-/** Bind Emscripten exports onto Module (idempotent). */
+/** Bind Emscripten exports onto Module (idempotent, once per Module). */
 export function bindGrok64WasmExports(mod: Grok64Module & { cwrap?: (...args: unknown[]) => unknown }): void {
-  if (bindingWasmExports) return;
-  const wrap = mod.cwrap;
+  if (isGrok64WasmExportsBound(mod)) return;
+  const wrap = grok64PristineCwrap(mod as Grok64WasmModule);
   if (!wrap) return;
-  bindingWasmExports = true;
+  markGrok64WasmExportsBound(mod);
   try {
     if (!mod._grok64_sd2iec_attach) {
       mod._grok64_sd2iec_attach = wrap("grok64_sd2iec_attach", null, ["number"]) as (unit: number) => void;
@@ -107,8 +111,6 @@ export function bindGrok64WasmExports(mod: Grok64Module & { cwrap?: (...args: un
     }
   } catch {
     /* stock core */
-  } finally {
-    bindingWasmExports = false;
   }
 }
 

@@ -107,7 +107,9 @@ import {
 import {
   grok64DiskExportsReady,
   lastViceDiskAttach,
+  probeViceAttachPaths,
   viceAttachedImage,
+  viceDiskLastAttachDiag,
   viceRetroSaveDirectory,
 } from "@/lib/emu/vice-disk";
 import {
@@ -917,6 +919,15 @@ export function Grok64App() {
           diskExportsPresent: grok64DiskExportsReady(emuRef.current),
           workDiskRefreshExport: Boolean(
             (emuRef.current?.Module as { _grok64_work_disk_refresh?: unknown })?._grok64_work_disk_refresh,
+          ),
+          diskAttachDiagExport: Boolean(
+            (emuRef.current?.Module as { _grok64_disk_last_attach_diag?: unknown })?._grok64_disk_last_attach_diag,
+          ),
+          viceLastAttachDiag: viceDiskLastAttachDiag(emuRef.current),
+          attachPathProbe: probeViceAttachPaths(
+            emuRef.current,
+            unit,
+            session?.name ?? bootFileOf(emuRef.current) ?? "GEOS_2.0.d64",
           ),
           coreBuildId: grok64CoreStatus(emuRef.current).coreBuildId,
           coreUrlBuildId: grok64CoreStatus(emuRef.current).coreUrlBuildId,

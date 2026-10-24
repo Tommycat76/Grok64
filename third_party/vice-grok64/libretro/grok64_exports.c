@@ -9,9 +9,13 @@
 #include "kbdbuf.h"
 #include "machine.h"
 #include "vdrive/vdrive.h"
+#include "vice-event.h"
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 extern char retro_save_directory[];
 
@@ -23,6 +27,35 @@ static int pending_disk_drive = 0;
 static char pending_disk_path[GROK64_DISK_PATH_MAX];
 static int pending_disk_attach = 0;
 static int last_disk_attach_rc = -1;
+static char last_disk_attach_diag[384];
+
+static void grok64_note_attach_diag(const char *msg)
+{
+    if (!msg) {
+        last_disk_attach_diag[0] = '\0';
+        return;
+    }
+    strlcpy(last_disk_attach_diag, msg, sizeof(last_disk_attach_diag));
+}
+
+static int grok64_fs_size_bytes(const char *path)
+{
+    struct stat st;
+
+    if (!path || !path[0]) {
+        return -EINVAL;
+    }
+    if (stat(path, &st) != 0) {
+        return -errno;
+    }
+    if (!S_ISREG(st.st_mode)) {
+        return -EINVAL;
+    }
+    if (st.st_size > 0x7fffffff) {
+        return -EFBIG;
+    }
+    return (int)st.st_size;
+}
 
 extern void cartridge_trigger_freeze(void);
 extern void retro_keyboard_event(bool down, unsigned code, uint32_t character, uint16_t mod);
@@ -209,17 +242,37 @@ EMSCRIPTEN_KEEPALIVE
 #endif
 int grok64_disk_attach(int unit, int drive, const char *path)
 {
+    int fs_bytes;
+
+    grok64_note_attach_diag(NULL);
     if (!path || !path[0]) {
+        grok64_note_attach_diag("empty path");
         return -1;
     }
     if (unit < 8 || unit > 11) {
+        snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag), "bad unit %d", unit);
         return -1;
     }
     if (drive < 0 || drive > 1) {
         drive = 0;
     }
+    if (event_playback_active()) {
+        grok64_note_attach_diag("event_playback_active");
+        last_disk_attach_rc = -1;
+        return -1;
+    }
+    fs_bytes = grok64_fs_size_bytes(path);
+    if (fs_bytes < 0) {
+        snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag), "fs_stat %s errno=%d", path, -fs_bytes);
+        last_disk_attach_rc = -1;
+        return -1;
+    }
     file_system_detach_disk((unsigned int)unit, (unsigned int)drive);
     last_disk_attach_rc = file_system_attach_disk((unsigned int)unit, (unsigned int)drive, path);
+    if (last_disk_attach_rc < 0) {
+        snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
+                 "file_system_attach_disk unit=%d path=%s fs_bytes=%d", unit, path, fs_bytes);
+    }
     return last_disk_attach_rc;
 }
 
@@ -229,6 +282,22 @@ EMSCRIPTEN_KEEPALIVE
 int grok64_disk_last_attach_rc(void)
 {
     return last_disk_attach_rc;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+const char *grok64_disk_last_attach_diag(void)
+{
+    return last_disk_attach_diag;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int grok64_fs_stat_bytes(const char *path)
+{
+    return grok64_fs_size_bytes(path);
 }
 
 #ifdef __EMSCRIPTEN__

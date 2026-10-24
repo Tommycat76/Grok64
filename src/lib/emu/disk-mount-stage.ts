@@ -1,7 +1,7 @@
 import { toast } from "sonner";
 import { glog } from "./debug";
 
-export function mountErrorStack(err: unknown, maxLines = 30): string | undefined {
+export function mountErrorStack(err: unknown, maxLines = 40): string | undefined {
   if (!(err instanceof Error) || !err.stack) return undefined;
   return err.stack.split("\n").slice(0, maxLines).join("\n");
 }
