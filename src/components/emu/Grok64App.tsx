@@ -41,6 +41,7 @@ import {
   dismissEjsPrompts,
   ensureRuntime,
   prefetchViceCores,
+  patchIndexedDbForEmulatorJsCache,
   fitEmu,
   grok64CoreStatus,
   hardReset,
@@ -269,6 +270,7 @@ import { isSid, psidToPrg } from "@/lib/emu/psid";
 import { explodeArchive, pickBootFile, toArrayBuffer } from "@/lib/emu/archive";
 import { BuildId } from "@/components/emu/BuildId";
 import { debugQueryOn, drive8LogLines, glog, glogFire, setDebugUi, subscribeLog } from "@/lib/emu/debug";
+import { grok64LibraryIdbDiag } from "@/lib/emu/library-diag";
 import { readBuildId } from "@/lib/emu/build-id";
 import {
   cartAttachResultCode,
@@ -588,6 +590,10 @@ export function Grok64App() {
     return () => window.removeEventListener("g64-fit", onFit);
   }, []);
   useEffect(() => {
+    patchIndexedDbForEmulatorJsCache();
+    void listLibrary()
+      .then((rows) => useEmu.getState().setLibrary(rows))
+      .catch(() => undefined);
     void ensureRuntime().catch(() => undefined);
     prefetchViceCores();
     prefetchBundledRoms()
@@ -955,6 +961,7 @@ export function Grok64App() {
           loadedGlueHasDiskExports: grok64CoreStatus(emuRef.current).loadedGlueHasDiskExports,
           coreUrlBuildId: grok64CoreStatus(emuRef.current).coreUrlBuildId,
           grok64Core: grok64CoreStatus(emuRef.current),
+          libraryIdb: await grok64LibraryIdbDiag(),
           appBuildId: readBuildId(),
           grok64WasmBindRev: GROK64_WASM_BIND_REV,
         };

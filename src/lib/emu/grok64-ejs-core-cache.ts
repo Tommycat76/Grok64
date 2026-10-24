@@ -1,6 +1,6 @@
 /**
  * EmulatorJS stores extracted cores in IndexedDB (`EmulatorJS-Cache`) keyed by download URL.
- * Stale vice *.data entries survive manifest bumps — purge when build id / URL diverges.
+ * Grok64 library lives in a separate DB (`grok64`) — never touch it here.
  */
 import { GROK64_CORE_BUILD_ID } from "./grok64-core-build.generated";
 import { grok64CoreBuildIdForUrl } from "./grok64-core-build";
@@ -8,6 +8,20 @@ import { grok64CoreBuildMatchesExpected, loadedCoreGlueInfo } from "./grok64-cor
 import { grok64DiskAttachCallableEmu } from "./grok64-wasm-direct";
 
 export const GROK64_IEC_CORE_BLOB = "vice_x64sc-grok64-iec-wasm.data";
+export const GROK64_LIBRARY_DB = "grok64";
+const EJS_CACHE_DB = "EmulatorJS-Cache";
+/** EJS ships with version 1; we bump to 2 so onupgradeneeded can recreate missing stores after a bad open. */
+const EJS_CACHE_DB_VERSION = 2;
+
+const MANIFEST_LS = "grok64.ejsCoreManifestBuildId";
+const AUTO_RELOAD_SS = "grok64.coreCacheAutoReload";
+
+type CacheMeta = {
+  key: string;
+  url?: string;
+  type?: string;
+  filename?: string;
+};
 
 function grok64ViceCoreRoot(): string | null {
   if (typeof import.meta !== "undefined" && import.meta.env?.VITE_GROK64_VICE_DATAPATH) {
@@ -33,17 +47,6 @@ function grok64CoreBlobUrl(): string | null {
   return url;
 }
 
-const EJS_CACHE_DB = "EmulatorJS-Cache";
-const MANIFEST_LS = "grok64.ejsCoreManifestBuildId";
-const AUTO_RELOAD_SS = "grok64.coreCacheAutoReload";
-
-type CacheMeta = {
-  key: string;
-  url?: string;
-  type?: string;
-  filename?: string;
-};
-
 function viceCoreUrl(meta: CacheMeta): boolean {
   const u = String(meta.url ?? meta.filename ?? "");
   return /vice_.*wasm\.data/i.test(u) || u.includes(GROK64_IEC_CORE_BLOB);
@@ -59,30 +62,95 @@ function urlBuildId(url: string): string | null {
   }
 }
 
-function openDb(): Promise<IDBDatabase | null> {
+function ensureEjsCacheStores(db: IDBDatabase): void {
+  if (!db.objectStoreNames.contains("cache")) {
+    const cacheStore = db.createObjectStore("cache");
+    if (!cacheStore.indexNames.contains("type")) {
+      cacheStore.createIndex("type", "type", { unique: false });
+    }
+    if (!cacheStore.indexNames.contains("url")) {
+      cacheStore.createIndex("url", "url", { unique: false });
+    }
+  }
+  if (!db.objectStoreNames.contains("blobs")) {
+    db.createObjectStore("blobs");
+  }
+}
+
+/**
+ * EmulatorJS opens `EmulatorJS-Cache` at version 1 without healing empty DBs.
+ * Intercept only that database; never alter `grok64` (user library).
+ */
+export function patchIndexedDbForEmulatorJsCache(): void {
+  if (typeof indexedDB === "undefined") return;
+  const w = window as unknown as { __g64IdbOpenPatched?: boolean };
+  if (w.__g64IdbOpenPatched) return;
+  w.__g64IdbOpenPatched = true;
+
+  const origOpen = IDBFactory.prototype.open;
+  IDBFactory.prototype.open = function (this: IDBFactory, name: string, version?: number): IDBOpenDBRequest {
+    if (name === GROK64_LIBRARY_DB) {
+      return origOpen.call(this, name, version);
+    }
+    if (name !== EJS_CACHE_DB) {
+      return origOpen.call(this, name, version);
+    }
+    const req = origOpen.call(this, name, Math.max(version ?? 1, EJS_CACHE_DB_VERSION));
+    req.addEventListener("upgradeneeded", (ev) => {
+      const db = (ev.target as IDBOpenDBRequest).result;
+      ensureEjsCacheStores(db);
+    });
+    return req;
+  };
+}
+
+function openEjsCacheDb(): Promise<IDBDatabase | null> {
   if (typeof indexedDB === "undefined") return Promise.resolve(null);
+  patchIndexedDbForEmulatorJsCache();
   return new Promise((resolve) => {
-    const req = indexedDB.open(EJS_CACHE_DB, 1);
+    const req = indexedDB.open(EJS_CACHE_DB, EJS_CACHE_DB_VERSION);
     req.onerror = () => resolve(null);
-    req.onsuccess = () => resolve(req.result);
+    req.onupgradeneeded = () => {
+      ensureEjsCacheStores(req.result);
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains("cache") || !db.objectStoreNames.contains("blobs")) {
+        db.close();
+        resolve(null);
+        return;
+      }
+      resolve(db);
+    };
   });
 }
 
 function idbGet<T>(db: IDBDatabase, store: string, key: string): Promise<T | undefined> {
+  if (!db.objectStoreNames.contains(store)) return Promise.resolve(undefined);
   return new Promise((resolve) => {
-    const tx = db.transaction(store, "readonly");
-    const req = tx.objectStore(store).get(key);
-    req.onsuccess = () => resolve(req.result as T | undefined);
-    req.onerror = () => resolve(undefined);
+    try {
+      const tx = db.transaction(store, "readonly");
+      const req = tx.objectStore(store).get(key);
+      req.onsuccess = () => resolve(req.result as T | undefined);
+      req.onerror = () => resolve(undefined);
+      tx.onerror = () => resolve(undefined);
+    } catch {
+      resolve(undefined);
+    }
   });
 }
 
 function idbDelete(db: IDBDatabase, store: string, key: string): Promise<void> {
+  if (!db.objectStoreNames.contains(store)) return Promise.resolve();
   return new Promise((resolve) => {
-    const tx = db.transaction(store, "readwrite");
-    tx.objectStore(store).delete(key);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => resolve();
+    try {
+      const tx = db.transaction(store, "readwrite");
+      tx.objectStore(store).delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    } catch {
+      resolve();
+    }
   });
 }
 
@@ -122,23 +190,27 @@ async function deleteCacheEntry(db: IDBDatabase, key: string): Promise<void> {
   await removeBlobManifest(db, key);
   await idbDelete(db, "cache", key);
   const keys = await idbGet<string[]>(db, "cache", "?EJS_KEYS!");
-  if (keys) {
-    const next = keys.filter((k) => k !== key);
-    await new Promise<void>((resolve) => {
+  if (!keys) return;
+  const next = keys.filter((k) => k !== key);
+  if (!db.objectStoreNames.contains("cache")) return;
+  await new Promise<void>((resolve) => {
+    try {
       const tx = db.transaction("cache", "readwrite");
       tx.objectStore("cache").put(next, "?EJS_KEYS!");
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve();
-    });
-  }
+    } catch {
+      resolve();
+    }
+  });
 }
 
 export type Grok64EjsCachePurgeResult = { removed: number; reason: string };
 
-/** Drop EmulatorJS core cache rows for VICE / Grok64 blobs (keeps ROM rows). */
+/** Drop only stale VICE / Grok64 **Core** rows inside `EmulatorJS-Cache` (never the `grok64` library DB). */
 export async function purgeEmulatorJsViceCoreCache(reason: string): Promise<Grok64EjsCachePurgeResult> {
-  const db = await openDb();
-  if (!db) return { removed: 0, reason };
+  const db = await openEjsCacheDb();
+  if (!db) return { removed: 0, reason: `${reason}:no-db` };
   const expectedUrl = grok64CoreBlobUrl();
   const expectedId = grok64CoreBuildIdForUrl();
   const metas = await listCacheMetas(db);
@@ -163,32 +235,20 @@ export async function purgeEmulatorJsViceCoreCache(reason: string): Promise<Grok
   return { removed, reason };
 }
 
-export async function deleteEmulatorJsCacheDatabase(): Promise<void> {
-  if (typeof indexedDB === "undefined") return;
-  await new Promise<void>((resolve) => {
-    const req = indexedDB.deleteDatabase(EJS_CACHE_DB);
-    req.onsuccess = () => resolve();
-    req.onerror = () => resolve();
-    req.onblocked = () => resolve();
-  });
-}
-
-/** Run before EmulatorJS boots — align IDB with committed manifest build id + canonical core URL. */
+/** Run before EmulatorJS boots — purge stale core rows only; never deleteDatabase. */
 export async function syncEmulatorJsCoreCacheWithManifest(): Promise<Grok64EjsCachePurgeResult | null> {
   if (!grok64ViceCoreRoot() || !GROK64_CORE_BUILD_ID) return null;
+  patchIndexedDbForEmulatorJsCache();
   const prev = typeof localStorage !== "undefined" ? localStorage.getItem(MANIFEST_LS) : null;
-  let reason = "vice-core-url-sync";
+  const reason = prev !== GROK64_CORE_BUILD_ID ? "manifest-build-id-changed" : "vice-core-url-sync";
+  const purge = await purgeEmulatorJsViceCoreCache(reason);
   if (prev !== GROK64_CORE_BUILD_ID) {
-    reason = "manifest-build-id-changed";
-    await deleteEmulatorJsCacheDatabase();
     try {
       localStorage.setItem(MANIFEST_LS, GROK64_CORE_BUILD_ID);
     } catch {
       /* ignore */
     }
-    return { removed: -1, reason };
   }
-  const purge = await purgeEmulatorJsViceCoreCache(reason);
   return purge;
 }
 
@@ -214,10 +274,6 @@ export function patchFetchNoStoreForGrok64Core(): void {
   };
 }
 
-/**
- * One-shot reload after purging IDB when glue/WASM proves a stale core is running.
- * Returns true if a reload was scheduled.
- */
 export async function maybeAutoRefreshStaleEmulatorCore(emu: { Module?: unknown } | null): Promise<boolean> {
   if (!grok64ViceCoreRoot() || !GROK64_CORE_BUILD_ID) return false;
   if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(AUTO_RELOAD_SS)) return false;
@@ -239,9 +295,10 @@ export async function maybeAutoRefreshStaleEmulatorCore(emu: { Module?: unknown 
     }
     return false;
   }
-  if (!glue && !exportsOk) return false;
+  if (!glue?.glueSha12) return false;
 
-  const needsRefresh = !exportsOk || !glue?.glueHasDiskExports || !matches;
+  const needsRefresh =
+    !glue.glueHasDiskExports || !matches || (glue.glueHasDiskExports && !exportsOk);
   if (!needsRefresh) return false;
 
   await purgeEmulatorJsViceCoreCache("stale-loaded-core");

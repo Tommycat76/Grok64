@@ -54,8 +54,11 @@ import {
 import {
   maybeAutoRefreshStaleEmulatorCore,
   patchFetchNoStoreForGrok64Core,
+  patchIndexedDbForEmulatorJsCache,
   syncEmulatorJsCoreCacheWithManifest,
 } from "./grok64-ejs-core-cache";
+
+export { patchIndexedDbForEmulatorJsCache } from "./grok64-ejs-core-cache";
 import {
   grok64DiskExportsReady,
   resolveViceDiskAttachPath,
@@ -637,8 +640,9 @@ export function ensureRuntime(): Promise<void> {
     return Promise.resolve();
   }
   scriptsReady = (async () => {
+    patchIndexedDbForEmulatorJsCache();
     patchFetchNoStoreForGrok64Core();
-    await syncEmulatorJsCoreCacheWithManifest();
+    await syncEmulatorJsCoreCacheWithManifest().catch(() => undefined);
     await loadCss(`${DATA}emulator.css`);
     for (const file of SCRIPTS) {
       await loadScript(`${DATA}src/${file}`);
@@ -912,8 +916,9 @@ function coreOptions(cfg: BootConfig): Record<string, string> {
 }
 
 export async function bootEmulator(el: HTMLElement, cfg: BootConfig): Promise<EjsInstance> {
+  patchIndexedDbForEmulatorJsCache();
   patchFetchNoStoreForGrok64Core();
-  await syncEmulatorJsCoreCacheWithManifest();
+  await syncEmulatorJsCoreCacheWithManifest().catch(() => undefined);
   await ensureRuntime();
   patchEjsGrok64CoreDownload();
   patchEjsInitGameCoreGlue();

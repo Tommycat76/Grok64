@@ -34,6 +34,11 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
 
   useEffect(() => {
     if (!open) return;
+    void refresh().catch(() => undefined);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       if (e.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;

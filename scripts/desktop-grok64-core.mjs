@@ -67,13 +67,25 @@ export async function installGrok64CoreNetworkGuard(page, baseUrl) {
   return { enabled: true, allowed };
 }
 
+/** QA only — drops EmulatorJS download cache, never the `grok64` user library DB. */
 export async function clearEmulatorJsCache(page) {
   await page.evaluate(async () => {
-    if (!indexedDB.databases) return;
-    for (const db of await indexedDB.databases()) {
-      if (db.name && /emulatorjs|EmulatorJS/i.test(db.name)) {
-        indexedDB.deleteDatabase(db.name);
+    const names = ["EmulatorJS-Cache", "EmulatorJS-states"];
+    if (indexedDB.databases) {
+      for (const db of await indexedDB.databases()) {
+        if (db.name && /^EmulatorJS/i.test(db.name) && db.name !== "grok64") {
+          if (!names.includes(db.name)) names.push(db.name);
+        }
       }
+    }
+    for (const name of names) {
+      if (name === "grok64") continue;
+      await new Promise((resolve) => {
+        const req = indexedDB.deleteDatabase(name);
+        req.onsuccess = () => resolve();
+        req.onerror = () => resolve();
+        req.onblocked = () => resolve();
+      });
     }
   });
 }

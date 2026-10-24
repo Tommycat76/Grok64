@@ -652,7 +652,8 @@ function Drive8DiagPanel() {
       {exportsMissing || coreMismatch ? (
         <p className="mb-2 rounded-md border border-amber-500/60 bg-amber-500/15 px-2 py-2 text-xs font-medium leading-5 text-amber-100">
           Stale or stock VICE core — disk WASM exports are missing or the loaded glue does not match the committed build.
-          Grok64 clears EmulatorJS core cache and reloads once automatically; compare{" "}
+          Grok64 may purge only stale EmulatorJS core rows and reload once; your Software library uses a separate database — check{" "}
+          <code className="text-fg">libraryIdb</code> in the JSON. Compare{" "}
           <code className="text-fg">coreBuildIdExpected</code> vs <code className="text-fg">coreBuildIdLoaded</code> in
           the JSON below. Send this block if it persists after one reload.
         </p>
