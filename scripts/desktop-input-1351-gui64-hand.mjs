@@ -374,6 +374,45 @@ function looksLikeCenteredDialog(before, after) {
   return diff.changed >= 350;
 }
 
+/** Official Select Input Device: JOYSTICK highlight bar, empty mid, OK at bottom-right. */
+function looksLikeSelectInput(img) {
+  const c = contentRect(img);
+  if (!c) return false;
+  const { data, width, height } = img;
+  const sample = (gx, gy) => {
+    const x = Math.round(c.x + (gx / 320) * c.w);
+    const y = Math.round(c.y + (gy / 200) * c.h);
+    if (x < 0 || y < 0 || x >= width || y >= height) return 0;
+    const i = (y * width + x) * 4;
+    return data[i] + data[i + 1] + data[i + 2];
+  };
+  let barDark = 0;
+  let barN = 0;
+  for (let gy = 44; gy <= 54; gy++) {
+    for (let gx = 92; gx <= 168; gx++) {
+      barN += 1;
+      if (sample(gx, gy) < 300) barDark += 1;
+    }
+  }
+  let emptyLight = 0;
+  let emptyN = 0;
+  for (let gy = 70; gy <= 100; gy += 2) {
+    for (let gx = 96; gx <= 200; gx += 2) {
+      emptyN += 1;
+      if (sample(gx, gy) > 380) emptyLight += 1;
+    }
+  }
+  let okDark = 0;
+  let okN = 0;
+  for (let gy = 108; gy <= 120; gy++) {
+    for (let gx = 188; gx <= 224; gx++) {
+      okN += 1;
+      if (sample(gx, gy) < 300) okDark += 1;
+    }
+  }
+  return barN > 0 && barDark / barN > 0.35 && emptyN > 0 && emptyLight / emptyN > 0.55 && okN > 0 && okDark / okN > 0.05;
+}
+
 async function stillGeosDesk(hand) {
   const desk = await canvasLooksLikeGeosDesktop(hand.page);
   const text = await hand.screenText();
@@ -601,13 +640,46 @@ async function tapCbmI(hand) {
     const g = window.__g64;
     g?.kbdReleaseAll?.();
     g?.dispatchKey?.("ControlLeft", "Control", true);
-    await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, 80));
     g?.dispatchKey?.("KeyI", "i", true);
-    await new Promise((r) => setTimeout(r, 90));
+    await new Promise((r) => setTimeout(r, 120));
     g?.dispatchKey?.("KeyI", "i", false);
     g?.dispatchKey?.("ControlLeft", "Control", false);
   });
-  await sleep(700);
+  await sleep(400);
+}
+
+function isSelectInputDialog(before, after) {
+  if (!after?.img) return false;
+  if (looksLikeSelectInput(after.img)) return true;
+  if (!before?.img) return false;
+  return looksLikeCenteredDialog(before, after) && notepadHasIcons(after.img);
+}
+
+async function waitSelectInput(hand, before, ms = 8000) {
+  const t0 = Date.now();
+  let last = await snapshot(hand.page);
+  while (Date.now() - t0 < ms) {
+    if (isSelectInputDialog(before, last)) return last;
+    await sleep(350);
+    last = await snapshot(hand.page);
+  }
+  return last;
+}
+
+async function pickComm1351InDialog(hand, dlg) {
+  // Sprite centroid sits ~6px below the tip. COMM 1351(a) ink is GEOS y≈56–62;
+  // walking to y=72 clicked empty dialog and left JOYSTICK selected.
+  await tapC64Key(hand, "ArrowDown", "ArrowDown");
+  await sleep(180);
+  const comm = geosMap(dlg.img, 118, 64);
+  const ok = geosMap(dlg.img, 204, 118);
+  if (comm) await walkPointerTo(hand, comm.x, comm.y, { timeout: 4000, close: 10 });
+  await clickJoy(hand, { downMs: 110 });
+  await sleep(250);
+  if (ok) await walkPointerTo(hand, ok.x, ok.y, { timeout: 3500, close: 10 });
+  await clickJoy(hand, { downMs: 110 });
+  await sleep(400);
 }
 
 async function locatePointer(hand, { dirs = null, pulseMs = 55 } = {}) {
@@ -1039,7 +1111,7 @@ async function test1351(hand, prefix) {
   return out;
 }
 
-/** geos → select input, or C= + I, then COMM 1351(a) + OK. */
+/** C= + I opens Select Input Device; pick COMM 1351(a) + OK. */
 async function activateGeos1351(hand) {
   const out = { steps: [], file: "COMM 1351(a)", via: "select-input" };
   await ensureMouse(hand, false);
@@ -1048,98 +1120,130 @@ async function activateGeos1351(hand) {
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
 
-  // WASD parks on "select". geos is x≈5–28; file starts ~32. Do not click the gap.
-  out.landGeos = await landOnGeosWord(hand);
-  out.steps.push(onGeosWord(out.landGeos?.landed) ? "on-geos" : "geos-miss");
-  await hand.shot("10-1351-preclick.png");
-  if (onGeosWord(out.landGeos?.landed)) {
-    await clickJoy(hand);
-    await sleep(450);
+  await tapCbmI(hand);
+  out.steps.push("cbm-i");
+  let dlg = await waitSelectInput(hand, before, 10000);
+  if (!isSelectInputDialog(before, dlg)) {
+    await tapCbmI(hand);
+    out.steps.push("cbm-i-retry");
+    dlg = await waitSelectInput(hand, before, 8000);
   }
-  await hand.shot("10-1351-geos-menu.png");
-  let menuSnap = await snapshot(hand.page);
-  out.menu = openedMenuKind(before, menuSnap);
-  if (out.menu.kind !== "geos") {
-    out.steps.push(out.menu.kind === "none" ? "no-menu" : "wrong-menu");
-    if (out.menu.kind !== "none") {
-      await clickJoy(hand);
-      await sleep(250);
-    }
-    out.landGeos = await landOnGeosWord(hand);
-    out.steps.push(onGeosWord(out.landGeos?.landed) ? "on-geos-retry" : "geos-miss-retry");
-    await hand.shot("10-1351-preclick-retry.png");
-    if (onGeosWord(out.landGeos?.landed)) {
-      await clickJoy(hand);
-      await sleep(450);
-    }
-    await hand.shot("10-1351-geos-menu.png");
-    menuSnap = await snapshot(hand.page);
-    out.menu = openedMenuKind(before, menuSnap);
-  }
-  if (out.menu.kind !== "geos") {
-    out.steps.push("geos-menu-fail");
-  } else {
-    out.menuWalk = [];
-    for (let i = 0; i < 6; i++) {
-      const row = await snapshot(hand.page);
-      await savePng(hand.shotDir(), `10-1351-menu-walk-${i}.png`, row.b64);
-      if (looksLikeAboutBox(row.img)) {
-        out.steps.push("about-box");
-        await clickJoy(hand);
-        await sleep(250);
-        break;
-      }
-      if (i > 0 && (looksLikeDialog(before, row) || looksLikeCenteredDialog(before, row))) {
-        out.steps.push("select-input-menu");
-        break;
-      }
-      const ptr = findMenuPointer(row.img);
-      if (ptr) out.menuWalk.push({ i, x: +ptr.x.toFixed(1), y: ptr.y, n: ptr.n, med: ptr.med });
-      // Last open already sat on select input. A missed gutter read still clicks once.
-      const alreadyThere = onSelectInputItem(ptr) || (i === 0 && !ptr);
-      if (alreadyThere || i === 4) {
-        await clickJoy(hand);
-        await sleep(900);
-        out.steps.push(alreadyThere ? "select-input-menu" : "select-input-after-walk");
-        break;
-      }
-      if (ptr && ptr.y > 72) await holdJoy(hand, 0, -1, 36);
-      else await holdJoy(hand, 0, 1, 36);
-      await sleep(140);
-    }
-  }
-  let dlg = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-page-menu.png", dlg.b64);
   await hand.shot("10-1351-select-input.png");
-  const about = looksLikeAboutBox(dlg.img);
-  out.dialog = !about && (looksLikeDialog(before, dlg) || looksLikeCenteredDialog(before, dlg));
-  if (about) {
-    out.steps.push("about-not-input");
-    await clickJoy(hand);
-    await sleep(300);
+  // C= + I opens Select Input Device, never the about box — don't reject a white dialog.
+  out.dialog = isSelectInputDialog(before, dlg);
+
+  if (!out.dialog) {
+    out.landGeos = await landOnGeosWord(hand);
+    out.steps.push(onGeosWord(out.landGeos?.landed) ? "on-geos" : "geos-miss");
+    await hand.shot("10-1351-preclick.png");
+    if (onGeosWord(out.landGeos?.landed)) {
+      await clickJoy(hand, { downMs: 120 });
+      await sleep(500);
+    }
+    await hand.shot("10-1351-geos-menu.png");
+    const menuSnap = await snapshot(hand.page);
+    out.menu = openedMenuKind(before, menuSnap);
+    if (out.menu.kind === "geos") {
+      out.menuWalk = [];
+      for (let i = 0; i < 6; i++) {
+        const row = await snapshot(hand.page);
+        await savePng(hand.shotDir(), `10-1351-menu-walk-${i}.png`, row.b64);
+        if (looksLikeAboutBox(row.img)) {
+          out.steps.push("about-box");
+          await clickJoy(hand, { downMs: 110 });
+          await sleep(250);
+          break;
+        }
+        if (i > 0 && isSelectInputDialog(before, row)) {
+          out.steps.push("select-input-menu");
+          dlg = row;
+          out.dialog = true;
+          break;
+        }
+        const ptr = findMenuPointer(row.img);
+        if (ptr) out.menuWalk.push({ i, x: +ptr.x.toFixed(1), y: ptr.y, n: ptr.n, med: ptr.med });
+        const alreadyThere = onSelectInputItem(ptr) || (i === 0 && !ptr);
+        if (alreadyThere || i === 4) {
+          await clickJoy(hand, { downMs: 120 });
+          await sleep(900);
+          out.steps.push(alreadyThere ? "select-input-menu" : "select-input-after-walk");
+          break;
+        }
+        if (ptr && ptr.y > 72) await holdJoy(hand, 0, -1, 36);
+        else await holdJoy(hand, 0, 1, 36);
+        await sleep(140);
+      }
+      if (!out.dialog) {
+        dlg = await waitSelectInput(hand, before, 8000);
+        out.dialog = isSelectInputDialog(before, dlg);
+      }
+    } else {
+      out.steps.push(out.menu.kind === "none" ? "no-menu" : "wrong-menu");
+    }
   }
+
   if (out.dialog) {
-    await tapC64Key(hand, "ArrowDown", "ArrowDown");
-    await tapC64Key(hand, "Enter", "Enter");
+    await savePng(hand.shotDir(), "10-1351-input-dialog.png", dlg.b64);
+    await hand.shot("10-1351-input-dialog-ui.png");
+    await pickComm1351InDialog(hand, dlg);
     out.steps.push("pick-1351");
-    await tapC64Key(hand, "ArrowDown", "ArrowDown");
-    await tapC64Key(hand, "ArrowRight", "ArrowRight");
-    await tapC64Key(hand, "Enter", "Enter");
-    await sleep(2500);
+    for (const [code, key] of [
+      ["ArrowDown", "ArrowDown"],
+      ["Enter", "Enter"],
+      ["ArrowRight", "ArrowRight"],
+      ["Enter", "Enter"],
+    ]) {
+      const now = await snapshot(hand.page);
+      if (!isSelectInputDialog(before, now)) break;
+      await tapC64Key(hand, code, key);
+    }
     out.steps.push("ok");
+    for (let i = 0; i < 16; i++) {
+      await sleep(400);
+      const now = await snapshot(hand.page);
+      if (!isSelectInputDialog(before, now)) break;
+    }
+  } else {
+    out.steps.push("page-flip");
+    out.landPage = await landOnPageNumber(hand);
+    await clickJoy(hand, { downMs: 110 });
+    await sleep(800);
+    let page2 = await snapshot(hand.page);
+    if (isSelectInputDialog(before, page2)) {
+      out.dialog = true;
+      await pickComm1351InDialog(hand, page2);
+      out.steps.push("pick-1351", "ok");
+    } else {
+      if (!notepadHasIcons(page2.img) || !iconRegionChanged(before, page2, { minChanged: 120 }).pass) {
+        await clickJoy(hand, { downMs: 110 });
+        await sleep(800);
+        page2 = await snapshot(hand.page);
+      }
+      await savePng(hand.shotDir(), "10-1351-page2.png", page2.b64);
+      await hand.shot("10-1351-page2-ui.png");
+      const target = comm1351Pos(page2.img);
+      out.commTarget = target ? { x: target.x, y: target.y } : null;
+      if (target) {
+        out.walkComm = await walkPointerTo(hand, target.x, target.y, { timeout: 8000, close: 8 });
+        out.steps.push("comm-cell");
+      }
+      await clickJoy(hand, { double: true, downMs: 110 });
+      await sleep(3600);
+      out.steps.push("comm-open");
+    }
   }
   const after = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-after.png", after.b64);
   await hand.shot("10-1351-after-ui.png");
-  await savePng(hand.shotDir(), "10-1351-page2.png", after.b64);
-  await hand.shot("10-1351-page2-ui.png");
   const live = await stillGeosDesk(hand);
   out.afterDesk = live;
   out.basic = live.basic;
   out.icons = notepadHasIcons(after.img);
-  out.dialogGone = !looksLikeDialog(before, after) && !looksLikeCenteredDialog(before, after) && out.dialog;
+  out.dialogGone = !isSelectInputDialog(before, after);
   out.after = movedEnough(dlg, after, { minChanged: 80, minInk: 3 });
-  out.pass = Boolean(out.dialog && out.icons && live.pass && !live.basic);
+  const opened = out.steps.includes("ok") || out.steps.includes("comm-open") || out.steps.includes("pick-1351");
+  out.pass = Boolean(opened && out.dialogGone && out.icons && live.pass && !live.basic);
   return out;
 }
 
@@ -1223,7 +1327,7 @@ async function runGeosMode(hand, disk, jiffy) {
     const afterComm = await stillGeosDesk(hand);
     trace.stillDeskAfterComm = afterComm;
     if (trace.comm1351 && !afterComm.pass) trace.comm1351.pass = false;
-    if (afterComm.pass && trace.comm1351?.pass) {
+    if (afterComm.pass && trace.comm1351?.pass && trace.comm1351?.dialogGone !== false) {
       trace.mouse = await test1351(hand, "09");
       const afterMouse = await stillGeosDesk(hand);
       trace.stillDeskAfterMouse = afterMouse;
