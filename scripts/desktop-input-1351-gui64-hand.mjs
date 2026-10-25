@@ -1419,7 +1419,7 @@ async function test1351(hand, prefix) {
   return out;
 }
 
-/** geos → select input → COMM 1351(a) → OK. C= + I opens GEOS info on this disk. */
+/** C= + I opens Select Input Device on the official boot disk (real-UI proof). Menu walk is fallback. */
 async function activateGeos1351(hand) {
   const out = { steps: [], file: "COMM 1351(a)", via: "select-input" };
   await ensureMouse(hand, false);
@@ -1428,8 +1428,16 @@ async function activateGeos1351(hand) {
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
 
-  let dlg = before;
-  out.dialog = isSelectInputDialog(before, before);
+  await tapCbmI(hand);
+  out.steps.push("cbm-i");
+  let dlg = await waitSelectInput(hand, before, 8000);
+  if (looksLikeAboutBox(dlg.img)) {
+    out.steps.push("cbm-i-about");
+    await clickJoy(hand, { downMs: 110 });
+    await sleep(300);
+    dlg = await snapshot(hand.page);
+  }
+  out.dialog = isSelectInputDialog(before, dlg);
 
   if (!out.dialog) {
     out.landGeos = await landOnGeosWord(hand);
