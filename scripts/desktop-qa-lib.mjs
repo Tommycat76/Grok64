@@ -172,14 +172,22 @@ export async function canvasPixelStats(page) {
   return { ok: false, reason: "no-shot" };
 }
 
+/** True when the CRT is still stock/JiffyDOS BASIC, not a GEOS/GUI bitmap. */
+export function isStillBasicNotGeos(text) {
+  if (!text) return false;
+  if (/BOOTING GEOS/i.test(text)) return false;
+  if (/\bREADY\b/i.test(text) && (/COMMODORE 64 BASIC/i.test(text) || /JIFFYDOS/i.test(text) || /C-64 BASIC V2/i.test(text))) {
+    return true;
+  }
+  return /SAVING BOOT/i.test(text) && /READY\./i.test(text);
+}
+
 /** GUI64's desktop is a flat purple work area — VICE PNG dumps are often black. */
 export async function canvasLooksLikeGui64(page) {
   const stats = await canvasPixelStats(page);
   if (!stats?.ok) return { pass: false, stats };
   const text = await page.evaluate(() => window.__g64?.screenText?.() || "");
-  const basicOnly =
-    /COMMODORE 64 BASIC/i.test(text) && /\bREADY\b/i.test(text) && text.replace(/\s+/g, "").length < 220;
-  const pass = !basicOnly && stats.buckets >= 4 && stats.viceBlank < 0.9;
+  const pass = !isStillBasicNotGeos(text) && stats.buckets >= 4 && stats.viceBlank < 0.9;
   return { pass, stats, textHead: text.slice(0, 100) };
 }
 
@@ -187,10 +195,8 @@ export async function canvasLooksLikeGeosDesktop(page) {
   const stats = await canvasPixelStats(page);
   if (!stats?.ok) return { pass: false, stats };
   const text = await page.evaluate(() => window.__g64?.screenText?.() || "");
-  const basicReady =
-    /COMMODORE 64 BASIC/i.test(text) && /\bREADY\b/i.test(text) && text.replace(/\s+/g, "").length < 220;
   const pass =
-    !basicReady &&
+    !isStillBasicNotGeos(text) &&
     stats.geosDesk >= 0.1 &&
     stats.viceBlank < 0.85 &&
     stats.ink < 0.995 &&

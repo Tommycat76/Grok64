@@ -724,8 +724,21 @@ async function activateGeos1351(hand) {
 }
 
 async function bootOfficialGeos(hand, disk) {
+  await hand.page.evaluate(() => window.__g64?.kbdReleaseAll?.());
+  await hand.key("Return").catch(() => {});
+  await sleep(250);
+  for (let i = 0; i < 3; i++) await hand.key("BackSpace").catch(() => {});
   await hand.clickCrtAndType('LOAD"BOOT",8,1');
-  const loadLine = await hand.waitTypedLine('LOAD"BOOT",8,1');
+  let loadLine = await hand.waitTypedLine('LOAD"BOOT",8,1');
+  const typed = await hand.screenText();
+  if (/SAVING BOOT/i.test(typed) && !/SEARCHING FOR BOOT|LOADING/i.test(typed)) {
+    await hand.key("Return").catch(() => {});
+    await sleep(200);
+    const jiffy = await hand.page.evaluate(() => window.__g64?.jiffyLive?.());
+    const retry = jiffy ? "%BOOT" : 'LOAD"BOOT",8,1';
+    await hand.clickCrtAndType(retry);
+    loadLine = (await hand.waitTypedLine(retry)) || loadLine;
+  }
   await hand.shot("05-load-boot-typed.png");
   const boot = await waitGeosBoot(hand.page, {
     command: 'LOAD"BOOT",8,1',
@@ -812,6 +825,25 @@ async function runGui64(hand, cart, tag) {
   if (trace.started) {
     trace.joystick = await testStickAndWasd(hand, "03", { mouse: true });
     trace.mouse = await test1351(hand, "04");
+    // Empty-desktop LMB is a no-op; drive 8 must open to prove the button.
+    await ensureMouse(hand, true);
+    await ensurePort(hand, 1);
+    await holdJoy(hand, -1, -1, 900);
+    await holdJoy(hand, 1, 1, 160);
+    const driveClick = await pointerProbe(hand, "drive8-click", async () => {
+      const left = hand.page.getByRole("button", { name: "Left mouse button" }).first();
+      await hand.click(left, "1351 left");
+      await sleep(80);
+    }, { settle: 800 });
+    await savePng(shotDir, "05-drive8-before.png", driveClick.b64Before);
+    await savePng(shotDir, "05-drive8-after.png", driveClick.b64After);
+    await hand.shot("05-drive8-click.png");
+    trace.driveClick = {
+      changed: driveClick.changed,
+      inkDist: driveClick.inkDist,
+      pass: driveClick.changed >= 80 || driveClick.inkDist >= 3,
+    };
+    if (trace.mouse) trace.mouse.clickPass = Boolean(trace.mouse.clickPass || trace.driveClick.pass);
   }
   const wantStd = /PAL/i.test(cart.name) ? "pal" : "ntsc";
   trace.videoOk = trace.video?.resolved === wantStd || trace.video?.software === wantStd;
