@@ -963,16 +963,18 @@ async function pickComm1351InDialog(hand, dlg) {
   await hand.shot("10-1351-comm-highlighted-ui.png");
 
   if (out.which === "comm") {
-    // RETURN does not close this dialog. Pointer sits at ~172,80; OK is 204,114.
-    // Joystick hops do not move the list bar. Walk the dark sprite onto OK, then fire.
+    // RETURN does not close this dialog. Walk the VICE sprite onto OK, then
+    // fire. If the sprite hunt undershoots, hold farther right/down.
     out.parked = await walkDialogSpriteTo(hand, 204, 114, { timeout: 4500, close: 10 });
     await hand.shot("10-1351-on-ok-preclick.png");
     await clickJoy(hand, { downMs: 140 });
     await sleep(400);
     let still = await snapshot(hand.page);
     if (looksLikeSelectInput(still.img)) {
-      await holdJoy(hand, 1, 0, 160);
-      await holdJoy(hand, 0, 1, 120);
+      await holdJoy(hand, 1, 0, 2000);
+      await sleep(80);
+      await holdJoy(hand, 0, 1, 700);
+      await sleep(80);
       await clickJoy(hand, { downMs: 140 });
       await sleep(400);
       still = await snapshot(hand.page);
@@ -1430,7 +1432,7 @@ async function test1351(hand, prefix) {
   return out;
 }
 
-/** geos → select input → COMM 1351(a) → OK. C= + I opens GEOS info on this disk. */
+/** C= + I opens Select Input Device on the official boot disk (real-UI proof). Menu walk is fallback. */
 async function activateGeos1351(hand) {
   const out = { steps: [], file: "COMM 1351(a)", via: "select-input" };
   await ensureMouse(hand, false);
@@ -1439,8 +1441,16 @@ async function activateGeos1351(hand) {
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
 
-  let dlg = before;
-  out.dialog = isSelectInputDialog(before, before);
+  await tapCbmI(hand);
+  out.steps.push("cbm-i");
+  let dlg = await waitSelectInput(hand, before, 8000);
+  if (looksLikeAboutBox(dlg.img)) {
+    out.steps.push("cbm-i-about");
+    await clickJoy(hand, { downMs: 110 });
+    await sleep(300);
+    dlg = await snapshot(hand.page);
+  }
+  out.dialog = isSelectInputDialog(before, dlg);
 
   if (!out.dialog) {
     out.landGeos = await landOnGeosWord(hand);
