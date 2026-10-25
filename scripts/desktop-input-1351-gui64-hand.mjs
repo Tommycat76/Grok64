@@ -348,6 +348,33 @@ function comm1351Pos(img) {
   return geosMap(img, 200, 118);
 }
 
+/** The "1" under the icons — this flips file pages. The title-bar "−" is close. */
+function pageNumberPos(img) {
+  return geosMap(img, 138, 124);
+}
+
+function inPageNumberBox(g) {
+  return Boolean(g && g.x >= 128 && g.x <= 152 && g.y >= 116 && g.y <= 132);
+}
+
+function notepadHasIcons(img) {
+  const c = contentRect(img);
+  if (!c) return false;
+  const { data, width } = img;
+  let dark = 0;
+  let n = 0;
+  for (let gy = 44; gy < 115; gy++) {
+    for (let gx = 20; gx < 240; gx++) {
+      const x = Math.round(c.x + (gx / 320) * c.w);
+      const y = Math.round(c.y + (gy / 200) * c.h);
+      const i = (y * width + x) * 4;
+      n += 1;
+      if (data[i] + data[i + 1] + data[i + 2] < 300) dark += 1;
+    }
+  }
+  return n > 0 && dark / n > 0.02;
+}
+
 function iconRegionChanged(a, b, { minChanged = 180 } = {}) {
   if (!a?.img || !b?.img) return { pass: false, changed: 0 };
   const pad = notepadBodyRect(b.img) || notepadBodyRect(a.img) || notepadRect(b.img) || notepadRect(a.img);
@@ -561,7 +588,46 @@ function inMinusBox(g) {
   return Boolean(g && g.x >= 238 && g.x <= 260 && g.y >= 16 && g.y <= 28);
 }
 
-/** GEOS joystick snaps to the clock above the minus — drop down, don't walk in screen space. */
+async function landOnPageNumber(hand) {
+  const trace = { hops: [] };
+  const dirs = [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ];
+  for (let i = 0; i < 20; i++) {
+    const snap = await snapshot(hand.page);
+    const loc = await locatePointer(hand, { dirs, pulseMs: 48 });
+    const g = toGeos(loc, snap.img);
+    if (g) trace.hops.push({ i, x: +g.x.toFixed(1), y: +g.y.toFixed(1) });
+    if (inPageNumberBox(g)) {
+      trace.landed = g;
+      return trace;
+    }
+    if (!g) {
+      await holdJoy(hand, 0, 1, 80);
+      continue;
+    }
+    if (g.y < 100) {
+      await holdJoy(hand, 0, 1, 95);
+      continue;
+    }
+    if (g.y > 136) {
+      await holdJoy(hand, 0, -1, 80);
+      continue;
+    }
+    if (g.x < 128) await holdJoy(hand, 1, 0, 80);
+    else if (g.x > 152) await holdJoy(hand, -1, 0, 80);
+    else await holdJoy(hand, 0, 1, 70);
+  }
+  const snap = await snapshot(hand.page);
+  const loc = await locatePointer(hand, { dirs, pulseMs: 48 });
+  trace.landed = toGeos(loc, snap.img);
+  return trace;
+}
+
+/** GEOS joystick snaps to the clock above the close box — kept for recovery only. */
 async function landOnNotepadMinus(hand) {
   const trace = { hops: [] };
   const horiz = [
@@ -786,49 +852,44 @@ async function activateGeos1351(hand) {
   await ensureWasd(hand, false);
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
-  // The page *menu* is append/delete. The minus sits under the clock; a screen-space
-  // walk from "select" snaps to the clock (same X, menu-bar Y). Drop off the menu first.
-  await holdJoy(hand, 0, 1, 140);
+  // Title-bar "−" is close (empties the notepad). File pages flip by clicking the "1"
+  // under the icons. The page *menu* is append/delete of desk pages, not next/prev.
+  await holdJoy(hand, 0, 1, 160);
   out.steps.push("off-menu");
-  const gadget = findPageGadget(before.img) || pageGadgetPos(before.img);
-  out.gadget = gadget ? { x: gadget.x, y: gadget.y, gx: gadget.gx ?? 248 } : null;
-  out.land = await landOnNotepadMinus(hand);
-  out.steps.push(inMinusBox(out.land?.landed) ? "on-minus" : "minus-miss");
+  out.pageNum = pageNumberPos(before.img);
+  out.land = await landOnPageNumber(hand);
+  out.steps.push(inPageNumberBox(out.land?.landed) ? "on-page-num" : "page-num-miss");
   await hand.shot("10-1351-preclick.png");
   await clickJoy(hand);
   await sleep(1000);
   await hand.shot("10-1351-page-menu.png");
   let page2 = await snapshot(hand.page);
   out.dialog = looksLikeDialog(before, page2);
+  out.closed = !notepadHasIcons(page2.img);
   out.paged = iconRegionChanged(before, page2, { minChanged: 180 });
-  if (out.dialog) {
-    out.paged = { ...out.paged, pass: false, dialog: true };
-    out.steps.push("dialog");
-    const ok = geosMap(page2.img, 160, 118);
-    if (ok) await walkPointerTo(hand, ok.x, ok.y, { timeout: 2500, close: 14 });
-    await clickJoy(hand);
-    await sleep(700);
-    page2 = await snapshot(hand.page);
-    out.dialog = looksLikeDialog(before, page2);
+  if (out.dialog || out.closed) {
+    out.paged = { ...out.paged, pass: false, dialog: out.dialog, closed: out.closed };
+    out.steps.push(out.dialog ? "dialog" : "closed-notepad");
   }
-  if (!out.paged.pass || out.dialog) {
-    if (out.land?.landed?.y < 15) await holdJoy(hand, 0, 1, 100);
-    out.landRetry = await landOnNotepadMinus(hand);
-    out.steps.push(inMinusBox(out.landRetry?.landed) ? "on-minus-retry" : "minus-retry-miss");
+  if (!out.paged.pass) {
+    out.landRetry = await landOnPageNumber(hand);
+    out.steps.push(inPageNumberBox(out.landRetry?.landed) ? "on-page-num-retry" : "page-num-retry-miss");
     await hand.shot("10-1351-preclick-retry.png");
     await clickJoy(hand);
     await sleep(1000);
     page2 = await snapshot(hand.page);
     out.dialog = looksLikeDialog(before, page2);
+    out.closed = !notepadHasIcons(page2.img);
     out.paged = iconRegionChanged(before, page2, { minChanged: 180 });
-    if (out.dialog) out.paged = { ...out.paged, pass: false, dialog: true };
+    if (out.dialog || out.closed) out.paged = { ...out.paged, pass: false, dialog: out.dialog, closed: out.closed };
   }
   await savePng(hand.shotDir(), "10-1351-page2.png", page2.b64);
   await hand.shot("10-1351-page2-ui.png");
-  out.steps.push(out.paged.pass && !out.dialog ? "page-2" : "page-miss");
+  out.icons = notepadHasIcons(page2.img);
+  out.steps.push(out.paged.pass && !out.dialog && out.icons ? "page-2" : "page-miss");
   const target = comm1351Pos(page2.img);
   out.commTarget = target ? { x: target.x, y: target.y } : null;
-  if (out.paged.pass && !out.dialog) {
+  if (out.paged.pass && !out.dialog && out.icons) {
     if (target) {
       out.walkComm = await walkPointerTo(hand, target.x, target.y);
       out.steps.push("comm-cell");
@@ -845,7 +906,7 @@ async function activateGeos1351(hand) {
   await savePng(hand.shotDir(), "10-1351-after.png", after.b64);
   await hand.shot("10-1351-after-ui.png");
   out.after = movedEnough(page2, after, { minChanged: 80, minInk: 3 });
-  out.pass = Boolean(out.paged.pass && !out.dialog);
+  out.pass = Boolean(out.paged.pass && !out.dialog && out.icons);
   return out;
 }
 
