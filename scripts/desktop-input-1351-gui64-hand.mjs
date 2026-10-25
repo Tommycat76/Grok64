@@ -15,7 +15,13 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { canvasLooksLikeGeosDesktop, canvasLooksLikeGui64, seedTomReusedProfile, waitGeosBoot } from "./desktop-qa-lib.mjs";
+import {
+  canvasLooksLikeGeosDesktop,
+  canvasLooksLikeGui64,
+  isStillBasicNotGeos,
+  seedTomReusedProfile,
+  waitGeosBoot,
+} from "./desktop-qa-lib.mjs";
 import { handConfig, openHand, sleep, waitFor, withHandDisplay } from "./desktop-hand-lib.mjs";
 
 const cwd = process.cwd();
@@ -355,6 +361,24 @@ function pageNumberPos(img) {
 
 function inPageNumberBox(g) {
   return Boolean(g && g.x >= 128 && g.x <= 152 && g.y >= 116 && g.y <= 132);
+}
+
+function looksLikeCenteredDialog(before, after) {
+  if (!before?.img || !after?.img) return false;
+  const c = contentRect(after.img);
+  if (!c) return false;
+  const diff = frameDiff(before.img, after.img, {
+    rect: { x: c.x + c.w * 0.12, y: c.y + c.h * 0.16, w: c.w * 0.76, h: c.h * 0.6 },
+    skipTop: 0,
+  });
+  return diff.changed >= 350;
+}
+
+async function stillGeosDesk(hand) {
+  const desk = await canvasLooksLikeGeosDesktop(hand.page);
+  const text = await hand.screenText();
+  const basic = isStillBasicNotGeos(text);
+  return { desk: desk.pass, basic, pass: Boolean(desk.pass && !basic), stats: desk.stats };
 }
 
 function notepadHasIcons(img) {
@@ -937,14 +961,14 @@ async function activateGeos1351(hand) {
   let dlg = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-page-menu.png", dlg.b64);
   await hand.shot("10-1351-select-input.png");
-  out.dialog = looksLikeDialog(before, dlg);
+  out.dialog = looksLikeDialog(before, dlg) || looksLikeCenteredDialog(before, dlg);
   if (!out.dialog) {
     await tapCbmI(hand);
     out.steps.push("cbm-i");
     dlg = await snapshot(hand.page);
     await savePng(hand.shotDir(), "10-1351-page-menu.png", dlg.b64);
     await hand.shot("10-1351-select-input-cbm.png");
-    out.dialog = looksLikeDialog(before, dlg);
+    out.dialog = looksLikeDialog(before, dlg) || looksLikeCenteredDialog(before, dlg);
   }
   if (out.dialog) {
     await tapC64Key(hand, "ArrowDown", "ArrowDown");
@@ -953,7 +977,7 @@ async function activateGeos1351(hand) {
     await tapC64Key(hand, "ArrowDown", "ArrowDown");
     await tapC64Key(hand, "ArrowRight", "ArrowRight");
     await tapC64Key(hand, "Enter", "Enter");
-    await sleep(800);
+    await sleep(2500);
     out.steps.push("ok");
   }
   const after = await snapshot(hand.page);
@@ -961,10 +985,13 @@ async function activateGeos1351(hand) {
   await hand.shot("10-1351-after-ui.png");
   await savePng(hand.shotDir(), "10-1351-page2.png", after.b64);
   await hand.shot("10-1351-page2-ui.png");
+  const live = await stillGeosDesk(hand);
+  out.afterDesk = live;
+  out.basic = live.basic;
   out.icons = notepadHasIcons(after.img);
-  out.dialogGone = !looksLikeDialog(before, after) && out.dialog;
+  out.dialogGone = !looksLikeDialog(before, after) && !looksLikeCenteredDialog(before, after) && out.dialog;
   out.after = movedEnough(dlg, after, { minChanged: 80, minInk: 3 });
-  out.pass = Boolean(out.dialog && out.dialogGone && out.icons);
+  out.pass = Boolean(out.dialog && out.icons && live.pass && !live.basic);
   return out;
 }
 
@@ -1045,7 +1072,20 @@ async function runGeosMode(hand, disk, jiffy) {
   if (trace.deskTop) {
     trace.joystick = await testStickAndWasd(hand, "08");
     trace.comm1351 = await activateGeos1351(hand);
-    trace.mouse = await test1351(hand, "09");
+    const afterComm = await stillGeosDesk(hand);
+    trace.stillDeskAfterComm = afterComm;
+    if (trace.comm1351 && !afterComm.pass) trace.comm1351.pass = false;
+    if (afterComm.pass && trace.comm1351?.pass) {
+      trace.mouse = await test1351(hand, "09");
+      const afterMouse = await stillGeosDesk(hand);
+      trace.stillDeskAfterMouse = afterMouse;
+      if (!afterMouse.pass && trace.mouse) {
+        trace.mouse.pass = false;
+        trace.mouse.leftDesk = true;
+      }
+    } else {
+      trace.mouse = { pass: false, skipped: true, reason: "COMM 1351 not on deskTop" };
+    }
   }
   trace.pass = Boolean(
     trace.jiffyOk &&
@@ -1054,7 +1094,10 @@ async function runGeosMode(hand, disk, jiffy) {
       trace.deskTop &&
       trace.joystick?.pass &&
       trace.comm1351?.pass &&
-      trace.mouse?.pass,
+      trace.mouse?.pass &&
+      !trace.comm1351?.basic &&
+      trace.stillDeskAfterComm?.pass &&
+      trace.stillDeskAfterMouse?.pass,
   );
   return trace;
 }
@@ -1086,13 +1129,21 @@ async function runGui64(hand, cart, tag) {
   if (trace.started) {
     trace.joystick = await testStickAndWasd(hand, "03", { mouse: true });
     trace.mouse = await test1351(hand, "04");
-    // Empty-desktop LMB is a no-op; drive 8 must open to prove the button.
     await ensureMouse(hand, true);
     await ensurePort(hand, 1);
-    // C= menu is the large bottom-left target; empty desktop LMB is a no-op.
-    await holdJoy(hand, -1, 1, 1400);
-    await holdJoy(hand, 0, -1, 80);
-    const driveClick = await pointerProbe(hand, "drive8-click", async () => {
+    const parked = await snapshot(hand.page);
+    const pad = contentRect(parked.img);
+    const cEquals = pad
+      ? { x: pad.x + pad.w * 0.1, y: pad.y + pad.h * 0.9 }
+      : geosMap(parked.img, 20, 188);
+    if (cEquals) await walkPointerTo(hand, cEquals.x, cEquals.y, { timeout: 6000, close: 12 });
+    else {
+      await hand.page.evaluate(() => {
+        for (let i = 0; i < 10; i++) window.__g64?.addMouseDelta?.(-20, 24);
+      });
+      await sleep(200);
+    }
+    const driveClick = await pointerProbe(hand, "c64-click", async () => {
       const left = hand.page.getByRole("button", { name: "Left mouse button" }).first();
       await hand.click(left, "1351 left");
       await sleep(80);

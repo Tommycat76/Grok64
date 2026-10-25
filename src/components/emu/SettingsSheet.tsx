@@ -92,7 +92,7 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               1351 sits on the selected port; the other port stays a joystick. Drag the screen or
               the trackpad — those pixels become 1351 POT X/Y. L/R are the 1351 buttons. GEOS
               JOYSTICK is Port 1: tap P1, turn Keyboard joystick on, then WASD or the on-screen
-              stick. After geos → select input → COMM 1351, put the mouse on that port.
+              stick. After geos → select input → COMM 1351(a), put the mouse on that port.
             </p>
             {s.mouseMode ? (
               <div className="g64-field">
