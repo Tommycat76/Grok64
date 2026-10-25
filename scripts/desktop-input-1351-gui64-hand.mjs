@@ -1234,7 +1234,13 @@ async function activateGeos1351(hand) {
 
   await tapCbmI(hand);
   out.steps.push("cbm-i");
-  let dlg = await waitSelectInput(hand, before, 8000);
+  let dlg = await waitSelectInput(hand, before, 2500);
+  if (looksLikeAboutBox(dlg.img)) {
+    out.steps.push("cbm-i-about");
+    await clickJoy(hand, { downMs: 110 });
+    await sleep(300);
+    dlg = await snapshot(hand.page);
+  }
   out.dialog = isSelectInputDialog(before, dlg);
 
   if (!out.dialog) {
