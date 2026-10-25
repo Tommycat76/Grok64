@@ -1,6 +1,6 @@
 import { Disc3, FolderOpen, Play } from "lucide-react";
 import { Drawer } from "vaul";
-import { KIND_LABEL, isDiskKind } from "@/lib/emu/formats";
+import { displayKindOf, isDiskKind, kindLabelFor } from "@/lib/emu/formats";
 import { isWorkDisk, listLibrary, updateFileUnit } from "@/lib/emu/library";
 import { floppyInsertUnit } from "@/lib/emu/play-session";
 import { useEmu } from "@/lib/emu/store";
@@ -20,7 +20,7 @@ export function DiskMountSheet({ open, onOpenChange, onPlay, onInsert, onBrowse 
   const running = useEmu((s) => s.running);
   const iecMap = useEmu((s) => s.iecMap);
   const setLibrary = useEmu((s) => s.setLibrary);
-  const disks = library.filter((i) => isDiskKind(i.kind) && !isWorkDisk(i.name));
+  const disks = library.filter((i) => isDiskKind(displayKindOf(i.name, i.kind)) && !isWorkDisk(i.name));
 
   async function refreshLibrary() {
     setLibrary(await listLibrary());
@@ -48,11 +48,11 @@ export function DiskMountSheet({ open, onOpenChange, onPlay, onInsert, onBrowse 
               {disks.map((item) => (
                 <div key={item.id} className="g64-card">
                   <strong>{item.name}</strong>
-                  <em className="g64-tag not-italic">{KIND_LABEL[item.kind]}</em>
+                  <em className="g64-tag not-italic">{kindLabelFor(item.name, item.kind)}</em>
                   <span>{(item.size / 1024).toFixed(0)} KB</span>
                   <IecUnitSeg
                     compact
-                    value={item.iecUnit ?? floppyInsertUnit(iecMap, item.kind)}
+                    value={item.iecUnit ?? floppyInsertUnit(iecMap, displayKindOf(item.name, item.kind))}
                     onChange={(unit) => {
                       void updateFileUnit(item.id, unit).then(refreshLibrary);
                     }}

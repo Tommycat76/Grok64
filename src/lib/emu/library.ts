@@ -1,5 +1,5 @@
 import type { LibraryItem, StoredFile, IecUnit } from "./types";
-import { kindOf } from "./formats";
+import { displayKindOf, kindOf } from "./formats";
 import { libraryRowAllowsDiskWriteBack } from "./library-writeback";
 import { publicUrl } from "@/lib/public-url";
 
@@ -49,7 +49,10 @@ export async function listLibrary(): Promise<LibraryItem[]> {
     const tx = db.transaction(STORE, "readonly");
     const req = tx.objectStore(STORE).getAll();
     req.onsuccess = () => {
-      const rows = (req.result as StoredFile[]).map(({ data: _d, ...meta }) => meta);
+      const rows = (req.result as StoredFile[]).map(({ data: _d, ...meta }) => ({
+        ...meta,
+        kind: displayKindOf(meta.name, meta.kind),
+      }));
       rows.sort((a, b) => (b.lastPlayed ?? b.addedAt) - (a.lastPlayed ?? a.addedAt));
       resolve(rows);
     };

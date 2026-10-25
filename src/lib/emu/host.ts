@@ -60,11 +60,14 @@ import {
 } from "./grok64-core-loaded";
 import {
   grok64CoreRefreshAttempts,
+  grok64CoreHealPending,
   grok64CoreStaleSticky,
   maybeAutoRefreshStaleEmulatorCore,
   patchEmulatorJsDownloaderCoreCacheBypass,
+  patchEmulatorJsStorageViceCoreBypass,
   patchFetchNoStoreForGrok64Core,
   patchIndexedDbForEmulatorJsCache,
+  patchXhrNoStoreForGrok64Core,
   purgeAllEmulatorJsCoreRows,
   purgeEmulatorJsLegacyCoreViceRows,
   syncEmulatorJsCoreCacheWithManifest,
@@ -235,6 +238,7 @@ export type Grok64CoreStatus = {
   mismatchReason: string | null;
   coreRefreshAttempt: number;
   coreStaleSticky: boolean;
+  coreHealPending: boolean;
   mouseButtons: boolean;
 };
 
@@ -272,6 +276,7 @@ export function grok64CoreStatus(emu: EjsInstance | null): Grok64CoreStatus {
     mismatchReason: mismatch.reason,
     coreRefreshAttempt: grok64CoreRefreshAttempts(),
     coreStaleSticky: grok64CoreStaleSticky(),
+    coreHealPending: grok64CoreHealPending(),
     mouseButtons: typeof grok64MouseApi(emu)?.mouseButtons === "function",
   };
 }
@@ -682,6 +687,8 @@ export function prefetchViceCores() {
 }
 
 function applyGrok64EmulatorJsRuntimePatches(): void {
+  patchXhrNoStoreForGrok64Core();
+  patchEmulatorJsStorageViceCoreBypass();
   patchEjsGrok64CoreDownload();
   patchEjsInitGameCoreGlue();
   patchEmulatorJsDownloaderCoreCacheBypass();
@@ -694,6 +701,7 @@ export function ensureRuntime(): Promise<void> {
       scriptsReady = (async () => {
         patchIndexedDbForEmulatorJsCache();
         patchFetchNoStoreForGrok64Core();
+        patchXhrNoStoreForGrok64Core();
         await syncEmulatorJsCoreCacheWithManifest().catch(() => undefined);
         applyGrok64EmulatorJsRuntimePatches();
       })();
@@ -703,6 +711,7 @@ export function ensureRuntime(): Promise<void> {
   scriptsReady = (async () => {
     patchIndexedDbForEmulatorJsCache();
     patchFetchNoStoreForGrok64Core();
+    patchXhrNoStoreForGrok64Core();
     await syncEmulatorJsCoreCacheWithManifest().catch(() => undefined);
     await loadCss(`${DATA}emulator.css`);
     for (const file of SCRIPTS) {
@@ -803,9 +812,16 @@ function patchEjsInitGameCoreGlue() {
   const orig = proto.initGameCore;
   proto.initGameCore = function patchedInitGameCore(js: unknown, wasm: unknown, thread: unknown) {
     try {
-      if (js instanceof Uint8Array) recordGrok64CoreGlue(js);
-      else if (js instanceof ArrayBuffer) recordGrok64CoreGlue(js);
-      else if (typeof js === "string") recordGrok64CoreGlue(js);
+      const jsOk = js instanceof Uint8Array || js instanceof ArrayBuffer || typeof js === "string";
+      const wasmOk = wasm instanceof Uint8Array || wasm instanceof ArrayBuffer || typeof wasm === "string";
+      if (jsOk) {
+        recordGrok64CoreGlue(
+          js as Uint8Array | ArrayBuffer | string,
+          wasmOk ? (wasm as Uint8Array | ArrayBuffer | string) : null,
+        );
+      } else if (wasmOk) {
+        recordGrok64CoreGlue(new Uint8Array(0), wasm as Uint8Array | ArrayBuffer | string);
+      }
     } catch {
       /* ignore */
     }
@@ -987,6 +1003,7 @@ function coreOptions(cfg: BootConfig): Record<string, string> {
 export async function bootEmulator(el: HTMLElement, cfg: BootConfig): Promise<EjsInstance> {
   patchIndexedDbForEmulatorJsCache();
   patchFetchNoStoreForGrok64Core();
+  patchXhrNoStoreForGrok64Core();
   await syncEmulatorJsCoreCacheWithManifest().catch(() => undefined);
   await ensureRuntime();
   applyGrok64EmulatorJsRuntimePatches();
@@ -1012,6 +1029,9 @@ export async function bootEmulator(el: HTMLElement, cfg: BootConfig): Promise<Ej
     noAutoFocus: false,
     disableAutoLang: true,
     disableLocalStorage: true,
+    // EmulatorJS-core is keyed by filename, not URL. A dirty profile keeps the
+    // old VICE blob there even after we cache-bust the download URL.
+    disableDatabases: true,
     disableCue: true,
     language: "en-US",
     browserMode: 2,

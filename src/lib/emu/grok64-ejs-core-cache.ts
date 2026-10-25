@@ -1,10 +1,18 @@
 /**
- * EmulatorJS stores extracted cores in IndexedDB (`EmulatorJS-Cache`) keyed by download URL.
- * Grok64 library lives in a separate DB (`grok64`) — never touch it here.
+ * EmulatorJS stores extracted cores in IndexedDB (`EmulatorJS-Cache`) keyed by download URL
+ * and in `EmulatorJS-core` keyed by filename. Grok64 library lives in a separate DB
+ * (`grok64`) — never touch it here.
  */
-import { GROK64_CORE_BUILD_ID, GROK64_CORE_GLUE_SHA12 } from "./grok64-core-build.generated";
+import { GROK64_CORE_BUILD_ID, GROK64_CORE_BYTES, GROK64_CORE_GLUE_SHA12 } from "./grok64-core-build.generated";
 import { grok64CoreBuildIdForUrl } from "./grok64-core-build";
-import { appendGrok64CoreUrlCacheParams, expectedGrok64GlueSha12FromUrl } from "./grok64-core-url";
+import {
+  appendGrok64CoreUrlCacheParams,
+  expectedGrok64GlueSha12FromUrl,
+  GROK64_CORE_AUTO_RELOAD_SS,
+  GROK64_CORE_HEAL_PENDING_SS,
+  GROK64_CORE_LAST_FETCH_SS,
+  GROK64_CORE_STALE_STICKY_SS,
+} from "./grok64-core-url";
 import { grok64CoreBuildMatchesExpected, loadedCoreGlueInfo, runningCoreMismatch } from "./grok64-core-loaded";
 import { grok64DiskAttachCallableEmu } from "./grok64-wasm-direct";
 
@@ -13,6 +21,12 @@ export const GROK64_LIBRARY_DB = "grok64";
 /** CDN stable EmulatorJS legacy per-core WASM cache (keyed by `vice_x64sc-wasm.data`, not URL). */
 export const EJS_LEGACY_CORE_DB = "EmulatorJS-core";
 const EJS_LEGACY_CORE_STORE = "core";
+export const EJS_ROMS_DB = "EmulatorJS-roms";
+const EJS_ROMS_STORE = "rom";
+export const EJS_BIOS_DB = "EmulatorJS-bios";
+const EJS_BIOS_STORE = "bios";
+export const EJS_STATES_DB = "EmulatorJS-states";
+const EJS_STATES_STORE = "states";
 const EJS_CACHE_DB = "EmulatorJS-Cache";
 const EJS_CACHE_DB_VERSION = 2;
 
@@ -25,16 +39,29 @@ export const VICE_X64SC_LEGACY_CORE_KEYS = [
 ] as const;
 
 export function isLegacyViceX64scCoreStorageKey(key: string): boolean {
-  const k = String(key);
+  const k = String(key).split("?")[0].split("/").pop() ?? String(key);
   if ((VICE_X64SC_LEGACY_CORE_KEYS as readonly string[]).includes(k)) return true;
   return /^vice_x64sc(-thread|-legacy|-thread-legacy)?-wasm\.data$/i.test(k);
 }
 
+/** Any EmulatorJS store key that can hold a VICE / Grok64 .data core (not a user save state). */
+export function isEmulatorJsViceCoreStorageKey(key: string): boolean {
+  const k = String(key).split("?")[0].split("/").pop() ?? String(key);
+  if (k === "?EJS_KEYS!") return false;
+  if (isLegacyViceX64scCoreStorageKey(k)) return true;
+  if (k.includes(GROK64_IEC_CORE_BLOB)) return true;
+  return /^vice_.*-wasm\.data$/i.test(k);
+}
+
 const MANIFEST_LS = "grok64.ejsCoreManifestBuildId";
-const AUTO_RELOAD_SS = "grok64.coreCacheAutoReload";
-const STICKY_SS = "grok64.coreStaleSticky";
-/** First reload drops IDB; second also evicts Cache Storage that re-served the stale blob. */
-export const CORE_REFRESH_BUDGET = 2;
+const AUTO_RELOAD_SS = GROK64_CORE_AUTO_RELOAD_SS;
+const STICKY_SS = GROK64_CORE_STALE_STICKY_SS;
+const HEAL_PENDING_SS = GROK64_CORE_HEAL_PENDING_SS;
+const LAST_FETCH_SS = GROK64_CORE_LAST_FETCH_SS;
+/** Reload budget after a real manifest-sized fetch still lacks disk attach. */
+export const CORE_REFRESH_BUDGET = 3;
+/** Hard cap so a broken network cannot loop forever. */
+export const CORE_REFRESH_MAX = 6;
 
 type CacheMeta = {
   key: string;
@@ -95,24 +122,78 @@ export function grok64CoreStaleSticky(): boolean {
   }
 }
 
+export function grok64CoreHealPending(): boolean {
+  if (typeof sessionStorage === "undefined") return false;
+  try {
+    return sessionStorage.getItem(HEAL_PENDING_SS) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function noteGrok64CoreNetworkBytes(bytes: number): void {
+  if (!Number.isFinite(bytes) || bytes <= 0) return;
+  try {
+    sessionStorage.setItem(LAST_FETCH_SS, String(Math.floor(bytes)));
+  } catch {
+    /* ignore */
+  }
+}
+
+function lastCoreFetchLooksCurrent(): boolean {
+  if (typeof sessionStorage === "undefined") return false;
+  try {
+    const n = Number(sessionStorage.getItem(LAST_FETCH_SS) || 0);
+    if (!Number.isFinite(n) || n <= 0) return false;
+    const expect = GROK64_CORE_BYTES || 0;
+    if (expect > 0) return n >= expect * 0.95;
+    return n > 200_000;
+  } catch {
+    return false;
+  }
+}
+
 function markCoreRefreshAttempt(): number {
   const next = grok64CoreRefreshAttempts() + 1;
   try {
     sessionStorage.setItem(AUTO_RELOAD_SS, String(next));
-    if (next >= CORE_REFRESH_BUDGET) sessionStorage.setItem(STICKY_SS, "1");
   } catch {
     /* ignore */
   }
   return next;
 }
 
+function markCoreStaleSticky(): void {
+  try {
+    sessionStorage.setItem(STICKY_SS, "1");
+  } catch {
+    /* ignore */
+  }
+}
+
 function clearCoreRefreshMarks(): void {
   try {
     sessionStorage.removeItem(AUTO_RELOAD_SS);
     sessionStorage.removeItem(STICKY_SS);
+    sessionStorage.removeItem(HEAL_PENDING_SS);
+    sessionStorage.removeItem(LAST_FETCH_SS);
   } catch {
     /* ignore */
   }
+}
+
+function beginCoreHealReload(): number {
+  const next = markCoreRefreshAttempt();
+  try {
+    sessionStorage.setItem(HEAL_PENDING_SS, "1");
+    // Drop the crash-play resume so a heal reload does not come back already READY
+    // on the old core. Keys match play-session.ts (g64-crash-play / g64-live-play).
+    sessionStorage.removeItem("g64-crash-play");
+    sessionStorage.removeItem("g64-live-play");
+  } catch {
+    /* ignore */
+  }
+  return next;
 }
 
 /** Evict VICE / Grok64 core blobs from Cache Storage. Never unregisters the PWA service worker. */
@@ -237,6 +318,57 @@ function idbPut(db: IDBDatabase, store: string, key: string, value: unknown): Pr
   });
 }
 
+function openExistingIdb(dbName: string): Promise<IDBDatabase | null> {
+  if (typeof indexedDB === "undefined") return Promise.resolve(null);
+  return new Promise((resolve) => {
+    let req: IDBOpenDBRequest;
+    try {
+      req = indexedDB.open(dbName);
+    } catch {
+      resolve(null);
+      return;
+    }
+    req.onerror = () => resolve(null);
+    req.onupgradeneeded = () => {
+      try {
+        req.transaction?.abort();
+      } catch {
+        /* ignore */
+      }
+      try {
+        req.result?.close();
+      } catch {
+        /* ignore */
+      }
+      resolve(null);
+    };
+    req.onsuccess = () => resolve(req.result);
+  });
+}
+
+function listObjectStoreKeys(db: IDBDatabase, store: string): Promise<IDBValidKey[]> {
+  if (!db.objectStoreNames.contains(store)) return Promise.resolve([]);
+  return new Promise((resolve) => {
+    const keys: IDBValidKey[] = [];
+    try {
+      const tx = db.transaction(store, "readonly");
+      const req = tx.objectStore(store).openCursor();
+      req.onsuccess = () => {
+        const cursor = req.result;
+        if (!cursor) {
+          resolve(keys);
+          return;
+        }
+        keys.push(cursor.key);
+        cursor.continue();
+      };
+      req.onerror = () => resolve(keys);
+    } catch {
+      resolve(keys);
+    }
+  });
+}
+
 function idbDelete(db: IDBDatabase, store: string, key: string): Promise<void> {
   if (!db.objectStoreNames.contains(store)) return Promise.resolve();
   return new Promise((resolve) => {
@@ -252,13 +384,26 @@ function idbDelete(db: IDBDatabase, store: string, key: string): Promise<void> {
 }
 
 async function listCacheMetas(db: IDBDatabase): Promise<CacheMeta[]> {
-  const keys = await idbGet<string[]>(db, "cache", "?EJS_KEYS!");
-  if (!keys?.length) return [];
   const out: CacheMeta[] = [];
+  const seen = new Set<string>();
+  const push = (meta: CacheMeta) => {
+    if (!meta?.key || seen.has(meta.key)) return;
+    seen.add(meta.key);
+    out.push(meta);
+  };
+  const listed = (await idbGet<string[]>(db, "cache", "?EJS_KEYS!")) ?? [];
+  const cursorKeys = await listObjectStoreKeys(db, "cache");
+  const keys = [...listed, ...cursorKeys.map((k) => String(k))];
   for (const key of keys) {
     if (key === "?EJS_KEYS!") continue;
     const meta = await idbGet<CacheMeta>(db, "cache", key);
-    if (meta?.key) out.push(meta);
+    if (meta?.key) {
+      push(meta);
+      continue;
+    }
+    if (isEmulatorJsViceCoreStorageKey(key) || viceCoreUrl({ key, filename: key })) {
+      push({ key, filename: key });
+    }
   }
   return out;
 }
@@ -370,6 +515,7 @@ export async function syncEmulatorJsCoreCacheWithManifest(): Promise<Grok64EjsCa
   removed += (await purgeAllEmulatorJsCoreRows(`${reason}:boot-all-core`)).removed;
   removed += (await purgeEmulatorJsViceCoreCache(reason)).removed;
   removed += (await purgeEmulatorJsLegacyCoreViceRows(reason)).removed;
+  removed += (await purgeEmulatorJsRomBiosViceRows(reason)).removed;
   removed += (await purgeGrok64CoreCacheStorage(`${reason}:cache-storage`)).removed;
   if (manifestBump) {
     try {
@@ -381,6 +527,19 @@ export async function syncEmulatorJsCoreCacheWithManifest(): Promise<Grok64EjsCa
   return { removed, reason };
 }
 
+function rewriteCoreDownloadUrl(url: string): string {
+  if (!url || !isGrok64CoreCacheRequestUrl(url)) return url;
+  const canonical = grok64CoreBlobUrl();
+  if (canonical && /vice_.*wasm\.data/i.test(url)) return canonical;
+  return url;
+}
+
+function noteCoreResponseBytes(res: Response | null): void {
+  if (!res) return;
+  const len = Number(res.headers.get("content-length") || 0);
+  if (len > 0) noteGrok64CoreNetworkBytes(len);
+}
+
 export function patchFetchNoStoreForGrok64Core(): void {
   if (typeof window === "undefined" || (window as unknown as { __g64CoreFetch?: boolean }).__g64CoreFetch) {
     return;
@@ -388,7 +547,7 @@ export function patchFetchNoStoreForGrok64Core(): void {
   (window as unknown as { __g64CoreFetch?: boolean }).__g64CoreFetch = true;
   const orig = window.fetch.bind(window);
   window.fetch = (input: RequestInfo | URL, init?: RequestInit) => {
-    const url =
+    let url =
       typeof input === "string"
         ? input
         : input instanceof URL
@@ -398,15 +557,111 @@ export function patchFetchNoStoreForGrok64Core(): void {
             : "";
     if (url.includes(GROK64_IEC_CORE_BLOB) || /\/cores\/vice_.*wasm\.data/i.test(url)) {
       init = { ...init, cache: "no-store" };
+      const next = rewriteCoreDownloadUrl(url);
+      if (next !== url) {
+        url = next;
+        input = next;
+      }
+      const out = orig(input, init);
+      void Promise.resolve(out).then((res) => noteCoreResponseBytes(res)).catch(() => undefined);
+      return out;
     }
     return orig(input, init);
   };
+}
+
+/** EmulatorJS `downloadFile` uses XHR, not fetch — no-store + heal nonce must wrap open/send. */
+export function patchXhrNoStoreForGrok64Core(): void {
+  if (typeof window === "undefined" || (window as unknown as { __g64CoreXhr?: boolean }).__g64CoreXhr) {
+    return;
+  }
+  const XHR = window.XMLHttpRequest;
+  if (!XHR?.prototype?.open) return;
+  (window as unknown as { __g64CoreXhr?: boolean }).__g64CoreXhr = true;
+  const origOpen = XHR.prototype.open;
+  XHR.prototype.open = function patchedOpen(
+    this: XMLHttpRequest,
+    method: string,
+    url: string | URL,
+    ...rest: unknown[]
+  ) {
+    let href = String(url);
+    if (isGrok64CoreCacheRequestUrl(href)) {
+      href = rewriteCoreDownloadUrl(href);
+      (this as XMLHttpRequest & { __g64CoreXhr?: boolean }).__g64CoreXhr = true;
+    }
+    return origOpen.call(
+      this,
+      method,
+      href,
+      ...(rest as [boolean, string | undefined, string | undefined]),
+    );
+  };
+  const origSend = XHR.prototype.send;
+  XHR.prototype.send = function patchedSend(this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
+    if ((this as XMLHttpRequest & { __g64CoreXhr?: boolean }).__g64CoreXhr) {
+      try {
+        this.setRequestHeader("Cache-Control", "no-cache");
+        this.setRequestHeader("Pragma", "no-cache");
+      } catch {
+        /* forbidden header on some browsers */
+      }
+      this.addEventListener("load", () => {
+        const len = Number(this.getResponseHeader("content-length") || 0);
+        if (len > 0) noteGrok64CoreNetworkBytes(len);
+        else if (this.response instanceof ArrayBuffer) noteGrok64CoreNetworkBytes(this.response.byteLength);
+      });
+    }
+    return origSend.call(this, body);
+  };
+}
+
+type EjsStorageCtor = {
+  prototype: {
+    get?: (key: string) => Promise<unknown>;
+    put?: (key: string, data: unknown) => Promise<void>;
+    __g64ViceBypass?: boolean;
+  };
+  new (dbName: string, storeName: string): { dbName?: string };
+};
+
+/** Bypass EmulatorJS-core/rom/bios get/put for VICE .data even if the instance wrap lost the race. */
+export function patchEmulatorJsStorageViceCoreBypass(): void {
+  if (typeof window === "undefined") return;
+  const Ctor = (window as unknown as { EJS_STORAGE?: EjsStorageCtor }).EJS_STORAGE;
+  if (!Ctor?.prototype?.get || Ctor.prototype.__g64ViceBypass) return;
+  Ctor.prototype.__g64ViceBypass = true;
+  const origGet = Ctor.prototype.get;
+  Ctor.prototype.get = function patchedEjsGet(this: { dbName?: string }, key: string) {
+    const db = String(this.dbName ?? "");
+    if (
+      (db === EJS_LEGACY_CORE_DB || db === EJS_ROMS_DB || db === EJS_BIOS_DB) &&
+      isEmulatorJsViceCoreStorageKey(String(key))
+    ) {
+      return Promise.resolve(undefined);
+    }
+    return origGet.call(this, key);
+  };
+  if (Ctor.prototype.put) {
+    const origPut = Ctor.prototype.put;
+    Ctor.prototype.put = function patchedEjsPut(this: { dbName?: string }, key: string, data: unknown) {
+      const db = String(this.dbName ?? "");
+      if (
+        (db === EJS_LEGACY_CORE_DB || db === EJS_ROMS_DB || db === EJS_BIOS_DB) &&
+        isEmulatorJsViceCoreStorageKey(String(key))
+      ) {
+        return Promise.resolve();
+      }
+      return origPut.call(this, key, data);
+    };
+  }
 }
 
 export async function forceFreshGrok64CoreDownloadCache(): Promise<void> {
   await purgeAllEmulatorJsCoreRows("force-fresh-core");
   await purgeEmulatorJsViceCoreCache("force-fresh-core");
   await purgeEmulatorJsLegacyCoreViceRows("force-fresh-core");
+  await purgeEmulatorJsRomBiosViceRows("force-fresh-core");
   await purgeGrok64CoreCacheStorage("force-fresh-core");
 }
 
@@ -441,23 +696,42 @@ async function removeLegacyObjectStoreKey(db: IDBDatabase, store: string, key: s
   await idbPut(db, store, "?EJS_KEYS!", next);
 }
 
-/** Delete stale `vice_x64sc*-wasm.data` rows from EmulatorJS-core only (never deleteDatabase). */
-export async function purgeEmulatorJsLegacyCoreViceRows(reason = "legacy-core"): Promise<Grok64EjsCachePurgeResult> {
-  const db = await openLegacyIdbDb(EJS_LEGACY_CORE_DB);
+async function purgeViceKeysFromNamedStore(
+  dbName: string,
+  storeName: string,
+  reason: string,
+): Promise<Grok64EjsCachePurgeResult> {
+  const db = (await openExistingIdb(dbName)) ?? (dbName === EJS_LEGACY_CORE_DB ? await openLegacyIdbDb(dbName, storeName) : null);
   if (!db) return { removed: 0, reason: `${reason}:no-db` };
-  if (!db.objectStoreNames.contains(EJS_LEGACY_CORE_STORE)) {
+  if (!db.objectStoreNames.contains(storeName)) {
     db.close();
     return { removed: 0, reason: `${reason}:no-store` };
   }
-  const keys = (await idbGet<string[]>(db, EJS_LEGACY_CORE_STORE, "?EJS_KEYS!")) ?? [];
+  const listed = (await idbGet<string[]>(db, storeName, "?EJS_KEYS!")) ?? [];
+  const cursorKeys = await listObjectStoreKeys(db, storeName);
+  const keys = new Set([...listed, ...cursorKeys.map((k) => String(k))]);
   let removed = 0;
   for (const key of keys) {
     if (key === "?EJS_KEYS!") continue;
-    if (!isLegacyViceX64scCoreStorageKey(key)) continue;
-    await removeLegacyObjectStoreKey(db, EJS_LEGACY_CORE_STORE, key);
+    if (!isEmulatorJsViceCoreStorageKey(key)) continue;
+    await removeLegacyObjectStoreKey(db, storeName, key);
     removed++;
   }
   db.close();
+  return { removed, reason };
+}
+
+/** Delete stale `vice_x64sc*-wasm.data` rows from EmulatorJS-core (cursor + ?EJS_KEYS!). */
+export async function purgeEmulatorJsLegacyCoreViceRows(reason = "legacy-core"): Promise<Grok64EjsCachePurgeResult> {
+  return purgeViceKeysFromNamedStore(EJS_LEGACY_CORE_DB, EJS_LEGACY_CORE_STORE, reason);
+}
+
+/** EmulatorJS-roms / -bios can hold a vice_*.data if a dirty profile stored the core as a ROM. */
+export async function purgeEmulatorJsRomBiosViceRows(reason = "rom-bios-core"): Promise<Grok64EjsCachePurgeResult> {
+  let removed = 0;
+  removed += (await purgeViceKeysFromNamedStore(EJS_ROMS_DB, EJS_ROMS_STORE, `${reason}:roms`)).removed;
+  removed += (await purgeViceKeysFromNamedStore(EJS_BIOS_DB, EJS_BIOS_STORE, `${reason}:bios`)).removed;
+  removed += (await purgeViceKeysFromNamedStore(EJS_STATES_DB, EJS_STATES_STORE, `${reason}:states`)).removed;
   return { removed, reason };
 }
 
@@ -474,10 +748,12 @@ export async function grok64LegacyCoreIdbDiag(): Promise<Grok64LegacyCoreIdbDiag
     db?.close();
     return null;
   }
-  const keys = (await idbGet<string[]>(db, EJS_LEGACY_CORE_STORE, "?EJS_KEYS!")) ?? [];
+  const listed = (await idbGet<string[]>(db, EJS_LEGACY_CORE_STORE, "?EJS_KEYS!")) ?? [];
+  const cursorKeys = await listObjectStoreKeys(db, EJS_LEGACY_CORE_STORE);
+  const keys = [...new Set([...listed, ...cursorKeys.map((k) => String(k))])];
   const viceRows: Grok64LegacyCoreIdbDiag["viceRows"] = [];
   for (const key of keys) {
-    if (!isLegacyViceX64scCoreStorageKey(key)) continue;
+    if (!isEmulatorJsViceCoreStorageKey(key)) continue;
     const row = await idbGet<{ version?: unknown; data?: ArrayBuffer }>(db, EJS_LEGACY_CORE_STORE, key);
     viceRows.push({
       key,
@@ -672,28 +948,57 @@ export async function qaSeedBrokenGrok64CoreCaches(): Promise<{
 
   patchIndexedDbForEmulatorJsCache();
   const db = await openEjsCacheDb();
-  if (!db) return { idbKey: "", cache: "grok64-qa-stale-core", url: canonical, bytes: dummy.byteLength };
-  const key = `Obj-qa-broken-${Date.now()}`;
-  const now = Date.now();
-  await writeEjsCoreCacheBlob(
-    db,
-    key,
-    {
+  let idbKey = "";
+  if (db) {
+    const key = `Obj-qa-broken-${Date.now()}`;
+    const now = Date.now();
+    await writeEjsCoreCacheBlob(
+      db,
       key,
-      url: canonical,
-      type: "Core",
-      filename: "vice_x64sc-wasm.data",
-      added: now,
-      lastAccessed: now,
-      fileSize: dummy.byteLength,
-      responseType: "arraybuffer",
-      cacheExpiry: now + 7 * 86400000,
-    },
-    "vice_x64sc-wasm.data",
-    dummy,
-  );
-  db.close();
-  return { idbKey: key, cache: "grok64-qa-stale-core", url: canonical, bytes: dummy.byteLength };
+      {
+        key,
+        url: canonical,
+        type: "Core",
+        filename: "vice_x64sc-wasm.data",
+        added: now,
+        lastAccessed: now,
+        fileSize: dummy.byteLength,
+        responseType: "arraybuffer",
+        cacheExpiry: now + 7 * 86400000,
+      },
+      "vice_x64sc-wasm.data",
+      dummy,
+    );
+    db.close();
+    idbKey = key;
+  }
+
+  // Real EmulatorJS-core row keyed by filename — no ?EJS_KEYS! (the eviction miss).
+  const copy =
+    dummy.byteOffset === 0 && dummy.byteLength === dummy.buffer.byteLength
+      ? dummy.buffer
+      : dummy.buffer.slice(dummy.byteOffset, dummy.byteOffset + dummy.byteLength);
+  const legacy = await openLegacyIdbDb(EJS_LEGACY_CORE_DB);
+  if (legacy) {
+    let version: unknown = 1;
+    try {
+      const root = grok64ViceCoreRoot();
+      if (root) {
+        const reportUrl = `${window.location.origin}${root.startsWith("/") ? root : `/${root}`}/cores/reports/vice_x64sc.json`;
+        const reportRes = await fetch(reportUrl, { cache: "no-store" });
+        if (reportRes.ok) {
+          const rep = (await reportRes.json()) as { buildStart?: unknown };
+          if (rep.buildStart != null) version = rep.buildStart;
+        }
+      }
+    } catch {
+      /* keep version 1 */
+    }
+    await idbPut(legacy, EJS_LEGACY_CORE_STORE, "vice_x64sc-wasm.data", { version, data: copy });
+    legacy.close();
+  }
+
+  return { idbKey, cache: "grok64-qa-stale-core", url: canonical, bytes: dummy.byteLength };
 }
 
 export async function qaSeedStaleGrok64CoreCacheStorage(): Promise<{
@@ -725,7 +1030,7 @@ export async function qaSeedStaleGrok64CoreCacheStorage(): Promise<{
  * instantiated yet, so missing exports say nothing about staleness and must not force a reload.
  *
  * A running core with no `grok64_disk_attach` always refreshes (Tom dirty-profile case), even when
- * glue was never recorded. Budget is two reloads so Cache Storage can be evicted after the first.
+ * glue was never recorded. Sticky only after a real manifest-sized fetch still lacks exports.
  */
 export async function maybeAutoRefreshStaleEmulatorCore(
   emu: { Module?: unknown } | null,
@@ -734,7 +1039,7 @@ export async function maybeAutoRefreshStaleEmulatorCore(
   if (!grok64ViceCoreRoot() || !GROK64_CORE_BUILD_ID) return false;
 
   if (coreStarted) {
-    for (let i = 0; i < 40; i++) {
+    for (let i = 0; i < 60; i++) {
       if (grok64DiskAttachCallableEmu(emu)) break;
       await new Promise((r) => setTimeout(r, 50));
     }
@@ -755,6 +1060,8 @@ export async function maybeAutoRefreshStaleEmulatorCore(
   const exportsOk = grok64DiskAttachCallableEmu(emu);
   const glue = loadedCoreGlueInfo();
   if (!coreStarted && (!glue || glue.glueBytes <= 0)) return false;
+  // Glue-only: a missing disk-attach name can be "exports not bound yet". Wait for WASM.
+  if (!coreStarted && !glue?.glueHasDiskExports) return false;
 
   const report = runningCoreMismatch({
     coreStarted,
@@ -762,23 +1069,25 @@ export async function maybeAutoRefreshStaleEmulatorCore(
     glue,
   });
   const matches = grok64CoreBuildMatchesExpected();
-  if (!report.mismatch && exportsOk && (matches || !glue?.glueSha12)) {
+  if (exportsOk && (!report.mismatch || report.reason === "glue-missing-disk-exports") && (matches || !glue?.glueSha12 || !glue.glueHasDiskExports)) {
     clearCoreRefreshMarks();
     return false;
   }
   if (!report.mismatch) return false;
 
-  if (grok64CoreRefreshAttempts() >= CORE_REFRESH_BUDGET) {
-    try {
-      sessionStorage.setItem(STICKY_SS, "1");
-    } catch {
-      /* ignore */
-    }
+  const attempts = grok64CoreRefreshAttempts();
+  const fetchedCurrent = lastCoreFetchLooksCurrent();
+  if (fetchedCurrent && attempts >= CORE_REFRESH_BUDGET) {
+    markCoreStaleSticky();
+    return false;
+  }
+  if (attempts >= CORE_REFRESH_MAX) {
+    markCoreStaleSticky();
     return false;
   }
 
   await forceFreshGrok64CoreDownloadCache();
-  markCoreRefreshAttempt();
+  beginCoreHealReload();
   window.location.reload();
   return true;
 }
@@ -819,13 +1128,13 @@ function wrapEmulatorJsLegacyCoreStorage(inst: Grok64PatchedEjsInstance): void {
   core.__g64LegacyCore = true;
   const origGet = core.get.bind(core);
   core.get = async (key: string) => {
-    if (isLegacyViceX64scCoreStorageKey(String(key))) return undefined;
+    if (isEmulatorJsViceCoreStorageKey(String(key))) return undefined;
     return origGet(key);
   };
   if (core.put) {
     const origPut = core.put.bind(core);
     core.put = async (key: string, data: unknown) => {
-      if (isLegacyViceX64scCoreStorageKey(String(key))) return;
+      if (isEmulatorJsViceCoreStorageKey(String(key))) return;
       return origPut(key, data);
     };
   }
@@ -840,6 +1149,7 @@ export function patchEmulatorJsDownloaderCoreCacheBypass(): void {
   const EJS = w.EmulatorJS;
   if (!EJS || w.__g64EjsDlBypass) return;
   w.__g64EjsDlBypass = true;
+  patchEmulatorJsStorageViceCoreBypass();
 
   const wrapDownloader = (dl: EjsDownloaderLike | undefined) => {
     if (!dl?.downloadFile || dl.__g64Bypass) return;

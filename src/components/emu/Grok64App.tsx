@@ -334,6 +334,7 @@ import {
   grok64LegacyCoreIdbDiag,
   grok64CoreRefreshAttempts,
   grok64CoreStaleSticky,
+  grok64CoreHealPending,
   forceFreshGrok64CoreDownloadCache,
 } from "@/lib/emu/grok64-ejs-core-cache";
 import { runningCoreMismatch, loadedCoreGlueInfo } from "@/lib/emu/grok64-core-loaded";
@@ -928,6 +929,7 @@ export function Grok64App() {
         }),
       coreRefreshAttempt: () => grok64CoreRefreshAttempts(),
       coreStaleSticky: () => grok64CoreStaleSticky(),
+      coreHealPending: () => grok64CoreHealPending(),
       librarySnapshot: async () => {
         const items = await listLibrary();
         const snap = [];
@@ -4175,6 +4177,7 @@ export function Grok64App() {
     // owns the reboot. If rehydrate fails the splash stays, honest.
     if (crashRecoverStarted) return;
     if (useEmu.getState().powered) return;
+    if (grok64CoreHealPending()) return;
     const live = livePlayTitle();
     const marker = readPlayMarker();
     if (!live || !marker) return;

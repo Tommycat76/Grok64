@@ -3,10 +3,14 @@ import test from "node:test";
 import { createServer } from "vite";
 
 const server = await createServer({ server: { middlewareMode: true }, appType: "custom" });
-const { runningCoreMismatch } = await server.ssrLoadModule("/src/lib/emu/grok64-core-loaded.ts");
-const { isGrok64CoreCacheRequestUrl, CORE_REFRESH_BUDGET } = await server.ssrLoadModule(
-  "/src/lib/emu/grok64-ejs-core-cache.ts",
+const { runningCoreMismatch, bytesHaveGrok64DiskAttach } = await server.ssrLoadModule(
+  "/src/lib/emu/grok64-core-loaded.ts",
 );
+const { isGrok64CoreCacheRequestUrl, isEmulatorJsViceCoreStorageKey, CORE_REFRESH_BUDGET, CORE_REFRESH_MAX } =
+  await server.ssrLoadModule("/src/lib/emu/grok64-ejs-core-cache.ts");
+const { displayKindOf, kindLabelFor } = await server.ssrLoadModule("/src/lib/emu/formats.ts");
+const { appendGrok64CoreUrlCacheParams, GROK64_CORE_HEAL_PENDING_SS, GROK64_CORE_AUTO_RELOAD_SS } =
+  await server.ssrLoadModule("/src/lib/emu/grok64-core-url.ts");
 const { formatMissingDiskExportsMessage, formatViceReattachFailure } = await server.ssrLoadModule(
   "/src/lib/emu/disk-mount-ready.ts",
 );
@@ -23,6 +27,18 @@ test("a running core without grok64_disk_attach is a mismatch even when glue was
   assert.equal(report.mismatch, true);
   assert.equal(report.reason, "wasm-exports-missing");
   assert.equal(report.expectedBuildId, "36a7cd049a97");
+});
+
+test("live WASM disk attach wins over a glue sample that missed the export name", () => {
+  const report = runningCoreMismatch({
+    coreStarted: true,
+    diskExportsPresent: true,
+    glue: { glueBytes: 1200, glueSha12: "deadbeef0001", glueHasDiskExports: false, recordedAt: 1 },
+    expectedBuildId: "36a7cd049a97",
+    expectedGlueSha12: "d41b59759aa4",
+  });
+  assert.equal(report.mismatch, false);
+  assert.notEqual(report.loadedBuildId, "stale-no-disk-exports");
 });
 
 test("glue without the disk-attach symbol is stale", () => {
@@ -108,5 +124,49 @@ test("missing-exports toast names the loaded and needed build instead of rc=-99"
   );
   assert.match(attach, /old VICE core without disk attach/);
   assert.doesNotMatch(attach, /rc=-99/);
-  assert.equal(CORE_REFRESH_BUDGET, 2);
+  assert.equal(CORE_REFRESH_BUDGET, 3);
+  assert.equal(CORE_REFRESH_MAX, 6);
+});
+
+test("filename wins over a stale stored kind on the Software list", () => {
+  assert.equal(displayKindOf("GEOS Boot Disk.d64", "d81"), "d64");
+  assert.match(kindLabelFor("GEOS Boot Disk.d64", "d81"), /1541 disk/i);
+  assert.equal(displayKindOf("Wheels.d81", "d64"), "d81");
+});
+
+test("EmulatorJS-core filename keys are vice cores even without ?EJS_KEYS!", () => {
+  assert.equal(isEmulatorJsViceCoreStorageKey("vice_x64sc-wasm.data"), true);
+  assert.equal(isEmulatorJsViceCoreStorageKey("?EJS_KEYS!"), false);
+  assert.equal(isEmulatorJsViceCoreStorageKey("GROK64.state"), false);
+});
+
+test("Cache Storage matcher still hits a heal-nonce core URL", () => {
+  assert.equal(
+    isGrok64CoreCacheRequestUrl(
+      "https://app/system/vice/emulatorjs/data/cores/vice_x64sc-grok64-iec-wasm.data?grok64core=36a7cd049a97&grok64heal=2",
+    ),
+    true,
+  );
+});
+
+test("heal nonce is added only while a heal reload is pending", () => {
+  const base = "https://app/system/vice/emulatorjs/data/cores/vice_x64sc-grok64-iec-wasm.data";
+  const before = appendGrok64CoreUrlCacheParams(base);
+  assert.doesNotMatch(before, /grok64heal=/);
+  if (typeof sessionStorage !== "undefined") {
+    sessionStorage.setItem(GROK64_CORE_HEAL_PENDING_SS, "1");
+    sessionStorage.setItem(GROK64_CORE_AUTO_RELOAD_SS, "2");
+    const during = appendGrok64CoreUrlCacheParams(base);
+    assert.match(during, /grok64heal=2/);
+    sessionStorage.removeItem(GROK64_CORE_HEAL_PENDING_SS);
+    sessionStorage.removeItem(GROK64_CORE_AUTO_RELOAD_SS);
+  }
+});
+
+test("disk-attach fingerprint scans the whole buffer, not a 2.5MB head", () => {
+  const padded = new Uint8Array(100);
+  const name = new TextEncoder().encode("grok64_disk_attach");
+  padded.set(name, 70);
+  assert.equal(bytesHaveGrok64DiskAttach(padded), true);
+  assert.equal(bytesHaveGrok64DiskAttach(new Uint8Array(32)), false);
 });

@@ -73,6 +73,21 @@ export function kindOf(name: string): MediaKind {
   return map[e] ?? "unknown";
 }
 
+/**
+ * Software-list kind: trust the filename when it is a known extension so a
+ * stale IndexedDB `kind` (e.g. d81 on GEOS Boot Disk.d64) cannot flash 1581.
+ */
+export function displayKindOf(name: string, stored?: MediaKind | null): MediaKind {
+  const fromName = kindOf(name);
+  if (fromName !== "unknown") return fromName;
+  if (stored && stored in KIND_LABEL) return stored;
+  return "unknown";
+}
+
+export function kindLabelFor(name: string, stored?: MediaKind | null): string {
+  return KIND_LABEL[displayKindOf(name, stored)];
+}
+
 export function bootFileName(name: string, kind?: MediaKind): string {
   const cleaned = name.replace(/[#<$+%>!`&*'|{}/\\?"=@:^\r\n]/g, "").trim() || "software";
   if (kindOf(cleaned) !== "unknown") return cleaned;

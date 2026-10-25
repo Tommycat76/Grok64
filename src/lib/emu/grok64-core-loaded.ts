@@ -29,21 +29,45 @@ export async function sha256PrefixAsync(bytes: Uint8Array, hexLen = 12): Promise
   return (h >>> 0).toString(16).padStart(8, "0").slice(0, hexLen);
 }
 
-export function recordGrok64CoreGlue(js: Uint8Array | ArrayBuffer | string): void {
-  if (typeof window === "undefined") return;
-  let bytes: Uint8Array;
-  if (typeof js === "string") {
-    bytes = new TextEncoder().encode(js);
-  } else if (js instanceof ArrayBuffer) {
-    bytes = new Uint8Array(js);
-  } else {
-    bytes = js;
+function toBytes(js: Uint8Array | ArrayBuffer | string): Uint8Array {
+  if (typeof js === "string") return new TextEncoder().encode(js);
+  if (js instanceof ArrayBuffer) return new Uint8Array(js);
+  return js;
+}
+
+/** Scan the whole buffer — the 7z archive compresses this name, the extracted JS/WASM does not. */
+export function bytesHaveGrok64DiskAttach(bytes: Uint8Array): boolean {
+  return bufferContainsAscii(bytes, "grok64_disk_attach") || bufferContainsAscii(bytes, "_grok64_disk_attach");
+}
+
+function bufferContainsAscii(haystack: Uint8Array, needle: string): boolean {
+  if (!haystack.length || !needle) return false;
+  const n = new TextEncoder().encode(needle);
+  const last = haystack.length - n.length;
+  if (last < 0) return false;
+  const first = n[0]!;
+  for (let i = 0; i <= last; i++) {
+    if (haystack[i] !== first) continue;
+    let ok = true;
+    for (let j = 1; j < n.length; j++) {
+      if (haystack[i + j] !== n[j]) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) return true;
   }
-  const sampleLen = Math.min(bytes.length, 2_500_000);
-  const sample = bytes.subarray(0, sampleLen);
-  const text = new TextDecoder().decode(sample);
-  const glueHasDiskExports =
-    text.includes("grok64_disk_attach") || text.includes("_grok64_disk_attach");
+  return false;
+}
+
+export function recordGrok64CoreGlue(
+  js: Uint8Array | ArrayBuffer | string,
+  wasm?: Uint8Array | ArrayBuffer | string | null,
+): void {
+  if (typeof window === "undefined") return;
+  const bytes = toBytes(js);
+  const wasmBytes = wasm != null ? toBytes(wasm) : null;
+  const glueHasDiskExports = bytesHaveGrok64DiskAttach(bytes) || Boolean(wasmBytes && bytesHaveGrok64DiskAttach(wasmBytes));
   const info: Grok64LoadedCoreGlue = {
     glueBytes: bytes.length,
     glueSha12: null,
@@ -126,13 +150,13 @@ export function runningCoreMismatch(input: Grok64CoreMismatchInput = {}): Grok64
 
   let loadedBuildId: string | null = null;
   if (glueRecorded) {
-    if (!glueHasDiskExports) loadedBuildId = "stale-no-disk-exports";
+    if (!glueHasDiskExports && !diskExportsPresent) loadedBuildId = "stale-no-disk-exports";
     else if (expectedGlueSha12 && glueSha12 === expectedGlueSha12) loadedBuildId = expectedBuildId || glueSha12;
-    else loadedBuildId = glueSha12 ?? (glueHasDiskExports ? expectedBuildId || null : null);
+    else loadedBuildId = glueSha12 ?? (glueHasDiskExports || diskExportsPresent ? expectedBuildId || null : null);
   }
 
   let reason: string | null = null;
-  if (glueRecorded && !glueHasDiskExports) {
+  if (glueRecorded && !glueHasDiskExports && !diskExportsPresent) {
     reason = "glue-missing-disk-exports";
   } else if (glueSha12 && expectedGlueSha12 && glueSha12 !== expectedGlueSha12) {
     reason = "glue-sha-mismatch";
@@ -141,6 +165,9 @@ export function runningCoreMismatch(input: Grok64CoreMismatchInput = {}): Grok64
   }
 
   if (diskExportsPresent && reason === "wasm-exports-missing") reason = null;
+  if (diskExportsPresent && reason === "glue-missing-disk-exports") reason = null;
+  // A glue sample that missed the export name is not a SHA identity for the running core.
+  if (diskExportsPresent && !glueHasDiskExports && reason === "glue-sha-mismatch") reason = null;
   if (diskExportsPresent && reason == null && glueRecorded && glueHasDiskExports && glueSha12 && expectedGlueSha12 && glueSha12 !== expectedGlueSha12) {
     reason = "glue-sha-mismatch";
   }
