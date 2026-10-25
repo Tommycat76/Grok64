@@ -632,10 +632,12 @@ async function runGui64(hand, cart, tag) {
 }
 
 async function main() {
+  const wantJiffyOn = modes.includes(true);
   for (const [k, p] of Object.entries(files)) {
+    if (k.startsWith("jiffy") && !wantJiffyOn) continue;
     if (!existsSync(p)) {
       console.log(JSON.stringify({ pass: false, skipped: true, reason: `missing ${k}`, path: p }, null, 2));
-      process.exit(0);
+      process.exit(k.startsWith("jiffy") ? 0 : 1);
     }
   }
   const geos = media(files.geos);
