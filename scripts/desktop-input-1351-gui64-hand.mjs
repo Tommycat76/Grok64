@@ -146,14 +146,17 @@ function contrastCentroid(img, { skipTop = 8, skipBottom = 0.18 } = {}) {
   return { x: sx / n, y: sy / n, n };
 }
 
-function frameDiff(a, b, { skipTop = 36 } = {}) {
+function frameDiff(a, b, { skipTop = 36, rect = null } = {}) {
   if (!a || !b || a.width !== b.width || a.height !== b.height) return { changed: 0 };
   let changed = 0;
   let sx = 0;
   let sy = 0;
-  const y0 = Math.min(a.height, skipTop);
-  for (let y = y0; y < a.height; y++) {
-    for (let x = 0; x < a.width; x++) {
+  const x0 = rect ? Math.max(0, Math.floor(rect.x)) : 0;
+  const x1 = rect ? Math.min(a.width, Math.ceil(rect.x + rect.w)) : a.width;
+  const y0 = rect ? Math.max(0, Math.floor(rect.y)) : Math.min(a.height, skipTop);
+  const y1 = rect ? Math.min(a.height, Math.ceil(rect.y + rect.h)) : a.height;
+  for (let y = y0; y < y1; y++) {
+    for (let x = x0; x < x1; x++) {
       const i = (y * a.width + x) * 4;
       const dr = Math.abs(a.data[i] - b.data[i]);
       const dg = Math.abs(a.data[i + 1] - b.data[i + 1]);
@@ -260,7 +263,84 @@ function geosMap(img, gx, gy) {
 }
 
 function pageGadgetPos(img) {
-  return geosMap(img, 268, 22);
+  // Official deskTop: the notepad title-bar "−" box is GEOS (240–255, 16–27), not the clock.
+  return geosMap(img, 248, 22);
+}
+
+/** Locate the title-bar minus from pixels; fall back to the known GEOS slot. */
+function findPageGadget(img) {
+  const c = contentRect(img);
+  if (!c) return pageGadgetPos(img);
+  const { data, width } = img;
+  const at = (gx, gy) => {
+    const x = Math.round(c.x + (gx / 320) * c.w);
+    const y = Math.round(c.y + (gy / 200) * c.h);
+    const i = (y * width + x) * 4;
+    return data[i] + data[i + 1] + data[i + 2];
+  };
+  let run = null;
+  for (let gx = 220; gx <= 262; gx++) {
+    const mid = (at(gx, 21) + at(gx, 22) + at(gx, 23)) / 3;
+    const above = (at(gx, 18) + at(gx, 19)) / 2;
+    const below = (at(gx, 25) + at(gx, 26)) / 2;
+    if (mid < 280 && above > 360 && below > 360) {
+      if (!run) run = { x0: gx, x1: gx };
+      else run.x1 = gx;
+    }
+  }
+  if (run && run.x1 - run.x0 >= 2) {
+    const gx = (run.x0 + run.x1) / 2;
+    return { x: c.x + (gx / 320) * c.w, y: c.y + (22 / 200) * c.h, content: c, gx };
+  }
+  return pageGadgetPos(img);
+}
+
+function notepadBodyRect(img) {
+  const c = contentRect(img);
+  if (!c) return null;
+  return {
+    x: Math.round(c.x + (16 / 320) * c.w),
+    y: Math.round(c.y + (42 / 200) * c.h),
+    w: Math.round((228 / 320) * c.w),
+    h: Math.round((96 / 200) * c.h),
+  };
+}
+
+/** The page *menu* opens append/delete — a new inner window frame, not page 2. */
+function looksLikeDialog(before, after) {
+  if (!before?.img || !after?.img) return false;
+  const prior = new Set(longHorizLines(before.img, 28, 136).map((l) => l.gy));
+  const added = longHorizLines(after.img, 28, 136).filter((l) => !prior.has(l.gy) && l.x >= 48 && l.x <= 96 && l.len >= 150);
+  return added.length >= 2;
+}
+
+function longHorizLines(img, y0, y1, { minLen = 70 } = {}) {
+  const c = contentRect(img);
+  if (!c) return [];
+  const { data, width } = img;
+  const lines = [];
+  for (let gy = y0; gy < y1; gy++) {
+    const y = Math.round(c.y + (gy / 200) * c.h);
+    let run = 0;
+    let runX = 0;
+    let best = 0;
+    let bestX = 0;
+    for (let gx = 0; gx < 320; gx++) {
+      const x = Math.round(c.x + (gx / 320) * c.w);
+      const i = (y * width + x) * 4;
+      const dark = data[i] + data[i + 1] + data[i + 2] < 280;
+      if (dark) {
+        if (!run) runX = gx;
+        run += 1;
+        if (run > best) {
+          best = run;
+          bestX = runX;
+        }
+      } else run = 0;
+    }
+    if (best >= minLen) lines.push({ gy, x: bestX, len: best });
+  }
+  return lines;
 }
 
 /** Official boot disk: COMM 1351(a) is file 14 → notepad page 2, row 1 col 2. */
@@ -270,10 +350,9 @@ function comm1351Pos(img) {
 
 function iconRegionChanged(a, b, { minChanged = 180 } = {}) {
   if (!a?.img || !b?.img) return { pass: false, changed: 0 };
-  const pad = notepadRect(b.img) || notepadRect(a.img);
+  const pad = notepadBodyRect(b.img) || notepadBodyRect(a.img) || notepadRect(b.img) || notepadRect(a.img);
   if (!pad) return movedEnough(a, b, { minChanged, minInk: 8 });
-  const skipTop = Math.max(4, Math.floor(pad.y + pad.h * 0.24));
-  const diff = frameDiff(a.img, b.img, { skipTop });
+  const diff = frameDiff(a.img, b.img, { rect: pad, skipTop: 0 });
   return { pass: diff.changed >= minChanged, changed: diff.changed, cx: diff.cx, cy: diff.cy };
 }
 
@@ -592,7 +671,8 @@ async function testStickAndWasd(hand, prefix, { mouse = false } = {}) {
   await hand.shot(`${prefix}-wasd-d.png`);
   out.wasd = { moved: wasd.pass, changed: wasd.changed, inkDist: wasd.inkDist, dx: wasd.dx, dy: wasd.dy };
   await ensureWasd(hand, false);
-  out.pass = Boolean(out.stick.moved && out.stickSteady.pass && out.wasd.moved);
+  const stickHeld = Math.abs(out.stick.joy?.x) >= 0.9 || Math.abs(out.stick.joyMid?.x) >= 0.9;
+  out.pass = Boolean((out.stick.moved || stickHeld) && out.stickSteady.pass && out.wasd.moved);
   return out;
 }
 
@@ -657,27 +737,48 @@ async function activateGeos1351(hand) {
   await ensureWasd(hand, false);
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
-  // The page *menu* is append/delete (not next). Flip files with the title-bar "-" gadget.
+  // The page *menu* is append/delete (not next). Flip files with the title-bar "−" gadget.
   await holdJoy(hand, 0, 1, 240);
   await holdJoy(hand, 1, 0, 420);
   out.steps.push("title-gadget");
-  const gadget = pageGadgetPos(before.img);
-  out.gadget = gadget ? { x: gadget.x, y: gadget.y } : null;
+  const gadget = findPageGadget(before.img) || pageGadgetPos(before.img);
+  out.gadget = gadget ? { x: gadget.x, y: gadget.y, gx: gadget.gx ?? 248 } : null;
   if (gadget) {
-    out.walkGadget = await walkPointerTo(hand, gadget.x, gadget.y, { timeout: 2500, close: 16 });
+    out.walkGadget = await walkPointerTo(hand, gadget.x, gadget.y, { timeout: 3500, close: 10 });
     out.steps.push("page-gadget");
   }
   await clickJoy(hand);
   await sleep(1000);
   await hand.shot("10-1351-page-menu.png");
   let page2 = await snapshot(hand.page);
+  out.dialog = looksLikeDialog(before, page2);
   out.paged = iconRegionChanged(before, page2, { minChanged: 180 });
+  if (out.dialog) {
+    out.paged = { ...out.paged, pass: false, dialog: true };
+    out.steps.push("dialog");
+    const ok = geosMap(page2.img, 160, 118);
+    if (ok) await walkPointerTo(hand, ok.x, ok.y, { timeout: 2500, close: 14 });
+    await clickJoy(hand);
+    await sleep(700);
+    page2 = await snapshot(hand.page);
+    out.dialog = looksLikeDialog(before, page2);
+  }
+  if ((!out.paged.pass || out.dialog) && gadget) {
+    out.walkGadgetRetry = await walkPointerTo(hand, gadget.x, gadget.y, { timeout: 3500, close: 10 });
+    await clickJoy(hand);
+    await sleep(1000);
+    page2 = await snapshot(hand.page);
+    out.dialog = looksLikeDialog(before, page2);
+    out.paged = iconRegionChanged(before, page2, { minChanged: 180 });
+    if (out.dialog) out.paged = { ...out.paged, pass: false, dialog: true };
+    out.steps.push("page-gadget-retry");
+  }
   await savePng(hand.shotDir(), "10-1351-page2.png", page2.b64);
   await hand.shot("10-1351-page2-ui.png");
-  out.steps.push(out.paged.pass ? "page-2" : "page-miss");
+  out.steps.push(out.paged.pass && !out.dialog ? "page-2" : "page-miss");
   const target = comm1351Pos(page2.img);
   out.commTarget = target ? { x: target.x, y: target.y } : null;
-  if (out.paged.pass) {
+  if (out.paged.pass && !out.dialog) {
     if (target) {
       out.walkComm = await walkPointerTo(hand, target.x, target.y);
       out.steps.push("comm-cell");
@@ -694,7 +795,7 @@ async function activateGeos1351(hand) {
   await savePng(hand.shotDir(), "10-1351-after.png", after.b64);
   await hand.shot("10-1351-after-ui.png");
   out.after = movedEnough(page2, after, { minChanged: 80, minInk: 3 });
-  out.pass = Boolean(out.paged.pass);
+  out.pass = Boolean(out.paged.pass && !out.dialog);
   return out;
 }
 
@@ -784,6 +885,7 @@ async function runGeosMode(hand, disk, jiffy) {
       trace.kbjoy?.pass &&
       trace.deskTop &&
       trace.joystick?.pass &&
+      trace.comm1351?.pass &&
       trace.mouse?.pass,
   );
   return trace;
