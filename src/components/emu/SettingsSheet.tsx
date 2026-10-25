@@ -90,9 +90,10 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
             </div>
             <p className="mb-3 text-xs text-fg-subtle">
               1351 sits on the selected port; the other port stays a joystick. Drag the screen or
-              the trackpad — those pixels become 1351 POT X/Y. L/R are the 1351 buttons. GEOS
-              JOYSTICK is Port 1: tap P1, turn Keyboard joystick on, then WASD or the on-screen
-              stick. After geos → select input → COMM 1351(a), put the mouse on that port.
+              the trackpad — those pixels become 1351 POT X/Y, one-to-one on both axes. L/R are
+              the 1351 buttons. GEOS JOYSTICK is Port 1: tap P1, turn Keyboard joystick on, then
+              WASD or the on-screen stick. After geos → select input → COMM 1351(a), put the mouse
+              on that port. The port you pick stays across carts, disks, and power.
             </p>
             {s.mouseMode ? (
               <div className="g64-field">
@@ -370,7 +371,9 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
                 </button>
               </div>
               <p className="text-xs text-fg-subtle">
-                Most games read Port 2. GEOS JOYSTICK and COMM 1351 read Port 1. Swap here, or tap P1/P2 next to FIRE. WARP sits next to FIRE and in the top bar.
+                Most games read Port 2. GEOS JOYSTICK and COMM 1351 read Port 1. Swap here, or tap
+                P1/P2 next to FIRE. The port stays until you change it — loading a cart or disk does
+                not reset it. WARP sits next to FIRE and in the top bar.
               </p>
             </div>
 

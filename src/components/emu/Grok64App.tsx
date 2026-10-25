@@ -76,7 +76,6 @@ import {
   sd2iecFreeze,
   sd2iecSwapDevice,
   scpuReset,
-  plugJoysticks,
   prepareCore,
   probeCore,
   readMountedMedia,
@@ -92,15 +91,17 @@ import {
   setPaused,
   setWarp,
   addHostMouseDelta,
+  addHostDrag1351,
+  applySavedJoyAndMouse,
   setHostMouseButtons,
   flushHostMouse1351,
   clearHostMouse1351,
   feedVice1351Plug,
   vice1351Direct,
+  vicePortDeviceOptions,
   audioLocked,
   unlockAudio,
   suspendAudio,
-  viceJoyOptions,
   waitForCoreFs,
   injectViceRc,
   bumpCrtPaint,
@@ -277,7 +278,7 @@ import { BUNDLED } from "@/lib/emu/software";
 import { putRom, removeRom } from "@/lib/emu/roms";
 import { snapshotDevice, readViewport, applyViewport, detectDevice, isIos, isIosPhone, isTouchMobile } from "@/lib/emu/detect";
 import { applyTabletContainFit, tabletBezelAvail, tabletGlassFillsBezel } from "@/lib/emu/tablet-fit";
-import { detectJoyPort, detectSoftwareStandard } from "@/lib/emu/region";
+import { detectSoftwareStandard } from "@/lib/emu/region";
 import { RETRO_BTN } from "@/lib/emu/types";
 import { feedBasicLine, readPrintTi } from "@/lib/emu/c64-keyboard";
 import { removeSessionCart, sessionDiskOnUnit, setSessionCart, setSessionDisk } from "@/lib/emu/session-media";
@@ -857,7 +858,10 @@ export function Grok64App() {
         );
         return sd2iecFreeze(emuRef.current, disks, dir as 1 | -1, sessionUnitRef.current);
       },
-      plug: () => plugJoysticks(emuRef.current, useEmu.getState().joyPort),
+      plug: () => {
+        const live = useEmu.getState();
+        applySavedJoyAndMouse(emuRef.current, live.joyPort, live.mouseMode);
+      },
       joyPort: () => useEmu.getState().joyPort,
       joy: () => ({ ...joyRef.current }),
       view: () => ({ ...readViewport(), dataOrient: document.documentElement.dataset.orient ?? null }),
@@ -1527,9 +1531,9 @@ export function Grok64App() {
         applyRuntimeOptions(emuRef.current, { vice_ram_expansion_unit: size });
       },
       setJoyPort: (port) => {
-        useEmu.getState().setJoyPort(port === 1 ? 1 : 2);
-        plugJoysticks(emuRef.current, port === 1 ? 1 : 2);
-        applyRuntimeOptions(emuRef.current, viceJoyOptions(port === 1 ? 1 : 2));
+        const next = port === 1 ? 1 : 2;
+        useEmu.getState().setJoyPort(next);
+        applySavedJoyAndMouse(emuRef.current, next, useEmu.getState().mouseMode);
       },
       swapJoy: () => swapJoyPortRef.current?.(),
       toggleWarp: () => toggleWarpRef.current?.(),
@@ -1936,7 +1940,10 @@ export function Grok64App() {
           muteC64Space(false);
           s.setBooting(false);
           s.setRunning(true);
-          plugJoysticks(emuRef.current, useEmu.getState().joyPort);
+          {
+            const live = useEmu.getState();
+            applySavedJoyAndMouse(emuRef.current, live.joyPort, live.mouseMode);
+          }
           inGameplayRef.current = true;
           clearMenuJoyInput();
           const unlockedTitle = useEmu.getState().currentTitle;
@@ -2344,7 +2351,7 @@ export function Grok64App() {
       }
       applyIecUnit(emu, spec.live.iec, spec.live.unit);
       applyRuntimeOptions(emu, {
-        ...viceJoyOptions(st.joyPort),
+        ...vicePortDeviceOptions(st.joyPort, st.mouseMode),
         vice_ram_expansion_unit: st.reuSize === "none" && wantsLargeReu(spec.title || "") ? C64OS_REU : st.reuSize,
       });
       if (spec.live.iec === "1541" || spec.live.iec === "1581" || spec.live.iec === "cmdhd") {
@@ -2358,7 +2365,10 @@ export function Grok64App() {
         restoreState(emu, pending.data);
         pendingSnapshotRef.current = null;
       }
-      plugJoysticks(emu, st.joyPort);
+      {
+        const live = useEmu.getState();
+        applySavedJoyAndMouse(emu, live.joyPort, live.mouseMode);
+      }
       unlockAudio(emu);
       setPaused(emu, false);
       try {
@@ -3265,16 +3275,9 @@ export function Grok64App() {
           iecUnit: playUnit,
         });
       };
-      const assigned = detectJoyPort({ names: [filename, title] });
-      const prevPort = useEmu.getState().joyPort;
-      if (prevPort !== assigned) {
-        useEmu.getState().setJoyPort(assigned);
-        glog("joy-autoplug", { port: assigned, filename, title });
-        toast.message(`Joystick → Port ${assigned}`);
-      }
-      if (emuRef.current) {
-        applyRuntimeOptions(emuRef.current, viceJoyOptions(assigned));
-        plugJoysticks(emuRef.current, assigned);
+      {
+        const live = useEmu.getState();
+        if (emuRef.current) applySavedJoyAndMouse(emuRef.current, live.joyPort, live.mouseMode);
       }
       const mustKeep = iosMustKeepLiveCore({
         iosPhone: isIosPhone(),
@@ -3395,7 +3398,7 @@ export function Grok64App() {
                   vice_virtual_device_traps: "disabled",
                 }
               : {}),
-            ...viceJoyOptions(useEmu.getState().joyPort),
+            ...vicePortDeviceOptions(useEmu.getState().joyPort, useEmu.getState().mouseMode),
           });
           if (attach) applyIecUnitFloppy(emuRef.current, playIec, playAttachUnit, floppyKind);
           const flushed = await flushEmuFs(emuRef.current, isIosPhone() ? 2000 : 800);
@@ -3433,7 +3436,10 @@ export function Grok64App() {
             useEmu.getState().setInsertedDiskName(filename);
           }
           applyIecUnitFloppy(emuRef.current, playIec, playAttachUnit, floppyKind);
-          plugJoysticks(emuRef.current, useEmu.getState().joyPort);
+          {
+            const live = useEmu.getState();
+            applySavedJoyAndMouse(emuRef.current, live.joyPort, live.mouseMode);
+          }
           // #13: never reset paint / wipe the live canvas on in-place Play.
           if (isIosPhone() && !keepLiveCrt && !mustKeep) resetIosPaintState();
           s.setCurrentTitle(title);
@@ -4708,11 +4714,10 @@ export function Grok64App() {
     const st = useEmu.getState();
     const next = st.joyPort === 2 ? 1 : 2;
     st.setJoyPort(next);
-    applyRuntimeOptions(emuRef.current, expansionOpts());
-    plugJoysticks(emuRef.current, next);
+    applySavedJoyAndMouse(emuRef.current, next, st.mouseMode);
     glog("port-swap", { next, mouse: st.mouseMode });
     toast.message(st.mouseMode ? `Mouse → Port ${next}` : `Joystick → Port ${next}`);
-  }, [expansionOpts]);
+  }, []);
   swapJoyPortRef.current = swapJoyPort;
   useEffect(() => {
     if (playModeRef.current === "disk") return;
@@ -4735,30 +4740,18 @@ export function Grok64App() {
     const emu = emuRef.current;
     if (playLockRef.current || playModeRef.current === "disk" || inGameplayRef.current) {
       applyRuntimeOptions(emu, {
-        ...viceJoyOptions(s.joyPort),
-        ...(s.mouseMode
-          ? {
-              vice_joyport_type: "3",
-              vice_analogmouse: "left",
-              vice_mouse_speed: "100",
-              vice_analogmouse_speed: "1.0",
-              vice_analogmouse_deadzone: "0",
-              vice_dpadmouse_speed: "6",
-            }
-          : {}),
+        ...vicePortDeviceOptions(s.joyPort, s.mouseMode),
         vice_ram_expansion_unit: s.reuSize,
       });
-      if (s.mouseMode) plugJoysticks(emu, s.joyPort);
-      feedVice1351Plug(emu, s.joyPort, s.mouseMode);
+      applySavedJoyAndMouse(emu, s.joyPort, s.mouseMode);
       return;
     }
     const extras = expansionOpts();
     extras.vice_ram_expansion_unit = s.reuSize;
     applyRuntimeOptions(emu, extras);
     void syncJiffy(emu, "none");
-    if (s.mouseMode) plugJoysticks(emu, s.joyPort);
-    else setJoyVector(emu, 0, 0, false, 1);
-    feedVice1351Plug(emu, s.joyPort, s.mouseMode);
+    if (!s.mouseMode) setJoyVector(emu, 0, 0, false, 1);
+    applySavedJoyAndMouse(emu, s.joyPort, s.mouseMode);
   }, [s.reuSize, s.iecDrive, s.iecUnit, s.mouseMode, s.joyPort, s.machineId, s.scpuSimm, s.scpuTurbo, expansionOpts, syncJiffy]);
   useEffect(() => {
     const emu = emuRef.current;
@@ -5410,7 +5403,8 @@ export function Grok64App() {
               const prev = mousePtrRef.current;
               mousePtrRef.current = { x: e.clientX, y: e.clientY };
               if (!prev) return;
-              addHostMouseDelta(e.clientX - prev.x, e.clientY - prev.y);
+              const box = e.currentTarget.getBoundingClientRect();
+              addHostDrag1351(e.clientX - prev.x, e.clientY - prev.y, { w: box.width, h: box.height });
             }}
             onPointerUp={(e) => {
               if (playLockRef.current || !s.running || s.booting) return;
@@ -5489,7 +5483,7 @@ export function Grok64App() {
         onMouseDelta={(dx, dy) => {
           unlockAudio(emuRef.current);
           if (playLockRef.current || useEmu.getState().booting) return;
-          addHostMouseDelta(dx, dy);
+          addHostDrag1351(dx, dy);
         }}
         onMouseEnd={() => {
           /* leftover pixels keep flushing; analog goes idle when the accumulator is empty */

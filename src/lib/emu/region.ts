@@ -138,6 +138,11 @@ export function detectJoyPort(hint: SoftwareHint | string): JoyPort {
   return 2;
 }
 
+/** Saved P1/P2 wins. Title hints never overwrite the user's port. */
+export function sessionJoyPort(saved: JoyPort): JoyPort {
+  return saved === 1 ? 1 : 2;
+}
+
 export function resolveSoftwareVideo(hint: SoftwareHint | string): VideoHz {
   return detectSoftwareStandard(hint) ?? DEFAULT_VIDEO;
 }

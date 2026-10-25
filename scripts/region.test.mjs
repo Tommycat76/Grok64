@@ -10,7 +10,7 @@ const server = await createServer({
   appType: "custom",
   logLevel: "error",
 });
-const { detectSoftwareStandard, resolveSoftwareVideo, detectJoyPort, regionBadge } = await server.ssrLoadModule("/src/lib/emu/region.ts");
+const { detectSoftwareStandard, resolveSoftwareVideo, detectJoyPort, regionBadge, sessionJoyPort } = await server.ssrLoadModule("/src/lib/emu/region.ts");
 const { isWorkDiskImage, d64DiskName, bootFileName } = await server.ssrLoadModule("/src/lib/emu/formats.ts");
 const { pickBootFile, isJunkRelease } = await server.ssrLoadModule("/src/lib/emu/archive.ts");
 await server.close();
@@ -175,4 +175,13 @@ test("Boulder Dash family plugs into CIA port 1, everything else port 2", () => 
   assert.equal(detectJoyPort("Paradroid.d64"), 2);
   assert.equal(detectJoyPort("byte-hopper.prg"), 2);
   assert.equal(detectJoyPort("WORK DISK.D64"), 2);
+  assert.equal(detectJoyPort("GUI64 [PAL].crt"), 2);
+  assert.equal(detectJoyPort("GUI64 [NTSC].crt"), 2);
+});
+
+test("the user's saved mouse port is not replaced by a title hint", () => {
+  assert.equal(sessionJoyPort(1), 1);
+  assert.equal(sessionJoyPort(2), 2);
+  assert.equal(sessionJoyPort(1), sessionJoyPort(1));
+  assert.notEqual(sessionJoyPort(1), detectJoyPort("GUI64 [PAL].crt"));
 });

@@ -125,7 +125,9 @@ import { stopIosPresent, stripIosPresent } from "./ios-present";
 import {
   addMouse1351Delta,
   createMouse1351Accum,
+  crtDisplayBox,
   dpadForAxes,
+  hostDragTo1351,
   resetMouse1351Accum,
   takeMouse1351Frame,
 } from "./mouse-1351";
@@ -1141,6 +1143,28 @@ export function viceJoyOptions(port: JoyPort): Record<string, string> {
   };
 }
 
+/** Joystick or 1351 on the user's saved port — never a title-based default. */
+export function vicePortDeviceOptions(port: JoyPort, mouse: boolean): Record<string, string> {
+  const base = viceJoyOptions(port === 1 ? 1 : 2);
+  if (!mouse) return base;
+  return {
+    ...base,
+    vice_joyport_type: "3",
+    vice_analogmouse: "left",
+    vice_mouse_speed: "100",
+    vice_analogmouse_speed: "1.0",
+    vice_analogmouse_deadzone: "0",
+    vice_dpadmouse_speed: "6",
+  };
+}
+
+export function applySavedJoyAndMouse(emu: EjsInstance | null, port: JoyPort, mouse: boolean) {
+  const p = port === 1 ? 1 : 2;
+  applyRuntimeOptions(emu, vicePortDeviceOptions(p, mouse));
+  plugJoysticks(emu, p);
+  feedVice1351Plug(emu, p, mouse);
+}
+
 function padMap(): PadMap {
   const unbound = { value: "unbound", value2: "" };
   return {
@@ -1351,6 +1375,13 @@ export function feedVice1351Plug(emu: EjsInstance | null, port: JoyPort, on: boo
 
 export function addHostMouseDelta(dx: number, dy: number) {
   addMouse1351Delta(hostMouse1351, dx, dy);
+}
+
+/** Screen-drag / trackpad: linear 1:1 on both axes (CRT glass scale). */
+export function addHostDrag1351(dx: number, dy: number, display?: { w: number; h: number }) {
+  const box = display ?? crtDisplayBox();
+  const scaled = hostDragTo1351(dx, dy, box.w, box.h);
+  addMouse1351Delta(hostMouse1351, scaled.dx, scaled.dy);
 }
 
 export function setHostMouseButtons(left: boolean, right: boolean) {

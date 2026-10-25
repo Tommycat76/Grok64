@@ -74,3 +74,38 @@ export function resetMouse1351Accum(acc: Mouse1351Accum): void {
   acc.x = 0;
   acc.y = 0;
 }
+
+/** VICE CRT glass (borders included). Same aspect as `.g64-screen`. */
+export const CRT_FRAME_W = 384;
+export const CRT_FRAME_H = 272;
+
+/**
+ * Host CSS-pixel drag → 1351 counts so finger travel matches the pointer
+ * on the CRT. X and Y use the same counts-per-visible-inch (no extra Y gain).
+ */
+export function hostDragTo1351(
+  dx: number,
+  dy: number,
+  displayW: number,
+  displayH: number,
+  frameW = CRT_FRAME_W,
+  frameH = CRT_FRAME_H,
+): { dx: number; dy: number } {
+  const x = Number.isFinite(dx) ? dx : 0;
+  const y = Number.isFinite(dy) ? dy : 0;
+  const fw = Number.isFinite(frameW) && frameW > 1 ? frameW : CRT_FRAME_W;
+  const fh = Number.isFinite(frameH) && frameH > 1 ? frameH : CRT_FRAME_H;
+  const w = Number.isFinite(displayW) && displayW > 1 ? displayW : fw;
+  const h = Number.isFinite(displayH) && displayH > 1 ? displayH : fh;
+  return { dx: x * (fw / w), dy: y * (fh / h) };
+}
+
+export function crtDisplayBox(root?: ParentNode | Document | null): { w: number; h: number } {
+  const doc = root ?? (typeof document !== "undefined" ? document : null);
+  const canvas = doc?.querySelector?.(".g64-screen canvas") as HTMLElement | null;
+  const screen = doc?.querySelector?.(".g64-screen") as HTMLElement | null;
+  const el = canvas && canvas.getBoundingClientRect().width > 1 ? canvas : screen;
+  const r = el?.getBoundingClientRect?.();
+  if (r && r.width > 1 && r.height > 1) return { w: r.width, h: r.height };
+  return { w: CRT_FRAME_W, h: CRT_FRAME_H };
+}

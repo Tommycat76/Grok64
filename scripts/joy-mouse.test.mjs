@@ -9,6 +9,7 @@ const {
   feedVice1351Buttons,
   feedVice1351Plug,
   vice1351Direct,
+  vicePortDeviceOptions,
 } = await server.ssrLoadModule("/src/lib/emu/host.ts");
 const { viceExpandOptions } = await server.ssrLoadModule("/src/lib/emu/expand.ts");
 const { useEmu } = await server.ssrLoadModule("/src/lib/emu/store.ts");
@@ -57,4 +58,13 @@ test("mouse extras put a 1351 on the chosen port; the core keeps a joystick on t
 
 test("keyboard joystick is off unless the user turns it on", () => {
   assert.equal(useEmu.getState().wasdIsJoy, false);
+});
+
+test("saved port keeps a 1351 when the mouse is on (cart load must not force joystick)", () => {
+  const on1 = vicePortDeviceOptions(1, true);
+  assert.equal(on1.vice_joyport, "1");
+  assert.equal(on1.vice_joyport_type, "3");
+  const off2 = vicePortDeviceOptions(2, false);
+  assert.equal(off2.vice_joyport, "2");
+  assert.equal(off2.vice_joyport_type, "1");
 });

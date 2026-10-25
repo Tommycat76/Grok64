@@ -8,7 +8,10 @@ const {
   analogAxesForDeltas,
   addMouse1351Delta,
   createMouse1351Accum,
+  CRT_FRAME_H,
+  CRT_FRAME_W,
   dpadForAxes,
+  hostDragTo1351,
   takeMouse1351Frame,
 } = await server.ssrLoadModule("/src/lib/emu/mouse-1351.ts");
 await server.close();
@@ -45,4 +48,20 @@ test("nonzero analog axes hold the D-pad bits vice-libretro maps to 1351 POT", (
   assert.deepEqual(dpadForAxes(0, 0), { left: false, right: false, up: false, down: false });
   assert.deepEqual(dpadForAxes(0.2, -0.4), { left: false, right: true, up: true, down: false });
   assert.deepEqual(dpadForAxes(-1, 1), { left: true, right: false, up: false, down: true });
+});
+
+test("host drag is 1:1 on a native 384×272 CRT and equal on both axes", () => {
+  const native = hostDragTo1351(12, -12, CRT_FRAME_W, CRT_FRAME_H);
+  assert.equal(native.dx, 12);
+  assert.equal(native.dy, -12);
+  const wide = hostDragTo1351(20, 20, 768, 544);
+  assert.equal(wide.dx, 10);
+  assert.equal(wide.dy, 10);
+});
+
+test("a taller-than-native box does not give vertical extra gain", () => {
+  const { dx, dy } = hostDragTo1351(10, 10, 384, 400);
+  assert.ok(Math.abs(dx - 10) < 1e-9);
+  assert.ok(dy < 10);
+  assert.ok(Math.abs(dy - 10 * (CRT_FRAME_H / 400)) < 1e-9);
 });
