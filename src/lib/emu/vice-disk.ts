@@ -4,7 +4,7 @@
  */
 import { glog } from "./debug";
 import type { IecUnit } from "./types";
-import { d64DiskName, isGcrDiskKind, kindOf } from "./formats";
+import { floppyDiskName, isGcrDiskKind, kindOf } from "./formats";
 import { diskAttachFingerprint, type DiskAttachFingerprint } from "./disk-attach-diag";
 import {
   grok64DiskApi,
@@ -62,6 +62,60 @@ const WORK_DISK_PATHS = [
 /** Flat MEMFS path for grok64_disk_attach (avoids spaced save dir + stale same-path refresh). */
 export function grok64IecAttachD64Path(unit: IecUnit): string {
   return `/data/saves/grok64_iec${unit}.d64`;
+}
+
+export function grok64IecAttachD81Path(unit: IecUnit): string {
+  return `/data/saves/grok64_iec${unit}.d81`;
+}
+
+/** grok64_disk_attach rc when the unit's true drive cannot read the image type (core GROK64_ATTACH_WRONG_DRIVE). */
+export const VICE_ATTACH_WRONG_DRIVE = -97;
+
+/** VICE DriveNType values: 1581 and CMD FD-2000/4000 read MFM (.d81); the rest of the IEC family GCR. */
+const MFM_DRIVE_TYPES = new Set([1581, 2000, 4000]);
+const GCR_FLOPPY_DRIVE_TYPES = new Set([1540, 1541, 1542, 1570, 1571]);
+
+/**
+ * Drive type to set on a unit before attaching an image of `kind`, or null to keep the live one.
+ * A .d81 needs a 1581-class drive; a .d64/.g64 left on a 1581 (or a stale CMD HD) gets a 1541.
+ * Type 0 (no drive) is left to the core, which makes it a 1541 on attach.
+ */
+export function driveTypeForAttach(kind: ReturnType<typeof kindOf>, liveType: number | null): number | null {
+  if (liveType == null) return null;
+  if (kind === "d81") return MFM_DRIVE_TYPES.has(liveType) ? null : 1581;
+  if (kind === "d64" || kind === "g64") {
+    return liveType === 0 || GCR_FLOPPY_DRIVE_TYPES.has(liveType) ? null : 1541;
+  }
+  return null;
+}
+
+/** True when the live drive on `unit` reads MFM (.d81) disks. */
+export function viceUnitIsMfmDrive(emu: ViceDiskEmu | null, unit: IecUnit): boolean {
+  const mod = diskMod(emu);
+  if (mod) bindGrok64DiskExports(mod, emu);
+  const type = grok64DiskApi(mod)?.driveUnitType?.(unit);
+  return typeof type === "number" && MFM_DRIVE_TYPES.has(type);
+}
+
+/**
+ * Writing DriveNType detaches the unit's disks and resets its drive CPU, so the type the image
+ * needs is set before the attach, never after. Returns 0, or the core's negative rc.
+ */
+export function prepareDriveForAttach(emu: ViceDiskEmu | null, unit: IecUnit, path: string): number {
+  const mod = diskMod(emu);
+  if (!mod) return 0;
+  bindGrok64DiskExports(mod, emu);
+  const api = grok64DiskApi(mod);
+  const live = api?.driveUnitType?.(unit) ?? null;
+  const want = driveTypeForAttach(kindOf(path), live);
+  if (want == null) return 0;
+  if (!api?.driveSetType) {
+    glog("vice-drive-set-type-missing", { unit, live, want, path });
+    return -99;
+  }
+  const rc = api.driveSetType(unit, want);
+  glog("vice-drive-set-type", { unit, live, want, rc, after: api.driveUnitType?.(unit) ?? null, path });
+  return rc < 0 ? rc : 0;
 }
 
 export type ViceDiskAttachRecord = {
@@ -314,8 +368,8 @@ export function viceDiskAttachPathUniverse(
     }
   };
   const saveDir = viceRetroSaveDirectory(emu);
-  if (isGcrDiskKind(kind)) {
-    push(grok64IecAttachD64Path(unit));
+  if (kind === "d81") push(grok64IecAttachD81Path(unit));
+  if (attachesOwnImageOnly(kind)) {
     push(`/${base}`);
     push(base);
   } else {
@@ -327,6 +381,11 @@ export function viceDiskAttachPathUniverse(
     push("/data/saves/vice_work.d64");
   }
   return out;
+}
+
+/** The .d64 mirrors hold the last D64 put on the unit, so a .d81/.d71/.g64/.g71 never falls back to them. */
+export function attachesOwnImageOnly(kind: ReturnType<typeof kindOf>): boolean {
+  return kind === "d81" || kind === "d71" || isGcrDiskKind(kind);
 }
 
 /** About: all candidate paths + JS/WASM byte probes (not filtered). */
@@ -357,8 +416,8 @@ export function viceDiskAttachCandidates(
 
   const saveDir = viceRetroSaveDirectory(emu);
 
-  if (isGcrDiskKind(kind)) {
-    push(grok64IecAttachD64Path(unit));
+  if (kind === "d81") push(grok64IecAttachD81Path(unit));
+  if (attachesOwnImageOnly(kind)) {
     push(`/${base}`);
     push(base);
   } else {
@@ -376,7 +435,7 @@ export function viceDiskAttachCandidates(
   const filtered = out.filter((p) => pathVisibleToWasm(emu, p) && pathHasAttachableBytes(emu, p));
   if (filtered.length) return filtered;
   const iecPath = grok64IecAttachD64Path(unit);
-  if (pathHasAttachableBytes(emu, iecPath)) return [iecPath];
+  if (!attachesOwnImageOnly(kind) && pathHasAttachableBytes(emu, iecPath)) return [iecPath];
   return [];
 }
 
@@ -454,6 +513,11 @@ function viceReattachDiskSync(
   const api = grok64DiskApi(mod);
   if (!api?.diskAttach) return -99;
   try {
+    const typeRc = prepareDriveForAttach(emu, unit, path);
+    if (typeRc < 0) {
+      lastAttachByUnit.set(unit, { path, rc: typeRc, before: null, after: null, at: Date.now() });
+      return typeRc;
+    }
     api.diskDetach?.(unit, drive);
     let rc = api.diskAttach(unit, drive, path) ?? -1;
     const attachRc = api.diskLastAttachRc?.();
@@ -703,8 +767,9 @@ function nextFrame(): Promise<void> {
 
 /**
  * Hold a floppy mount until the drive DOS can answer the bus. Any drive CPU reset (drive type
- * write, power-on) restarts the drive clock at 0; an ATN edge sent while the DOS is still in its
+ * write, power-on) restarts the drive clock at 0; an ATN edge sent while 1541 DOS is still in its
  * power-on test is never seen, so a LOAD typed then hangs at SEARCHING with DATA held low.
+ * A 1581 latches ATN on its CIA FLAG input and answers once its DOS is up, so it needs no wait.
  */
 export async function waitDriveFirmwareReady(
   emu: ViceDiskEmu | null,
@@ -782,14 +847,14 @@ export function viceDriveLiveProbe(emu: ViceDiskEmu | null, unit: IecUnit = 8, d
     try {
       const raw = FS?.readFile?.(attachPath);
       if (raw instanceof Uint8Array && raw.byteLength >= 174848) {
-        fsPathLabel = d64DiskName(raw);
+        fsPathLabel = floppyDiskName(raw);
       }
     } catch {
       /* */
     }
   }
   const ses = sessionDiskOnUnit(unit);
-  const sessionLabel = ses?.bytes ? d64DiskName(ses.bytes) : null;
+  const sessionLabel = ses?.bytes ? floppyDiskName(ses.bytes) : null;
   return {
     attachPath,
     fsPathLabel,

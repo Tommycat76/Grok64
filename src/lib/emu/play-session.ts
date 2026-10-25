@@ -1,6 +1,7 @@
 import type { IecDrive, IecMap, IecSlot, IecUnit, MediaKind } from "./types";
 import { IEC_UNITS } from "./types";
 import {
+  floppyMechanismFor,
   floppyPlayCanHotSwap,
   iecForAutostart,
   isCartridgePayload,
@@ -770,6 +771,44 @@ export function mapHasDrive(map: IecMap | null | undefined, drive: IecDrive): bo
 export function iecMapUnitIsSd2iec(map: IecMap | null | undefined, unit: IecUnit): boolean {
   const merged: IecMap = { ...defaultIecMap(), ...map };
   return merged[unit] === "sd2iec";
+}
+
+export function iecSlotOn(map: IecMap | null | undefined, unit: IecUnit): IecSlot {
+  const merged: IecMap = { ...defaultIecMap(), ...map };
+  return merged[unit];
+}
+
+const IEC_SLOT_NAME: Record<IecSlot, string> = {
+  "1541": "a 1541",
+  "1581": "a 1581",
+  sd2iec: "an SD2IEC",
+  cmdhd: "a CMD HD",
+  none: "not set up",
+};
+
+/**
+ * Library Insert onto the drive Settings put on `unit`: a 1581 reads only 3.5″ .d81 disks, a 1541
+ * only 5.25″ ones, and Grok64 has no 1571 for double-sided images. Returns the message for the
+ * user when the drive cannot take the disk, so the previous disk stays in.
+ */
+export function floppyInsertRejection(
+  kind: MediaKind,
+  map: IecMap | null | undefined,
+  unit: IecUnit,
+): string | null {
+  const need = floppyMechanismFor(kind);
+  if (!need) return null;
+  const slot = iecSlotOn(map, unit);
+  if (need === "1571") {
+    return `A .${kind} is a double-sided 1571 disk. Grok64's floppy drives are the 1541 and 1581, which can't read it.`;
+  }
+  if (need === "1581" && slot !== "1581") {
+    return `Drive #${unit} is ${IEC_SLOT_NAME[slot]}. A .d81 is a 3.5″ disk for a 1581: set #${unit} to 1581 in Settings → IEC drives, then insert it again.`;
+  }
+  if (need === "1541" && slot === "1581") {
+    return `Drive #${unit} is a 1581, which reads 3.5″ .d81 disks, not a 5.25″ .${kind}. Set #${unit} to 1541 in Settings → IEC drives, then insert it again.`;
+  }
+  return null;
 }
 
 export function unitOfDrive(map: IecMap | null | undefined, drive: IecDrive): IecUnit | null {

@@ -1,6 +1,7 @@
 import {
   d64DiskName,
   D64_STANDARD_SIZE,
+  floppyDiskName,
   isAcceptedD64ByteLength,
   isGcrDiskKind,
   isLikelyBlankD64Payload,
@@ -36,7 +37,7 @@ export async function diskAttachFingerprint(bytes: Uint8Array, fileName = ""): P
   return {
     size: bytes.byteLength,
     sha1: await sha1Hex(bytes),
-    diskLabel: bytes.byteLength >= D64_STANDARD_SIZE ? d64DiskName(bytes) : null,
+    diskLabel: bytes.byteLength >= D64_STANDARD_SIZE ? floppyDiskName(bytes) : null,
     dir18s1Hex: dir ? [...dir].map((b) => b.toString(16).padStart(2, "0")).join("") : null,
     kind: kindOf(fileName),
   };

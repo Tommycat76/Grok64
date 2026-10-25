@@ -228,6 +228,7 @@ import {
   markSessionReady,
   planPlay,
   CART_PLAY_UNLOCK_VICE_OPTS,
+  floppyInsertRejection,
   viceGeosFloppyOptions,
   readPlayMarker,
   savePlayMarker,
@@ -282,7 +283,7 @@ import {
   bootFileName,
   resolvePlayBootName,
   driveForPlay,
-  d64DiskName,
+  floppyDiskName,
   isBasicPrg,
   isCartridgePayload,
   isDiskKind,
@@ -723,7 +724,7 @@ export function Grok64App() {
         readMountedMediaForUi(emuRef.current, useEmu.getState().insertedDiskName).map((m) => ({
           name: m.name,
           size: m.data.byteLength,
-          disk: d64DiskName(m.data),
+          disk: floppyDiskName(m.data),
         })),
       setWarp: (on) => {
         useEmu.getState().setWarped(!!on);
@@ -3714,11 +3715,17 @@ export function Grok64App() {
       toast.error("Power on first, then insert the next disk.");
       return;
     }
+    const unit = item.iecUnit ?? useEmu.getState().iecUnit;
+    const wrongDrive = floppyInsertRejection(kind, useEmu.getState().iecMap, unit);
+    if (wrongDrive) {
+      glog("library-insert-wrong-drive", { name: file.name, kind, unit, slot: useEmu.getState().iecMap?.[unit] ?? null });
+      toast.error(wrongDrive);
+      return;
+    }
     playModeRef.current = "disk";
     cartLiveRef.current = false;
     setCartLive(false);
     useEmu.getState().setFastLoadCart(null);
-    const unit = item.iecUnit ?? useEmu.getState().iecUnit;
     setC64KeyboardDefer(true);
     const iec = useEmu.getState().iecDrive;
     const boot = bootFileName(file.name, kind);
@@ -3766,7 +3773,7 @@ export function Grok64App() {
       flushDeferredC64Keyboard(emuRef.current);
     }
     await touchPlayed(item.id);
-    const bam = d64DiskName(media);
+    const bam = floppyDiskName(media);
     const genericBam = !bam || /^work\s*disk/i.test(bam) || /^system$/i.test(bam.trim());
     const label = genericBam
       ? item.name.replace(/\.[a-z0-9]{2,4}$/i, "")

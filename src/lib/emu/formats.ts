@@ -131,15 +131,48 @@ export function isGcrDiskKind(kind: MediaKind): boolean {
   return kind === "g64" || kind === "g71";
 }
 
-const D64_BAM = 17 * 21 * 256;
+/** Drive mechanism a floppy image is for: 5.25″ single-sided (1541), double-sided (1571), 3.5″ (1581). */
+export type FloppyMechanism = "1541" | "1571" | "1581";
 
-export function d64DiskName(data: Uint8Array): string | null {
-  if (data.byteLength < D64_BAM + 0xa0) return null;
-  const raw = data.subarray(D64_BAM + 0x90, D64_BAM + 0xa0);
+export function floppyMechanismFor(kind: MediaKind): FloppyMechanism | null {
+  if (kind === "d64" || kind === "g64") return "1541";
+  if (kind === "d71" || kind === "g71") return "1571";
+  if (kind === "d81") return "1581";
+  return null;
+}
+
+/** 80 tracks × 40 sectors; +3200 bytes when the image carries an error-info table. */
+export const D81_STANDARD_SIZE = 819200;
+const D81_SIZE_WITH_ERROR = D81_STANDARD_SIZE + 3200;
+
+export function isAcceptedD81ByteLength(byteLength: number): boolean {
+  return byteLength === D81_STANDARD_SIZE || byteLength === D81_SIZE_WITH_ERROR;
+}
+
+const D64_BAM = 17 * 21 * 256;
+/** 1581 header sector, track 40 sector 0. */
+const D81_HEADER = 39 * 40 * 256;
+
+function petsciiDiskName(raw: Uint8Array): string | null {
   let s = "";
   for (const b of raw) s += String.fromCharCode(b === 0xa0 ? 32 : b & 0x7f);
   const name = s.replace(/\0/g, " ").trim();
   return name || null;
+}
+
+export function d64DiskName(data: Uint8Array): string | null {
+  if (data.byteLength < D64_BAM + 0xa0) return null;
+  return petsciiDiskName(data.subarray(D64_BAM + 0x90, D64_BAM + 0xa0));
+}
+
+/** The 1581 keeps the disk name at $04 of its header sector, not at the 1541 BAM's $90. */
+export function d81DiskName(data: Uint8Array): string | null {
+  if (data.byteLength < D81_HEADER + 0x14) return null;
+  return petsciiDiskName(data.subarray(D81_HEADER + 0x04, D81_HEADER + 0x14));
+}
+
+export function floppyDiskName(data: Uint8Array): string | null {
+  return isAcceptedD81ByteLength(data.byteLength) ? d81DiskName(data) : d64DiskName(data);
 }
 
 export function isWorkDiskImage(data: ArrayBuffer | Uint8Array): boolean {

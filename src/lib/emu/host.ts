@@ -85,10 +85,15 @@ import {
   viceDiskLastAttachDiag,
   viceBusSerialRoutingOk,
   viceDriveBusProbe,
+  grok64IecAttachD81Path,
+  prepareDriveForAttach,
+  viceUnitIsMfmDrive,
+  attachesOwnImageOnly,
 } from "./vice-disk";
 import { writeC64Bytes } from "./c64-memory";
 import {
   isAcceptedD64ByteLength,
+  isAcceptedD81ByteLength,
   isCartridgePayload,
   isGcrDiskKind,
   kindOf,
@@ -1698,7 +1703,10 @@ export async function bmc64FlushSessionDisk(
     bus.wasmGcrLoaded === 1 &&
     bus.serialDeviceLabel !== "virt";
   if (!tdeLive) {
-    injectViceRc(emu, viceRcFloppyIsolateProfile(unit, iecMap));
+    // The isolate profile pins a 1541 on the unit for the next core start; a .d81 needs its 1581.
+    if (kindOf(slot?.name ?? unitMounts.get(unit) ?? "") !== "d81") {
+      injectViceRc(emu, viceRcFloppyIsolateProfile(unit, iecMap));
+    }
     const rc = await viceReattachSessionDisk(emu, unit);
     if (rc < 0) return rc;
     return 0;
@@ -1722,6 +1730,7 @@ export async function finishFloppyInsertIec(
 ): Promise<number> {
   if (!emu) return -1;
   if (iecMapUnitIsSd2iec(iecMap, unit)) return 0;
+  if (kindOf(sessionDiskOnUnit(unit)?.name ?? "") === "d81") return finishMfmFloppyInsertIec(emu, unit, iecMap);
   const merged: IecMap | undefined = iecMap
     ? { ...defaultIecMap(), ...iecMap, [unit]: "1541" }
     : undefined;
@@ -1760,6 +1769,31 @@ export async function finishFloppyInsertIec(
   }
   if (bus.serialDeviceLabel !== "real") {
     glog("finish-floppy-insert-iec-serial-miss", { unit, bus });
+    return -1;
+  }
+  ensureViceLastAttachRecorded(emu, unit);
+  return 0;
+}
+
+/** A 1581 reads the .d81 through its WD1770, so there is no GCR track buffer to check, only the drive and image. */
+async function finishMfmFloppyInsertIec(emu: EjsInstance, unit: IecUnit, iecMap?: IecMap): Promise<number> {
+  if (iecMap) {
+    restoreUserDriveVicerc(emu, { ...defaultIecMap(), ...iecMap });
+    await waitRetroFrames(18);
+  }
+  const busRc = await ensureIecBusReconcile(emu, unit, iecMap, { lightVicerc: true, skipReload: true });
+  if (busRc < 0) return busRc;
+  const mod = grok64DiskModule(emu);
+  if (mod) bindGrok64DiskExports(mod, emu);
+  const imageBytes = grok64DiskApi(mod)?.driveImageBytes?.(unit, 0) ?? null;
+  const bus = viceDriveBusProbe(emu, unit);
+  if (!viceUnitIsMfmDrive(emu, unit) || !isAcceptedD81ByteLength(imageBytes ?? 0) || bus.serialDeviceLabel !== "real") {
+    glog("finish-floppy-insert-iec-mfm-miss", {
+      unit,
+      type: grok64DiskApi(mod)?.driveUnitType?.(unit) ?? null,
+      imageBytes,
+      bus,
+    });
     return -1;
   }
   ensureViceLastAttachRecorded(emu, unit);
@@ -2531,6 +2565,16 @@ export function applyIecUnitFloppy(
   unit: IecUnit,
   diskKind: ReturnType<typeof kindOf> | null,
 ) {
+  if (diskKind === "d81") {
+    // libretro's `N_d81` work disk would attach a blank vice_work.d81 over the session disk.
+    applyRuntimeOptions(emu, {
+      vice_work_disk: "disabled",
+      vice_drive_true_emulation: "enabled",
+      vice_virtual_device_traps: "disabled",
+    });
+    rememberWorkDisk("disabled");
+    return;
+  }
   if (diskKind && isGcrDiskKind(diskKind)) {
     applyRuntimeOptions(emu, {
       [`vice_drive${unit}_type`]: iec === "1581" ? "1581" : "1541",
@@ -2622,6 +2666,10 @@ export function resyncSessionDiskToVice(emu: EjsInstance | null, unit: IecUnit =
     applyIecUnitFloppy(emu, "1541", unit, k);
     return true;
   }
+  if (k === "d81" && isAcceptedD81ByteLength(slot.bytes.byteLength)) {
+    writeFsFile(emu, grok64IecAttachD81Path(unit), slot.bytes);
+    return true;
+  }
   if (/\.d64$/i.test(target) && isAcceptedD64ByteLength(slot.bytes.byteLength)) {
     syncViceWorkD64(emu, slot.bytes, unit);
     writeFsFile(emu, grok64IecAttachD64Path(unit), slot.bytes);
@@ -2643,6 +2691,12 @@ export async function viceReattachDiskOnEmuThread(
     const mod = grok64DiskModule(emu) ?? (emu.Module as Parameters<typeof bindGrok64WasmExports>[0]);
     bindGrok64DiskExports(mod, emu);
     const api = grok64DiskApi(mod);
+    const typeRc = prepareDriveForAttach(emu, unit, path);
+    if (typeRc < 0) {
+      recordViceLastAttach(unit, { path, rc: typeRc, before: null, after: null, at: Date.now() });
+      glog("vice-disk-reattach", { unit, path, rc: typeRc, diag: viceDiskLastAttachDiag(emu), stage: "set-type" });
+      return typeRc;
+    }
     api?.diskDetach?.(unit, drive);
     let rc = api?.diskAttach?.(unit, drive, path) ?? -1;
     const attachRc = api?.diskLastAttachRc?.();
@@ -2741,7 +2795,7 @@ export async function viceReattachSessionDisk(emu: EjsInstance | null, unit: Iec
   await flushEmuFs(emu, isIosPhone() ? 2000 : 800);
   const path = resolveViceDiskAttachPath(emu, unit, name);
   let candidates = viceDiskAttachCandidates(emu, unit, name);
-  if (!candidates.length) {
+  if (!candidates.length && !attachesOwnImageOnly(kindOf(name))) {
     for (const fallback of [
       "/data/saves/vice_work.d64",
       viceRetroSaveDirectory(emu) ? `${viceRetroSaveDirectory(emu)}/vice_work.d64` : null,

@@ -16,7 +16,21 @@ import type { IecDrive, IecUnit } from "./types";
 import { isIosPhone } from "./detect";
 import { glog } from "./debug";
 import { runMountStage } from "./disk-mount-stage";
-import { ensureViceLastAttachRecorded, lastViceDiskAttach, waitDriveFirmwareReady } from "./vice-disk";
+import {
+  ensureViceLastAttachRecorded,
+  lastViceDiskAttach,
+  VICE_ATTACH_WRONG_DRIVE,
+  viceDiskLastAttachDiag,
+  waitDriveFirmwareReady,
+} from "./vice-disk";
+
+function reattachFailure(emu: EjsInstance, unit: IecUnit, rc: number): Error {
+  if (rc === VICE_ATTACH_WRONG_DRIVE) {
+    return new Error(`Drive #${unit} rejected the disk (${viceDiskLastAttachDiag(emu) ?? "wrong drive type for this image"})`);
+  }
+  const last = lastViceDiskAttach(unit);
+  return new Error(`VICE disk reattach failed (rc=${rc})${last ? ` path=${last.path} attachRc=${last.rc}` : ""}`);
+}
 
 /**
  * After a disk image is on unit 8: true drive, hard reset to bare READY.
@@ -41,10 +55,7 @@ export async function presentFloppyMountReady(
     const rc = await runMountStage("vice-reattach-session", () =>
       ensureViceSessionDiskAttached(emu, live.unit, diskKind),
     60_000);
-    if (rc !== 0) {
-      const last = lastViceDiskAttach(live.unit);
-      throw new Error(`VICE disk reattach failed (rc=${rc})${last ? ` path=${last.path} attachRc=${last.rc}` : ""}`);
-    }
+    if (rc !== 0) throw reattachFailure(emu, live.unit, rc);
     ensureViceLastAttachRecorded(emu, live.unit);
     await runMountStage("flush-after-reattach", () => flushEmuFs(emu, isIosPhone() ? 2000 : 400));
     ensureViceLastAttachRecorded(emu, live.unit);
@@ -72,12 +83,7 @@ export async function presentFloppyMountReady(
   const rcCold = await runMountStage("vice-reattach-session", () =>
     ensureViceSessionDiskAttached(emu, live.unit, diskKind),
   60_000);
-  if (rcCold !== 0) {
-    const last = lastViceDiskAttach(live.unit);
-    throw new Error(
-      `VICE disk reattach failed (rc=${rcCold})${last ? ` path=${last.path} attachRc=${last.rc}` : ""}`,
-    );
-  }
+  if (rcCold !== 0) throw reattachFailure(emu, live.unit, rcCold);
   ensureViceLastAttachRecorded(emu, live.unit);
   await runMountStage("drive-firmware-ready", () => waitDriveFirmwareReady(emu, live.unit));
   bumpCrtPaint(emu);
