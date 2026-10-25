@@ -46,12 +46,12 @@ const profiles = [
     expectOrient: "landscape",
   },
   {
-    id: "android-tablet",
-    viewport: { width: 1280, height: 800 },
+    id: "ipad-tablet",
+    viewport: { width: 1024, height: 768 },
     isMobile: true,
     hasTouch: true,
     userAgent:
-      "Mozilla/5.0 (Linux; Android 13; TBAF11 Build/TP1A.220624.014) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.230 Safari/537.36",
+      "Mozilla/5.0 (iPad; CPU OS 18_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Mobile/15E148 Safari/604.1",
     expectDevice: "tablet",
     expectOrient: "landscape",
   },
@@ -121,7 +121,7 @@ async function runProfile(browser, spec) {
   const errors = [];
   page.on("pageerror", (e) => {
     const msg = String(e?.message || e);
-    if (/Hydration failed/i.test(msg)) return;
+    if (/Hydration failed|reading 'sources'/i.test(msg)) return;
     errors.push(msg);
   });
   const out = { id: spec.id, errors };

@@ -30,7 +30,8 @@ test("a connected pad does not hide the on-screen stick", () => {
 test("phone 1351 dock stacks so the stick still fits, and landscape sits above the dock", () => {
   assert.match(css, /data-device="phone"\] \.g64-controls-mouse\[data-stick="true"\]/);
   assert.match(css, /grid-template-rows: auto auto/);
-  assert.match(css, /bottom: max\(52px, calc\(env\(safe-area-inset-bottom, 0px\) \+ 44px\)\)/);
+  assert.match(css, /bottom: calc\(60px \+ env\(safe-area-inset-bottom, 0px\)\)/);
+  assert.match(css, /data-device="phone"\]:not\(\[data-kb="true"\]\) \.g64-dock/);
   assert.match(css, /\.g64-stick::before/);
   assert.match(css, /inset: -22px/);
 });

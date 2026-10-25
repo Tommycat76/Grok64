@@ -1894,7 +1894,7 @@ div[class*="ejs_virtual"] {
   .g64-app[data-orient="landscape"]:not([data-kb="true"]) .g64-controls {
     left: 8px;
     right: 8px;
-    bottom: max(52px, calc(env(safe-area-inset-bottom, 0px) + 44px));
+    bottom: calc(60px + env(safe-area-inset-bottom, 0px));
     width: auto;
     grid-template-columns: 1fr auto;
     min-height: 0;
@@ -2326,6 +2326,23 @@ div[class*="ejs_virtual"] {
   background: transparent;
   border-top: 0;
   padding: 0;
+}
+
+/* Phone/tablet: pin the Quick Dock to the bottom and keep the stick above it. */
+.g64-app[data-device="phone"]:not([data-kb="true"]) .g64-dock,
+.g64-app[data-device="tablet"]:not([data-kb="true"]) .g64-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 35;
+}
+.g64-app[data-device="phone"]:not([data-kb="true"]) .g64-controls,
+.g64-app[data-device="tablet"]:not([data-kb="true"]) .g64-controls,
+.g64-app[data-orient="landscape"][data-device="phone"]:not([data-kb="true"]) .g64-controls,
+.g64-app[data-orient="landscape"][data-device="tablet"]:not([data-kb="true"]) .g64-controls {
+  bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+  z-index: 40;
 }
 
 .g64-app[data-device="desktop"] .g64-controls {
