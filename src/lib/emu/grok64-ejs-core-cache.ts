@@ -564,7 +564,14 @@ export async function qaSeedStaleEmulatorJsCoreCacheRow(): Promise<{ key: string
   return { key, url: staleUrl };
 }
 
-export async function maybeAutoRefreshStaleEmulatorCore(emu: { Module?: unknown } | null): Promise<boolean> {
+/**
+ * `coreStarted: false` when only the glue has been seen (EmulatorJS `initGameCore`): the WASM is not
+ * instantiated yet, so missing exports say nothing about staleness and must not force a reload.
+ */
+export async function maybeAutoRefreshStaleEmulatorCore(
+  emu: { Module?: unknown } | null,
+  { coreStarted = true }: { coreStarted?: boolean } = {},
+): Promise<boolean> {
   if (!grok64ViceCoreRoot() || !GROK64_CORE_BUILD_ID) return false;
   if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(AUTO_RELOAD_SS)) return false;
 
@@ -599,7 +606,8 @@ export async function maybeAutoRefreshStaleEmulatorCore(emu: { Module?: unknown 
     !glue.glueHasDiskExports ||
     glueShaMismatch ||
     (glue.glueSha12 != null && !matches) ||
-    (glue.glueHasDiskExports &&
+    (coreStarted &&
+      glue.glueHasDiskExports &&
       glue.glueSha12 === GROK64_CORE_GLUE_SHA12 &&
       GROK64_CORE_GLUE_SHA12 &&
       !exportsOk);

@@ -623,7 +623,7 @@ export function Grok64App() {
     patchIndexedDbForEmulatorJsCache();
     patchGrok64DataFetchInstrumentation();
     const onGlueSha = () => {
-      void maybeAutoRefreshStaleEmulatorCore(emuRef.current);
+      void maybeAutoRefreshStaleEmulatorCore(emuRef.current, { coreStarted: false });
     };
     window.addEventListener("grok64-core-glue-sha", onGlueSha);
     void listLibrary()
