@@ -644,6 +644,63 @@ function onGeosWord(g) {
   return Boolean(g && g.x >= 8 && g.x <= 24 && g.y >= 0 && g.y <= 16);
 }
 
+/** Pointer on the geos menu's select input line (4th item; GEOS info / deskTop info / select printer / select input). */
+function onSelectInputItem(g) {
+  return Boolean(g && g.x < 90 && g.y >= 48 && g.y <= 72);
+}
+
+/** Gutter blob on an open menu — do not pulse, pulsing walks off the item. */
+function findMenuPointer(img) {
+  const c = contentRect(img);
+  if (!c) return null;
+  const { data, width } = img;
+  const rows = [];
+  for (let gy = 16; gy < 110; gy++) {
+    let n = 0;
+    let sx = 0;
+    for (let gx = 1; gx < 12; gx++) {
+      const x = Math.round(c.x + (gx / 320) * c.w);
+      const y = Math.round(c.y + (gy / 200) * c.h);
+      const i = (y * width + x) * 4;
+      if (data[i] + data[i + 1] + data[i + 2] < 200) {
+        n += 1;
+        sx += gx;
+      }
+    }
+    rows.push({ y: gy, n, x: n ? sx / n : 0 });
+  }
+  const ranked = [...rows].sort((a, b) => a.n - b.n);
+  const med = ranked[Math.floor(ranked.length / 2)]?.n ?? 0;
+  const best = rows.reduce((a, b) => (b.n > a.n ? b : a), rows[0]);
+  if (!best || best.n < 3 || best.n < med + 2) return null;
+  return { x: best.x, y: best.y, n: best.n, med };
+}
+
+/** geos info is a prose box. select input is a driver list with OK/Cancel. */
+function looksLikeAboutBox(img) {
+  const c = contentRect(img);
+  if (!c) return false;
+  const { data, width } = img;
+  let white = 0;
+  let dark = 0;
+  let n = 0;
+  for (let gy = 36; gy < 150; gy++) {
+    for (let gx = 70; gx < 250; gx++) {
+      const x = Math.round(c.x + (gx / 320) * c.w);
+      const y = Math.round(c.y + (gy / 200) * c.h);
+      const i = (y * width + x) * 4;
+      const s = data[i] + data[i + 1] + data[i + 2];
+      n += 1;
+      if (s > 600) white += 1;
+      else if (s < 240) dark += 1;
+    }
+  }
+  if (n < 200) return false;
+  const wf = white / n;
+  const df = dark / n;
+  return wf > 0.45 && df > 0.04 && df < 0.22;
+}
+
 /** Dropdown left edge: geos ~5, file ~32, view ~70. */
 function openedMenuKind(before, after) {
   if (!before?.img || !after?.img) return { kind: "none" };
@@ -697,15 +754,15 @@ async function landOnGeosWord(hand) {
     [-1, 0],
     [1, 0],
   ];
-  // Menu bar first, then a long left. Short hops from "select" died at x≈110.
-  await holdJoy(hand, 0, -1, 1600);
-  await holdJoy(hand, -1, 0, 1800);
-  await holdJoy(hand, 1, 0, 50);
   for (let i = 0; i < 24; i++) {
     const snap = await snapshot(hand.page);
     const lastX = trace.hops.length ? trace.hops[trace.hops.length - 1].x : 200;
     const loc = await locatePointer(hand, { dirs: horiz, pulseMs: lastX <= 40 ? 22 : 40 });
     const g = toGeos(loc, snap.img);
+    if (g && lastX < 80 && Math.abs(g.x - lastX) > 40) {
+      await holdJoy(hand, -1, 0, 40);
+      continue;
+    }
     if (g) trace.hops.push({ i, x: +g.x.toFixed(1), y: +g.y.toFixed(1) });
     if (onGeosWord(g)) {
       trace.landed = g;
@@ -1022,35 +1079,44 @@ async function activateGeos1351(hand) {
   if (out.menu.kind !== "geos") {
     out.steps.push("geos-menu-fail");
   } else {
-    // geos info → select printer → select input (a fourth down is RESET).
-    await holdJoy(hand, 0, 1, 90);
-    await holdJoy(hand, 0, 1, 90);
-    await holdJoy(hand, 0, 1, 90);
-    await clickJoy(hand);
-    await sleep(900);
-    out.steps.push("select-input-menu");
+    out.menuWalk = [];
+    for (let i = 0; i < 6; i++) {
+      const row = await snapshot(hand.page);
+      await savePng(hand.shotDir(), `10-1351-menu-walk-${i}.png`, row.b64);
+      if (looksLikeAboutBox(row.img)) {
+        out.steps.push("about-box");
+        await clickJoy(hand);
+        await sleep(250);
+        break;
+      }
+      if (i > 0 && (looksLikeDialog(before, row) || looksLikeCenteredDialog(before, row))) {
+        out.steps.push("select-input-menu");
+        break;
+      }
+      const ptr = findMenuPointer(row.img);
+      if (ptr) out.menuWalk.push({ i, x: +ptr.x.toFixed(1), y: ptr.y, n: ptr.n, med: ptr.med });
+      // Last open already sat on select input. A missed gutter read still clicks once.
+      const alreadyThere = onSelectInputItem(ptr) || (i === 0 && !ptr);
+      if (alreadyThere || i === 4) {
+        await clickJoy(hand);
+        await sleep(900);
+        out.steps.push(alreadyThere ? "select-input-menu" : "select-input-after-walk");
+        break;
+      }
+      if (ptr && ptr.y > 72) await holdJoy(hand, 0, -1, 36);
+      else await holdJoy(hand, 0, 1, 36);
+      await sleep(140);
+    }
   }
   let dlg = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-page-menu.png", dlg.b64);
   await hand.shot("10-1351-select-input.png");
-  const onGeos = Boolean(onGeosWord(out.landGeos?.landed) && out.menu?.kind === "geos");
-  const menuOpen = looksLikeDialog(before, dlg) || looksLikeCenteredDialog(before, dlg);
-  const emptyPad = !notepadHasIcons(dlg.img);
-  out.dialog = Boolean(onGeos && menuOpen && !emptyPad);
-  if (!onGeos) {
-    await holdJoy(hand, 0, 1, 500);
+  const about = looksLikeAboutBox(dlg.img);
+  out.dialog = !about && (looksLikeDialog(before, dlg) || looksLikeCenteredDialog(before, dlg));
+  if (about) {
+    out.steps.push("about-not-input");
     await clickJoy(hand);
-    await sleep(400);
-    out.steps.push("dismiss-miss");
-  }
-  if (!out.dialog) {
-    await tapCbmI(hand);
-    out.steps.push("cbm-i");
-    dlg = await snapshot(hand.page);
-    await savePng(hand.shotDir(), "10-1351-page-menu.png", dlg.b64);
-    await hand.shot("10-1351-select-input-cbm.png");
-    const cbmOpen = looksLikeDialog(before, dlg) || looksLikeCenteredDialog(before, dlg);
-    out.dialog = Boolean(cbmOpen && notepadHasIcons(dlg.img));
+    await sleep(300);
   }
   if (out.dialog) {
     await tapC64Key(hand, "ArrowDown", "ArrowDown");
@@ -1061,46 +1127,19 @@ async function activateGeos1351(hand) {
     await tapC64Key(hand, "Enter", "Enter");
     await sleep(2500);
     out.steps.push("ok");
-  } else {
-    // Official path: notepad page 2, double-click COMM 1351(a).
-    out.steps.push("page-flip");
-    out.landPage = await landOnPageNumber(hand);
-    await clickJoy(hand);
-    await sleep(800);
-    let page2 = await snapshot(hand.page);
-    if (!notepadHasIcons(page2.img) || !iconRegionChanged(before, page2, { minChanged: 120 }).pass) {
-      await clickJoy(hand);
-      await sleep(800);
-      page2 = await snapshot(hand.page);
-    }
-    await savePng(hand.shotDir(), "10-1351-page2.png", page2.b64);
-    await hand.shot("10-1351-page2-ui.png");
-    const target = comm1351Pos(page2.img);
-    out.commTarget = target ? { x: target.x, y: target.y } : null;
-    if (target) {
-      out.walkComm = await walkPointerTo(hand, target.x, target.y, { timeout: 8000, close: 8 });
-      out.steps.push("comm-cell");
-    }
-    await clickJoy(hand, { double: true });
-    await sleep(3600);
-    out.steps.push("comm-open");
   }
   const after = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-after.png", after.b64);
   await hand.shot("10-1351-after-ui.png");
-  if (!out.steps.includes("comm-open")) {
-    await savePng(hand.shotDir(), "10-1351-page2.png", after.b64);
-    await hand.shot("10-1351-page2-ui.png");
-  }
+  await savePng(hand.shotDir(), "10-1351-page2.png", after.b64);
+  await hand.shot("10-1351-page2-ui.png");
   const live = await stillGeosDesk(hand);
   out.afterDesk = live;
   out.basic = live.basic;
   out.icons = notepadHasIcons(after.img);
   out.dialogGone = !looksLikeDialog(before, after) && !looksLikeCenteredDialog(before, after) && out.dialog;
   out.after = movedEnough(dlg, after, { minChanged: 80, minInk: 3 });
-  const opened =
-    out.steps.includes("ok") || out.steps.includes("comm-open") || out.steps.includes("pick-1351");
-  out.pass = Boolean(opened && out.icons && live.pass && !live.basic);
+  out.pass = Boolean(out.dialog && out.icons && live.pass && !live.basic);
   return out;
 }
 
