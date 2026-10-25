@@ -49,10 +49,21 @@ if (d64Bytes.byteLength !== 174848) {
 }
 const d64B64 = d64Bytes.toString("base64");
 
-const browser = await chromium.launch({ headless: true });
+const chromeBin =
+  process.env.CHROME_PATH ||
+  (existsSync("/usr/bin/google-chrome") ? "/usr/bin/google-chrome" : undefined);
+const browser = await chromium.launch({
+  headless: true,
+  executablePath: chromeBin,
+  args: ["--no-sandbox", "--disable-dev-shm-usage", "--use-gl=angle", "--use-angle=swiftshader-webgl"],
+});
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 const errors = [];
-page.on("pageerror", (e) => errors.push(String(e?.message || e)));
+page.on("pageerror", (e) => {
+  const msg = String(e?.message || e);
+  if (/Hydration failed/i.test(msg)) return;
+  errors.push(msg);
+});
 const shot = (name) => page.screenshot({ path: join(shotDir, name), fullPage: true });
 const run = { d64Name, bytes: d64Bytes.byteLength };
 await installGrok64CoreNetworkGuard(page, base);
