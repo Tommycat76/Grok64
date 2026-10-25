@@ -651,9 +651,10 @@ async function tapCbmI(hand) {
 
 function isSelectInputDialog(before, after) {
   if (!after?.img) return false;
+  if (looksLikeAboutBox(after.img)) return false;
   if (looksLikeSelectInput(after.img)) return true;
   if (!before?.img) return false;
-  return looksLikeCenteredDialog(before, after) && notepadHasIcons(after.img);
+  return looksLikeCenteredDialog(before, after) && notepadHasIcons(after.img) && !looksLikeAboutBox(after.img);
 }
 
 async function waitSelectInput(hand, before, ms = 8000) {
@@ -1111,7 +1112,7 @@ async function test1351(hand, prefix) {
   return out;
 }
 
-/** C= + I opens Select Input Device; pick COMM 1351(a) + OK. */
+/** geos → select input → COMM 1351(a) → OK. C= + I opens GEOS info on this disk. */
 async function activateGeos1351(hand) {
   const out = { steps: [], file: "COMM 1351(a)", via: "select-input" };
   await ensureMouse(hand, false);
@@ -1120,68 +1121,73 @@ async function activateGeos1351(hand) {
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
 
-  await tapCbmI(hand);
-  out.steps.push("cbm-i");
-  let dlg = await waitSelectInput(hand, before, 10000);
-  if (!isSelectInputDialog(before, dlg)) {
-    await tapCbmI(hand);
-    out.steps.push("cbm-i-retry");
-    dlg = await waitSelectInput(hand, before, 8000);
+  out.landGeos = await landOnGeosWord(hand);
+  out.steps.push(onGeosWord(out.landGeos?.landed) ? "on-geos" : "geos-miss");
+  await hand.shot("10-1351-preclick.png");
+  if (onGeosWord(out.landGeos?.landed)) {
+    await clickJoy(hand, { downMs: 120 });
+    await sleep(500);
   }
-  await savePng(hand.shotDir(), "10-1351-page-menu.png", dlg.b64);
-  await hand.shot("10-1351-select-input.png");
-  // C= + I opens Select Input Device, never the about box — don't reject a white dialog.
-  out.dialog = isSelectInputDialog(before, dlg);
-
-  if (!out.dialog) {
+  await hand.shot("10-1351-geos-menu.png");
+  let menuSnap = await snapshot(hand.page);
+  out.menu = openedMenuKind(before, menuSnap);
+  if (out.menu.kind !== "geos") {
+    out.steps.push(out.menu.kind === "none" ? "no-menu" : "wrong-menu");
+    if (out.menu.kind !== "none") {
+      await clickJoy(hand, { downMs: 110 });
+      await sleep(250);
+    }
     out.landGeos = await landOnGeosWord(hand);
-    out.steps.push(onGeosWord(out.landGeos?.landed) ? "on-geos" : "geos-miss");
-    await hand.shot("10-1351-preclick.png");
+    out.steps.push(onGeosWord(out.landGeos?.landed) ? "on-geos-retry" : "geos-miss-retry");
+    await hand.shot("10-1351-preclick-retry.png");
     if (onGeosWord(out.landGeos?.landed)) {
       await clickJoy(hand, { downMs: 120 });
       await sleep(500);
     }
     await hand.shot("10-1351-geos-menu.png");
-    const menuSnap = await snapshot(hand.page);
+    menuSnap = await snapshot(hand.page);
     out.menu = openedMenuKind(before, menuSnap);
-    if (out.menu.kind === "geos") {
-      out.menuWalk = [];
-      for (let i = 0; i < 6; i++) {
-        const row = await snapshot(hand.page);
-        await savePng(hand.shotDir(), `10-1351-menu-walk-${i}.png`, row.b64);
-        if (looksLikeAboutBox(row.img)) {
-          out.steps.push("about-box");
-          await clickJoy(hand, { downMs: 110 });
-          await sleep(250);
-          break;
-        }
-        if (i > 0 && isSelectInputDialog(before, row)) {
-          out.steps.push("select-input-menu");
-          dlg = row;
-          out.dialog = true;
-          break;
-        }
-        const ptr = findMenuPointer(row.img);
-        if (ptr) out.menuWalk.push({ i, x: +ptr.x.toFixed(1), y: ptr.y, n: ptr.n, med: ptr.med });
-        const alreadyThere = onSelectInputItem(ptr) || (i === 0 && !ptr);
-        if (alreadyThere || i === 4) {
-          await clickJoy(hand, { downMs: 120 });
-          await sleep(900);
-          out.steps.push(alreadyThere ? "select-input-menu" : "select-input-after-walk");
-          break;
-        }
-        if (ptr && ptr.y > 72) await holdJoy(hand, 0, -1, 36);
-        else await holdJoy(hand, 0, 1, 36);
-        await sleep(140);
-      }
-      if (!out.dialog) {
-        dlg = await waitSelectInput(hand, before, 8000);
-        out.dialog = isSelectInputDialog(before, dlg);
-      }
-    } else {
-      out.steps.push(out.menu.kind === "none" ? "no-menu" : "wrong-menu");
-    }
   }
+
+  let dlg = menuSnap;
+  if (out.menu.kind !== "geos") {
+    out.steps.push("geos-menu-fail");
+  } else {
+    out.menuWalk = [];
+    // Pointer stays on the geos word. A click there closes the menu.
+    // Four short downs: GEOS info, deskTop info, select printer, select input.
+    for (let i = 0; i < 8; i++) {
+      const row = await snapshot(hand.page);
+      await savePng(hand.shotDir(), `10-1351-menu-walk-${i}.png`, row.b64);
+      if (looksLikeAboutBox(row.img)) {
+        out.steps.push("about-box");
+        await clickJoy(hand, { downMs: 110 });
+        await sleep(250);
+        break;
+      }
+      if (i > 0 && isSelectInputDialog(before, row)) {
+        out.steps.push("select-input-menu");
+        dlg = row;
+        break;
+      }
+      const ptr = findMenuPointer(row.img);
+      if (ptr) out.menuWalk.push({ i, x: +ptr.x.toFixed(1), y: ptr.y, n: ptr.n, med: ptr.med });
+      if (onSelectInputItem(ptr) || i === 4) {
+        await clickJoy(hand, { downMs: 110 });
+        await sleep(900);
+        out.steps.push(onSelectInputItem(ptr) ? "select-input-menu" : "select-input-after-walk");
+        break;
+      }
+      if (ptr && ptr.y > 68) await holdJoy(hand, 0, -1, 44);
+      else await holdJoy(hand, 0, 1, ptr && ptr.y <= 16 ? 70 : 48);
+      await sleep(160);
+    }
+    dlg = await waitSelectInput(hand, before, 4000);
+  }
+
+  await savePng(hand.shotDir(), "10-1351-page-menu.png", dlg.b64);
+  await hand.shot("10-1351-select-input.png");
+  out.dialog = isSelectInputDialog(before, dlg);
 
   if (out.dialog) {
     await savePng(hand.shotDir(), "10-1351-input-dialog.png", dlg.b64);
@@ -1204,46 +1210,20 @@ async function activateGeos1351(hand) {
       const now = await snapshot(hand.page);
       if (!isSelectInputDialog(before, now)) break;
     }
-  } else {
-    out.steps.push("page-flip");
-    out.landPage = await landOnPageNumber(hand);
-    await clickJoy(hand, { downMs: 110 });
-    await sleep(800);
-    let page2 = await snapshot(hand.page);
-    if (isSelectInputDialog(before, page2)) {
-      out.dialog = true;
-      await pickComm1351InDialog(hand, page2);
-      out.steps.push("pick-1351", "ok");
-    } else {
-      if (!notepadHasIcons(page2.img) || !iconRegionChanged(before, page2, { minChanged: 120 }).pass) {
-        await clickJoy(hand, { downMs: 110 });
-        await sleep(800);
-        page2 = await snapshot(hand.page);
-      }
-      await savePng(hand.shotDir(), "10-1351-page2.png", page2.b64);
-      await hand.shot("10-1351-page2-ui.png");
-      const target = comm1351Pos(page2.img);
-      out.commTarget = target ? { x: target.x, y: target.y } : null;
-      if (target) {
-        out.walkComm = await walkPointerTo(hand, target.x, target.y, { timeout: 8000, close: 8 });
-        out.steps.push("comm-cell");
-      }
-      await clickJoy(hand, { double: true, downMs: 110 });
-      await sleep(3600);
-      out.steps.push("comm-open");
-    }
   }
+
   const after = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-after.png", after.b64);
   await hand.shot("10-1351-after-ui.png");
+  await savePng(hand.shotDir(), "10-1351-page2.png", after.b64);
+  await hand.shot("10-1351-page2-ui.png");
   const live = await stillGeosDesk(hand);
   out.afterDesk = live;
   out.basic = live.basic;
   out.icons = notepadHasIcons(after.img);
   out.dialogGone = !isSelectInputDialog(before, after);
   out.after = movedEnough(dlg, after, { minChanged: 80, minInk: 3 });
-  const opened = out.steps.includes("ok") || out.steps.includes("comm-open") || out.steps.includes("pick-1351");
-  out.pass = Boolean(opened && out.dialogGone && out.icons && live.pass && !live.basic);
+  out.pass = Boolean(out.dialog && out.dialogGone && out.icons && live.pass && !live.basic && out.steps.includes("ok"));
   return out;
 }
 
