@@ -650,7 +650,7 @@ async function landOnGeosWord(hand) {
     const loc = await locatePointer(hand, { dirs: horiz, pulseMs: 40 });
     const g = toGeos(loc, snap.img);
     if (g) trace.hops.push({ i, x: +g.x.toFixed(1), y: +g.y.toFixed(1) });
-    if (g && g.x <= 40 && g.y <= 16) {
+    if (g && g.x <= 26 && g.y <= 16) {
       trace.landed = g;
       return trace;
     }
@@ -659,7 +659,7 @@ async function landOnGeosWord(hand) {
       continue;
     }
     if (g.y > 16) await holdJoy(hand, 0, -1, 70);
-    else if (g.x > 40) await holdJoy(hand, -1, 0, 70);
+    else if (g.x > 26) await holdJoy(hand, -1, 0, 70);
     else await holdJoy(hand, 1, 0, 50);
   }
   const snap = await snapshot(hand.page);
@@ -936,13 +936,13 @@ async function activateGeos1351(hand) {
   // WASD parks on "select". geos is the leftmost word (GEOS x < 42). Long
   // left pulses skip to "view" and "by name" empties the icon notepad.
   out.landGeos = await landOnGeosWord(hand);
-  out.steps.push(out.landGeos?.landed && out.landGeos.landed.x <= 42 ? "on-geos" : "geos-miss");
+  out.steps.push(out.landGeos?.landed && out.landGeos.landed.x <= 26 ? "on-geos" : "geos-miss");
   await clickJoy(hand);
   await sleep(450);
   await hand.shot("10-1351-geos-menu.png");
   const menu = await snapshot(hand.page);
   const menuPtr = toGeos(await locatePointer(hand, { dirs: [[1, 0], [-1, 0]], pulseMs: 40 }), menu.img);
-  if (menuPtr && menuPtr.x > 48) {
+  if (menuPtr && menuPtr.x > 30) {
     out.steps.push("wrong-menu");
     await clickJoy(hand);
     await sleep(250);
