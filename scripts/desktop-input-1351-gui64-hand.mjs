@@ -806,7 +806,8 @@ function onGeosWord(g) {
 
 /** Pointer on the geos menu's select input line (4th item; GEOS info / deskTop info / select printer / select input). */
 function onSelectInputItem(g) {
-  return Boolean(g && g.x < 90 && g.y >= 52 && g.y <= 68);
+  // Frame-diff centroid sits ~10px below the sprite. y=55 is still select printer.
+  return Boolean(g && g.x < 90 && g.y >= 60 && g.y <= 74);
 }
 
 /** Gutter blob on an open menu — do not pulse, pulsing walks off the item. */
