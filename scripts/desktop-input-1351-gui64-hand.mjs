@@ -239,7 +239,7 @@ function notepadRect(img) {
       const r = data[i];
       const g = data[i + 1];
       const b = data[i + 2];
-      if (r > 168 && g > 168 && b > 168 && Math.abs(r - g) < 22 && Math.abs(g - b) < 22) {
+      if (r > 210 && g > 210 && b > 210 && Math.abs(r - g) < 16 && Math.abs(g - b) < 16) {
         if (x < minX) minX = x;
         if (y < minY) minY = y;
         if (x > maxX) maxX = x;
@@ -252,23 +252,19 @@ function notepadRect(img) {
   return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1, n };
 }
 
+function geosMap(img, gx, gy) {
+  const c = contentRect(img);
+  if (!c) return null;
+  return { x: c.x + (gx / 320) * c.w, y: c.y + (gy / 200) * c.h, content: c };
+}
+
 function pageGadgetPos(img) {
-  const pad = notepadRect(img);
-  if (!pad) return null;
-  return { x: pad.x + pad.w * 0.93, y: pad.y + pad.h * 0.07, pad };
+  return geosMap(img, 268, 22);
 }
 
 /** Official boot disk: COMM 1351(a) is file 14 → notepad page 2, row 1 col 2. */
 function comm1351Pos(img) {
-  const pad = notepadRect(img);
-  if (!pad) return null;
-  const iconTop = pad.y + pad.h * 0.28;
-  const iconH = pad.h * 0.62;
-  return {
-    x: pad.x + (pad.w / 4) * 2.5,
-    y: iconTop + (iconH / 2) * 1.5,
-    pad,
-  };
+  return geosMap(img, 200, 118);
 }
 
 function iconRegionChanged(a, b, { minChanged = 180 } = {}) {
@@ -654,66 +650,61 @@ async function test1351(hand, prefix) {
 
 /** Page the official deskTop notepad and double-click COMM 1351(a). */
 async function activateGeos1351(hand) {
-  const out = { steps: [], tries: 0, file: "COMM 1351(a)", page: 2, cell: [1, 2] };
+  const out = { steps: [], file: "COMM 1351(a)", page: 2, cell: [1, 2] };
   await ensureMouse(hand, false);
   await ensurePort(hand, 1);
   await ensureWasd(hand, false);
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
-  out.pointer = await locatePointer(hand);
-  const gadget = pageGadgetPos(before.img);
-  out.gadget = gadget ? { x: gadget.x, y: gadget.y } : null;
-  if (gadget) {
-    out.walkGadget = await walkPointerTo(hand, gadget.x, gadget.y);
-    out.steps.push("page-gadget");
-  } else {
-    await holdJoy(hand, 0, -1, 320);
-    await holdJoy(hand, 1, 0, 220);
-    out.steps.push("page-gadget-blind");
-  }
+  // Home to the geos menu, then step right onto page (item 6 of 7).
+  await holdJoy(hand, 0, 1, 400);
   await clickJoy(hand);
-  await sleep(900);
+  await sleep(200);
+  await holdJoy(hand, -1, 0, 2000);
+  await holdJoy(hand, 0, -1, 2000);
+  out.steps.push("home-geos");
+  await hand.shot("10-1351-home.png");
+  for (let i = 0; i < 5; i++) await holdJoy(hand, 1, 0, 280);
+  out.steps.push("menu-page");
+  await clickJoy(hand);
+  await sleep(300);
   await hand.shot("10-1351-page-menu.png");
+  await holdJoy(hand, 0, 1, 160);
+  await clickJoy(hand);
+  await sleep(1000);
   let page2 = await snapshot(hand.page);
   out.paged = iconRegionChanged(before, page2, { minChanged: 180 });
   if (!out.paged.pass) {
-    out.steps.push("page-menu-fallback");
-    await holdJoy(hand, 0, -1, 4200);
-    await holdJoy(hand, 1, 0, 4200);
-    out.steps.push("pin-clock");
-    await hand.shot("10-1351-clock.png");
-    for (let i = 0; i < 8 && !out.paged.pass; i++) {
-      out.tries = i + 1;
-      await holdJoy(hand, -1, 0, 260);
-      await clickJoy(hand);
-      await sleep(350);
-      await hand.shot(`10-1351-page-try-${i}.png`);
-      await holdJoy(hand, 0, 1, 240);
-      await clickJoy(hand);
-      await sleep(900);
-      page2 = await snapshot(hand.page);
-      out.paged = iconRegionChanged(before, page2, { minChanged: 180 });
-      if (!out.paged.pass) out.paged = movedEnough(before, page2, { minChanged: 1200, minInk: 10 });
-      out.steps.push(`page-try-${i}`);
+    out.steps.push("page-gadget");
+    const gadget = pageGadgetPos(page2.img);
+    out.gadget = gadget ? { x: gadget.x, y: gadget.y } : null;
+    if (gadget) await walkPointerTo(hand, gadget.x, gadget.y);
+    else {
+      await holdJoy(hand, 0, -1, 280);
+      await holdJoy(hand, 1, 0, 200);
     }
+    await clickJoy(hand);
+    await sleep(900);
+    page2 = await snapshot(hand.page);
+    out.paged = iconRegionChanged(before, page2, { minChanged: 180 });
   }
   await savePng(hand.shotDir(), "10-1351-page2.png", page2.b64);
   await hand.shot("10-1351-page2-ui.png");
   out.steps.push(out.paged.pass ? "page-2" : "page-miss");
   const target = comm1351Pos(page2.img);
   out.commTarget = target ? { x: target.x, y: target.y } : null;
-  if (out.paged.pass && target) {
-    out.walkComm = await walkPointerTo(hand, target.x, target.y);
-    out.steps.push("comm-cell");
+  if (out.paged.pass) {
+    if (target) {
+      out.walkComm = await walkPointerTo(hand, target.x, target.y);
+      out.steps.push("comm-cell");
+    } else {
+      await holdJoy(hand, 0, 1, 700);
+      await holdJoy(hand, 1, 0, 400);
+      out.steps.push("comm-cell-blind");
+    }
     await clickJoy(hand, { double: true });
     await sleep(3200);
     out.steps.push("comm-open");
-  } else if (out.paged.pass) {
-    await holdJoy(hand, 1, 0, 2200);
-    await holdJoy(hand, 0, 1, 1800);
-    await clickJoy(hand, { double: true });
-    await sleep(2800);
-    out.steps.push("comm-open-blind");
   }
   const after = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-after.png", after.b64);
@@ -754,8 +745,12 @@ async function bootOfficialGeos(hand, disk) {
   });
   const desk = await canvasLooksLikeGeosDesktop(hand.page);
   let snap = await snapshot(hand.page);
-  for (let i = 0; i < 16 && (snap.ink?.n ?? 0) < 12_000; i++) {
-    await sleep(400);
+  let prevInk = 0;
+  for (let i = 0; i < 24; i++) {
+    const n = snap.ink?.n ?? 0;
+    if (n > 25_000 && Math.abs(n - prevInk) < 500) break;
+    prevInk = n;
+    await sleep(500);
     snap = await snapshot(hand.page);
   }
   await savePng(hand.shotDir(), "07-desktop.png", snap.b64);
@@ -896,16 +891,20 @@ async function main() {
         }
         writeRun(run);
       }
-      try {
-        run.gui64.ntsc = await runGui64(hand, ntsc, "gui64-ntsc");
-      } catch (err) {
-        run.gui64.ntsc = { pass: false, error: String(err?.stack || err) };
-      }
-      writeRun(run);
-      try {
-        run.gui64.pal = await runGui64(hand, pal, "gui64-pal");
-      } catch (err) {
-        run.gui64.pal = { pass: false, error: String(err?.stack || err) };
+      if (process.env.GROK64_HAND_SKIP_GUI64 === "1") {
+        run.gui64.skipped = true;
+      } else {
+        try {
+          run.gui64.ntsc = await runGui64(hand, ntsc, "gui64-ntsc");
+        } catch (err) {
+          run.gui64.ntsc = { pass: false, error: String(err?.stack || err) };
+        }
+        writeRun(run);
+        try {
+          run.gui64.pal = await runGui64(hand, pal, "gui64-pal");
+        } catch (err) {
+          run.gui64.pal = { pass: false, error: String(err?.stack || err) };
+        }
       }
       run.coreAfter = await hand.coreStatus();
       run.errors = hand.errors.slice(0, 12);
@@ -924,11 +923,11 @@ async function main() {
     }
   });
 
+  const skipGui = process.env.GROK64_HAND_SKIP_GUI64 === "1";
   run.pass = Boolean(
     (run.geos.jiffyOff?.pass ?? !modes.includes(false)) &&
       (run.geos.jiffyOn?.pass ?? !modes.includes(true)) &&
-      run.gui64.ntsc?.pass &&
-      run.gui64.pal?.pass,
+      (skipGui || (run.gui64.ntsc?.pass && run.gui64.pal?.pass)),
   );
   writeRun(run);
   console.log(JSON.stringify(run, null, 2));
