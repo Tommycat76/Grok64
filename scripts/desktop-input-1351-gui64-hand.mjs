@@ -559,6 +559,33 @@ async function clickJoy(hand, { double = false, downMs = 70, gapMs = 90 } = {}) 
   }
 }
 
+async function tapC64Key(hand, code, key, holdMs = 80) {
+  await hand.page.evaluate(async ({ code, key, holdMs }) => {
+    const g = window.__g64;
+    g?.dispatchKey?.(code, key, true);
+    await new Promise((r) => setTimeout(r, holdMs));
+    g?.dispatchKey?.(code, key, false);
+  }, { code, key, holdMs });
+  await sleep(140);
+}
+
+/** Official GEOS: C= + I opens select input (keyboard path when the pointer is wrong). */
+async function tapCbmI(hand) {
+  await hand.click(hand.crt(), "crt");
+  await sleep(80);
+  await hand.page.evaluate(async () => {
+    const g = window.__g64;
+    g?.kbdReleaseAll?.();
+    g?.dispatchKey?.("ControlLeft", "Control", true);
+    await new Promise((r) => setTimeout(r, 50));
+    g?.dispatchKey?.("KeyI", "i", true);
+    await new Promise((r) => setTimeout(r, 90));
+    g?.dispatchKey?.("KeyI", "i", false);
+    g?.dispatchKey?.("ControlLeft", "Control", false);
+  });
+  await sleep(700);
+}
+
 async function locatePointer(hand, { dirs = null, pulseMs = 55 } = {}) {
   for (const [jx, jy] of dirs || [
     [1, 0],
@@ -844,69 +871,59 @@ async function test1351(hand, prefix) {
   return out;
 }
 
-/** Page the official deskTop notepad and double-click COMM 1351(a). */
+/** geos → select input, or C= + I, then COMM 1351(a) + OK. */
 async function activateGeos1351(hand) {
-  const out = { steps: [], file: "COMM 1351(a)", page: 2, cell: [1, 2] };
+  const out = { steps: [], file: "COMM 1351(a)", via: "select-input" };
   await ensureMouse(hand, false);
   await ensurePort(hand, 1);
   await ensureWasd(hand, false);
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
-  // Title-bar "−" is close (empties the notepad). File pages flip by clicking the "1"
-  // under the icons. The page *menu* is append/delete of desk pages, not next/prev.
-  await holdJoy(hand, 0, 1, 160);
-  out.steps.push("off-menu");
-  out.pageNum = pageNumberPos(before.img);
-  out.land = await landOnPageNumber(hand);
-  out.steps.push(inPageNumberBox(out.land?.landed) ? "on-page-num" : "page-num-miss");
-  await hand.shot("10-1351-preclick.png");
+
+  // WASD parks on "select". Four snaps left is geos.
+  for (let i = 0; i < 4; i++) await holdJoy(hand, -1, 0, 130);
+  out.steps.push("to-geos");
   await clickJoy(hand);
-  await sleep(1000);
-  await hand.shot("10-1351-page-menu.png");
-  let page2 = await snapshot(hand.page);
-  out.dialog = looksLikeDialog(before, page2);
-  out.closed = !notepadHasIcons(page2.img);
-  out.paged = iconRegionChanged(before, page2, { minChanged: 180 });
-  if (out.dialog || out.closed) {
-    out.paged = { ...out.paged, pass: false, dialog: out.dialog, closed: out.closed };
-    out.steps.push(out.dialog ? "dialog" : "closed-notepad");
+  await sleep(450);
+  await hand.shot("10-1351-geos-menu.png");
+  // geos info → select printer → select input (avoid a fourth down: that is RESET).
+  await holdJoy(hand, 0, 1, 110);
+  await holdJoy(hand, 0, 1, 110);
+  await holdJoy(hand, 0, 1, 110);
+  await clickJoy(hand);
+  await sleep(900);
+  out.steps.push("select-input-menu");
+  let dlg = await snapshot(hand.page);
+  await savePng(hand.shotDir(), "10-1351-page-menu.png", dlg.b64);
+  await hand.shot("10-1351-select-input.png");
+  out.dialog = looksLikeDialog(before, dlg);
+  if (!out.dialog) {
+    await tapCbmI(hand);
+    out.steps.push("cbm-i");
+    dlg = await snapshot(hand.page);
+    await savePng(hand.shotDir(), "10-1351-page-menu.png", dlg.b64);
+    await hand.shot("10-1351-select-input-cbm.png");
+    out.dialog = looksLikeDialog(before, dlg);
   }
-  if (!out.paged.pass) {
-    out.landRetry = await landOnPageNumber(hand);
-    out.steps.push(inPageNumberBox(out.landRetry?.landed) ? "on-page-num-retry" : "page-num-retry-miss");
-    await hand.shot("10-1351-preclick-retry.png");
-    await clickJoy(hand);
-    await sleep(1000);
-    page2 = await snapshot(hand.page);
-    out.dialog = looksLikeDialog(before, page2);
-    out.closed = !notepadHasIcons(page2.img);
-    out.paged = iconRegionChanged(before, page2, { minChanged: 180 });
-    if (out.dialog || out.closed) out.paged = { ...out.paged, pass: false, dialog: out.dialog, closed: out.closed };
-  }
-  await savePng(hand.shotDir(), "10-1351-page2.png", page2.b64);
-  await hand.shot("10-1351-page2-ui.png");
-  out.icons = notepadHasIcons(page2.img);
-  out.steps.push(out.paged.pass && !out.dialog && out.icons ? "page-2" : "page-miss");
-  const target = comm1351Pos(page2.img);
-  out.commTarget = target ? { x: target.x, y: target.y } : null;
-  if (out.paged.pass && !out.dialog && out.icons) {
-    if (target) {
-      out.walkComm = await walkPointerTo(hand, target.x, target.y);
-      out.steps.push("comm-cell");
-    } else {
-      await holdJoy(hand, 0, 1, 700);
-      await holdJoy(hand, 1, 0, 400);
-      out.steps.push("comm-cell-blind");
-    }
-    await clickJoy(hand, { double: true });
-    await sleep(3200);
-    out.steps.push("comm-open");
+  if (out.dialog) {
+    await tapC64Key(hand, "ArrowDown", "ArrowDown");
+    await tapC64Key(hand, "Enter", "Enter");
+    out.steps.push("pick-1351");
+    await tapC64Key(hand, "ArrowDown", "ArrowDown");
+    await tapC64Key(hand, "ArrowRight", "ArrowRight");
+    await tapC64Key(hand, "Enter", "Enter");
+    await sleep(800);
+    out.steps.push("ok");
   }
   const after = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-after.png", after.b64);
   await hand.shot("10-1351-after-ui.png");
-  out.after = movedEnough(page2, after, { minChanged: 80, minInk: 3 });
-  out.pass = Boolean(out.paged.pass && !out.dialog && out.icons);
+  await savePng(hand.shotDir(), "10-1351-page2.png", after.b64);
+  await hand.shot("10-1351-page2-ui.png");
+  out.icons = notepadHasIcons(after.img);
+  out.dialogGone = !looksLikeDialog(before, after) && out.dialog;
+  out.after = movedEnough(dlg, after, { minChanged: 80, minInk: 3 });
+  out.pass = Boolean(out.dialog && out.dialogGone && out.icons);
   return out;
 }
 
