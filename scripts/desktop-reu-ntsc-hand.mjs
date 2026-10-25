@@ -25,7 +25,9 @@ const files = {
 };
 const shotRoot = join(cwd, "screenshots", "reu-ntsc-hand");
 const outDir = join(cwd, "artifacts", "reu-ntsc-hand");
+const bootShotDir = join(shotRoot, "boot");
 mkdirSync(shotRoot, { recursive: true });
+mkdirSync(bootShotDir, { recursive: true });
 mkdirSync(outDir, { recursive: true });
 
 function sha1Of(path) {
@@ -108,7 +110,7 @@ async function main() {
   };
 
   await withHandDisplay(handCfg, async () => {
-    const hand = await openHand(handCfg, { shotDir: join(shotRoot, "boot") });
+    const hand = await openHand(handCfg, { shotDir: bootShotDir });
     let stopRec = async () => {};
     try {
       run.start = await hand.start();
