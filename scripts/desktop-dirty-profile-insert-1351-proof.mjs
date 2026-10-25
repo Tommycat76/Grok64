@@ -323,7 +323,7 @@ try {
   await diskCard.getByRole("group", { name: /IEC drive unit/i }).getByRole("button", { name: "8", exact: true }).click({
     timeout: 15_000,
   });
-  await page.getByRole("button", { name: `Insert ${d64Name}` }).click({ timeout: 60_000 });
+  await diskCard.getByRole("button", { name: /^Insert$/ }).click({ timeout: 60_000 });
   const loadDisk = await waitInsertOutcome(page);
   run.loadDiskInsert = loadDisk;
   if (loadDisk.fail) throw new Error(`Load Disk Insert toasted ${loadDisk.fail}`);
