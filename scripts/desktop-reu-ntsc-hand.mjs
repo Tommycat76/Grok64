@@ -116,6 +116,10 @@ async function main() {
       run.start = await hand.start();
       run.core = await hand.coreStatus();
       await hand.shot("00-home.png");
+      // Software lives in the powered header — splash has no library button.
+      const powered = await hand.ensurePowered();
+      run.powered = Boolean(powered ?? (await hand.page.evaluate(() => window.__g64?.running?.())));
+      await hand.shot("01-ready.png");
 
       hand.setShotDir(join(shotRoot, "blureu"));
       mkdirSync(hand.shotDir(), { recursive: true });
