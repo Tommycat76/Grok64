@@ -57,6 +57,8 @@ const REQUIRED = [
   "grok64_vice_apply_safe_floppy_profile",
   "grok64_vice_drive_resource_snapshot",
   "grok64_drive_set_type",
+  "grok64_reu_attach",
+  "grok64_reu_size_kb",
 ];
 
 rmSync(tmp, { recursive: true, force: true });

@@ -383,7 +383,7 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
                 ))}
               </div>
               <p className="text-xs text-fg-subtle">
-                Real VICE REU on the expansion port — not stubbed, including on iPhone. 16 MB is what C64 OS needs. .reu / nuvie / C64 OS names auto-enable 16 MB. Size applies on the next core start.
+                Real VICE REU on the expansion port — not stubbed, including on iPhone. 16 MB is what C64 OS needs. Play a program next to a .reu (or a C64 Ultimate RunMeFirst.cfg) to preload that image. Play or Insert a non-Nuvie .reu dump to load it like VICE’s REU image file. Nuvie / .nuv still uses the Nuvie player. Size applies on the next core start.
               </p>
             </div>
 

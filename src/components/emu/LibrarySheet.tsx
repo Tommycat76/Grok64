@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { CatalogPanel } from "./CatalogPanel";
 import { BUNDLED } from "@/lib/emu/software";
 import { ACCEPT_EXT, KIND_LABEL, isDiskKind } from "@/lib/emu/formats";
+import { isReuImageName } from "@/lib/emu/reu-image";
 import { validateCrtImport } from "@/lib/emu/cart-crt-diag";
 import { isWorkDisk, listLibrary, putFile, removeFile, updateFileUnit } from "@/lib/emu/library";
 import { importFromUrl } from "@/lib/emu/import-url";
@@ -245,7 +246,7 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
                           onPlayLocal(item);
                         }}>
                           <strong>{item.name}</strong>
-                          <em className="g64-tag not-italic">{KIND_LABEL[item.kind]}</em>
+                          <em className="g64-tag not-italic">{isReuImageName(item.name) ? "REU image" : KIND_LABEL[item.kind]}</em>
                           <span>
                             {(item.size / 1024).toFixed(0)} KB ·{" "}
                             {item.source === "catalog" ? "Catalog" : item.source === "cloud" ? "Link" : "Imported"}
@@ -272,7 +273,7 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
                           >
                             <Play className="size-4" />
                           </button>
-                          {onInsert && running && isDiskKind(item.kind) ? (
+                          {onInsert && running && (isDiskKind(item.kind) || isReuImageName(item.name)) ? (
                             <button
                               type="button"
                               className="g64-iconbtn"

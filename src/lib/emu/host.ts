@@ -47,6 +47,7 @@ import {
 import { grok64RetroKeyboardAvailable } from "./grok64-keyboard";
 import { reportMountFailure, runMountStage } from "./disk-mount-stage";
 import { grok64DiskApi, grok64WasmApi } from "./grok64-api";
+import { GROK64_REU_IMAGE_PATH, snapReuKb } from "./reu-image";
 import { grok64DiskAttachCallableEmu } from "./grok64-wasm-direct";
 import { grok64CoreBuildIdForUrl, grok64CoreManifestSummary, GROK64_CORE_BUILD_ID } from "./grok64-core-build";
 import { appendGrok64CoreUrlCacheParams } from "./grok64-core-url";
@@ -3241,6 +3242,26 @@ export function remountSd2iecFromParts(
   attachGrok64Sd2iec(emu, unit);
   applyIecUnit(emu, "sd2iec", unit);
   return true;
+}
+
+/** Load a .reu dump into VICE REU RAM (REUfilename + reu_activate). */
+export function attachReuImage(
+  emu: EjsInstance | null,
+  data: Uint8Array,
+  sizeKb = 0,
+  path = GROK64_REU_IMAGE_PATH,
+): number {
+  if (!emu || !data.byteLength) return -1;
+  if (!writeFsFile(emu, path, data)) return -2;
+  const api = grok64DiskApi(emu.Module as Parameters<typeof grok64DiskApi>[0]);
+  const fn = api?.reuAttach;
+  if (!fn) return -3;
+  return fn(path, snapReuKb(sizeKb || Math.round(data.byteLength / 1024)));
+}
+
+export function grok64ReuSizeKb(emu: EjsInstance | null): number | null {
+  const api = grok64DiskApi(emu?.Module as Parameters<typeof grok64DiskApi>[0]);
+  return api?.reuSizeKb?.() ?? null;
 }
 
 /** Write sidecar files (e.g. `.reu` next to a `.prg`) before VICE autostart. */

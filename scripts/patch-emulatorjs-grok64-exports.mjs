@@ -54,6 +54,8 @@ const GROK64_EXPORTS = [
   "_grok64_vice_apply_safe_floppy_profile",
   "_grok64_vice_drive_resource_snapshot",
   "_grok64_drive_set_type",
+  "_grok64_reu_attach",
+  "_grok64_reu_size_kb",
 ];
 
 let text = readFileSync(makefile, "utf8");

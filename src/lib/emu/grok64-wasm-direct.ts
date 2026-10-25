@@ -78,6 +78,8 @@ const EXPECTED_GROK64_EXPORTS = [
   "grok64_vice_apply_safe_floppy_profile",
   "grok64_vice_drive_resource_snapshot",
   "grok64_drive_set_type",
+  "grok64_reu_attach",
+  "grok64_reu_size_kb",
 ] as const;
 
 function wasmUtf8JsonExport(
@@ -561,6 +563,16 @@ export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
       const fn = resolveWasmExport(mod, "grok64_drive_set_type");
       if (!fn) return -99;
       return Number(fn(unit, type));
+    },
+    reuAttach: (path, sizeKb) => {
+      const fn = resolveWasmExport(mod, "grok64_reu_attach");
+      if (!fn) return -99;
+      return withUtf8Arg(boundEmu(), mod, path, (ptr) => Number(fn(ptr, sizeKb)));
+    },
+    reuSizeKb: () => {
+      const fn = resolveWasmExport(mod, "grok64_reu_size_kb");
+      if (!fn) return null;
+      return Number(fn());
     },
   };
   return true;

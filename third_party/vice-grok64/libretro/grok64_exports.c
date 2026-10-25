@@ -1545,3 +1545,63 @@ int grok64_disk_attach_deferred(int unit, int drive, const char *path)
     pending_disk_attach = 1;
     return 0;
 }
+
+/* VICE REUfilename + REUsize + REU enable — same path as -reuimage at load_game. */
+static int grok64_reu_legal_kb(int kb)
+{
+    static const int legal[] = { 128, 256, 512, 1024, 2048, 4096, 8192, 16384 };
+    int i;
+
+    if (kb <= 0) {
+        return 0;
+    }
+    for (i = 0; i < (int)(sizeof(legal) / sizeof(legal[0])); i++) {
+        if (legal[i] >= kb) {
+            return legal[i];
+        }
+    }
+    return 16384;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int grok64_reu_attach(const char *path, int size_kb)
+{
+    int bytes;
+    int kb = size_kb;
+
+    if (path && path[0]) {
+        bytes = grok64_fs_size_bytes(path);
+        if (bytes < 0) {
+            return bytes;
+        }
+        if (kb <= 0) {
+            kb = bytes / 1024;
+        }
+    }
+    kb = grok64_reu_legal_kb(kb);
+    if (kb > 0 && resources_set_int("REUsize", kb) < 0) {
+        return -1;
+    }
+    if (path && path[0] && resources_set_string("REUfilename", path) < 0) {
+        return -2;
+    }
+    if (resources_set_int("REU", 1) < 0) {
+        return -3;
+    }
+    return 0;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int grok64_reu_size_kb(void)
+{
+    int kb = 0;
+
+    if (resources_get_int("REUsize", &kb) != 0) {
+        return -1;
+    }
+    return kb;
+}

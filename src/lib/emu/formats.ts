@@ -1,7 +1,7 @@
 import type { IecDrive, IecUnit, MediaKind } from "./types";
 
 export const ACCEPT_EXT =
-  ".prg,.p00,.d64,.d71,.d81,.g64,.g71,.t64,.tap,.crt,.bin,.zip,.vsf,.sav,.m3u,.sid,.n64";
+  ".prg,.p00,.d64,.d71,.d81,.g64,.g71,.t64,.tap,.crt,.bin,.zip,.vsf,.sav,.m3u,.sid,.n64,.reu,.nuv,.cfg";
 
 /** ROM upload — extensions plus MIME types so iOS Files enables .bin picks. */
 export const ROM_ACCEPT =

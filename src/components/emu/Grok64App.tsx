@@ -63,6 +63,8 @@ import {
   cartReset,
   repaintAfterCartFreeze,
   writeCompanionMedia,
+  attachReuImage,
+  grok64ReuSizeKb,
   cmdHdSwap,
   flushEmuFs,
   lastAppliedJiffy,
@@ -194,7 +196,18 @@ import {
   wireGrok64ViceHost,
 } from "@/lib/emu/grok64-vice-bridge";
 import { readC64Byte, readC64Bytes, writeC64Byte, writeC64Bytes } from "@/lib/emu/c64-memory";
-import { buildViceExtras, C64OS_REU, wantsLargeReu, wantsSuperCpu, workDiskFor } from "@/lib/emu/vice-extras";
+import { buildViceExtras, C64OS_REU, REU_LABEL, wantsLargeReu, wantsSuperCpu, workDiskFor } from "@/lib/emu/vice-extras";
+import {
+  isC64uReuCfgName,
+  isNuvieReuName,
+  isReuImageName,
+  pickCompanionReu,
+  resolveReuPlaySize,
+  reuPairZipFiles,
+  reuSizeFromByteLength,
+  reuSizeKbForVice,
+  type ReuCandidate,
+} from "@/lib/emu/reu-image";
 import {
   geosBootSucceeded,
   geosBootStuckAtBasic,
@@ -373,6 +386,31 @@ function playerCanvasReady(root?: HTMLElement | null) {
   return canvasLooksReady(canvas);
 }
 
+async function libraryReuPool(): Promise<ReuCandidate[]> {
+  const items = await listLibrary();
+  const out: ReuCandidate[] = [];
+  for (const item of items) {
+    if (!isReuImageName(item.name) && !isC64uReuCfgName(item.name)) continue;
+    const file = await getFile(item.id);
+    if (!file) continue;
+    out.push({ name: file.name, data: new Uint8Array(file.data), id: file.id });
+  }
+  return out;
+}
+
+function attachReuCompanions(
+  emu: Parameters<typeof attachReuImage>[0],
+  files: { name: string; data: Uint8Array }[],
+): number {
+  const reuFile = files.find((f) => isReuImageName(f.name) && !isNuvieReuName(f.name));
+  if (!reuFile || !emu) return -1;
+  const cur = useEmu.getState().reuSize;
+  const size = cur === "none" ? reuSizeFromByteLength(reuFile.data.byteLength) : cur;
+  if (cur === "none") useEmu.getState().setReuSize(size);
+  applyRuntimeOptions(emu, { vice_ram_expansion_unit: size });
+  return attachReuImage(emu, reuFile.data, reuSizeKbForVice(size));
+}
+
 const PlayerMount = memo(function PlayerMount() {
   return (
     <div
@@ -430,6 +468,7 @@ export function Grok64App() {
   const playLockGen = useRef(0);
   const pendingSnapshotRef = useRef(null);
   const pendingCompanionRef = useRef<{ name: string; data: Uint8Array }[]>([]);
+  const pendingReuRef = useRef<ReuCandidate | null>(null);
   const playPayloadRef = useRef(null);
   const sessionIecRef = useRef(s.iecDrive);
   const sessionUnitRef = useRef(s.iecUnit);
@@ -670,6 +709,14 @@ export function Grok64App() {
       userIec: () => useEmu.getState().iecDrive,
       userUnit: () => useEmu.getState().iecUnit,
       reu: () => useEmu.getState().reuSize,
+      reuKb: () => grok64ReuSizeKb(emuRef.current),
+      armedReu: () => pendingReuRef.current?.name ?? null,
+      video: () => ({
+        pref: useEmu.getState().videoStandard,
+        software: softwareStdRef.current,
+        resolved: resolvedRef.current?.standard ?? null,
+        source: resolvedRef.current?.videoSource ?? null,
+      }),
       workDisk: () => lastAppliedWorkDisk(),
       jiffyLive: () => lastAppliedJiffy(),
       drive8LogLines: (n?: number) => drive8LogLines(n ?? 20),
@@ -909,6 +956,20 @@ export function Grok64App() {
         const item = items.find((i) => i.name === name);
         if (!item) throw new Error(`On this device has no file named “${name}”.`);
         await insertDiskRef.current(item);
+      },
+      attachReuBytes: async (bytes, name = "preload.reu") => {
+        const data =
+          bytes instanceof Uint8Array
+            ? bytes
+            : bytes instanceof ArrayBuffer
+              ? new Uint8Array(bytes)
+              : new Uint8Array(bytes);
+        const size = reuSizeFromByteLength(data.byteLength);
+        useEmu.getState().setReuSize(size);
+        pendingReuRef.current = { name, data };
+        if (!emuRef.current) return { rc: -1, size };
+        const rc = attachReuImage(emuRef.current, data, reuSizeKbForVice(size));
+        return { rc, size, kb: grok64ReuSizeKb(emuRef.current) };
       },
       importLibraryBytes: async (name, bytes) => {
         const u8 =
@@ -1459,6 +1520,8 @@ export function Grok64App() {
           autostart: true,
           title: boot,
           bootName: boot,
+          keepArchive: true,
+          startFileName: `${base}.zip`,
         });
         return true;
       },
@@ -2321,7 +2384,9 @@ export function Grok64App() {
       setAwaitingStart(false);
       spec.onStarted?.(emu);
       if (pendingCompanionRef.current.length) {
-        writeCompanionMedia(emu, pendingCompanionRef.current);
+        const companions = pendingCompanionRef.current;
+        writeCompanionMedia(emu, companions);
+        attachReuCompanions(emu, companions);
         pendingCompanionRef.current = [];
       }
       if (cartBootSettle) {
@@ -2780,6 +2845,9 @@ export function Grok64App() {
       setIecDevice(playUnit);
       let payload = data;
       let bootNameOverride = opts.bootName ?? null;
+      let startFileName = opts.startFileName ?? null;
+      let keepArchive = Boolean(opts.keepArchive || (startFileName && /\.zip$/i.test(startFileName)));
+      let startPayload = null;
       const raw = new Uint8Array(data);
       const work = isWorkDisk(mediaName) || opts.title === "BASIC" || opts.title === "BASIC READY";
       if (!work && isWorkDiskImage(raw)) {
@@ -2801,6 +2869,36 @@ export function Grok64App() {
         }
       }
       if (/\.(reu|nuv)$/i.test(mediaName)) {
+        if (!isNuvieReuName(mediaName)) {
+          try {
+            const pool = await libraryReuPool();
+            const cfg = pickCompanionReu({
+              bootName: mediaName,
+              library: pool,
+              armed: { name: mediaName, data: raw },
+            })?.cfg;
+            const size = resolveReuPlaySize({ bytes: raw.byteLength, cfg });
+            useEmu.getState().setReuSize(size);
+            pendingReuRef.current = { name: mediaName, data: raw, id: opts.libraryId };
+            if (emuRef.current && coreHasFs(emuRef.current)) {
+              applyRuntimeOptions(emuRef.current, { vice_ram_expansion_unit: size });
+              const rc = attachReuImage(emuRef.current, raw, reuSizeKbForVice(size));
+              if (rc === 0) {
+                toast.success(`Loaded ${mediaName} into the REU (${REU_LABEL[size]})`);
+              } else {
+                toast.error("Could not load that REU image into VICE");
+              }
+              return;
+            }
+            toast.message(
+              `${mediaName} armed (${REU_LABEL[size]}). Play the program — VICE will preload this image.`,
+            );
+            return;
+          } catch (err) {
+            toast.error(err instanceof Error ? err.message : "Could not load REU image");
+            return;
+          }
+        }
         try {
           const base = mediaName.replace(/\.(reu|nuv)$/i, "") || "nuvie-play";
           const playerUrl = publicUrl("/system/vice/nuvieplayer1.0.prg");
@@ -2834,13 +2932,15 @@ export function Grok64App() {
           payload = toArrayBuffer(zip);
           bootNameOverride = boot;
           mediaName = `${base}.zip`;
+          startFileName = `${base}.zip`;
+          keepArchive = true;
         } catch (err) {
           toast.error(err instanceof Error ? err.message : "Could not open REU / NUVIE");
           return;
         }
       }
       pendingCompanionRef.current = [];
-      if (kindOf(filename) === "zip") {
+      if (kindOf(filename) === "zip" && !keepArchive) {
         const parts = explodeArchive(filename, new Uint8Array(payload));
         const bootPick = opts.bootName
           ? parts.find((p) => p.name.toLowerCase() === opts.bootName!.toLowerCase()) ??
@@ -2855,6 +2955,43 @@ export function Grok64App() {
           .map((p) => ({ name: p.name, data: p.data }));
         payload = toArrayBuffer(bootPick.data);
         mediaName = bootPick.name;
+      }
+      const bootKindForReu = kindOf(bootNameOverride ?? mediaName);
+      if (bootKindForReu === "prg" || bootKindForReu === "p00") {
+        try {
+          const pool = await libraryReuPool();
+          const picked = pickCompanionReu({
+            bootName: mediaName,
+            parts: pendingCompanionRef.current,
+            library: pool,
+            armed: pendingReuRef.current,
+          });
+          if (picked) {
+            const size = resolveReuPlaySize({
+              bytes: picked.candidate.data.byteLength,
+              cfg: picked.cfg,
+            });
+            useEmu.getState().setReuSize(size);
+            const pairZip = reuPairZipFiles(mediaName, new Uint8Array(payload), picked.candidate.data);
+            const { zipSync } = await import("fflate");
+            startFileName = pairZip.zipName;
+            keepArchive = true;
+            startPayload = toArrayBuffer(zipSync(pairZip.files));
+            pendingCompanionRef.current = [
+              ...pendingCompanionRef.current.filter((p) => !isReuImageName(p.name)),
+              { name: pairZip.reuName, data: picked.candidate.data },
+            ];
+            glog("reu-pair", {
+              boot: mediaName,
+              reu: picked.candidate.name,
+              reason: picked.reason,
+              bytes: picked.candidate.data.byteLength,
+              size,
+            });
+          }
+        } catch {
+          /* pairing is best-effort — Play the PRG anyway */
+        }
       }
       releaseBlob();
       let safe;
@@ -2871,10 +3008,12 @@ export function Grok64App() {
       const payloadView = new Uint8Array(safe);
       const bootName = resolvePlayBootName(mediaName, payloadView, bootNameOverride);
       const forceCartEarly = isCartridgePayload(payloadView, bootName);
-      const detected =
-        work || forceCartEarly
-          ? null
-          : detectSoftwareStandard({ names: [mediaName, opts.title, bootName], data: raw });
+      const detected = work
+        ? null
+        : detectSoftwareStandard({
+            names: [filename, mediaName, opts.title, bootName],
+            data: forceCartEarly ? undefined : raw,
+          });
       softwareStdRef.current = detected;
       setSoftwareStd(detected);
       const origKind = kindOf(bootName);
@@ -3227,7 +3366,9 @@ export function Grok64App() {
           );
           resolvedRef.current = resNow;
           if (pendingCompanionRef.current.length) {
-            writeCompanionMedia(emuRef.current, pendingCompanionRef.current);
+            const companions = pendingCompanionRef.current;
+            writeCompanionMedia(emuRef.current, companions);
+            attachReuCompanions(emuRef.current, companions);
             pendingCompanionRef.current = [];
           }
           applyRuntimeOptions(emuRef.current, {
@@ -3360,6 +3501,12 @@ export function Grok64App() {
         s.setBooting(true, plan.status, 35);
         const wrote = writeBootFile(emuRef.current, media, bootName);
         if (wrote) {
+          if (pendingCompanionRef.current.length) {
+            const companions = pendingCompanionRef.current;
+            writeCompanionMedia(emuRef.current, companions);
+            attachReuCompanions(emuRef.current, companions);
+            pendingCompanionRef.current = [];
+          }
           emuRef.current.fileName = bootName.replace(/^\//, "");
           glog("play-recycle-inplace", {
             filename,
@@ -3576,10 +3723,10 @@ export function Grok64App() {
           clearUnitMounts();
         }
       }
-      const blob = new Blob([toArrayBuffer(media)]);
+      const blob = new Blob([startPayload ?? toArrayBuffer(media)]);
       const url = URL.createObjectURL(blob);
       blobRef.current = url;
-      await startWithUrl(url, bootName, {
+      await startWithUrl(url, startFileName || bootName, {
         autostart: plan.autostartAfterReady,
         playKind: plan.kind,
         diskLoad: diskLoad && !forceCart && plan.kind !== "cart",
@@ -3704,6 +3851,30 @@ export function Grok64App() {
       return;
     }
     const raw = new Uint8Array(file.data);
+    if (isReuImageName(file.name) && !isNuvieReuName(file.name)) {
+      if (!emuRef.current || !coreHasFs(emuRef.current)) {
+        toast.error("Power on first, then load the REU image.");
+        return;
+      }
+      const pool = await libraryReuPool();
+      const cfg = pickCompanionReu({
+        bootName: file.name,
+        library: pool,
+        armed: { name: file.name, data: raw, id: item.id },
+      })?.cfg;
+      const size = resolveReuPlaySize({ bytes: raw.byteLength, cfg });
+      useEmu.getState().setReuSize(size);
+      pendingReuRef.current = { name: file.name, data: raw, id: item.id };
+      applyRuntimeOptions(emuRef.current, { vice_ram_expansion_unit: size });
+      const rc = attachReuImage(emuRef.current, raw, reuSizeKbForVice(size));
+      if (rc === 0) toast.success(`Loaded ${file.name} into the REU (${REU_LABEL[size]})`);
+      else toast.error("Could not load that REU image into VICE");
+      return;
+    }
+    if (isNuvieReuName(file.name)) {
+      await playBuffer(file.name, file.data, { autostart: true, title: file.name, libraryId: item.id });
+      return;
+    }
     const kind = kindOf(file.name);
     const check = validateFloppyLibraryPayload(file.name, raw);
     if (!check.ok) {
@@ -3793,7 +3964,7 @@ export function Grok64App() {
     void logFloppyAttach("insert-disk", { name: item.name, bytes: media, libraryId: item.id });
     finishFloppyMountReady();
     toast.success(`Inserted ${label} on drive ${unit}`);
-  }, [finishFloppyMountReady, logFloppyAttach, s]);
+  }, [finishFloppyMountReady, logFloppyAttach, playBuffer, s]);
   insertDiskRef.current = insertDisk;
   const toggleWarp = useCallback(() => {
     const next = !useEmu.getState().warped;

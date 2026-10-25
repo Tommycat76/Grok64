@@ -3,7 +3,7 @@ import { isCracktroName, listD64Directory, namesFuzzyMatch } from "./d64";
 import { kindOf } from "./formats";
 import type { MediaKind } from "./types";
 
-const C64_EXT = /\.(prg|p00|d64|d71|d81|g64|g71|t64|tap|crt|bin|sid|reu|nuv|zip)$/i;
+const C64_EXT = /\.(prg|p00|d64|d71|d81|g64|g71|t64|tap|crt|bin|sid|reu|nuv|zip|cfg)$/i;
 
 export function toArrayBuffer(u8: Uint8Array): ArrayBuffer {
   return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
