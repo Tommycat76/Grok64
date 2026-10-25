@@ -746,6 +746,7 @@ async function tapCbmI(hand) {
 function isSelectInputDialog(before, after) {
   if (!after?.img) return false;
   if (looksLikeAboutBox(after.img)) return false;
+  if (before?.img && openedMenuKind(before, after).kind === "geos") return false;
   return looksLikeSelectInput(after.img);
 }
 
@@ -781,10 +782,10 @@ async function walkJoyToUi(hand, tx, ty, { timeout = 5500, close = 12 } = {}) {
   const t0 = Date.now();
   let last = null;
   while (Date.now() - t0 < timeout) {
-    const ui = await uiSnapshot(hand);
-    const loc = findWhitePointer(ui.img);
+    // Horizontal pulses only — up/down also walk the Select Input highlight.
+    const loc = await locatePointer(hand, { dirs: [[1, 0], [-1, 0]], pulseMs: 40 });
     if (!loc) {
-      await holdJoy(hand, 0, -1, 70);
+      await holdJoy(hand, 1, 0, 70);
       await sleep(70);
       continue;
     }
@@ -792,10 +793,10 @@ async function walkJoyToUi(hand, tx, ty, { timeout = 5500, close = 12 } = {}) {
     const dx = tx - loc.x;
     const dy = ty - loc.y;
     if (Math.hypot(dx, dy) <= close) return loc;
-    const sx = Math.abs(dx) > 5 ? Math.sign(dx) : 0;
-    const sy = Math.abs(dy) > 5 ? Math.sign(dy) : 0;
+    const sx = Math.abs(dx) > 6 ? Math.sign(dx) : 0;
+    const sy = Math.abs(dy) > 6 ? Math.sign(dy) : 0;
     if (!sx && !sy) return loc;
-    const ms = Math.min(240, Math.max(55, Math.hypot(dx, dy) * 1.6));
+    const ms = Math.min(200, Math.max(55, Math.hypot(dx, dy) * 1.8));
     await holdJoy(hand, sx, sy, ms);
     await sleep(70);
   }
@@ -841,10 +842,10 @@ async function click1351Left(hand) {
 
 async function pickComm1351InDialog(hand, dlg) {
   // Mouse stays off so GEOS JOYSTICK still drives the pointer and fire.
-  // ArrowDown moves the list highlight JOYSTICK → COMM 1351(a). Extra
-  // ArrowDown leaves COMM onto the icon gadget and the dialog stays open.
-  // Do not enable host mouse first — that freezes the CIA stick.
+  // CRT shots ghost the sprite; locate it with horizontal VICE pulses (up/down
+  // also walk the list bar). Park on OK, highlight COMM, then fire.
   await ensureMouse(hand, false);
+  await ensurePort(hand, 1);
   await ensureWasd(hand, false);
   const out = {
     highlightBefore: whichInputHighlight(dlg.img),
@@ -852,6 +853,10 @@ async function pickComm1351InDialog(hand, dlg) {
     downs: 0,
     closed: false,
   };
+  const ok = geosMap(dlg.img, 204, 114);
+  if (ok) out.parked = await walkJoyToUi(hand, ok.x, ok.y, { timeout: 5000, close: 12 });
+  else await hopJoy(hand, 1, 1, 5, 90);
+  await hand.shot("10-1351-toward-ok.png");
 
   for (let i = 0; i < 2; i++) {
     const now = await snapshot(hand.page);
@@ -860,20 +865,28 @@ async function pickComm1351InDialog(hand, dlg) {
     if (out.which === "comm") break;
     await tapC64Key(hand, "ArrowDown", "ArrowDown", 120);
     out.downs += 1;
-    await sleep(280);
+    await sleep(250);
   }
 
   if (out.which !== "comm") {
-    const ui0 = await uiSnapshot(hand);
-    const comm = geosMap(ui0.img, 118, 60);
-    if (comm) out.landComm = await walkJoyToUi(hand, comm.x, comm.y, { timeout: 5000, close: 11 });
-    else await hopJoy(hand, 0, -1, 6, 80);
+    // From OK / empty mid, COMM is up-left. 70ms ≈ 3–4 GEOS px.
+    await hopJoy(hand, -1, -1, 5, 80);
     await hand.shot("10-1351-toward-comm.png");
     await clickJoy(hand, { downMs: 120 });
-    await sleep(350);
-    const vice = await snapshot(hand.page);
+    await sleep(300);
+    let vice = await snapshot(hand.page);
     out.which = whichInputHighlight(vice.img);
+    if (out.which !== "comm") {
+      await hopJoy(hand, 0, 1, 2, 80);
+      await clickJoy(hand, { downMs: 120 });
+      await sleep(280);
+      vice = await snapshot(hand.page);
+      out.which = whichInputHighlight(vice.img);
+    }
     out.highlight = out.which;
+    if (out.which === "comm" && ok) {
+      out.parked = await walkJoyToUi(hand, ok.x, ok.y, { timeout: 4000, close: 12 });
+    }
   }
 
   const marked = await snapshot(hand.page);
@@ -887,7 +900,7 @@ async function pickComm1351InDialog(hand, dlg) {
     await sleep(350);
     let still = await snapshot(hand.page);
     if (looksLikeSelectInput(still.img)) {
-      await clickJoy(hand, { downMs: 120 });
+      await clickJoy(hand, { downMs: 130 });
       await sleep(400);
       still = await snapshot(hand.page);
     }
@@ -1344,7 +1357,7 @@ async function test1351(hand, prefix) {
   return out;
 }
 
-/** geos → select input → COMM 1351(a) → OK. C= + I opens GEOS info on this disk. */
+/** C= + I opens Select Input Device on the official boot disk (real-UI proof). Menu walk is fallback. */
 async function activateGeos1351(hand) {
   const out = { steps: [], file: "COMM 1351(a)", via: "select-input" };
   await ensureMouse(hand, false);
@@ -1353,8 +1366,16 @@ async function activateGeos1351(hand) {
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
 
-  let dlg = before;
-  out.dialog = isSelectInputDialog(before, before);
+  await tapCbmI(hand);
+  out.steps.push("cbm-i");
+  let dlg = await waitSelectInput(hand, before, 8000);
+  if (looksLikeAboutBox(dlg.img)) {
+    out.steps.push("cbm-i-about");
+    await clickJoy(hand, { downMs: 110 });
+    await sleep(300);
+    dlg = await snapshot(hand.page);
+  }
+  out.dialog = isSelectInputDialog(before, dlg);
 
   if (!out.dialog) {
     out.landGeos = await landOnGeosWord(hand);
