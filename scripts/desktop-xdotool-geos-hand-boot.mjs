@@ -14,19 +14,26 @@
  * Per disk (GROK64_HAND_D64: the exact images under test) and JiffyDOS mode:
  *   the library row is compared with the image bytes; when it is missing or differs:
  *     Software → On this device → Remove, then Import through the native file dialog
- *   Settings → JiffyDOS switch, Power off → Power on,
+ *   Settings → JiffyDOS switch, Power off → Power on (JiffyDOS on only counts with JiffyDOS live and
+ *   its banner on screen, i.e. with the user's JiffyDOS ROMs in the profile; off needs the stock banner),
  *   Software → On this device → unit 8 → Insert (the screen has to stay at READY, nothing typed),
- *   click the CRT and type LOAD"$",8 / LIST, then LOAD"GEOS",8,1 / RUN until the GEOS deskTop
- *   is on screen or the C64 resets, then About.
+ *   click the CRT and type LOAD"$",8 / LIST, read the drive error channel with a short BASIC
+ *   program (NEW, 10 OPEN1,8,15 ... 40 CLOSE1, RUN), then LOAD"GEOS",8,1 / RUN until the GEOS
+ *   deskTop is on screen or the C64 resets, then About.
  * GROK64_HAND_EXPECT (one per disk, default desktop) is what desktop VICE x64sc does with the
- * same image and keys: "desktop", or "reset" for copy-protected originals whose protection a D64
- * cannot hold (BOOTING GEOS ..., then the BASIC power-on screen).
+ * same image and keys (scripts/vice-desktop-reference.mjs): "desktop"; "reset" for copy-protected
+ * originals whose protection a D64 cannot hold (BOOTING GEOS ..., then the BASIC power-on
+ * screen); "fnf" for an error-info D64 whose table marks the directory unreadable (FILE NOT FOUND
+ * for $ and GEOS, a read error on track 18 in the error channel).
  *
  *   GROK64_HAND_D64=/a.d64,/b.d64 GROK64_HAND_EXPECT=reset,desktop node scripts/desktop-xdotool-geos-hand-boot.mjs
  *   GROK64_HAND_JIFFY=off,on   GROK64_HAND_TYPE_DELAY_MS=90   GROK64_HAND_RECORD=0 (no video)
  *   GROK64_XDISPLAY=:98   GROK64_HAND_CHROME=/opt/google/chrome/chrome   GROK64_HAND_WM=xfwm4
- * Default disk: GEOS_2.0.d64 from private-c64/geos (GROK64_GEOS_D64_PATH) when present, else
+ * Default disk: the clean 1541 baseline (geosBaselineD64): GEOS_2.0.d64 (GROK64_GEOS_D64_PATH,
+ * private-c64/geos or its copy in fixtures/geos) with its error-info table stripped, else
  * fixtures/geos/GEOS64_en.d64.
+ * The image with its table is a separate check:
+ *   GROK64_HAND_D64=private-c64/geos/GEOS_2.0.d64 GROK64_HAND_EXPECT=fnf
  * Output: screenshots/geos-hand-boot/<disk>/<jiffy-off|jiffy-on>/ and
  * artifacts/geos-hand-boot/results.json.
  */
@@ -36,7 +43,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } fr
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { seedTomReusedProfile, TOM_REUSED_PROFILE, waitBasicCommand, waitGeosBoot } from "./desktop-qa-lib.mjs";
-import { GEOS_EN_PLAIN_NAME, geosD64Fingerprint, resolveGeosD64Path } from "./geos-fixture-lib.mjs";
+import { geosBaselineD64, geosD64Fingerprint } from "./geos-fixture-lib.mjs";
 import { d64Directory, d64ErrorInfoSummary } from "./d64-error-info-lib.mjs";
 
 const cwd = process.cwd();
@@ -66,9 +73,7 @@ mkdirSync(outDir, { recursive: true });
 function diskPaths() {
   const env = process.env.GROK64_HAND_D64;
   if (env) return env.split(",").map((s) => s.trim()).filter(Boolean).map((p) => resolve(p));
-  const tom = resolveGeosD64Path(cwd);
-  if (existsSync(tom) && !tom.startsWith(join(cwd, "fixtures"))) return [tom];
-  return [join(cwd, "fixtures", "geos", GEOS_EN_PLAIN_NAME)];
+  return [geosBaselineD64(cwd).path];
 }
 
 function describeDisk(path) {
@@ -549,6 +554,8 @@ async function runAll() {
       if (!trace.power.ready) throw new Error("no READY after Power on");
       trace.banner = (await screenText(page)).split("\n").filter((l) => l.trim()).slice(0, 3).join(" | ");
       trace.jiffyLive = await page.evaluate(() => window.__g64?.jiffyLive?.() ?? null);
+      trace.jiffyBanner = /JIFFYDOS/i.test(trace.banner);
+      trace.jiffyOk = jiffy ? trace.jiffyLive === true && trace.jiffyBanner : trace.jiffyLive !== true && !trace.jiffyBanner;
       trace.core = await coreStatus(page);
       trace.coreOk = trace.core?.buildIdLoaded === manifest.buildId && trace.core?.buildMatches === true;
       trace.sessionFlags = await page.evaluate(() => window.__g64?.sessionFlags?.() ?? null);
@@ -610,9 +617,29 @@ async function runAll() {
       await sleep(1500);
       listed = await screenText(page);
       trace.directory = directoryMatchesImage(listed, disk.dir);
-      trace.directoryOk = trace.loadDollarLine.found && !trace.loadDollar.error && trace.directory.ok;
+      trace.directoryOk =
+        disk.expect === "fnf"
+          ? trace.loadDollarLine.found &&
+            /FILE NOT FOUND/.test(trace.loadDollar.after ?? "") &&
+            !/BLOCKS FREE/i.test(screenTextAfterList(listed))
+          : trace.loadDollarLine.found && !trace.loadDollar.error && trace.directory.ok;
       trace.listScreen = listed.slice(0, 1200);
       await shot("04-directory.png");
+
+      // The drive's own error channel, read the way a user would: a short BASIC program.
+      await type("NEW");
+      await key("Return");
+      await sleep(800);
+      for (const line of ERROR_CHANNEL_PROGRAM) {
+        await type(line);
+        await key("Return");
+        await sleep(400);
+      }
+      await type("RUN");
+      await key("Return");
+      trace.errorChannel = await waitErrorChannel(page);
+      trace.errorChannelOk = errorChannelExpected(trace.errorChannel, disk.expect);
+      await shot("04b-error-channel.png");
 
       await key("shift+Home");
       await sleep(600);
@@ -644,7 +671,13 @@ async function runAll() {
       trace.run = boot.run;
       trace.bootingGeos = boot.bootingGeos;
       trace.deskTop = boot.deskTop && { pass: boot.deskTop.pass, reset: Boolean(boot.deskTop.reset), ms: boot.deskTop.ms };
-      trace.outcome = boot.deskTop?.pass ? "desktop" : boot.deskTop?.reset ? "reset" : "no-desktop";
+      trace.outcome = boot.deskTop?.pass
+        ? "desktop"
+        : boot.deskTop?.reset
+          ? "reset"
+          : /FILE NOT FOUND/.test(boot.load?.after ?? "")
+            ? "fnf"
+            : "no-desktop";
       await sleep(2000);
       await shot(trace.outcome === "desktop" ? "07-desktop.png" : `07-${trace.outcome}.png`);
       await openAbout();
@@ -652,12 +685,14 @@ async function runAll() {
       trace.expect = disk.expect;
       trace.pass = Boolean(
         trace.coreOk &&
+          trace.jiffyOk &&
           trace.exactMedia &&
           trace.insertedExact &&
           trace.insertLeftReady &&
           trace.directoryOk &&
+          trace.errorChannelOk &&
           trace.firstKeyAfterClickOk &&
-          !trace.loadGeos?.error &&
+          (disk.expect === "fnf" ? Boolean(trace.loadGeos?.error) : !trace.loadGeos?.error) &&
           trace.outcome === disk.expect,
       );
     } catch (e) {
@@ -741,6 +776,7 @@ async function runAll() {
             insertedExact: t.insertedExact,
             imported: t.library?.imported,
             jiffyLive: t.jiffyLive,
+            jiffyOk: t.jiffyOk,
             banner: t.banner,
             insertLeftReady: t.insertLeftReady,
             directoryOk: t.directoryOk,
@@ -752,6 +788,7 @@ async function runAll() {
             expect: t.expect,
             deskTop: t.deskTop,
             dos1541: t.loadDollarDiag?.dos1541?.errorChannel,
+            errorChannel: t.errorChannel?.text,
             error: t.error,
           }),
         );
@@ -772,6 +809,36 @@ function screenTextAfterList(text) {
     if (/^\s*LIST\s*$/i.test(lines[i])) return lines.slice(i + 1).join("\n");
   }
   return "";
+}
+
+/** Same program scripts/vice-desktop-reference.mjs types into desktop VICE. */
+const ERROR_CHANNEL_PROGRAM = ["10 OPEN1,8,15", "20 INPUT#1,A,B$,C,D", "30 PRINTA;B$;C;D", "40 CLOSE1"];
+
+/** The status line the program prints after RUN, e.g. " 23 READ ERROR 18  1". */
+async function waitErrorChannel(page, ms = 30_000) {
+  const t0 = Date.now();
+  let text = "";
+  while (Date.now() - t0 < ms) {
+    await sleep(700);
+    text = await screenText(page);
+    const lines = text.split("\n");
+    const runAt = lines.findLastIndex((l) => /^\s*RUN\s*$/i.test(l));
+    if (runAt < 0) continue;
+    const after = lines.slice(runAt + 1).filter((l) => l.trim());
+    if (!after.some((l) => /^\s*READY\.\s*$/.test(l))) continue;
+    const m = after.map((l) => /^\s*(\d+)\s+(.+?)\s+(\d+)\s+(\d+)\s*$/.exec(l)).find(Boolean);
+    return m
+      ? { text: m[0].trim().replace(/\s+/g, " "), code: Number(m[1]), message: m[2], track: Number(m[3]), sector: Number(m[4]) }
+      : { text: after.join(" | ").slice(0, 120), code: null };
+  }
+  return { text: text.split("\n").filter((l) => l.trim()).slice(-3).join(" | "), code: null, timeout: true };
+}
+
+/** A listed disk leaves "0 OK"; an unreadable directory leaves a read error on track 18. */
+function errorChannelExpected(ec, expect) {
+  if (ec?.code == null) return false;
+  if (expect === "fnf") return ec.code >= 20 && ec.code <= 29 && ec.track === 18;
+  return ec.code === 0;
 }
 
 let xvfb;
