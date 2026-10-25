@@ -13,13 +13,13 @@ import { basename, join, resolve } from "node:path";
 import { handConfig, openHand, sleep, waitFor, withHandDisplay } from "./desktop-hand-lib.mjs";
 
 const cwd = process.cwd();
-const cfg = handConfig();
+const handCfg = handConfig();
 const mediaRoot = resolve(process.env.GROK64_FIX_MEDIA || join(cwd, ".media"));
 const bluDir = join(mediaRoot, "DEMOS", "BluREU");
 const files = {
   prg: join(bluDir, "BluREU_Crest.prg"),
   reu: join(bluDir, "blu.reu"),
-  cfg: join(bluDir, "RunMeFirst.cfg"),
+  runMe: join(bluDir, "RunMeFirst.cfg"),
   ntsc: join(mediaRoot, "GUI64 [NTSC].crt"),
   pal: join(mediaRoot, "GUI64 [PAL].crt"),
 };
@@ -97,7 +97,7 @@ async function main() {
   if (failMissing()) process.exit(0);
   const prg = media(files.prg);
   const reu = media(files.reu);
-  const cfg = media(files.cfg);
+  const runMe = media(files.runMe);
   const ntsc = media(files.ntsc);
   const pal = media(files.pal);
   const run = {
@@ -107,8 +107,8 @@ async function main() {
     palCart: {},
   };
 
-  await withHandDisplay(cfg, async () => {
-    const hand = await openHand(cfg, { shotDir: join(shotRoot, "boot") });
+  await withHandDisplay(handCfg, async () => {
+    const hand = await openHand(handCfg, { shotDir: join(shotRoot, "boot") });
     let stopRec = async () => {};
     try {
       run.start = await hand.start();
@@ -117,13 +117,13 @@ async function main() {
 
       hand.setShotDir(join(shotRoot, "blureu"));
       mkdirSync(hand.shotDir(), { recursive: true });
-      if (cfg.record) stopRec = await hand.startRecording(join(outDir, "blureu.mp4"));
+      if (handCfg.record) stopRec = await hand.startRecording(join(outDir, "blureu.mp4"));
 
-      await importOnly(hand, cfg, "cfg");
+      await importOnly(hand, runMe, "cfg");
       await importOnly(hand, reu, "reu");
       await importOnly(hand, prg, "prg");
       run.blu.library = (await hand.libraryRows()).filter((r) =>
-        [prg.name, reu.name, cfg.name].includes(r.name),
+        [prg.name, reu.name, runMe.name].includes(r.name),
       );
       await playFromLibrary(hand, prg, "blu-play");
       const running = await waitFor(
