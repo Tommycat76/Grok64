@@ -543,6 +543,25 @@ export type ViceLoadDollarDiag = {
   imgTrack18Sector1Hex?: string;
   c64FnamLen?: number;
   c64FnambHex?: string;
+  /** D64 error-info table as VICE holds it; `flagged` lists [track, sector, code] for codes above 1. */
+  errorInfo?: {
+    present: boolean;
+    entries?: number;
+    codes?: Record<string, number>;
+    track18?: string;
+    flagged?: [number, number, number][];
+    flaggedCount?: number;
+  };
+  imgBamIdHex?: string;
+  /** True-drive 1541 RAM: job queue, master disk ID, last header, received name, error channel. */
+  dos1541?: {
+    jobsHex: string;
+    jobTsHex: string;
+    diskIdHex: string;
+    lastHeaderHex: string;
+    cmdHex: string;
+    errorChannel: string;
+  } | null;
 };
 
 export type ViceLoadDollarDiagReport = ViceLoadDollarDiag & {
@@ -552,6 +571,11 @@ export type ViceLoadDollarDiagReport = ViceLoadDollarDiag & {
 };
 
 let lastViceLoadDollarDiag: ViceLoadDollarDiagReport | null = null;
+
+/** The 1541 error buffer is not terminated: bytes of an earlier, longer message follow "nn,TEXT,tt,ss". */
+function dos1541CurrentMessage(text: string): string {
+  return /^\d\d,[^,]*,\d\d,\d\d/.exec(text)?.[0] ?? text;
+}
 
 export function getLastViceLoadDollarDiag(): ViceLoadDollarDiagReport | null {
   return lastViceLoadDollarDiag;
@@ -598,8 +622,12 @@ export function viceLoadDollarDiagCapture(
     lastViceLoadDollarDiag = report;
     return report;
   }
+  const diag = raw as ViceLoadDollarDiag;
   const report: ViceLoadDollarDiagReport = {
-    ...(raw as ViceLoadDollarDiag),
+    ...diag,
+    ...(diag.dos1541
+      ? { dos1541: { ...diag.dos1541, errorChannel: dos1541CurrentMessage(diag.dos1541.errorChannel) } }
+      : {}),
     capturedAt: new Date().toISOString(),
     captureSource: source,
   };

@@ -673,7 +673,9 @@ function Drive8DiagPanel() {
         <code className="text-fg">viceDriveBus</code> (drive CPU clock advancing,{" "}
         <code className="text-fg">wasmFilesystemDevice</code>=0,{" "}
         <code className="text-fg">serialDeviceLabel</code> not <code className="text-fg">virt</code>,{" "}
-        <code className="text-fg">viceLoadDollarDiag</code> (captured every About refresh and auto on FILE NOT FOUND; BASIC $0200, KERNAL $C3, vdrive error 62, track-18 BAM, IEC lines).{" "}
+        <code className="text-fg">viceLoadDollarDiag</code> (captured every About refresh and auto on FILE NOT FOUND; BASIC $0200, KERNAL $C3, vdrive error 62, track-18 BAM, IEC lines;{" "}
+        <code className="text-fg">errorInfo</code> shows a D64 error table as stored: code counts, the track 18 codes, and the flagged sectors;{" "}
+        <code className="text-fg">dos1541</code> reads the true drive&apos;s RAM: its error channel, the name it received, and the disk ID).{" "}
         <code className="text-fg">wasmIecBusAtn</code> false at idle READY (ATN released);{" "}
         <code className="text-fg">profilePersistDiff</code> diffs localStorage / vicerc / WASM drive resources vs a fresh profile. WASM only — copy and send
         this block. Logs: last 20 floppy-attach / play-mount lines.

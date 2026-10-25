@@ -87,7 +87,6 @@ import {
   viceDriveBusProbe,
 } from "./vice-disk";
 import { writeC64Bytes } from "./c64-memory";
-import { normalizeD64ErrorInfoTail } from "./d64-error-info";
 import {
   isAcceptedD64ByteLength,
   isCartridgePayload,
@@ -2428,7 +2427,6 @@ export async function bumpViceWorkDiskReload(emu: EjsInstance | null, unit: IecU
 
 export function syncViceWorkD64(emu: EjsInstance | null, data: Uint8Array, unit: IecUnit = 8) {
   if (!isAcceptedD64ByteLength(data.byteLength)) return;
-  data = normalizeD64ErrorInfoTail(data);
   const saveDir = retroSaveDirFromModule(emu) ?? viceRetroSaveDirectory(emu);
   const targets = [
     grok64IecAttachD64Path(unit),
@@ -2948,9 +2946,6 @@ export function mountDiskOnUnit(
 ): boolean {
   const FS = fsOf(emu);
   if (!FS?.writeFile) return false;
-  if (/\.d64$/i.test(filename) && isAcceptedD64ByteLength(data.byteLength)) {
-    data = normalizeD64ErrorInfoTail(data);
-  }
   const base = filename.replace(/^\//, "");
   const prev = unitMounts.get(unit);
   if (prev && prev !== base) removeMediaFile(FS, prev);
