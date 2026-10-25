@@ -672,21 +672,75 @@ async function waitSelectInput(hand, before, ms = 8000) {
   return last;
 }
 
+async function hopJoy(hand, x, y, hops, ms = 90) {
+  for (let i = 0; i < hops; i++) {
+    await holdJoy(hand, x, y, ms);
+    await sleep(50);
+  }
+}
+
+async function locatePointer1351(hand) {
+  const before = await snapshot(hand.page);
+  await hand.page.evaluate(() => window.__g64?.addMouseDelta?.(10, 0));
+  await sleep(90);
+  const after = await snapshot(hand.page);
+  const diff = frameDiff(before.img, after.img, { skipTop: 4 });
+  if (diff.changed >= 6) return { x: diff.cx, y: diff.cy, changed: diff.changed };
+  return null;
+}
+
+async function walk1351To(hand, tx, ty, { timeout = 4500, close = 10 } = {}) {
+  const t0 = Date.now();
+  let last = null;
+  while (Date.now() - t0 < timeout) {
+    const loc = await locatePointer1351(hand);
+    if (!loc) {
+      await hand.page.evaluate(() => window.__g64?.addMouseDelta?.(14, 8));
+      await sleep(80);
+      continue;
+    }
+    last = loc;
+    const dx = tx - loc.x;
+    const dy = ty - loc.y;
+    if (Math.hypot(dx, dy) <= close) return loc;
+    const stepX = Math.max(-22, Math.min(22, dx * 0.45));
+    const stepY = Math.max(-22, Math.min(22, dy * 0.45));
+    await hand.page.evaluate(({ stepX, stepY }) => window.__g64?.addMouseDelta?.(stepX, stepY), { stepX, stepY });
+    await sleep(80);
+  }
+  return last;
+}
+
+async function click1351Left(hand) {
+  const left = hand.page.getByRole("button", { name: "Left mouse button" }).first();
+  if (await left.isVisible().catch(() => false)) {
+    await hand.click(left, "1351 left");
+    await sleep(120);
+    return;
+  }
+  await clickJoy(hand, { downMs: 120 });
+}
+
 async function pickComm1351InDialog(hand, dlg) {
-  // Clicking the COMM row can load 1351 immediately and freeze the joystick walk.
-  // Park on OK first (JOYSTICK driver still moves the pointer), ArrowDown onto
-  // COMM 1351(a), then fire / RETURN to confirm. Sprite centroid is ~6px below the tip.
+  // Joystick locate pulses also move this dialog's list highlight. After C= + I
+  // the pointer sits in the empty mid; hop onto COMM, click, then walk to OK
+  // with host 1351 deltas (the row click can load the mouse and freeze the stick).
   const ok = geosMap(dlg.img, 204, 114);
-  if (ok) await walkPointerTo(hand, ok.x, ok.y, { timeout: 5000, close: 8 });
+  await hopJoy(hand, -1, -1, 3, 100);
+  await hand.shot("10-1351-toward-comm.png");
+  await clickJoy(hand, { downMs: 120 });
+  await sleep(350);
+  await hand.shot("10-1351-comm-clicked.png");
+  await hopJoy(hand, 1, 1, 4, 110);
+  await ensureMouse(hand, true);
+  await ensurePort(hand, 1);
+  if (ok) await walk1351To(hand, ok.x, ok.y, { timeout: 5000, close: 10 });
   const parked = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-on-ok.png", parked.b64);
-  await tapC64Key(hand, "ArrowDown", "ArrowDown");
-  await sleep(200);
-  await hand.shot("10-1351-comm-highlighted.png");
-  await clickJoy(hand, { downMs: 120 });
+  await hand.shot("10-1351-on-ok-ui.png");
+  await click1351Left(hand);
+  await clickJoy(hand, { downMs: 110 });
   await sleep(400);
-  await tapC64Key(hand, "Enter", "Enter");
-  await sleep(300);
 }
 
 async function locatePointer(hand, { dirs = null, pulseMs = 55 } = {}) {
@@ -1118,7 +1172,7 @@ async function test1351(hand, prefix) {
   return out;
 }
 
-/** geos → select input → COMM 1351(a) → OK. C= + I opens GEOS info on this disk. */
+/** C= + I opens Select Input Device on the official boot disk (real-UI proof). Menu walk is fallback. */
 async function activateGeos1351(hand) {
   const out = { steps: [], file: "COMM 1351(a)", via: "select-input" };
   await ensureMouse(hand, false);
@@ -1127,8 +1181,12 @@ async function activateGeos1351(hand) {
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
 
-  let dlg = before;
-  {
+  await tapCbmI(hand);
+  out.steps.push("cbm-i");
+  let dlg = await waitSelectInput(hand, before, 10000);
+  out.dialog = isSelectInputDialog(before, dlg);
+
+  if (!out.dialog) {
     out.landGeos = await landOnGeosWord(hand);
     out.steps.push(onGeosWord(out.landGeos?.landed) ? "on-geos" : "geos-miss");
     await hand.shot("10-1351-preclick.png");
