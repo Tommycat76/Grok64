@@ -799,9 +799,8 @@ async function activateGeos1351(hand) {
   return out;
 }
 
-async function bootOfficialGeos(hand, disk) {
+async function bootOfficialGeos(hand, disk, jiffy = false) {
   await hand.page.evaluate(() => window.__g64?.kbdReleaseAll?.());
-  const jiffy = await hand.page.evaluate(() => window.__g64?.jiffyLive?.());
   if (jiffy) {
     // JiffyDOS + host xdotool prepends a "4"/← and turns NEW/LOAD into SAVE.
     await hand.page.evaluate(async () => {
@@ -872,7 +871,7 @@ async function runGeosMode(hand, disk, jiffy) {
   trace.jiffyOk = jiffy ? trace.jiffyLive === true && trace.jiffyBanner : trace.jiffyLive !== true && !trace.jiffyBanner;
   Object.assign(trace, await hand.insertFromLibrary(disk, { unit: 8, shot: "03-library-row.png", readyShot: "03-inserted-ready.png" }));
   trace.kbjoy = await basicKbjoy(hand, "04");
-  trace.geos = await bootOfficialGeos(hand, disk);
+  trace.geos = await bootOfficialGeos(hand, disk, jiffy);
   trace.deskTop = Boolean(trace.geos.desk?.pass || trace.geos.boot?.deskTop?.pass);
   if (trace.deskTop) {
     trace.joystick = await testStickAndWasd(hand, "08");
