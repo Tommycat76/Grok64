@@ -657,39 +657,21 @@ async function activateGeos1351(hand) {
   await ensureWasd(hand, false);
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
-  // WASD-D parks on "page" or "select". Click, then one step right if the menu did not open.
-  await clickJoy(hand);
-  await sleep(400);
-  out.steps.push("click-page");
-  await hand.shot("10-1351-page-menu.png");
-  out.menu = movedEnough(before, await snapshot(hand.page), { minChanged: 40, minInk: 1.2 });
-  if (!out.menu.pass) {
-    await holdJoy(hand, 1, 0, 200);
-    out.steps.push("select-to-page");
-    await clickJoy(hand);
-    await sleep(350);
-    await hand.shot("10-1351-page-menu-retry.png");
+  // The page *menu* is append/delete (not next). Flip files with the title-bar "-" gadget.
+  await holdJoy(hand, 0, 1, 240);
+  await holdJoy(hand, 1, 0, 420);
+  out.steps.push("title-gadget");
+  const gadget = pageGadgetPos(before.img);
+  out.gadget = gadget ? { x: gadget.x, y: gadget.y } : null;
+  if (gadget) {
+    out.walkGadget = await walkPointerTo(hand, gadget.x, gadget.y, { timeout: 2500, close: 16 });
+    out.steps.push("page-gadget");
   }
-  await holdJoy(hand, 0, 1, 160);
   await clickJoy(hand);
-  await sleep(1200);
+  await sleep(1000);
+  await hand.shot("10-1351-page-menu.png");
   let page2 = await snapshot(hand.page);
   out.paged = iconRegionChanged(before, page2, { minChanged: 180 });
-  if (!out.paged.pass) out.paged = movedEnough(before, page2, { minChanged: 400, minInk: 8 });
-  if (!out.paged.pass) {
-    out.steps.push("page-gadget");
-    const gadget = pageGadgetPos(page2.img);
-    out.gadget = gadget ? { x: gadget.x, y: gadget.y } : null;
-    if (gadget) await walkPointerTo(hand, gadget.x, gadget.y);
-    else {
-      await holdJoy(hand, 0, -1, 280);
-      await holdJoy(hand, 1, 0, 200);
-    }
-    await clickJoy(hand);
-    await sleep(900);
-    page2 = await snapshot(hand.page);
-    out.paged = iconRegionChanged(before, page2, { minChanged: 180 });
-  }
   await savePng(hand.shotDir(), "10-1351-page2.png", page2.b64);
   await hand.shot("10-1351-page2-ui.png");
   out.steps.push(out.paged.pass ? "page-2" : "page-miss");
