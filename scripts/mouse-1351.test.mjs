@@ -50,18 +50,17 @@ test("nonzero analog axes hold the D-pad bits vice-libretro maps to 1351 POT", (
   assert.deepEqual(dpadForAxes(-1, 1), { left: true, right: false, up: false, down: true });
 });
 
-test("host drag is 1:1 on a native 384×272 CRT and equal on both axes", () => {
+test("host drag is one CSS pixel per 1351 count on any display size", () => {
   const native = hostDragTo1351(12, -12, CRT_FRAME_W, CRT_FRAME_H);
   assert.equal(native.dx, 12);
   assert.equal(native.dy, -12);
   const wide = hostDragTo1351(20, 20, 768, 544);
-  assert.equal(wide.dx, 10);
-  assert.equal(wide.dy, 10);
+  assert.equal(wide.dx, 20);
+  assert.equal(wide.dy, 20);
 });
 
-test("a taller-than-native box does not give vertical extra gain", () => {
+test("a taller-than-native box does not shrink vertical 1351 counts", () => {
   const { dx, dy } = hostDragTo1351(10, 10, 384, 400);
-  assert.ok(Math.abs(dx - 10) < 1e-9);
-  assert.ok(dy < 10);
-  assert.ok(Math.abs(dy - 10 * (CRT_FRAME_H / 400)) < 1e-9);
+  assert.equal(dx, 10);
+  assert.equal(dy, 10);
 });

@@ -12,6 +12,7 @@ import {
 } from "./host";
 import { sessionDiskOnUnit } from "./session-media";
 import { isGcrDiskKind, kindOf } from "./formats";
+import { floppyIecForKind } from "./play-session";
 import type { IecDrive, IecUnit } from "./types";
 import { isIosPhone } from "./detect";
 import { glog } from "./debug";
@@ -45,7 +46,7 @@ export async function presentFloppyMountReady(
   disarmAutostart(emu, "disk");
   const slot = sessionDiskOnUnit(live.unit);
   const diskKind = slot ? kindOf(slot.name) : null;
-  applyIecUnitFloppy(emu, live.iec, live.unit, diskKind);
+  applyIecUnitFloppy(emu, diskKind ? floppyIecForKind(diskKind) : "1541", live.unit, diskKind);
   if (opts?.afterDriveRefresh) {
     glog("floppy-mount-ready", { afterDriveRefresh: true, kind: diskKind, unit: live.unit });
     await runMountStage("work-disk-manager-off", () => detachLibretroWorkDiskManager(emu, live.unit));

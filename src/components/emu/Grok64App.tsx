@@ -247,7 +247,9 @@ import {
   markSessionReady,
   planPlay,
   CART_PLAY_UNLOCK_VICE_OPTS,
+  floppyIecForKind,
   floppyInsertRejection,
+  floppyInsertUnit,
   viceGeosFloppyOptions,
   readPlayMarker,
   savePlayMarker,
@@ -279,6 +281,7 @@ import { putRom, removeRom } from "@/lib/emu/roms";
 import { snapshotDevice, readViewport, applyViewport, detectDevice, isIos, isIosPhone, isTouchMobile } from "@/lib/emu/detect";
 import { applyTabletContainFit, tabletBezelAvail, tabletGlassFillsBezel } from "@/lib/emu/tablet-fit";
 import { detectSoftwareStandard } from "@/lib/emu/region";
+import { hostDragTo1351 } from "@/lib/emu/mouse-1351";
 import { RETRO_BTN } from "@/lib/emu/types";
 import { feedBasicLine, readPrintTi } from "@/lib/emu/c64-keyboard";
 import { removeSessionCart, sessionDiskOnUnit, setSessionCart, setSessionDisk } from "@/lib/emu/session-media";
@@ -1409,6 +1412,8 @@ export function Grok64App() {
       setWasdIsJoy: (on) => useEmu.getState().setWasdIsJoy(!!on),
       setMouseMode: (on) => useEmu.getState().setMouseMode(!!on),
       addMouseDelta: (dx, dy) => addHostMouseDelta(Number(dx) || 0, Number(dy) || 0),
+      addHostDrag: (dx, dy) => addHostDrag1351(Number(dx) || 0, Number(dy) || 0),
+      hostDragTo1351: (dx, dy, w, h) => hostDragTo1351(Number(dx) || 0, Number(dy) || 0, Number(w) || 0, Number(h) || 0),
       vice1351Direct: () => vice1351Direct(emuRef.current),
       setMouseButtons: (left, right) => {
         mouseBtnRef.current = { left: !!left, right: !!right };
@@ -3897,10 +3902,11 @@ export function Grok64App() {
       toast.error("Power on first, then insert the next disk.");
       return;
     }
-    const unit = item.iecUnit ?? useEmu.getState().iecUnit;
-    const wrongDrive = floppyInsertRejection(kind, useEmu.getState().iecMap, unit);
+    const iecMap = useEmu.getState().iecMap;
+    const unit = floppyInsertUnit(iecMap, kind, item.iecUnit);
+    const wrongDrive = floppyInsertRejection(kind, iecMap, unit);
     if (wrongDrive) {
-      glog("library-insert-wrong-drive", { name: file.name, kind, unit, slot: useEmu.getState().iecMap?.[unit] ?? null });
+      glog("library-insert-wrong-drive", { name: file.name, kind, unit, slot: iecMap?.[unit] ?? null });
       toast.error(wrongDrive);
       return;
     }
@@ -3909,7 +3915,7 @@ export function Grok64App() {
     setCartLive(false);
     useEmu.getState().setFastLoadCart(null);
     setC64KeyboardDefer(true);
-    const iec = useEmu.getState().iecDrive;
+    const iec = floppyIecForKind(kind);
     const boot = bootFileName(file.name, kind);
     const ok = mountDiskOnUnit(emuRef.current, unit, media, boot, iec);
     if (!ok) {
@@ -3927,7 +3933,7 @@ export function Grok64App() {
       applyRuntimeOptions(emuRef.current, {
         vice_drive_true_emulation: "enabled",
         vice_virtual_device_traps: "disabled",
-        [`vice_drive${unit}_type`]: "1541",
+        [`vice_drive${unit}_type`]: iec === "1581" ? "1581" : "1541",
       });
       applyIecUnitFloppy(emuRef.current, iec, unit, kind);
       await detachLibretroWorkDiskManager(emuRef.current, unit);

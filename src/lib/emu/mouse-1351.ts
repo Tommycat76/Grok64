@@ -80,24 +80,24 @@ export const CRT_FRAME_W = 384;
 export const CRT_FRAME_H = 272;
 
 /**
- * Host CSS-pixel drag → 1351 counts so finger travel matches the pointer
- * on the CRT. X and Y use the same counts-per-visible-inch (no extra Y gain).
+ * Host CSS-pixel drag → 1351 counts for VICE `mouse_move`.
+ *
+ * One CSS pixel is one 1351 count on both axes. Scaling down to the 384×272
+ * glass starved small drags (they rounded to 0) while WASD still fed +4
+ * counts/frame — GEOS then looked like it was reading a joystick. GEOS
+ * applies its own 1351 sensitivity; do not pre-shrink here.
  */
 export function hostDragTo1351(
   dx: number,
   dy: number,
-  displayW: number,
-  displayH: number,
-  frameW = CRT_FRAME_W,
-  frameH = CRT_FRAME_H,
+  _displayW?: number,
+  _displayH?: number,
+  _frameW = CRT_FRAME_W,
+  _frameH = CRT_FRAME_H,
 ): { dx: number; dy: number } {
   const x = Number.isFinite(dx) ? dx : 0;
   const y = Number.isFinite(dy) ? dy : 0;
-  const fw = Number.isFinite(frameW) && frameW > 1 ? frameW : CRT_FRAME_W;
-  const fh = Number.isFinite(frameH) && frameH > 1 ? frameH : CRT_FRAME_H;
-  const w = Number.isFinite(displayW) && displayW > 1 ? displayW : fw;
-  const h = Number.isFinite(displayH) && displayH > 1 ? displayH : fh;
-  return { dx: x * (fw / w), dy: y * (fh / h) };
+  return { dx: x, dy: y };
 }
 
 export function crtDisplayBox(root?: ParentNode | Document | null): { w: number; h: number } {

@@ -47,6 +47,9 @@ const {
   savePlayMarker,
   readPlayMarker,
   clearPlayMarker,
+  floppyIecForKind,
+  floppyInsertRejection,
+  floppyInsertUnit,
 } = await server.ssrLoadModule("/src/lib/emu/play-session.ts");
 const {
   classifyPress,
@@ -94,6 +97,19 @@ test("MULE / Burger Time same attach — user SD2IEC preference is not overwritt
     assert.deepEqual(plan.attach, { iec: "1541", unit: 8 });
     assert.equal(plan.recycle, true);
   }
+});
+
+test("Insert of a D64 uses the 1541 in Tom's map, not the selected CMD HD", () => {
+  const map = { 8: "1541", 9: "cmdhd", 10: "none", 11: "none" };
+  assert.equal(floppyIecForKind("d64"), "1541");
+  assert.equal(floppyIecForKind("g64"), "1541");
+  assert.equal(floppyIecForKind("d81"), "1581");
+  assert.equal(floppyInsertUnit(map, "d64"), 8);
+  assert.equal(floppyInsertUnit(map, "d64", 8), 8);
+  assert.equal(floppyInsertUnit(map, "d64", 9), 9);
+  assert.equal(floppyInsertRejection("d64", map, 8), null);
+  assert.match(floppyInsertRejection("d64", map, 9), /CMD HD/);
+  assert.deepEqual(userAttachFromMap(map), { iec: "cmdhd", unit: 9 });
 });
 
 test("CMD HD on unit 9 keeps a 1541 on 8 — floppy Play does not gut CMD", () => {

@@ -401,11 +401,31 @@ export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
     return withUtf8Arg(boundEmu(), mod, path, (ptr) => invoke(fn, ptr));
   };
 
+  const callAttachWithPath = (
+    exportName: string,
+    unit: number,
+    drive: number,
+    path: string,
+  ) => {
+    const fn = resolveWasmExport(mod, exportName);
+    if (!fn) return -99;
+    const rt = mergedWasmRuntime(boundEmu(), mod);
+    const ccall = grok64PristineCcall(rt) ?? rt.ccall;
+    if (ccall) {
+      try {
+        const out = ccall(exportName, "number", ["number", "number", "string"], [unit, drive, path]);
+        if (typeof out === "number" && !Number.isNaN(out)) return out;
+      } catch {
+        /* fall through to UTF-8 pointer */
+      }
+    }
+    return withUtf8Arg(boundEmu(), mod, path, (ptr) => Number(fn(unit, drive, ptr)));
+  };
+
   mod.grok64DiskApi = {
-    diskAttach: (unit, drive, path) =>
-      callWithPath("grok64_disk_attach", (fn, ptr) => Number(fn(unit, drive, ptr)), path),
+    diskAttach: (unit, drive, path) => callAttachWithPath("grok64_disk_attach", unit, drive, path),
     diskAttachDeferred: (unit, drive, path) =>
-      callWithPath("grok64_disk_attach_deferred", (fn, ptr) => Number(fn(unit, drive, ptr)), path),
+      callAttachWithPath("grok64_disk_attach_deferred", unit, drive, path),
     sd2iecPoll: () => {
       resolveWasmExport(mod, "grok64_sd2iec_poll")?.();
     },

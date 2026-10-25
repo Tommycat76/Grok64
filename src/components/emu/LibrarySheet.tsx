@@ -10,6 +10,7 @@ import { validateCrtImport } from "@/lib/emu/cart-crt-diag";
 import { isWorkDisk, listLibrary, putFile, removeFile, updateFileUnit } from "@/lib/emu/library";
 import { importFromUrl } from "@/lib/emu/import-url";
 import { b64ToU8, explodeArchive, pickBootFile, toArrayBuffer } from "@/lib/emu/archive";
+import { floppyInsertUnit } from "@/lib/emu/play-session";
 import { useEmu } from "@/lib/emu/store";
 import type { BundledTitle, LibraryItem } from "@/lib/emu/types";
 import { IecUnitSeg } from "@/components/emu/IecUnitSeg";
@@ -26,7 +27,7 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
   const library = useEmu((s) => s.library);
   const setLibrary = useEmu((s) => s.setLibrary);
   const running = useEmu((s) => s.running);
-  const defaultUnit = useEmu((s) => s.iecUnit);
+  const iecMap = useEmu((s) => s.iecMap);
   const fileRef = useRef<HTMLInputElement>(null);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
@@ -256,7 +257,7 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
                           {isDiskKind(item.kind) ? (
                             <IecUnitSeg
                               compact
-                              value={item.iecUnit ?? defaultUnit}
+                              value={item.iecUnit ?? floppyInsertUnit(iecMap, item.kind)}
                               onChange={(unit) => {
                                 void updateFileUnit(item.id, unit).then(refresh);
                               }}

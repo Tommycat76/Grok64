@@ -2698,6 +2698,7 @@ export function applyIecUnitFloppy(
   if (diskKind === "d81") {
     // libretro's `N_d81` work disk would attach a blank vice_work.d81 over the session disk.
     applyRuntimeOptions(emu, {
+      [`vice_drive${unit}_type`]: "1581",
       vice_work_disk: "disabled",
       vice_drive_true_emulation: "enabled",
       vice_virtual_device_traps: "disabled",
@@ -2715,7 +2716,9 @@ export function applyIecUnitFloppy(
     rememberWorkDisk("disabled");
     return;
   }
-  applyIecUnit(emu, iec, unit);
+  // A .d64 must stay on a 1541. The selected Settings drive may be CMD HD on
+  // unit 9 — applying that type here rewrote Drive8Type and made attach fail.
+  applyIecUnit(emu, "1541", unit);
 }
 
 export async function applyJiffyThenRefreshWorkDisk(

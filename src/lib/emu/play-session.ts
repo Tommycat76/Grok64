@@ -805,10 +805,35 @@ export function floppyInsertRejection(
   if (need === "1581" && slot !== "1581") {
     return `Drive #${unit} is ${IEC_SLOT_NAME[slot]}. A .d81 is a 3.5″ disk for a 1581: set #${unit} to 1581 in Settings → IEC drives, then insert it again.`;
   }
-  if (need === "1541" && slot === "1581") {
-    return `Drive #${unit} is a 1581, which reads 3.5″ .d81 disks, not a 5.25″ .${kind}. Set #${unit} to 1541 in Settings → IEC drives, then insert it again.`;
+  if (need === "1541" && slot !== "1541") {
+    return `Drive #${unit} is ${IEC_SLOT_NAME[slot]}. A .${kind} is a 5.25″ disk for a 1541: set #${unit} to 1541 in Settings → IEC drives, or insert it on the 1541, then insert it again.`;
   }
   return null;
+}
+
+/** 1541 or 1581 for this image — never the selected CMD HD / SD2IEC. */
+export function floppyIecForKind(kind: MediaKind): "1541" | "1581" {
+  return floppyMechanismFor(kind) === "1581" ? "1581" : "1541";
+}
+
+/**
+ * Unit to Insert a floppy on. An explicit library-row unit wins (rejection handles a
+ * CMD HD / 1581 mismatch). Otherwise the first matching floppy in the saved map —
+ * not `iecUnit`, which is the CMD HD when that is the selected drive.
+ */
+export function floppyInsertUnit(
+  map: IecMap | null | undefined,
+  kind: MediaKind,
+  requested?: IecUnit | null,
+): IecUnit {
+  if (requested === 8 || requested === 9 || requested === 10 || requested === 11) {
+    return requested;
+  }
+  const need = floppyMechanismFor(kind);
+  if (need === "1581") {
+    return IEC_UNITS.find((u) => iecSlotOn(map, u) === "1581") ?? 8;
+  }
+  return IEC_UNITS.find((u) => iecSlotOn(map, u) === "1541") ?? 8;
 }
 
 export function unitOfDrive(map: IecMap | null | undefined, drive: IecDrive): IecUnit | null {

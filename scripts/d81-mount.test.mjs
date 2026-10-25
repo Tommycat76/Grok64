@@ -11,7 +11,7 @@ const {
   isAcceptedD81ByteLength,
   kindOf,
 } = await server.ssrLoadModule("/src/lib/emu/formats.ts");
-const { floppyInsertRejection } = await server.ssrLoadModule("/src/lib/emu/play-session.ts");
+const { floppyIecForKind, floppyInsertRejection, floppyInsertUnit } = await server.ssrLoadModule("/src/lib/emu/play-session.ts");
 const { attachesOwnImageOnly, driveTypeForAttach } = await server.ssrLoadModule("/src/lib/emu/vice-disk.ts");
 await server.close();
 
@@ -44,7 +44,19 @@ test("library Insert refuses a D81 unless that unit is a 1581, and refuses a D64
   assert.match(floppyInsertRejection("d64", MAP_1581, 8), /1541/);
   assert.match(floppyInsertRejection("g64", MAP_1581, 8), /1541/);
   assert.equal(floppyInsertRejection("d64", MAP_1541, 8), null);
+  assert.match(floppyInsertRejection("d64", MAP_CMDHD, 9), /CMD HD/);
+  assert.match(floppyInsertRejection("d64", MAP_CMDHD, 9), /1541/);
+  assert.equal(floppyInsertRejection("d64", MAP_CMDHD, 8), null);
   assert.match(floppyInsertRejection("d71", MAP_1541, 8), /1571/);
+});
+
+test("Insert of a D64 uses the 1541 in the map, not the selected CMD HD unit", () => {
+  assert.equal(floppyIecForKind("d64"), "1541");
+  assert.equal(floppyIecForKind("d81"), "1581");
+  assert.equal(floppyInsertUnit(MAP_CMDHD, "d64"), 8);
+  assert.equal(floppyInsertUnit(MAP_CMDHD, "d64", 8), 8);
+  assert.equal(floppyInsertUnit(MAP_CMDHD, "d64", 9), 9);
+  assert.equal(floppyInsertUnit(MAP_1581, "d81"), 8);
 });
 
 test("driveTypeForAttach only switches the live drive when the image needs it", () => {
