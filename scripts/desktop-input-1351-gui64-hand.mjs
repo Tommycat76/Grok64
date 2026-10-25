@@ -715,16 +715,14 @@ async function activateGeos1351(hand) {
 }
 
 async function bootOfficialGeos(hand, disk) {
-  await hand.page.evaluate(() => window.__g64?.kbdReleaseAll?.());
-  await hand.key("Return").catch(() => {});
-  await sleep(250);
-  for (let i = 0; i < 3; i++) await hand.key("BackSpace").catch(() => {});
+  await hand.clickCrtAndType("NEW");
+  await sleep(600);
   await hand.clickCrtAndType('LOAD"BOOT",8,1');
   let loadLine = await hand.waitTypedLine('LOAD"BOOT",8,1');
   const typed = await hand.screenText();
   if (/SAVING BOOT/i.test(typed) && !/SEARCHING FOR BOOT|LOADING/i.test(typed)) {
-    await hand.key("Return").catch(() => {});
-    await sleep(200);
+    await hand.clickCrtAndType("NEW");
+    await sleep(400);
     const jiffy = await hand.page.evaluate(() => window.__g64?.jiffyLive?.());
     const retry = jiffy ? "%BOOT" : 'LOAD"BOOT",8,1';
     await hand.clickCrtAndType(retry);

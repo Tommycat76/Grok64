@@ -582,7 +582,10 @@ export async function waitGeosBoot(
     if (/BOOTING GEOS/i.test(text)) out.bootingGeos = true;
     return text;
   };
-  const resetTo = (text, last) => coldStartScreen(text) && screenTextAfterCommand(text, last) == null;
+  const resetTo = (text, last) =>
+    coldStartScreen(text) &&
+    screenTextAfterCommand(text, last) == null &&
+    !/SEARCHING FOR|LOADING|BOOTING GEOS/i.test(text);
   while (Date.now() - t0 < loadMs) {
     await page.waitForTimeout(1000);
     const text = await screen();
