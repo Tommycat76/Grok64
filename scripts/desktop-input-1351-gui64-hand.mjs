@@ -351,7 +351,7 @@ function longHorizLines(img, y0, y1, { minLen = 70 } = {}) {
 
 /** Official boot disk: COMM 1351(a) is file 14 → notepad page 2, row 1 col 2. */
 function comm1351Pos(img) {
-  return geosMap(img, 200, 118);
+  return geosMap(img, 152, 118);
 }
 
 /** The "1" under the icons — this flips file pages. The title-bar "−" is close. */
@@ -697,6 +697,10 @@ async function landOnGeosWord(hand) {
     [-1, 0],
     [1, 0],
   ];
+  // Menu bar first, then a long left. Short hops from "select" died at x≈110.
+  await holdJoy(hand, 0, -1, 1600);
+  await holdJoy(hand, -1, 0, 1800);
+  await holdJoy(hand, 1, 0, 50);
   for (let i = 0; i < 24; i++) {
     const snap = await snapshot(hand.page);
     const lastX = trace.hops.length ? trace.hops[trace.hops.length - 1].x : 200;
@@ -708,7 +712,7 @@ async function landOnGeosWord(hand) {
       return trace;
     }
     if (!g) {
-      await holdJoy(hand, -1, 0, 70);
+      await holdJoy(hand, -1, 0, 100);
       continue;
     }
     if (g.y > 16) await holdJoy(hand, 0, -1, 70);
@@ -1029,14 +1033,24 @@ async function activateGeos1351(hand) {
   let dlg = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-page-menu.png", dlg.b64);
   await hand.shot("10-1351-select-input.png");
-  out.dialog = looksLikeDialog(before, dlg) || looksLikeCenteredDialog(before, dlg);
+  const onGeos = Boolean(onGeosWord(out.landGeos?.landed) && out.menu?.kind === "geos");
+  const menuOpen = looksLikeDialog(before, dlg) || looksLikeCenteredDialog(before, dlg);
+  const emptyPad = !notepadHasIcons(dlg.img);
+  out.dialog = Boolean(onGeos && menuOpen && !emptyPad);
+  if (!onGeos) {
+    await holdJoy(hand, 0, 1, 500);
+    await clickJoy(hand);
+    await sleep(400);
+    out.steps.push("dismiss-miss");
+  }
   if (!out.dialog) {
     await tapCbmI(hand);
     out.steps.push("cbm-i");
     dlg = await snapshot(hand.page);
     await savePng(hand.shotDir(), "10-1351-page-menu.png", dlg.b64);
     await hand.shot("10-1351-select-input-cbm.png");
-    out.dialog = looksLikeDialog(before, dlg) || looksLikeCenteredDialog(before, dlg);
+    const cbmOpen = looksLikeDialog(before, dlg) || looksLikeCenteredDialog(before, dlg);
+    out.dialog = Boolean(cbmOpen && notepadHasIcons(dlg.img));
   }
   if (out.dialog) {
     await tapC64Key(hand, "ArrowDown", "ArrowDown");
@@ -1047,19 +1061,46 @@ async function activateGeos1351(hand) {
     await tapC64Key(hand, "Enter", "Enter");
     await sleep(2500);
     out.steps.push("ok");
+  } else {
+    // Official path: notepad page 2, double-click COMM 1351(a).
+    out.steps.push("page-flip");
+    out.landPage = await landOnPageNumber(hand);
+    await clickJoy(hand);
+    await sleep(800);
+    let page2 = await snapshot(hand.page);
+    if (!notepadHasIcons(page2.img) || !iconRegionChanged(before, page2, { minChanged: 120 }).pass) {
+      await clickJoy(hand);
+      await sleep(800);
+      page2 = await snapshot(hand.page);
+    }
+    await savePng(hand.shotDir(), "10-1351-page2.png", page2.b64);
+    await hand.shot("10-1351-page2-ui.png");
+    const target = comm1351Pos(page2.img);
+    out.commTarget = target ? { x: target.x, y: target.y } : null;
+    if (target) {
+      out.walkComm = await walkPointerTo(hand, target.x, target.y, { timeout: 8000, close: 8 });
+      out.steps.push("comm-cell");
+    }
+    await clickJoy(hand, { double: true });
+    await sleep(3600);
+    out.steps.push("comm-open");
   }
   const after = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-after.png", after.b64);
   await hand.shot("10-1351-after-ui.png");
-  await savePng(hand.shotDir(), "10-1351-page2.png", after.b64);
-  await hand.shot("10-1351-page2-ui.png");
+  if (!out.steps.includes("comm-open")) {
+    await savePng(hand.shotDir(), "10-1351-page2.png", after.b64);
+    await hand.shot("10-1351-page2-ui.png");
+  }
   const live = await stillGeosDesk(hand);
   out.afterDesk = live;
   out.basic = live.basic;
   out.icons = notepadHasIcons(after.img);
   out.dialogGone = !looksLikeDialog(before, after) && !looksLikeCenteredDialog(before, after) && out.dialog;
   out.after = movedEnough(dlg, after, { minChanged: 80, minInk: 3 });
-  out.pass = Boolean(out.dialog && out.icons && live.pass && !live.basic);
+  const opened =
+    out.steps.includes("ok") || out.steps.includes("comm-open") || out.steps.includes("pick-1351");
+  out.pass = Boolean(opened && out.icons && live.pass && !live.basic);
   return out;
 }
 
