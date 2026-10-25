@@ -343,7 +343,7 @@ import {
   scanLibraryCartHealth,
 } from "@/lib/emu/cart-crt-diag";
 import { createMenuJoyGate, resetMenuJoyGate } from "@/lib/emu/menu-joy.mjs";
-import { createStickPrecision, resetStickPrecision } from "@/lib/emu/stick-precision.mjs";
+import { createStickPrecision, mergePadStick, resetStickPrecision } from "@/lib/emu/stick-precision.mjs";
 import { publicUrl } from "@/lib/public-url";
 import { readScreenText, screenRamShowsGeosCatalog } from "@/lib/emu/screen-text";
 import { applyEmuVolume, gestureUnlockAudio, pokeAudioUnlock } from "@/lib/emu/audio-unlock";
@@ -488,6 +488,8 @@ export function Grok64App() {
   const menuJoyGateRef = useRef(createMenuJoyGate());
   const stickPrecisionRef = useRef(createStickPrecision(20));
   const stickCenterHoldRef = useRef(false);
+  const stickDownRef = useRef(false);
+  const padDrivingRef = useRef(false);
   const jumpHeldRef = useRef(false);
   const arrowJoyRef = useRef({ up: false, down: false, left: false, right: false });
   const wasdJoyRef = useRef({ up: false, down: false, left: false, right: false });
@@ -778,12 +780,9 @@ export function Grok64App() {
       fire: (down) => {
         if (playLockRef.current || useEmu.getState().booting) return;
         joyRef.current.fire = down;
-        if (down) {
-          joyRef.current.x = 0;
-          joyRef.current.y = 0;
-        }
         emitJoyRef.current(down);
       },
+      stickDown: () => stickDownRef.current,
       stick: (x, y) => {
         joyRef.current.x = x;
         joyRef.current.y = y;
@@ -4552,7 +4551,7 @@ export function Grok64App() {
     }
     glogFire(down, { title: st.currentTitle, hasGm: Boolean(emuRef.current?.gameManager) });
     joyRef.current.fire = down;
-    if (down && clearStick) {
+    if (down && clearStick && !stickDownRef.current) {
       joyRef.current.x = 0;
       joyRef.current.y = 0;
       setStickViz({ x: 0, y: 0 });
@@ -4892,12 +4891,14 @@ export function Grok64App() {
       const down = prev.get("down");
       const left = prev.get("left");
       const right = prev.get("right");
-      const x = (right ? 1 : 0) - (left ? 1 : 0);
-      const y = (down ? 1 : 0) - (up ? 1 : 0);
-      if (joyRef.current.x !== x || joyRef.current.y !== y) {
-        joyRef.current.x = x;
-        joyRef.current.y = y;
-        setStickViz({ x, y });
+      const padX = (right ? 1 : 0) - (left ? 1 : 0);
+      const padY = (down ? 1 : 0) - (up ? 1 : 0);
+      const merged = mergePadStick(padX, padY, joyRef.current, stickDownRef.current, padDrivingRef.current);
+      padDrivingRef.current = merged.driving;
+      if (joyRef.current.x !== merged.x || joyRef.current.y !== merged.y) {
+        joyRef.current.x = merged.x;
+        joyRef.current.y = merged.y;
+        setStickViz({ x: merged.x, y: merged.y });
       }
       emitJoyVector();
     };
@@ -4909,10 +4910,13 @@ export function Grok64App() {
     const disconnect = () => {
       if (!hasRealGamepad()) {
         s.setPadName(null);
-        joyRef.current.x = 0;
-        joyRef.current.y = 0;
-        setStickViz({ x: 0, y: 0 });
-        emitJoyVector();
+        padDrivingRef.current = false;
+        if (!stickDownRef.current) {
+          joyRef.current.x = 0;
+          joyRef.current.y = 0;
+          setStickViz({ x: 0, y: 0 });
+          emitJoyVector();
+        }
       }
     };
     window.addEventListener("gamepadconnected", connect);
@@ -5040,9 +5044,9 @@ export function Grok64App() {
     suppressHydrationWarning: true,
   };
   const padConnected = hasRealGamepad();
-  const showStick = s.powered && s.showJoystick && !padConnected;
+  const showStick = s.powered && s.showJoystick;
   const showJoyChrome = s.powered;
-  const showMousePad = s.powered && s.mouseMode && !padConnected;
+  const showMousePad = s.powered && s.mouseMode;
   return (
     <div {...appAttrs}>
       {!s.powered ? (
@@ -5437,7 +5441,7 @@ export function Grok64App() {
                 feedVice1351Buttons(emuRef.current, mouseBtnRef.current.left, mouseBtnRef.current.right);
                 flushHostMouse1351(emuRef.current, frameMsForStandard(resolvedRef.current.standard));
               } else {
-                onFire(true, true);
+                onFire(true, false);
               }
             }}
             onPointerMove={(e) => {
@@ -5519,6 +5523,7 @@ export function Grok64App() {
       <TouchControls
         onVector={onVector}
         stickHoldRef={stickCenterHoldRef}
+        stickDownRef={stickDownRef}
         onFire={onFire}
         onJump={onJump}
         onMouseDelta={(dx, dy) => {

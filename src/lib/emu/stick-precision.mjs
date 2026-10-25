@@ -94,3 +94,21 @@ export function resetStickPrecision(state) {
   state.lastTick = 0;
   state.holdStart = -1;
 }
+
+function digitalAxis(v) {
+  if (!v) return 0;
+  return v < 0 ? -1 : 1;
+}
+
+/**
+ * Merge a physical pad with the on-screen stick.
+ * A pad at rest must not zero a live thumb hold — that is the phone-killer
+ * when Android enumerates a ghost controller.
+ */
+export function mergePadStick(padX, padY, current = { x: 0, y: 0 }, stickDown = false, wasDriving = false) {
+  const x = digitalAxis(padX);
+  const y = digitalAxis(padY);
+  if (x !== 0 || y !== 0) return { x, y, driving: true };
+  if (wasDriving && !stickDown) return { x: 0, y: 0, driving: false };
+  return { x: current.x || 0, y: current.y || 0, driving: false };
+}

@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   applyStickPrecision,
   createStickPrecision,
+  mergePadStick,
   PRECISION_REST_MS,
   snapStick,
   STICK_INNER_DEAD,
@@ -37,4 +38,15 @@ test("release clears the latch immediately", () => {
   state.precision = true;
   applyStickPrecision(state, { x: -1, y: 0 }, 0, true);
   assert.deepEqual(applyStickPrecision(state, { x: 0, y: 0 }, 10, true), { x: 0, y: 0 });
+});
+
+test("an idle pad does not zero a held on-screen stick", () => {
+  const held = mergePadStick(0, 0, { x: 1, y: 0 }, true, false);
+  assert.deepEqual(held, { x: 1, y: 0, driving: false });
+  const padWins = mergePadStick(-1, 0, { x: 1, y: 0 }, true, false);
+  assert.deepEqual(padWins, { x: -1, y: 0, driving: true });
+  const padReleaseKeepsThumb = mergePadStick(0, 0, { x: -1, y: 0 }, true, true);
+  assert.deepEqual(padReleaseKeepsThumb, { x: -1, y: 0, driving: false });
+  const padReleaseCenters = mergePadStick(0, 0, { x: -1, y: 0 }, false, true);
+  assert.deepEqual(padReleaseCenters, { x: 0, y: 0, driving: false });
 });

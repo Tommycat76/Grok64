@@ -7,9 +7,15 @@ import { Touchpad } from "@/components/emu/Touchpad";
 
 export type StickGate = "4way" | "8way";
 
+/** Extra hit slop around the stick so a fat thumb does not punch through to the CRT. */
+export const STICK_HIT_PAD = 28;
+/** FIRE / LMB / RMB slop — smaller than the stick so the two thumbs stay distinct. */
+export const BUTTON_HIT_PAD = 12;
+
 interface Props {
   onVector: (x: number, y: number, centerHold?: boolean) => void;
   stickHoldRef?: React.MutableRefObject<boolean>;
+  stickDownRef?: React.MutableRefObject<boolean>;
   onFire: (down: boolean) => void;
   onJump?: (down: boolean) => void;
   onMouseDelta?: (dx: number, dy: number) => void;
@@ -94,6 +100,7 @@ export function TouchControls({
   controlLayout,
   onLayoutDrag,
   stickHoldRef,
+  stickDownRef,
 }: Props) {
   const root = useRef<HTMLDivElement>(null);
   const stickEl = useRef<HTMLDivElement>(null);
@@ -134,6 +141,7 @@ export function TouchControls({
 
   const syncStickHold = () => {
     if (stickHoldRef) stickHoldRef.current = stickCenterDrag.current && stickFingerDown.current;
+    if (stickDownRef) stickDownRef.current = stickFingerDown.current;
   };
 
   const layout = controlLayout;
@@ -218,13 +226,13 @@ export function TouchControls({
       return {
         fire: false,
         jump: false,
-        mouseL: hitRect(mouseLEl.current, x, y, 6),
-        mouseR: hitRect(mouseREl.current, x, y, 6),
+        mouseL: hitRect(mouseLEl.current, x, y, BUTTON_HIT_PAD),
+        mouseR: hitRect(mouseREl.current, x, y, BUTTON_HIT_PAD),
       };
     }
     return {
-      fire: hitRect(fireEl.current, x, y, 6),
-      jump: jumpRef.current && hitRect(jumpEl.current, x, y, 6),
+      fire: hitRect(fireEl.current, x, y, BUTTON_HIT_PAD),
+      jump: jumpRef.current && hitRect(jumpEl.current, x, y, BUTTON_HIT_PAD),
       mouseL: false,
       mouseR: false,
     };
@@ -249,7 +257,7 @@ export function TouchControls({
     if (stickEl.current?.contains(el) || el?.closest(".g64-stick") || el?.closest(".g64-stick-col")) {
       return { stick: true };
     }
-    if (hitRect(stickEl.current, x, y, 16)) return { stick: true };
+    if (hitRect(stickEl.current, x, y, STICK_HIT_PAD)) return { stick: true };
     return null;
   }
 
@@ -391,7 +399,7 @@ export function TouchControls({
       host.removeEventListener("pointerup", onPointerUp);
       host.removeEventListener("pointercancel", onPointerUp);
     };
-  }, [hidden, padActive, jumpEnabled, mouseMode]);
+  }, [hidden, jumpEnabled, mouseMode]);
 
   useEffect(() => {
     const host = root.current;
@@ -499,7 +507,7 @@ export function TouchControls({
       host.removeEventListener("pointerup", onPointerUp);
       host.removeEventListener("pointercancel", onPointerUp);
     };
-  }, [hidden, padActive, mouseMode]);
+  }, [hidden, mouseMode]);
 
   if (hidden) return null;
 
@@ -537,7 +545,7 @@ export function TouchControls({
     </div>
   );
 
-  if (padActive || (stickHidden && !mouseMode)) {
+  if (stickHidden && !mouseMode) {
     return (
       <div ref={root} className="g64-controls" data-pad={padActive ? "true" : "false"}>
         {padActive ? <div className="g64-pad-note">Controller</div> : <div />}

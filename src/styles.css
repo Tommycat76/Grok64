@@ -789,6 +789,7 @@ div[class*="ejs_virtual"] {
   align-items: center;
   justify-self: start;
   pointer-events: auto;
+  touch-action: none;
 }
 
 .g64-controls[data-layout-edit="true"] {
@@ -964,6 +965,12 @@ div[class*="ejs_virtual"] {
   justify-self: start;
   pointer-events: auto;
 }
+.g64-stick::before {
+  content: "";
+  position: absolute;
+  inset: -22px;
+  border-radius: inherit;
+}
 .g64-stick-tick {
   position: absolute;
   left: 50%;
@@ -1072,6 +1079,13 @@ div[class*="ejs_virtual"] {
   -webkit-user-select: none;
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
+  position: relative;
+}
+.g64-fire::before {
+  content: "";
+  position: absolute;
+  inset: -12px;
+  border-radius: inherit;
 }
 .g64-fire[data-down="true"] {
   background: var(--color-accent);
@@ -1360,6 +1374,40 @@ div[class*="ejs_virtual"] {
 }
 .g64-app[data-device="phone"]:not([data-kb="true"]) .g64-stage {
   max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 168px);
+}
+/* Phone 1351 dock: stick + L/R on one row, touchpad above — 3 columns do not fit 390px. */
+.g64-app[data-device="phone"] .g64-controls-mouse[data-stick="true"]:not([data-layout-edit="true"]) {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  justify-content: space-between;
+  align-items: end;
+  gap: 8px 12px;
+}
+.g64-app[data-device="phone"] .g64-controls-mouse[data-stick="true"]:not([data-layout-edit="true"]) .g64-touchpad-wrap {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  justify-self: stretch;
+}
+.g64-app[data-device="phone"] .g64-controls-mouse[data-stick="true"]:not([data-layout-edit="true"]) .g64-stick-col {
+  grid-column: 1;
+  grid-row: 2;
+}
+.g64-app[data-device="phone"] .g64-controls-mouse[data-stick="true"]:not([data-layout-edit="true"]) .g64-mouse-col {
+  grid-column: 2;
+  grid-row: 2;
+}
+.g64-app[data-device="phone"] .g64-touchpad {
+  width: 100%;
+  height: 72px;
+}
+.g64-app[data-device="phone"] .g64-mouse-btn {
+  width: 64px;
+  height: 64px;
+}
+.g64-app[data-device="phone"]:not([data-kb="true"]) .g64-stick {
+  width: 136px;
+  height: 136px;
 }
 .g64-app[data-device="tablet"]:not([data-kb="true"]) .g64-stage {
   max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 188px);
@@ -1846,7 +1894,7 @@ div[class*="ejs_virtual"] {
   .g64-app[data-orient="landscape"]:not([data-kb="true"]) .g64-controls {
     left: 8px;
     right: 8px;
-    bottom: 12px;
+    bottom: max(52px, calc(env(safe-area-inset-bottom, 0px) + 44px));
     width: auto;
     grid-template-columns: 1fr auto;
     min-height: 0;
@@ -1856,6 +1904,23 @@ div[class*="ejs_virtual"] {
     width: 108px;
     height: 108px;
     justify-self: start;
+  }
+  .g64-app[data-device="phone"][data-orient="landscape"] .g64-controls-mouse[data-stick="true"]:not([data-layout-edit="true"]) {
+    grid-template-columns: auto 1fr auto;
+    grid-template-rows: auto;
+  }
+  .g64-app[data-device="phone"][data-orient="landscape"] .g64-controls-mouse[data-stick="true"]:not([data-layout-edit="true"]) .g64-touchpad-wrap {
+    grid-column: auto;
+    grid-row: auto;
+  }
+  .g64-app[data-device="phone"][data-orient="landscape"] .g64-controls-mouse[data-stick="true"]:not([data-layout-edit="true"]) .g64-stick-col,
+  .g64-app[data-device="phone"][data-orient="landscape"] .g64-controls-mouse[data-stick="true"]:not([data-layout-edit="true"]) .g64-mouse-col {
+    grid-column: auto;
+    grid-row: auto;
+  }
+  .g64-app[data-device="phone"][data-orient="landscape"] .g64-touchpad {
+    width: min(30vw, 160px);
+    height: 72px;
   }
   .g64-app[data-orient="landscape"] .g64-fire-col {
     justify-self: end;
@@ -2113,7 +2178,7 @@ div[class*="ejs_virtual"] {
   position: absolute;
   left: 16px;
   right: 16px;
-  bottom: 20px;
+  bottom: max(56px, calc(env(safe-area-inset-bottom, 0px) + 48px));
   width: auto;
   flex: none;
   background: transparent;
@@ -2255,7 +2320,7 @@ div[class*="ejs_virtual"] {
   position: absolute;
   left: 16px;
   right: 16px;
-  bottom: 20px;
+  bottom: max(56px, calc(env(safe-area-inset-bottom, 0px) + 48px));
   width: auto;
   flex: none;
   background: transparent;
