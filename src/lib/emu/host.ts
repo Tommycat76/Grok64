@@ -125,6 +125,7 @@ import { stopIosPresent, stripIosPresent } from "./ios-present";
 import {
   addMouse1351Delta,
   createMouse1351Accum,
+  dpadForAxes,
   resetMouse1351Accum,
   takeMouse1351Frame,
 } from "./mouse-1351";
@@ -1269,16 +1270,17 @@ export function setMouseAnalog(
 ) {
   const cx = Math.max(-1, Math.min(1, ax));
   const cy = Math.max(-1, Math.min(1, ay));
+  const pad = dpadForAxes(cx, cy);
   padAxes[0] = cx;
   padAxes[1] = cy;
   padAxes[2] = 0;
   padAxes[3] = 0;
   btn(0, leftDown);
   btn(1, rightDown);
-  btn(14, false);
-  btn(15, false);
-  btn(12, false);
-  btn(13, false);
+  btn(14, pad.left);
+  btn(15, pad.right);
+  btn(12, pad.up);
+  btn(13, pad.down);
   virtualPad0.timestamp = performance.now();
   analogStick(emu, cx, cy);
   try {
@@ -1291,10 +1293,12 @@ export function setMouseAnalog(
   }
   joyInput(emu, RETRO_BTN.B, leftDown);
   joyInput(emu, RETRO_BTN.A, rightDown);
-  joyInput(emu, RETRO_BTN.LEFT, false);
-  joyInput(emu, RETRO_BTN.RIGHT, false);
-  joyInput(emu, RETRO_BTN.UP, false);
-  joyInput(emu, RETRO_BTN.DOWN, false);
+  // Analog may never reach RETRO_DEVICE_ANALOG; vice-libretro still turns these
+  // bits into retro_mouse_move → VICE mouse_move → 1351 POT X/Y.
+  joyInput(emu, RETRO_BTN.LEFT, pad.left);
+  joyInput(emu, RETRO_BTN.RIGHT, pad.right);
+  joyInput(emu, RETRO_BTN.UP, pad.up);
+  joyInput(emu, RETRO_BTN.DOWN, pad.down);
 }
 
 export function clearMouseAnalog(emu: EjsInstance | null) {

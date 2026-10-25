@@ -58,6 +58,7 @@ export function buildViceExtras(input: ViceExtrasInput): Record<string, string> 
     opts.vice_mouse_speed = "100";
     opts.vice_analogmouse_speed = "1.0";
     opts.vice_analogmouse_deadzone = "0";
+    opts.vice_dpadmouse_speed = "6";
   } else {
     opts.vice_joyport = input.joyPort === 1 ? "1" : "2";
     opts.vice_joyport_type = "1";

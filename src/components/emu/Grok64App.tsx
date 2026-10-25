@@ -485,6 +485,7 @@ export function Grok64App() {
   const arrowJoyRef = useRef({ up: false, down: false, left: false, right: false });
   const wasdJoyRef = useRef({ up: false, down: false, left: false, right: false });
   const lastJoySentRef = useRef({ x: 0, y: 0, fire: false });
+  const mouseLiveRef = useRef(false);
   const fireArmedAt = useRef(0);
   const mousePtrRef = useRef<{ x: number; y: number } | null>(null);
   const mouseBtnRef = useRef({ left: false, right: false });
@@ -1404,6 +1405,13 @@ export function Grok64App() {
       setMouseButtons: (left, right) => {
         mouseBtnRef.current = { left: !!left, right: !!right };
         setHostMouseButtons(!!left, !!right);
+      },
+      setJoy: (x, y, fire) => {
+        joyRef.current.x = Number(x) || 0;
+        joyRef.current.y = Number(y) || 0;
+        joyRef.current.fire = !!fire;
+        lastJoySentRef.current = { x: 99, y: 99, fire: !fire };
+        emitJoyRef.current(!!fire);
       },
       setSidAddresses: (patch) => {
         const st = useEmu.getState();
@@ -4531,17 +4539,20 @@ export function Grok64App() {
       if (mapHasDrive(st.iecMap, "sd2iec") && st.running && !playLockRef.current) {
         void tickGrok64Iec(emu);
       }
-      if (st.mouseMode && !playLockRef.current && !st.booting && st.running) {
+      const liveMouse = st.mouseMode && !playLockRef.current && !st.booting && st.running;
+      if (liveMouse) {
         setHostMouseButtons(mouseBtnRef.current.left, mouseBtnRef.current.right);
         flushHostMouse1351(emu, frameMsForStandard(resolvedRef.current.standard));
-        emitJoyVector();
-      } else if (st.mouseMode) {
+        mouseLiveRef.current = true;
+      } else if (mouseLiveRef.current) {
+        // Only clear on the falling edge. Doing this every frame while the
+        // mouse is off released the digital stick before emitJoyVector's
+        // unchanged-vector early-out could put the hold back.
         clearHostMouse1351(emu);
-        emitJoyVector();
-      } else {
-        clearHostMouse1351(emu);
-        emitJoyVector();
+        lastJoySentRef.current = { x: 99, y: 99, fire: !joyRef.current.fire };
+        mouseLiveRef.current = false;
       }
+      emitJoyVector();
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
@@ -4709,6 +4720,7 @@ export function Grok64App() {
               vice_mouse_speed: "100",
               vice_analogmouse_speed: "1.0",
               vice_analogmouse_deadzone: "0",
+              vice_dpadmouse_speed: "6",
             }
           : {}),
         vice_ram_expansion_unit: s.reuSize,

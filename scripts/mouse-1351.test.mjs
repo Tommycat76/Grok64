@@ -8,6 +8,7 @@ const {
   analogAxesForDeltas,
   addMouse1351Delta,
   createMouse1351Accum,
+  dpadForAxes,
   takeMouse1351Frame,
 } = await server.ssrLoadModule("/src/lib/emu/mouse-1351.ts");
 await server.close();
@@ -38,4 +39,10 @@ test("idle poll is zero analog — no leftover velocity", () => {
   const acc = createMouse1351Accum();
   const idle = takeMouse1351Frame(acc);
   assert.deepEqual(idle, { ax: 0, ay: 0 });
+});
+
+test("nonzero analog axes hold the D-pad bits vice-libretro maps to 1351 POT", () => {
+  assert.deepEqual(dpadForAxes(0, 0), { left: false, right: false, up: false, down: false });
+  assert.deepEqual(dpadForAxes(0.2, -0.4), { left: false, right: true, up: true, down: false });
+  assert.deepEqual(dpadForAxes(-1, 1), { left: true, right: false, up: false, down: true });
 });

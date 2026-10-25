@@ -25,6 +25,7 @@ test("mouse extras put a 1351 on the chosen port; the core keeps a joystick on t
   assert.equal(p2.vice_joyport_type, "3");
   assert.equal(p2.vice_analogmouse, "left");
   assert.equal(p2.vice_analogmouse_deadzone, "0");
+  assert.equal(p2.vice_dpadmouse_speed, "6");
   const p1 = viceExpandOptions({
     reu: "none",
     iec: "1541",

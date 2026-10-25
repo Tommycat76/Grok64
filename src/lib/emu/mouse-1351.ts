@@ -17,6 +17,23 @@ export function clampMouseDelta(n: number, max = ANALOGMOUSE_UNITS_PER_FRAME): n
   return n;
 }
 
+/** D-Pad bits vice-libretro also turns into `retro_mouse_move` when the port is a 1351. */
+export function dpadForAxes(ax: number, ay: number, dead = 0.08): {
+  left: boolean;
+  right: boolean;
+  up: boolean;
+  down: boolean;
+} {
+  const x = Number.isFinite(ax) ? ax : 0;
+  const y = Number.isFinite(ay) ? ay : 0;
+  return {
+    left: x < -dead,
+    right: x > dead,
+    up: y < -dead,
+    down: y > dead,
+  };
+}
+
 /** Analog axes in [-1, 1] that produce `usedX`/`usedY` 1351 units this poll. */
 export function analogAxesForDeltas(dx: number, dy: number): {
   ax: number;

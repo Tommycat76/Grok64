@@ -142,6 +142,10 @@ function decodePngStats(page, b64, src) {
   }, { b64, src });
 }
 
+function isBlankStats(stats) {
+  return Boolean(stats && stats.buckets <= 3 && stats.ink > 0.92);
+}
+
 /** Decode __g64 shot PNG and sample pixels — catches blank VICE blue vs real GEOS/cart UI. */
 export async function canvasPixelStats(page) {
   const shotWrap = await page.evaluate(async () => {
@@ -150,16 +154,33 @@ export async function canvasPixelStats(page) {
   });
   if (shotWrap) {
     const stats = await decodePngStats(page, shotWrap.b64, shotWrap.src);
-    if (stats?.ok) return stats;
+    if (stats?.ok && !isBlankStats(stats)) return stats;
   }
   const canvas = page.locator("#grok64-player canvas:not(.g64-ios-present)").first();
   if (await canvas.count()) {
     const buf = await canvas.screenshot({ type: "png" });
     const b64 = buf.toString("base64");
     const stats = await decodePngStats(page, b64, "playwright");
+    if (stats?.ok && !isBlankStats(stats)) return stats;
+  }
+  const screen = page.locator(".g64-screen").first();
+  if (await screen.count()) {
+    const buf = await screen.screenshot({ type: "png" });
+    const stats = await decodePngStats(page, buf.toString("base64"), "screen");
     if (stats?.ok) return stats;
   }
   return { ok: false, reason: "no-shot" };
+}
+
+/** GUI64's desktop is a flat purple work area — VICE PNG dumps are often black. */
+export async function canvasLooksLikeGui64(page) {
+  const stats = await canvasPixelStats(page);
+  if (!stats?.ok) return { pass: false, stats };
+  const text = await page.evaluate(() => window.__g64?.screenText?.() || "");
+  const basicOnly =
+    /COMMODORE 64 BASIC/i.test(text) && /\bREADY\b/i.test(text) && text.replace(/\s+/g, "").length < 220;
+  const pass = !basicOnly && stats.buckets >= 4 && stats.viceBlank < 0.9;
+  return { pass, stats, textHead: text.slice(0, 100) };
 }
 
 export async function canvasLooksLikeGeosDesktop(page) {

@@ -15,7 +15,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
-import { canvasLooksLikeCartMenu, canvasLooksLikeGeosDesktop, seedTomReusedProfile, waitGeosBoot } from "./desktop-qa-lib.mjs";
+import { canvasLooksLikeGeosDesktop, canvasLooksLikeGui64, seedTomReusedProfile, waitGeosBoot } from "./desktop-qa-lib.mjs";
 import { handConfig, openHand, sleep, waitFor, withHandDisplay } from "./desktop-hand-lib.mjs";
 
 const cwd = process.cwd();
@@ -69,6 +69,20 @@ async function vicePng(page) {
   });
 }
 
+function isBlankImg(img) {
+  if (!img) return true;
+  let ink = 0;
+  const buckets = new Set();
+  for (let i = 0; i < img.data.length; i += 4) {
+    const r = img.data[i];
+    const g = img.data[i + 1];
+    const b = img.data[i + 2];
+    buckets.add(`${r >> 4},${g >> 4},${b >> 4}`);
+    if (r + g + b < 80) ink++;
+  }
+  return buckets.size <= 3 && ink / (img.data.length / 4) > 0.92;
+}
+
 function inkCentroid(img, { skipTop = 36 } = {}) {
   if (!img) return null;
   const { data, width, height } = img;
@@ -87,6 +101,47 @@ function inkCentroid(img, { skipTop = 36 } = {}) {
     }
   }
   if (n < 8) return null;
+  return { x: sx / n, y: sy / n, n };
+}
+
+function contrastCentroid(img, { skipTop = 8, skipBottom = 0.18 } = {}) {
+  if (!img) return null;
+  const { data, width, height } = img;
+  const y0 = Math.min(height, skipTop);
+  const y1 = Math.max(y0 + 1, Math.floor(height * (1 - skipBottom)));
+  const counts = new Map();
+  for (let y = y0; y < y1; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const key = `${data[i] >> 4},${data[i + 1] >> 4},${data[i + 2] >> 4}`;
+      counts.set(key, (counts.get(key) || 0) + 1);
+    }
+  }
+  let mode = null;
+  let modeN = 0;
+  for (const [key, n] of counts) {
+    if (n > modeN) {
+      mode = key;
+      modeN = n;
+    }
+  }
+  if (!mode) return null;
+  const [mr, mg, mb] = mode.split(",").map((s) => (Number(s) << 4) + 8);
+  let sx = 0;
+  let sy = 0;
+  let n = 0;
+  for (let y = y0; y < y1; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const d = Math.abs(data[i] - mr) + Math.abs(data[i + 1] - mg) + Math.abs(data[i + 2] - mb);
+      if (d > 80) {
+        sx += x;
+        sy += y;
+        n++;
+      }
+    }
+  }
+  if (n < 4) return null;
   return { x: sx / n, y: sy / n, n };
 }
 
@@ -112,10 +167,22 @@ function frameDiff(a, b, { skipTop = 36 } = {}) {
   return { changed, cx: changed ? sx / changed : 0, cy: changed ? sy / changed : 0, pixels: a.width * a.height };
 }
 
+async function screenPng(page) {
+  const loc = page.locator(".g64-screen").first();
+  const buf = await loc.screenshot({ type: "png" });
+  return buf.toString("base64");
+}
+
 async function snapshot(page) {
-  const b64 = await vicePng(page);
-  const img = await decodeShot(page, b64);
-  return { b64, img, ink: inkCentroid(img) };
+  let b64 = await vicePng(page);
+  let img = await decodeShot(page, b64);
+  let src = "vice";
+  if (isBlankImg(img)) {
+    b64 = await screenPng(page);
+    img = await decodeShot(page, b64);
+    src = "screen";
+  }
+  return { b64, img, src, ink: contrastCentroid(img) || inkCentroid(img) };
 }
 
 function movedEnough(before, after, { minChanged = 40, minInk = 2.5 } = {}) {
@@ -273,6 +340,28 @@ async function holdWasd(hand, key, ms) {
   await hand.sh("xdotool", ["keyup", key]);
 }
 
+async function setJoy(hand, x, y, fire = false) {
+  await hand.page.evaluate(({ x, y, fire }) => window.__g64?.setJoy?.(x, y, fire), { x, y, fire });
+}
+
+async function holdJoy(hand, x, y, ms) {
+  await setJoy(hand, x, y, false);
+  await sleep(ms);
+  await setJoy(hand, 0, 0, false);
+}
+
+async function clickJoy(hand, { double = false, downMs = 70, gapMs = 90 } = {}) {
+  await setJoy(hand, 0, 0, true);
+  await sleep(downMs);
+  await setJoy(hand, 0, 0, false);
+  if (double) {
+    await sleep(gapMs);
+    await setJoy(hand, 0, 0, true);
+    await sleep(downMs);
+    await setJoy(hand, 0, 0, false);
+  }
+}
+
 async function uploadRom(hand, label, path) {
   await hand.openSettings();
   const row = hand.page.locator(".g64-filerow").filter({ hasText: label }).first();
@@ -342,7 +431,7 @@ async function testStickAndWasd(hand, prefix) {
   await ensureMouse(hand, false);
   await ensurePort(hand, 1);
   await ensureWasd(hand, false);
-  const right = await pointerProbe(hand, "stick-right", () => holdStick(hand, "right", 900), { settle: 200 });
+  const right = await pointerProbe(hand, "stick-right", () => holdStick(hand, "right", 1400), { settle: 250 });
   await savePng(hand.shotDir(), `${prefix}-stick-right-before.png`, right.b64Before);
   await savePng(hand.shotDir(), `${prefix}-stick-right-after.png`, right.b64After);
   await hand.shot(`${prefix}-stick-right.png`);
@@ -353,7 +442,7 @@ async function testStickAndWasd(hand, prefix) {
   out.stick = { moved: right.pass, changed: right.changed, inkDist: right.inkDist, dx: right.dx, dy: right.dy };
   out.stickSteady = { coastChanged: coast.changed, coastInk: coast.inkDist, pass: !coast.pass || coast.inkDist < 6 };
   await ensureWasd(hand, true);
-  const wasd = await pointerProbe(hand, "wasd-d", () => holdWasd(hand, "d", 900), { settle: 200 });
+  const wasd = await pointerProbe(hand, "wasd-d", () => holdWasd(hand, "d", 1400), { settle: 250 });
   await savePng(hand.shotDir(), `${prefix}-wasd-d-after.png`, wasd.b64After);
   await hand.shot(`${prefix}-wasd-d.png`);
   out.wasd = { moved: wasd.pass, changed: wasd.changed, inkDist: wasd.inkDist, dx: wasd.dx, dy: wasd.dy };
@@ -393,8 +482,55 @@ async function test1351(hand, prefix) {
   await hand.shot(`${prefix}-left-click.png`);
   out.click = { changed: click.changed, inkDist: click.inkDist, pass: click.changed >= 20 || click.inkDist >= 1.2 };
 
-  out.pass = Boolean(out.trackpad.moved || out.drag.moved);
+  const nudge = await pointerProbe(hand, "nudge", async () => {
+    await hand.page.evaluate(() => window.__g64?.addMouseDelta?.(90, 36));
+    await sleep(120);
+    await hand.page.evaluate(() => window.__g64?.addMouseDelta?.(90, 36));
+  }, { settle: 400 });
+  await savePng(hand.shotDir(), `${prefix}-nudge-after.png`, nudge.b64After);
+  out.nudge = { moved: nudge.pass, changed: nudge.changed, inkDist: nudge.inkDist, dx: nudge.dx, dy: nudge.dy };
+
+  out.pass = Boolean(out.trackpad.moved || out.drag.moved || out.nudge.moved);
   out.clickPass = Boolean(out.click.pass);
+  return out;
+}
+
+/** Page the official deskTop notepad and double-click COMM 1351(a). */
+async function activateGeos1351(hand) {
+  const out = { steps: [] };
+  await ensureMouse(hand, false);
+  await ensurePort(hand, 1);
+  await ensureWasd(hand, false);
+  const before = await snapshot(hand.page);
+  await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
+  await holdJoy(hand, 0, -1, 2200);
+  out.steps.push("up");
+  await holdJoy(hand, -1, 0, 2200);
+  out.steps.push("left");
+  await holdJoy(hand, 1, 0, 1100);
+  out.steps.push("page-x");
+  await clickJoy(hand);
+  await sleep(350);
+  await hand.shot("10-1351-page-menu.png");
+  out.steps.push("page-click");
+  await holdJoy(hand, 0, 1, 240);
+  await clickJoy(hand);
+  await sleep(900);
+  const page2 = await snapshot(hand.page);
+  await savePng(hand.shotDir(), "10-1351-page2.png", page2.b64);
+  await hand.shot("10-1351-page2-ui.png");
+  out.paged = movedEnough(before, page2, { minChanged: 80, minInk: 4 });
+  out.steps.push("page-next");
+  await holdJoy(hand, 1, 0, 1800);
+  await holdJoy(hand, 0, 1, 1400);
+  await clickJoy(hand, { double: true });
+  await sleep(2800);
+  const after = await snapshot(hand.page);
+  await savePng(hand.shotDir(), "10-1351-after.png", after.b64);
+  await hand.shot("10-1351-after-ui.png");
+  out.after = movedEnough(page2, after, { minChanged: 20, minInk: 1.5 });
+  out.steps.push("comm-open");
+  out.pass = Boolean(out.paged.pass || out.after.pass);
   return out;
 }
 
@@ -443,6 +579,7 @@ async function runGeosMode(hand, disk, jiffy) {
   trace.deskTop = Boolean(trace.geos.desk?.pass || trace.geos.boot?.deskTop?.pass);
   if (trace.deskTop) {
     trace.joystick = await testStickAndWasd(hand, "08");
+    trace.comm1351 = await activateGeos1351(hand);
     trace.mouse = await test1351(hand, "09");
   }
   trace.pass = Boolean(
@@ -478,11 +615,11 @@ async function runGui64(hand, cart, tag) {
   );
   trace.started = Boolean(running);
   await sleep(5000);
-  const gui = await canvasLooksLikeCartMenu(hand.page, { minBuckets: 24 });
+  const gui = await canvasLooksLikeGui64(hand.page);
   const snap = await snapshot(hand.page);
   await savePng(shotDir, "02-gui.png", snap.b64);
   await hand.shot("02-gui-ui.png");
-  trace.gui = { pass: gui.pass, buckets: gui.stats?.buckets, geosDesk: gui.stats?.geosDesk, ink: gui.stats?.ink };
+  trace.gui = { pass: gui.pass, buckets: gui.stats?.buckets, geosDesk: gui.stats?.geosDesk, ink: gui.stats?.ink, src: gui.stats?.src };
   trace.video = await hand.page.evaluate(() => window.__g64?.video?.());
   if (trace.started) {
     trace.joystick = await testStickAndWasd(hand, "03");

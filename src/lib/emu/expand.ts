@@ -80,6 +80,7 @@ export function viceExpandOptions(opts: {
     o.vice_mouse_speed = "100";
     o.vice_analogmouse_speed = "1.0";
     o.vice_analogmouse_deadzone = "0";
+    o.vice_dpadmouse_speed = "6";
   } else {
     o.vice_joyport = opts.joyPort === 1 ? "1" : "2";
     o.vice_joyport_type = "1";
