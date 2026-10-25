@@ -83,18 +83,21 @@ export function wireGrok64ViceHost(emu: Grok64Emu | null): Grok64IecBackend {
   const api = grok64WasmApi(mod);
   const hasWasmExports = Boolean(resolveWasmExport(mod, "grok64_sd2iec_attach"));
   setSd2iecWasmIecOnly(hasWasmExports);
-  mod.grok64Host = {
+  const host = {
     ...grok64WasmIecHost,
-    sd2iecAttach: (unit) => attachSd2iecBus(asSd(emu), unit as IecDeviceNumber),
+    sd2iecAttach: (unit: number) => attachSd2iecBus(asSd(emu), unit as IecDeviceNumber),
     sd2iecPoll: () => {
       const e = asSd(emu);
       if (e) void tickSd2iec(e);
     },
-    c64Read: (addr) => readC64Byte(emu, addr) ?? 0,
-    c64Write: (addr, value) => {
+    c64Read: (addr: number) => readC64Byte(emu, addr) ?? 0,
+    c64Write: (addr: number, value: number) => {
       writeC64Byte(emu, addr, value);
     },
   };
+  // The glue reads iecReadSt after every byte; a spread would have copied one value.
+  Object.defineProperty(host, "iecReadSt", { get: () => grok64WasmIecHost.iecReadSt, enumerable: true });
+  mod.grok64Host = host;
   if (hasWasmExports && api) {
     mod.grok64Sd2iecHost = {
       attach: (unit: number) => {
