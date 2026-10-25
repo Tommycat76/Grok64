@@ -10,6 +10,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
+import { seedTomReusedProfile } from "./desktop-qa-lib.mjs";
 import { handConfig, openHand, sleep, waitFor, withHandDisplay } from "./desktop-hand-lib.mjs";
 
 const cwd = process.cwd();
@@ -193,6 +194,16 @@ async function main() {
       run.errors = hand.errors.slice(0, 12);
     } finally {
       await stopRec();
+      try {
+        const seedUrl = new URL("grok64-gate-seed", handCfg.base).href;
+        await hand.page.route(seedUrl, (r) =>
+          r.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>seed</title>" }),
+        );
+        await hand.page.goto(seedUrl);
+        await seedTomReusedProfile(hand.page, { jiffyDos: false });
+      } catch {
+        /* later gates still need Tom's stored REU size */
+      }
       await hand.close();
     }
   });
