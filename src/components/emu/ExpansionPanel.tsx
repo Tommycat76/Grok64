@@ -21,6 +21,7 @@ import {
   supportsHostDirectoryPicker,
 } from "@/lib/emu/sd2iec-card-source";
 import { JiffyDosToggleRow, JiffyFastloadCartMatrix } from "@/components/emu/JiffyCartCompatPanel";
+import { mapHasDrive } from "@/lib/emu/play-session";
 import { useEmu } from "@/lib/emu/store";
 
 export function ExpansionPanel() {
@@ -37,6 +38,11 @@ export function ExpansionPanel() {
     await prefetchBundledRoms();
     setRoms(await listRoms());
     setParts(await listPartitions());
+  }
+
+  /** SD2IEC stays on the unit the user gave it; only a bus without one gets it on #8. */
+  function ensureSd2iecOnBus() {
+    if (!mapHasDrive(useEmu.getState().iecMap, "sd2iec")) s.setIecDrive("sd2iec");
   }
 
   useEffect(() => {
@@ -178,7 +184,7 @@ export function ExpansionPanel() {
             }
             await refresh();
             if (files.length) {
-              s.setIecDrive("sd2iec");
+              ensureSd2iecOnBus();
               toast.message(`Added to //${partId}:`);
             }
           }}
@@ -222,7 +228,7 @@ export function ExpansionPanel() {
                 const file = input.files?.[0];
                 if (!file) return;
                 await mountDirectFatImage(new Uint8Array(await file.arrayBuffer()), file.name);
-                s.setIecDrive("sd2iec");
+                ensureSd2iecOnBus();
                 await refresh();
                 toast.message("Mounted .img on SD2IEC (direct FAT)");
               };
@@ -242,7 +248,7 @@ export function ExpansionPanel() {
                 const file = input.files?.[0];
                 if (!file) return;
                 await importSdImage(new Uint8Array(await file.arrayBuffer()));
-                s.setIecDrive("sd2iec");
+                ensureSd2iecOnBus();
                 await refresh();
                 toast.message("Copied .img into browser card (IndexedDB)");
               };
@@ -265,7 +271,7 @@ export function ExpansionPanel() {
               try {
                 const handle = await window.showDirectoryPicker({ mode: "readwrite" });
                 await mountHostSdFolder(handle);
-                s.setIecDrive("sd2iec");
+                ensureSd2iecOnBus();
                 await refresh();
                 toast.message(`SD folder: ${handle.name}`);
               } catch (e) {
