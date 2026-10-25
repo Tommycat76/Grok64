@@ -246,8 +246,10 @@ export function TouchControls({
     }
     let el = target instanceof Element ? target : null;
     if (!el) el = document.elementFromPoint(x, y);
-    if (stickEl.current?.contains(el) || el?.closest(".g64-stick")) return { stick: true };
-    if (hitRect(stickEl.current, x, y, 4)) return { stick: true };
+    if (stickEl.current?.contains(el) || el?.closest(".g64-stick") || el?.closest(".g64-stick-col")) {
+      return { stick: true };
+    }
+    if (hitRect(stickEl.current, x, y, 16)) return { stick: true };
     return null;
   }
 

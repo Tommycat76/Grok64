@@ -201,6 +201,85 @@ function movedEnough(before, after, { minChanged = 40, minInk = 2.5 } = {}) {
   };
 }
 
+function contentRect(img) {
+  if (!img) return null;
+  const { data, width, height } = img;
+  let minX = width;
+  let minY = height;
+  let maxX = 0;
+  let maxY = 0;
+  let n = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      if (data[i] + data[i + 1] + data[i + 2] > 48) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+        n++;
+      }
+    }
+  }
+  if (n < 80) return null;
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1, n };
+}
+
+function notepadRect(img) {
+  if (!img) return contentRect(img);
+  const { data, width, height } = img;
+  let minX = width;
+  let minY = height;
+  let maxX = 0;
+  let maxY = 0;
+  let n = 0;
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4;
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      if (r > 168 && g > 168 && b > 168 && Math.abs(r - g) < 22 && Math.abs(g - b) < 22) {
+        if (x < minX) minX = x;
+        if (y < minY) minY = y;
+        if (x > maxX) maxX = x;
+        if (y > maxY) maxY = y;
+        n++;
+      }
+    }
+  }
+  if (n < 200) return contentRect(img);
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1, n };
+}
+
+function pageGadgetPos(img) {
+  const pad = notepadRect(img);
+  if (!pad) return null;
+  return { x: pad.x + pad.w * 0.93, y: pad.y + pad.h * 0.07, pad };
+}
+
+/** Official boot disk: COMM 1351(a) is file 14 → notepad page 2, row 1 col 2. */
+function comm1351Pos(img) {
+  const pad = notepadRect(img);
+  if (!pad) return null;
+  const iconTop = pad.y + pad.h * 0.28;
+  const iconH = pad.h * 0.62;
+  return {
+    x: pad.x + (pad.w / 4) * 2.5,
+    y: iconTop + (iconH / 2) * 1.5,
+    pad,
+  };
+}
+
+function iconRegionChanged(a, b, { minChanged = 180 } = {}) {
+  if (!a?.img || !b?.img) return { pass: false, changed: 0 };
+  const pad = notepadRect(b.img) || notepadRect(a.img);
+  if (!pad) return movedEnough(a, b, { minChanged, minInk: 8 });
+  const skipTop = Math.max(4, Math.floor(pad.y + pad.h * 0.24));
+  const diff = frameDiff(a.img, b.img, { skipTop });
+  return { pass: diff.changed >= minChanged, changed: diff.changed, cx: diff.cx, cy: diff.cy };
+}
+
 async function savePng(dir, name, b64) {
   if (!b64) return;
   writeFileSync(join(dir, name), Buffer.from(b64, "base64"));
@@ -328,10 +407,25 @@ async function dragBox(hand, box, { from = [0.25, 0.4], to = [0.8, 0.7], steps =
 async function holdStick(hand, dir, ms) {
   const stick = hand.page.locator(".g64-stick").first();
   const box = await hand.reveal(stick, "on-screen stick");
-  const nx = dir === "right" ? 0.88 : dir === "left" ? 0.12 : 0.5;
-  const ny = dir === "down" ? 0.88 : dir === "up" ? 0.12 : 0.5;
-  await holdPoint(hand, box.x + box.width * nx, box.y + box.height * ny, ms);
-  return box;
+  const cx = box.x + box.width * 0.5;
+  const cy = box.y + box.height * 0.5;
+  const nx = dir === "right" ? 0.7 : dir === "left" ? 0.3 : 0.5;
+  const ny = dir === "down" ? 0.7 : dir === "up" ? 0.3 : 0.5;
+  const tx = box.x + box.width * nx;
+  const ty = box.y + box.height * ny;
+  await hand.xmove(cx, cy);
+  await sleep(80);
+  await hand.sh("xdotool", ["mousedown", "1"]);
+  await sleep(50);
+  for (let i = 1; i <= 6; i++) {
+    await hand.xmove(cx + ((tx - cx) * i) / 6, cy + ((ty - cy) * i) / 6);
+    await sleep(28);
+  }
+  const joyMid = await hand.page.evaluate(() => window.__g64?.joy?.() ?? null);
+  await sleep(ms);
+  const joy = await hand.page.evaluate(() => window.__g64?.joy?.() ?? null);
+  await hand.sh("xdotool", ["mouseup", "1"]);
+  return { box, joyMid, joy };
 }
 
 async function holdWasd(hand, key, ms) {
@@ -360,6 +454,47 @@ async function clickJoy(hand, { double = false, downMs = 70, gapMs = 90 } = {}) 
     await sleep(downMs);
     await setJoy(hand, 0, 0, false);
   }
+}
+
+async function locatePointer(hand) {
+  for (const [jx, jy] of [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ]) {
+    const before = await snapshot(hand.page);
+    await setJoy(hand, jx, jy, false);
+    await sleep(70);
+    await setJoy(hand, 0, 0, false);
+    await sleep(50);
+    const after = await snapshot(hand.page);
+    const diff = frameDiff(before.img, after.img, { skipTop: 4 });
+    if (diff.changed >= 6) return { x: diff.cx, y: diff.cy, changed: diff.changed, dir: [jx, jy] };
+  }
+  return null;
+}
+
+async function walkPointerTo(hand, tx, ty, { timeout = 4500, close = 20 } = {}) {
+  const t0 = Date.now();
+  let last = null;
+  while (Date.now() - t0 < timeout) {
+    const loc = await locatePointer(hand);
+    if (!loc) {
+      await holdJoy(hand, 1, 0, 180);
+      continue;
+    }
+    last = loc;
+    const dx = tx - loc.x;
+    const dy = ty - loc.y;
+    if (Math.hypot(dx, dy) <= close) return loc;
+    const sx = Math.abs(dx) > 8 ? Math.sign(dx) : 0;
+    const sy = Math.abs(dy) > 8 ? Math.sign(dy) : 0;
+    if (!sx && !sy) return loc;
+    const ms = Math.min(420, Math.max(90, Math.hypot(dx, dy) * 3.2));
+    await holdJoy(hand, sx, sy, ms);
+  }
+  return last;
 }
 
 async function uploadRom(hand, label, path) {
@@ -431,12 +566,10 @@ async function testStickAndWasd(hand, prefix, { mouse = false } = {}) {
   await ensureMouse(hand, mouse);
   await ensurePort(hand, 1);
   await ensureWasd(hand, false);
-  const right = await pointerProbe(
-    hand,
-    "stick-right",
-    () => (mouse ? holdJoy(hand, 1, 0, 450) : holdStick(hand, "right", 1400)),
-    { settle: 250 },
-  );
+  let held = null;
+  const right = await pointerProbe(hand, "stick-right", async () => {
+    held = await holdStick(hand, "right", mouse ? 500 : 1400);
+  }, { settle: 250 });
   await savePng(hand.shotDir(), `${prefix}-stick-right-before.png`, right.b64Before);
   await savePng(hand.shotDir(), `${prefix}-stick-right-after.png`, right.b64After);
   await hand.shot(`${prefix}-stick-right.png`);
@@ -444,9 +577,19 @@ async function testStickAndWasd(hand, prefix, { mouse = false } = {}) {
   await sleep(700);
   const afterRelease = await snapshot(hand.page);
   const coast = movedEnough(afterHold, afterRelease, { minChanged: 80, minInk: 6 });
-  out.stick = { moved: right.pass, changed: right.changed, inkDist: right.inkDist, dx: right.dx, dy: right.dy };
+  out.stick = {
+    moved: right.pass,
+    changed: right.changed,
+    inkDist: right.inkDist,
+    dx: right.dx,
+    dy: right.dy,
+    joyMid: held?.joyMid ?? null,
+    joy: held?.joy ?? null,
+  };
   out.stickSteady = { coastChanged: coast.changed, coastInk: coast.inkDist, pass: !coast.pass || coast.inkDist < 6 };
   await ensureWasd(hand, true);
+  await hand.click(hand.crt(), "crt");
+  await sleep(80);
   const wasd = await pointerProbe(hand, "wasd-d", () => holdWasd(hand, "d", mouse ? 450 : 1400), { settle: 250 });
   await savePng(hand.shotDir(), `${prefix}-wasd-d-after.png`, wasd.b64After);
   await hand.shot(`${prefix}-wasd-d.png`);
@@ -462,6 +605,8 @@ async function test1351(hand, prefix) {
   await ensureMouse(hand, true);
   out.opts = await hand.page.evaluate(() => window.__g64?.runtimeViceOpts?.() ?? null);
   out.settings = await hand.page.evaluate(() => window.__g64?.settings?.() ?? null);
+  out.core = await hand.coreStatus();
+  out.vice1351Direct = await hand.page.evaluate(() => window.__g64?.vice1351Direct?.() ?? null);
   const pad = hand.page.locator(".g64-touchpad").first();
   const padBox = await hand.reveal(pad, "trackpad");
   const track = await pointerProbe(hand, "trackpad", () =>
@@ -509,46 +654,71 @@ async function test1351(hand, prefix) {
 
 /** Page the official deskTop notepad and double-click COMM 1351(a). */
 async function activateGeos1351(hand) {
-  const out = { steps: [], tries: 0 };
+  const out = { steps: [], tries: 0, file: "COMM 1351(a)", page: 2, cell: [1, 2] };
   await ensureMouse(hand, false);
   await ensurePort(hand, 1);
   await ensureWasd(hand, false);
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
-  // Pin to the notepad clock (top-right), then step left onto "page".
-  await holdJoy(hand, 0, -1, 4200);
-  await holdJoy(hand, 1, 0, 4200);
-  out.steps.push("pin-clock");
-  await hand.shot("10-1351-clock.png");
-  let paged = { pass: false, changed: 0 };
-  for (let i = 0; i < 8 && !paged.pass; i++) {
-    out.tries = i + 1;
-    await holdJoy(hand, -1, 0, 260);
-    await clickJoy(hand);
-    await sleep(350);
-    await hand.shot(`10-1351-page-try-${i}.png`);
-    await holdJoy(hand, 0, 1, 240);
-    await clickJoy(hand);
-    await sleep(900);
-    const now = await snapshot(hand.page);
-    paged = movedEnough(before, now, { minChanged: 1200, minInk: 10 });
-    out.steps.push(`page-try-${i}`);
+  out.pointer = await locatePointer(hand);
+  const gadget = pageGadgetPos(before.img);
+  out.gadget = gadget ? { x: gadget.x, y: gadget.y } : null;
+  if (gadget) {
+    out.walkGadget = await walkPointerTo(hand, gadget.x, gadget.y);
+    out.steps.push("page-gadget");
+  } else {
+    await holdJoy(hand, 0, -1, 320);
+    await holdJoy(hand, 1, 0, 220);
+    out.steps.push("page-gadget-blind");
   }
-  const page2 = await snapshot(hand.page);
+  await clickJoy(hand);
+  await sleep(900);
+  await hand.shot("10-1351-page-menu.png");
+  let page2 = await snapshot(hand.page);
+  out.paged = iconRegionChanged(before, page2, { minChanged: 180 });
+  if (!out.paged.pass) {
+    out.steps.push("page-menu-fallback");
+    await holdJoy(hand, 0, -1, 4200);
+    await holdJoy(hand, 1, 0, 4200);
+    out.steps.push("pin-clock");
+    await hand.shot("10-1351-clock.png");
+    for (let i = 0; i < 8 && !out.paged.pass; i++) {
+      out.tries = i + 1;
+      await holdJoy(hand, -1, 0, 260);
+      await clickJoy(hand);
+      await sleep(350);
+      await hand.shot(`10-1351-page-try-${i}.png`);
+      await holdJoy(hand, 0, 1, 240);
+      await clickJoy(hand);
+      await sleep(900);
+      page2 = await snapshot(hand.page);
+      out.paged = iconRegionChanged(before, page2, { minChanged: 180 });
+      if (!out.paged.pass) out.paged = movedEnough(before, page2, { minChanged: 1200, minInk: 10 });
+      out.steps.push(`page-try-${i}`);
+    }
+  }
   await savePng(hand.shotDir(), "10-1351-page2.png", page2.b64);
   await hand.shot("10-1351-page2-ui.png");
-  out.paged = paged;
-  if (paged.pass) {
+  out.steps.push(out.paged.pass ? "page-2" : "page-miss");
+  const target = comm1351Pos(page2.img);
+  out.commTarget = target ? { x: target.x, y: target.y } : null;
+  if (out.paged.pass && target) {
+    out.walkComm = await walkPointerTo(hand, target.x, target.y);
+    out.steps.push("comm-cell");
+    await clickJoy(hand, { double: true });
+    await sleep(3200);
+    out.steps.push("comm-open");
+  } else if (out.paged.pass) {
     await holdJoy(hand, 1, 0, 2200);
     await holdJoy(hand, 0, 1, 1800);
     await clickJoy(hand, { double: true });
     await sleep(2800);
-    out.steps.push("comm-open");
+    out.steps.push("comm-open-blind");
   }
   const after = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-after.png", after.b64);
   await hand.shot("10-1351-after-ui.png");
-  out.after = movedEnough(page2, after, { minChanged: 80, minInk: 2 });
+  out.after = movedEnough(page2, after, { minChanged: 80, minInk: 3 });
   out.pass = Boolean(out.paged.pass);
   return out;
 }
@@ -570,8 +740,11 @@ async function bootOfficialGeos(hand, disk) {
     },
   });
   const desk = await canvasLooksLikeGeosDesktop(hand.page);
-  await sleep(1500);
-  const snap = await snapshot(hand.page);
+  let snap = await snapshot(hand.page);
+  for (let i = 0; i < 16 && (snap.ink?.n ?? 0) < 12_000; i++) {
+    await sleep(400);
+    snap = await snapshot(hand.page);
+  }
   await savePng(hand.shotDir(), "07-desktop.png", snap.b64);
   await hand.shot(desk.pass || boot.deskTop?.pass ? "07-desktop-ui.png" : "07-no-desktop.png");
   return { loadLine, boot, desk, screen: (await hand.screenText()).slice(0, 400) };

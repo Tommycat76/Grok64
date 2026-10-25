@@ -96,6 +96,7 @@ import {
   flushHostMouse1351,
   clearHostMouse1351,
   feedVice1351Plug,
+  vice1351Direct,
   audioLocked,
   unlockAudio,
   suspendAudio,
@@ -1404,6 +1405,7 @@ export function Grok64App() {
       setWasdIsJoy: (on) => useEmu.getState().setWasdIsJoy(!!on),
       setMouseMode: (on) => useEmu.getState().setMouseMode(!!on),
       addMouseDelta: (dx, dy) => addHostMouseDelta(Number(dx) || 0, Number(dy) || 0),
+      vice1351Direct: () => vice1351Direct(emuRef.current),
       setMouseButtons: (left, right) => {
         mouseBtnRef.current = { left: !!left, right: !!right };
         setHostMouseButtons(!!left, !!right);
