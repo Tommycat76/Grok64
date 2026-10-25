@@ -44,6 +44,9 @@ test("filename PAL/NTSC tags beat locale-less defaults", () => {
   assert.equal(detectSoftwareStandard("Summer Games (NTSC).d64"), "ntsc");
   assert.equal(detectSoftwareStandard("Boulder Dash [PAL].crt"), "pal");
   assert.equal(detectSoftwareStandard("Impossible Mission_ntsc.prg"), "ntsc");
+  assert.equal(detectSoftwareStandard("GUI64 [NTSC].crt"), "ntsc");
+  assert.equal(detectSoftwareStandard("GUI64 [PAL].crt"), "pal");
+  assert.equal(detectSoftwareStandard("GUI64 (NTSC).crt"), "ntsc");
 });
 
 test("TOSEC country tags", () => {

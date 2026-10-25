@@ -9,6 +9,7 @@ export type VideoSource = "software" | "override" | "default";
 const EXPLICIT_PAL =
   /(?:^|[^a-z0-9])pal(?:[-_ ]?(?:b|n|m|i))?(?:[^a-z0-9]|$)/i;
 const EXPLICIT_NTSC = /(?:^|[^a-z0-9])ntsc(?:[-_ ]?[uj])?(?:[^a-z0-9]|$)/i;
+const BRACKET_VIDEO = /[\[{(]\s*(ntsc|pal)\s*[\]})]/i;
 
 const COUNTRY_PAL =
   /\((?:europe|eur|uk|england|great britain|gb|germany|ger|deutschland|france|fr|italy|it|spain|es|netherlands|holland|nl|sweden|se|finland|fi|denmark|dk|norway|no|australia|aus|austria|switzerland|poland|hungary|belgium|portugal|ireland|new zealand|nz)\)/i;
@@ -57,6 +58,27 @@ export interface SoftwareHint {
   data?: Uint8Array | ArrayBuffer | null;
 }
 
+/** [NTSC] / (PAL) / {NTSC} on the filename, plus existing PAL/NTSC tokens. */
+export function filenameVideoTag(names: Array<string | null | undefined>): VideoHz | null {
+  let pal = false;
+  let ntsc = false;
+  for (const name of names) {
+    if (!name) continue;
+    const base = name.replace(/\.[a-z0-9]{2,4}$/i, "");
+    const bracket = base.match(BRACKET_VIDEO);
+    if (bracket) {
+      if (/^ntsc$/i.test(bracket[1]!)) ntsc = true;
+      else pal = true;
+    }
+    const folded = fold(name);
+    if (EXPLICIT_PAL.test(folded)) pal = true;
+    if (EXPLICIT_NTSC.test(folded)) ntsc = true;
+  }
+  if (pal && !ntsc) return "pal";
+  if (ntsc && !pal) return "ntsc";
+  return null;
+}
+
 export function detectSoftwareStandard(hint: SoftwareHint | string): VideoHz | null {
   const names = typeof hint === "string" ? [hint] : (hint.names ?? []);
   const raw =
@@ -67,6 +89,9 @@ export function detectSoftwareStandard(hint: SoftwareHint | string): VideoHz | n
         : hint.data ?? undefined;
   const text = haystack(names.map((n) => n ?? ""));
   if (!text && !raw) return null;
+
+  const tagged = filenameVideoTag(names);
+  if (tagged) return tagged;
 
   const palName = EXPLICIT_PAL.test(text);
   const ntscName = EXPLICIT_NTSC.test(text);

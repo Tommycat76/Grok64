@@ -158,7 +158,7 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
                 ))}
               </div>
               <p className="text-xs text-fg-subtle">
-                Auto reads the dump, not your location. Untagged titles boot PAL (VICE default). Force PAL 50 or NTSC 60 when a release is tagged wrong.
+                Auto reads filename tags ([NTSC], (PAL), and the same in parentheses), SID flags, and the dump — including cartridges. Untagged titles boot PAL (VICE default). Force PAL 50 or NTSC 60 here when a release is tagged wrong.
               </p>
             </div>
 
