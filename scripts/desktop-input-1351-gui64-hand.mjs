@@ -482,58 +482,6 @@ function looksLikeSelectInput(img) {
   );
 }
 
-/** Dark GEOS pointer in the dialog. Skips the list highlight and the OK ink. */
-function findDialogSprite(img) {
-  const c = contentRect(img);
-  if (!c) return null;
-  const { data, width, height } = img;
-  let sx = 0;
-  let sy = 0;
-  let n = 0;
-  for (let gy = 50; gy <= 128; gy++) {
-    for (let gx = 80; gx <= 236; gx++) {
-      if (gy >= 44 && gy <= 66 && gx >= 90 && gx <= 170) continue;
-      if (gy >= 106 && gy <= 124 && gx >= 184 && gx <= 230) continue;
-      const x = Math.round(c.x + (gx / 320) * c.w);
-      const y = Math.round(c.y + (gy / 200) * c.h);
-      if (x < 0 || y < 0 || x >= width || y >= height) continue;
-      const i = (y * width + x) * 4;
-      if (data[i] + data[i + 1] + data[i + 2] < 300) {
-        sx += gx;
-        sy += gy;
-        n += 1;
-      }
-    }
-  }
-  if (n < 5 || n > 50) return null;
-  return { gx: sx / n, gy: sy / n, n };
-}
-
-async function walkDialogSpriteTo(hand, tx, ty, { timeout = 4500, close = 10 } = {}) {
-  const t0 = Date.now();
-  let last = null;
-  while (Date.now() - t0 < timeout) {
-    const snap = await snapshot(hand.page);
-    const loc = findDialogSprite(snap.img);
-    if (!loc) {
-      await holdJoy(hand, 1, 0, 80);
-      await sleep(60);
-      continue;
-    }
-    last = loc;
-    const dx = tx - loc.gx;
-    const dy = ty - loc.gy;
-    if (Math.hypot(dx, dy) <= close) return loc;
-    const sx = Math.abs(dx) > 5 ? Math.sign(dx) : 0;
-    const sy = Math.abs(dy) > 5 ? Math.sign(dy) : 0;
-    if (!sx && !sy) return loc;
-    const ms = Math.min(220, Math.max(55, Math.hypot(dx, dy) * 2.2));
-    await holdJoy(hand, sx, sy, ms);
-    await sleep(70);
-  }
-  return last;
-}
-
 /** Dark sprite in the empty dialog mid (VICE gray pointer). Null if it's on the list/OK. */
 function findDialogPointer(img) {
   const c = contentRect(img);
@@ -964,9 +912,15 @@ async function pickComm1351InDialog(hand, dlg) {
   await hand.shot("10-1351-comm-highlighted-ui.png");
 
   if (out.which === "comm") {
-    // RETURN does not close this dialog. Walk the VICE sprite onto OK, then
-    // fire. If the sprite hunt undershoots, hold farther right/down.
-    out.parked = await walkDialogSpriteTo(hand, 204, 114, { timeout: 4500, close: 10 });
+    // VICE-gray dumps hide the sprite. Locate it with horizontal pulses (up/down
+    // also walk the list bar), then hold toward OK. Fire only on the OK gadget.
+    out.parked = await walkJoyGeosTo(hand, 204, 114, { timeout: 6000, close: 12 });
+    if (!onOkGadget(out.parked) && out.parked?.x != null) {
+      const dx = 204 - out.parked.x;
+      const dy = 114 - out.parked.y;
+      if (Math.abs(dx) > 6) await holdJoy(hand, Math.sign(dx), 0, Math.min(900, Math.abs(dx) * 20));
+      if (Math.abs(dy) > 6) await holdJoy(hand, 0, Math.sign(dy), Math.min(900, Math.abs(dy) * 20));
+    }
     await hand.shot("10-1351-on-ok-preclick.png");
     await clickJoy(hand, { downMs: 140 });
     await sleep(400);
@@ -1014,6 +968,38 @@ function toGeos(pt, img) {
   const c = contentRect(img);
   if (!c || !pt) return null;
   return { x: ((pt.x - c.x) / c.w) * 320, y: ((pt.y - c.y) / c.h) * 200 };
+}
+
+function onOkGadget(g) {
+  return Boolean(g && g.x >= 186 && g.x <= 232 && g.y >= 102 && g.y <= 128);
+}
+
+/** Locate with horizontal pulses, then hold toward a GEOS point. */
+async function walkJoyGeosTo(hand, tx, ty, { timeout = 6000, close = 12 } = {}) {
+  const t0 = Date.now();
+  const hops = [];
+  let last = null;
+  while (Date.now() - t0 < timeout) {
+    const snap = await snapshot(hand.page);
+    const loc = await locatePointer(hand, { dirs: [[1, 0], [-1, 0]], pulseMs: 32 });
+    const g = toGeos(loc, snap.img);
+    if (!g) {
+      await holdJoy(hand, 1, 1, 90);
+      continue;
+    }
+    last = g;
+    hops.push({ x: +g.x.toFixed(1), y: +g.y.toFixed(1) });
+    const dx = tx - g.x;
+    const dy = ty - g.y;
+    if (Math.hypot(dx, dy) <= close) return { ...g, hops };
+    const sx = Math.abs(dx) > 6 ? Math.sign(dx) : 0;
+    const sy = Math.abs(dy) > 6 ? Math.sign(dy) : 0;
+    if (!sx && !sy) return { ...g, hops };
+    const ms = Math.min(240, Math.max(50, Math.hypot(dx, dy) * 2.0));
+    await holdJoy(hand, sx, sy, ms);
+    await sleep(60);
+  }
+  return last ? { ...last, hops } : { hops };
 }
 
 function inMinusBox(g) {
@@ -1433,7 +1419,7 @@ async function test1351(hand, prefix) {
   return out;
 }
 
-/** C= + I opens Select Input Device on the official boot disk (real-UI proof). Menu walk is fallback. */
+/** geos → select input → COMM 1351(a) → OK. C= + I opens GEOS info on this disk. */
 async function activateGeos1351(hand) {
   const out = { steps: [], file: "COMM 1351(a)", via: "select-input" };
   await ensureMouse(hand, false);
@@ -1442,16 +1428,8 @@ async function activateGeos1351(hand) {
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
 
-  await tapCbmI(hand);
-  out.steps.push("cbm-i");
-  let dlg = await waitSelectInput(hand, before, 8000);
-  if (looksLikeAboutBox(dlg.img)) {
-    out.steps.push("cbm-i-about");
-    await clickJoy(hand, { downMs: 110 });
-    await sleep(300);
-    dlg = await snapshot(hand.page);
-  }
-  out.dialog = isSelectInputDialog(before, dlg);
+  let dlg = before;
+  out.dialog = isSelectInputDialog(before, before);
 
   if (!out.dialog) {
     out.landGeos = await landOnGeosWord(hand);
