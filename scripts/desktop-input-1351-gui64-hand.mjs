@@ -433,7 +433,7 @@ function inputRowDark(img, y0, y1) {
   return n ? dark / n : 0;
 }
 
-/** Which Select Input line is the dark bar — VICE dumps show this even when the sprite is missing. */
+/** JOYSTICK bar y≈44–53; COMM 1351(a) bar y≈54–65 after one ArrowDown. */
 function whichInputHighlight(img) {
   if (!img) return "none";
   const joy = inputRowDark(img, 44, 53);
@@ -746,7 +746,6 @@ async function tapCbmI(hand) {
 function isSelectInputDialog(before, after) {
   if (!after?.img) return false;
   if (looksLikeAboutBox(after.img)) return false;
-  if (before?.img && openedMenuKind(before, after).kind === "geos") return false;
   return looksLikeSelectInput(after.img);
 }
 
@@ -841,78 +840,65 @@ async function click1351Left(hand) {
 }
 
 async function pickComm1351InDialog(hand, dlg) {
-  // VICE dumps hide the sprite. Track the white pointer on the CRT, walk onto
-  // COMM, click, then (once the 1351 driver may be live) creep to OK. Joystick
-  // hops after COMM is selected also move the list highlight — avoid them.
-  const out = { hops: [], which: "none", closed: false };
+  // Mouse stays off so GEOS JOYSTICK still drives the pointer and fire.
+  // ArrowDown moves the list highlight JOYSTICK → COMM 1351(a). Extra
+  // ArrowDown leaves COMM onto the icon gadget and the dialog stays open.
+  // Do not enable host mouse first — that freezes the CIA stick.
   await ensureMouse(hand, false);
-  await ensurePort(hand, 1);
-  const ui0 = await uiSnapshot(hand);
-  const comm = geosMap(ui0.img, 118, 60);
-  const ok = geosMap(ui0.img, 204, 114);
-  out.ptr0 = findWhitePointer(ui0.img);
-  if (comm) out.landComm = await walkJoyToUi(hand, comm.x, comm.y, { timeout: 6000, close: 11 });
-  else await hopJoy(hand, 0, -1, 8, 80);
-  await hand.shot("10-1351-toward-comm.png");
-  await clickJoy(hand, { downMs: 120 });
-  await sleep(350);
-  await hand.shot("10-1351-comm-clicked.png");
+  await ensureWasd(hand, false);
+  const out = {
+    highlightBefore: whichInputHighlight(dlg.img),
+    which: whichInputHighlight(dlg.img),
+    downs: 0,
+    closed: false,
+  };
 
-  let vice = await snapshot(hand.page);
-  out.which = whichInputHighlight(vice.img);
-  if (!looksLikeSelectInput(vice.img)) {
-    out.closed = true;
-    return out;
-  }
-
-  for (let i = 0; i < 5 && out.which !== "comm"; i++) {
-    const ui = await uiSnapshot(hand);
-    const target = geosMap(ui.img, 118, 60);
-    if (target) await walkJoyToUi(hand, target.x, target.y, { timeout: 2500, close: 11 });
-    else await holdJoy(hand, 0, out.which === "joystick" ? 1 : -1, 140);
-    await clickJoy(hand, { downMs: 120 });
+  for (let i = 0; i < 2; i++) {
+    const now = await snapshot(hand.page);
+    out.which = whichInputHighlight(now.img);
+    out.highlight = out.which;
+    if (out.which === "comm") break;
+    await tapC64Key(hand, "ArrowDown", "ArrowDown", 120);
+    out.downs += 1;
     await sleep(280);
-    vice = await snapshot(hand.page);
+  }
+
+  if (out.which !== "comm") {
+    const ui0 = await uiSnapshot(hand);
+    const comm = geosMap(ui0.img, 118, 60);
+    if (comm) out.landComm = await walkJoyToUi(hand, comm.x, comm.y, { timeout: 5000, close: 11 });
+    else await hopJoy(hand, 0, -1, 6, 80);
+    await hand.shot("10-1351-toward-comm.png");
+    await clickJoy(hand, { downMs: 120 });
+    await sleep(350);
+    const vice = await snapshot(hand.page);
     out.which = whichInputHighlight(vice.img);
-    out.hops.push({ i, which: out.which });
-    await savePng(hand.shotDir(), `10-1351-comm-try-${i}.png`, vice.b64);
-    if (!looksLikeSelectInput(vice.img)) {
-      out.closed = true;
-      return out;
+    out.highlight = out.which;
+  }
+
+  const marked = await snapshot(hand.page);
+  out.which = whichInputHighlight(marked.img);
+  out.highlight = out.which;
+  await savePng(hand.shotDir(), "10-1351-comm-highlighted.png", marked.b64);
+  await hand.shot("10-1351-comm-highlighted-ui.png");
+
+  if (out.which === "comm") {
+    await tapC64Key(hand, "Enter", "Enter", 120);
+    await sleep(350);
+    let still = await snapshot(hand.page);
+    if (looksLikeSelectInput(still.img)) {
+      await clickJoy(hand, { downMs: 120 });
+      await sleep(400);
+      still = await snapshot(hand.page);
     }
+    out.closed = !looksLikeSelectInput(still.img);
   }
-
-  if (out.which !== "comm") return out;
-
-  await clickJoy(hand, { double: true, downMs: 100, gapMs: 80 });
-  await sleep(450);
-  vice = await snapshot(hand.page);
-  if (!looksLikeSelectInput(vice.img)) {
-    out.closed = true;
-    return out;
-  }
-
-  await ensureMouse(hand, true);
-  await ensurePort(hand, 1);
-  const uiOk = await uiSnapshot(hand);
-  const okNow = geosMap(uiOk.img, 204, 114) || ok;
-  if (okNow) out.parked = await walk1351To(hand, okNow.x, okNow.y, { timeout: 4500, close: 8 });
   const parked = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-on-ok.png", parked.b64);
   await hand.shot("10-1351-on-ok-ui.png");
-  await click1351Left(hand);
-  await sleep(400);
-  vice = await snapshot(hand.page);
-  if (!looksLikeSelectInput(vice.img)) {
-    out.closed = true;
-    return out;
-  }
-
-  await tapC64Key(hand, "Enter", "Enter");
-  await sleep(350);
-  vice = await snapshot(hand.page);
-  out.closed = !looksLikeSelectInput(vice.img);
-  out.which = whichInputHighlight(vice.img);
+  out.highlightAfter = whichInputHighlight(parked.img);
+  out.dialogStill = looksLikeSelectInput(parked.img);
+  out.closed = !out.dialogStill;
   return out;
 }
 
@@ -1358,7 +1344,7 @@ async function test1351(hand, prefix) {
   return out;
 }
 
-/** C= + I opens Select Input Device on the official boot disk (real-UI proof). Menu walk is fallback. */
+/** geos → select input → COMM 1351(a) → OK. C= + I opens GEOS info on this disk. */
 async function activateGeos1351(hand) {
   const out = { steps: [], file: "COMM 1351(a)", via: "select-input" };
   await ensureMouse(hand, false);
@@ -1367,16 +1353,8 @@ async function activateGeos1351(hand) {
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
 
-  await tapCbmI(hand);
-  out.steps.push("cbm-i");
-  let dlg = await waitSelectInput(hand, before, 8000);
-  if (looksLikeAboutBox(dlg.img)) {
-    out.steps.push("cbm-i-about");
-    await clickJoy(hand, { downMs: 110 });
-    await sleep(300);
-    dlg = await snapshot(hand.page);
-  }
-  out.dialog = isSelectInputDialog(before, dlg);
+  let dlg = before;
+  out.dialog = isSelectInputDialog(before, before);
 
   if (!out.dialog) {
     out.landGeos = await landOnGeosWord(hand);
@@ -1408,7 +1386,9 @@ async function activateGeos1351(hand) {
     }
 
     dlg = menuSnap;
-    if (out.menu.kind !== "geos") {
+    if (isSelectInputDialog(before, dlg)) {
+      out.steps.push("dialog-already");
+    } else if (out.menu.kind !== "geos") {
       out.steps.push("geos-menu-fail");
     } else {
       out.menuWalk = [];
@@ -1461,20 +1441,21 @@ async function activateGeos1351(hand) {
   if (out.dialog) {
     await savePng(hand.shotDir(), "10-1351-input-dialog.png", dlg.b64);
     await hand.shot("10-1351-input-dialog-ui.png");
-    const pick = await pickComm1351InDialog(hand, dlg);
-    out.pick = pick;
+    out.pick = await pickComm1351InDialog(hand, dlg);
+    out.highlight = out.pick.highlight || out.pick.which;
     out.steps.push("pick-1351");
-    if (pick?.closed) {
-      out.steps.push("ok");
-    } else {
-      // RETURN only while COMM is the highlighted driver.
-      for (let i = 0; i < 3; i++) {
-        const now = await snapshot(hand.page);
-        if (!isSelectInputDialog(before, now)) break;
-        if (whichInputHighlight(now.img) !== "comm") break;
-        await tapC64Key(hand, "Enter", "Enter");
+    if (out.highlight === "comm") {
+      if (!out.pick.closed) {
+        for (let i = 0; i < 4; i++) {
+          const now = await snapshot(hand.page);
+          if (!isSelectInputDialog(before, now)) break;
+          if (whichInputHighlight(now.img) !== "comm") break;
+          await tapC64Key(hand, "Enter", "Enter");
+        }
       }
       out.steps.push("ok");
+    } else {
+      out.steps.push("comm-not-highlighted");
     }
     for (let i = 0; i < 16; i++) {
       await sleep(400);
@@ -1494,7 +1475,15 @@ async function activateGeos1351(hand) {
   out.icons = notepadHasIcons(after.img);
   out.dialogGone = !isSelectInputDialog(before, after);
   out.after = movedEnough(dlg, after, { minChanged: 80, minInk: 3 });
-  out.pass = Boolean(out.dialog && out.dialogGone && out.icons && live.pass && !live.basic && out.steps.includes("ok"));
+  out.pass = Boolean(
+    out.dialog &&
+      out.highlight === "comm" &&
+      out.dialogGone &&
+      out.icons &&
+      live.pass &&
+      !live.basic &&
+      out.steps.includes("ok"),
+  );
   return out;
 }
 
