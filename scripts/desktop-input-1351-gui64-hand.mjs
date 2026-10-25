@@ -482,7 +482,7 @@ function looksLikeSelectInput(img) {
   );
 }
 
-/** Dark GEOS pointer in the dialog, including the OK row. Skips the list highlight. */
+/** Dark GEOS pointer in the dialog. Skips the list highlight and the OK ink. */
 function findDialogSprite(img) {
   const c = contentRect(img);
   if (!c) return null;
@@ -490,9 +490,10 @@ function findDialogSprite(img) {
   let sx = 0;
   let sy = 0;
   let n = 0;
-  for (let gy = 68; gy <= 128; gy++) {
+  for (let gy = 50; gy <= 128; gy++) {
     for (let gx = 80; gx <= 236; gx++) {
-      if (gy <= 66 && gx >= 92 && gx <= 168) continue;
+      if (gy >= 44 && gy <= 66 && gx >= 90 && gx <= 170) continue;
+      if (gy >= 106 && gy <= 124 && gx >= 184 && gx <= 230) continue;
       const x = Math.round(c.x + (gx / 320) * c.w);
       const y = Math.round(c.y + (gy / 200) * c.h);
       if (x < 0 || y < 0 || x >= width || y >= height) continue;
@@ -504,7 +505,7 @@ function findDialogSprite(img) {
       }
     }
   }
-  if (n < 5 || n > 220) return null;
+  if (n < 5 || n > 50) return null;
   return { gx: sx / n, gy: sy / n, n };
 }
 
@@ -971,9 +972,9 @@ async function pickComm1351InDialog(hand, dlg) {
     await sleep(400);
     let still = await snapshot(hand.page);
     if (looksLikeSelectInput(still.img)) {
-      await holdJoy(hand, 1, 0, 2000);
-      await sleep(80);
-      await holdJoy(hand, 0, 1, 700);
+      // 850ms right stopped in the empty mid; 2000+700 overshot to the trash.
+      await hopJoy(hand, 1, 0, 16, 80);
+      await hopJoy(hand, 0, 1, 5, 80);
       await sleep(80);
       await clickJoy(hand, { downMs: 140 });
       await sleep(400);
