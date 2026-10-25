@@ -289,8 +289,7 @@ try {
     await page.waitForTimeout(1000);
     dollarScreen = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
     if (/FILE NOT FOUND|\?FILE|DEVICE NOT PRESENT/i.test(dollarScreen)) break;
-    if (/SEARCHING FOR|LOADING/i.test(dollarScreen) && !/READY\.\s*$/m.test(dollarScreen)) continue;
-    if (/LOAD"\$",8/i.test(dollarScreen) && /READY/i.test(dollarScreen) && !/SEARCHING FOR/i.test(dollarScreen)) {
+    if (/LOAD"\$",8/i.test(dollarScreen) && /LOADING/i.test(dollarScreen) && /READY/i.test(dollarScreen)) {
       loadedDir = true;
       break;
     }
