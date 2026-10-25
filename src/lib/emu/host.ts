@@ -933,7 +933,8 @@ function coreOptions(cfg: BootConfig): Record<string, string> {
     vice_statusbar: "disabled",
     vice_vkbd: "disabled",
     vice_keyboard_input: "enabled",
-    vice_physical_keyboard_pass_through: "disabled",
+    // "disabled" makes the core drop every key while joystick fire is held (screen click).
+    vice_physical_keyboard_pass_through: "enabled",
     ...viceJoyOptions(cfg.joyPort),
     ...buildViceExtras({
       reu: cfg.reu ?? "none",
@@ -1163,9 +1164,8 @@ export function plugJoysticks(emu: EjsInstance | null, _port: JoyPort = 2) {
   userJoyPort = _port;
   guardCore(emu);
   const grokKbd = grok64RetroKeyboardAvailable(emu);
-  const grokDatapath = Boolean(grok64ViceCoreRoot());
   applyRuntimeOptions(emu, {
-    vice_physical_keyboard_pass_through: grokDatapath ? "disabled" : "enabled",
+    vice_physical_keyboard_pass_through: "enabled",
     vice_keyboard_input: "enabled",
   });
   try {

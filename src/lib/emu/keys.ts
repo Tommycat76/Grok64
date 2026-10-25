@@ -30,14 +30,14 @@ export const C64_ROWS: C64Key[][] = [
     { id: "0", label: "0", code: "Digit0", key: "0" },
     { id: "plus", label: "+", code: "Minus", key: "+", cbmPetscii: 0xa6, shiftPetscii: 0xdb },
     { id: "minus", label: "−", code: "Equal", key: "-", cbmPetscii: 0xdc, shiftPetscii: 0xdd },
-    { id: "pound", label: "£", code: "Backslash", key: "\\", cbmPetscii: 0xa8, shiftPetscii: 0xa9 },
+    { id: "pound", label: "£", code: "Insert", key: "\\", cbmPetscii: 0xa8, shiftPetscii: 0xa9 },
     { id: "home", label: "HOME", code: "Home", key: "Home", width: 1.3 },
     { id: "clr", label: "CLR", code: "Home", key: "Home", width: 1.3, forceShift: true },
-    { id: "inst", label: "INST", code: "Insert", key: "Insert", width: 1.3 },
+    { id: "inst", label: "INST", code: "Backspace", key: "Backspace", width: 1.3, forceShift: true },
     { id: "del", label: "DEL", shift: "INST", code: "Backspace", key: "Backspace", width: 1.3 },
   ],
   [
-    { id: "ctrl", label: "CTRL", code: "ControlLeft", key: "Control", width: 1.4, modifier: "ctrl" },
+    { id: "ctrl", label: "CTRL", code: "Tab", key: "Tab", width: 1.4, modifier: "ctrl" },
     { id: "q", label: "Q", code: "KeyQ", key: "q", cbmPetscii: 0xab, shiftPetscii: 0xd1 },
     { id: "w", label: "W", code: "KeyW", key: "w", cbmPetscii: 0xb3, shiftPetscii: 0xd7 },
     { id: "e", label: "E", code: "KeyE", key: "e", cbmPetscii: 0xb1, shiftPetscii: 0xc5 },
@@ -68,11 +68,11 @@ export const C64_ROWS: C64Key[][] = [
     { id: "l", label: "L", code: "KeyL", key: "l", cbmPetscii: 0xb6, shiftPetscii: 0xcc },
     { id: "colon", label: ":", shift: "[", shiftPetscii: 0x5b, cbmPetscii: 0x5b, code: "Semicolon", key: ":" },
     { id: "semi", label: ";", shift: "]", shiftPetscii: 0x5d, cbmPetscii: 0x5d, code: "Quote", key: ";" },
-    { id: "eq", label: "=", code: "IntlBackslash", key: "=" },
+    { id: "eq", label: "=", code: "Backslash", key: "=" },
     { id: "return", label: "RETURN", code: "Enter", key: "Enter", width: 1.8 },
   ],
   [
-    { id: "cbm", label: "C=", code: "Tab", key: "Tab", width: 1.4, modifier: "cbm" },
+    { id: "cbm", label: "C=", code: "ControlLeft", key: "Control", width: 1.4, modifier: "cbm" },
     { id: "lshift", label: "SHIFT", code: "ShiftLeft", key: "Shift", width: 1.6, modifier: "shift" },
     { id: "z", label: "Z", code: "KeyZ", key: "z", cbmPetscii: 0xad, shiftPetscii: 0xda },
     { id: "x", label: "X", code: "KeyX", key: "x", cbmPetscii: 0xbd, shiftPetscii: 0xd8 },
@@ -237,7 +237,7 @@ export function touchC64Stroke(k: C64Key, shiftLayer: boolean): { code: string; 
   if (shiftLayer && k.shift && k.shiftPetscii == null) {
     const extra = EXTRA[k.shift];
     if (extra) return { code: extra.code, key: extra.key, shift: extra.shift };
-    return { code: k.code, key: k.shift, shift: false };
+    return { code: k.code, key: k.key, shift: true };
   }
   return { code: k.code, key: k.key, shift: shiftLayer || !!k.forceShift };
 }
@@ -326,11 +326,13 @@ const EXTRA: Record<string, C64Stroke> = {
   ";": { code: "Quote", key: ";", shift: false },
   "+": { code: "Minus", key: "+", shift: false },
   "-": { code: "Equal", key: "-", shift: false },
-  "=": { code: "IntlBackslash", key: "=", shift: false },
+  "=": { code: "Backslash", key: "=", shift: false },
   "/": { code: "Slash", key: "/", shift: false },
   "!": { code: "Digit1", key: "1", shift: true },
   "#": { code: "Digit3", key: "3", shift: true },
   $: { code: "Digit4", key: "4", shift: true },
+  "(": { code: "Digit8", key: "8", shift: true },
+  ")": { code: "Digit9", key: "9", shift: true },
 };
 
 export function c64Keystrokes(text: string): C64Stroke[] {

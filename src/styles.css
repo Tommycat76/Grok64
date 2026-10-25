@@ -615,6 +615,8 @@ html, body, #app {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Bezel chrome must not steal toolbar / Software clicks above the CRT. */
+  pointer-events: none;
 }
 .g64-screen {
   width: 100%;
@@ -629,6 +631,7 @@ html, body, #app {
   overflow: hidden;
   position: relative;
   touch-action: none;
+  pointer-events: auto;
 }
 .g64-screen:not(.is-on) {
   pointer-events: none;

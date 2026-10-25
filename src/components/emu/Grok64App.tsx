@@ -4149,7 +4149,9 @@ export function Grok64App() {
   }, []);
   useEffect(() => {
     if (!s.running) return;
-    const onHostKey = async (e: KeyboardEvent) => {
+    const cursorArrowsDown = new Set<string>();
+    // Synchronous on purpose: key events must reach the delivery queue in the order they happened.
+    const onHostKey = (e: KeyboardEvent) => {
       if (!useEmu.getState().running) return;
       const ui = useEmu.getState();
       if (ui.settingsOpen || ui.aboutOpen || ui.libraryOpen || ui.mapperOpen || ui.snapsOpen) return;
@@ -4163,6 +4165,12 @@ export function Grok64App() {
       }
       if (isJoyFireKey(e.code)) return;
       const down = e.type === "keydown";
+      if (/^Arrow(Up|Down|Left|Right)$/.test(e.code)) {
+        // Menu joy mode: the arrow-key listener pulses the joystick; no cursor key too.
+        if (down && isMenuJoyMode()) return;
+        if (down) cursorArrowsDown.add(e.code);
+        else if (!cursorArrowsDown.delete(e.code)) return;
+      }
       const deferKeys = playLockRef.current || useEmu.getState().booting;
       if (deferKeys && !freezerFn) {
         enqueueC64KeyboardStroke(e.code, e.key, down, {
@@ -4175,20 +4183,22 @@ export function Grok64App() {
         return;
       }
       if (down && e.repeat) return;
-      if (down && e.shiftKey && /^Digit[0-9]$/.test(e.code)) {
-        await grok64KeyboardDrain();
-        await new Promise((r) => setTimeout(r, 32));
-      }
-      const handled = grok64RetroKeyboardFromDom(emuRef.current, e.code, e.key, down, {
-        shift: e.shiftKey,
-        ctrl: e.ctrlKey,
-        alt: e.altKey,
-      });
+      const handled = grok64RetroKeyboardFromDom(
+        emuRef.current,
+        e.code,
+        e.key,
+        down,
+        { shift: e.shiftKey, ctrl: e.ctrlKey, alt: e.altKey },
+        e.timeStamp,
+      );
       if (!handled) return;
       e.preventDefault();
       e.stopPropagation();
     };
-    const onBlur = () => grok64KeyboardReleaseAll(emuRef.current);
+    const onBlur = () => {
+      cursorArrowsDown.clear();
+      grok64KeyboardReleaseAll(emuRef.current);
+    };
     window.addEventListener("keydown", onHostKey, true);
     window.addEventListener("keyup", onHostKey, true);
     window.addEventListener("blur", onBlur);
@@ -4197,7 +4207,7 @@ export function Grok64App() {
       window.removeEventListener("keyup", onHostKey, true);
       window.removeEventListener("blur", onBlur);
     };
-  }, [s.running]);
+  }, [s.running, isMenuJoyMode]);
   useEffect(() => {
     if (
       !shouldDismissPictureHold({
@@ -4615,7 +4625,7 @@ export function Grok64App() {
         }
         if (action === "space") dispatchC64Key("Space", " ", on);
         if (action === "runstop") dispatchC64Key("Escape", "Escape", on);
-        if (action === "commodore") dispatchC64Key("Tab", "Tab", on);
+        if (action === "commodore") dispatchC64Key("ControlLeft", "Control", on);
         if (action === "return") dispatchC64Key("Enter", "Enter", on);
       };
       for (const b of binds) {
