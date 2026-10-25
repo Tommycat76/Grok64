@@ -3,6 +3,7 @@ import { c64RamView } from "./c64-memory";
 import { grok64WasmApi, type Grok64ModuleBag } from "./grok64-api";
 import { resolveWasmExport } from "./grok64-wasm-direct";
 import { listD64Directory, readD64Prg } from "./d64";
+import { isAcceptedD64ByteLength } from "./formats";
 import type { IecUnit } from "./types";
 
 /**
@@ -57,29 +58,24 @@ function syncFilesInDir(partId: number, dir = currentDir): SdFile[] {
   return part.files.filter((f) => normDir(parentPath(f)) === want);
 }
 
-function syncSubdirsInDir(partId: number, dir = currentDir): string[] {
+/** Folders directly inside `dir`: made with MD/CD, or holding a file somewhere below them. */
+function childDirs(part: SdPartition, dir: string): string[] {
   const want = normDir(dir);
-  const part = syncPart(partId);
   const out = new Set<string>();
-  for (const d of part.dirs ?? []) {
-    const n = normDir(d);
-    if (!want) {
-      const first = n.split("/")[0];
-      if (first) out.add(first);
-    } else if (n.startsWith(`${want}/`)) {
-      const rest = n.slice(want.length + 1);
-      const seg = rest.split("/")[0];
-      if (seg) out.add(seg);
-    }
-  }
-  for (const f of part.files) {
-    const p = normDir(parentPath(f));
-    if (want && p.startsWith(`${want}/`)) {
-      const seg = p.slice(want.length + 1).split("/")[0];
-      if (seg) out.add(seg);
-    }
-  }
-  return [...out];
+  const add = (path: string) => {
+    const n = normDir(path);
+    if (!n) return;
+    const rest = !want ? n : n.startsWith(`${want}/`) ? n.slice(want.length + 1) : "";
+    const seg = rest.split("/")[0];
+    if (seg) out.add(seg);
+  };
+  for (const d of part.dirs ?? []) add(d);
+  for (const f of part.files) add(parentPath(f));
+  return [...out].sort();
+}
+
+function syncSubdirsInDir(partId: number, dir = currentDir): string[] {
+  return childDirs(syncPart(partId), dir);
 }
 
 function syncFindFile(partId: number, pattern: string): SdFile | null {
@@ -555,26 +551,7 @@ function parentPath(f: SdFile): string {
 }
 
 async function subdirsInDir(partId: number, dir = currentDir): Promise<string[]> {
-  const part = await loadPart(partId);
-  const want = normDir(dir);
-  const out = new Set<string>();
-  for (const d of part.dirs ?? []) {
-    const n = normDir(d);
-    if (!n) continue;
-    const p = parentDir(n);
-    if (p === want) out.add(n.split("/").pop() || n);
-    else if (!want && !n.includes("/")) out.add(n);
-  }
-  for (const f of part.files) {
-    const p = normDir(parentPath(f));
-    if (p !== want) continue;
-    const base = basename(f);
-    if (base.includes("/")) {
-      const seg = base.split("/")[0];
-      if (seg) out.add(seg);
-    }
-  }
-  return [...out].sort();
+  return childDirs(await loadPart(partId), dir);
 }
 
 async function findFileOnCard(partId: number, pattern: string): Promise<SdFile | null> {
@@ -759,29 +736,114 @@ function dirListing(
   return petsciiAscii(lines.join("\r") + "\r");
 }
 
-/** CBM linked directory blocks for LOAD"$" / IEC read (matches KERNAL trap handleRead). */
-function buildLinkedDirectoryBytes(files: SdFile[], subdirs: string[], inSubdir: boolean): Uint8Array {
-  const out: number[] = [1, 8];
-  let ptr = 2049;
-  const line = (link: number, text: string) => {
-    const raw = petsciiAscii(text);
-    const addr = ptr + 5 + raw.length;
-    out.push(addr & 255, addr >> 8, link & 255, link >> 8, 34);
-    for (const b of raw) out.push(b);
-    out.push(34, 0);
-    ptr = addr;
-  };
-  line(0, `0 "${"GROK64 SD".toUpperCase().padEnd(16).slice(0, 16)}  SD 2A`);
-  if (inSubdir) line(0, `${"0".padStart(4)} "←" DIR`);
-  for (const d of subdirs) {
-    line(0, `${"0".padStart(4)} "${petsciiName(d).padEnd(16)}" DIR`);
+interface CbmDirEntry {
+  blocks: number;
+  /** PETSCII name bytes, without the 0xA0 padding. */
+  name: ArrayLike<number>;
+  type: string;
+  open?: boolean;
+  locked?: boolean;
+}
+
+const CBM_FILE_TYPES = ["DEL", "SEQ", "PRG", "USR", "REL"];
+const PETSCII_LEFT_ARROW = 0x5f;
+
+/**
+ * `$` as a BASIC program, laid out the way the 1541 and the sd2iec firmware send it: load address
+ * $0401, dummy line links (BASIC relinks after LOAD), a reverse header with the quoted 16-character
+ * disk name, ID and DOS type, one line per entry (blocks as line number, quoted name, type column),
+ * then BLOCKS FREE.
+ */
+function cbmDirectoryProgram(
+  header: { name: ArrayLike<number>; id: ArrayLike<number>; dos: ArrayLike<number> },
+  entries: CbmDirEntry[],
+  blocksFree: number,
+): Uint8Array {
+  const out: number[] = [0x01, 0x04];
+  const line = (num: number, text: number[]) => out.push(0x01, 0x01, num & 0xff, (num >> 8) & 0xff, ...text, 0);
+  const field = (bytes: ArrayLike<number>, len: number) =>
+    Array.from({ length: len }, (_, i) => {
+      const b = bytes[i] ?? 0x20;
+      return b === 0xa0 ? 0x20 : b;
+    });
+  line(0, [0x12, 0x22, ...field(header.name, 16), 0x22, 0x20, ...field(header.id, 2), 0x20, ...field(header.dos, 2)]);
+  for (const e of entries) {
+    const name = Array.from(e.name).slice(0, 16);
+    const fill = [e.blocks < 1000, e.blocks < 100, e.blocks < 10].filter(Boolean).map(() => 0x20);
+    line(e.blocks, [
+      ...fill,
+      0x22,
+      ...name,
+      0x22,
+      ...Array<number>(16 - name.length).fill(0x20),
+      e.open ? 0x2a : 0x20,
+      ...petsciiAscii(e.type),
+      e.locked ? 0x3c : 0x20,
+    ]);
   }
-  for (const f of files) {
-    line(Math.max(1, Math.ceil(f.size / 254)), `"${petsciiName(basename(f)).padEnd(16)}" PRG`);
-  }
-  line(65535, "BLOCKS FREE");
+  line(Math.min(blocksFree, 65535), [...petsciiAscii("BLOCKS FREE.")]);
   out.push(0, 0);
   return Uint8Array.from(out);
+}
+
+/** The card's current folder: parent entry in a subfolder, folders as DIR, files as PRG. */
+function cardDirectoryProgram(files: SdFile[], subdirs: string[], inSubdir: boolean): Uint8Array {
+  const name = (s: string) => petsciiAscii(s.slice(0, 16));
+  return cbmDirectoryProgram(
+    { name: petsciiAscii("GROK64 SD"), id: petsciiAscii("SD"), dos: petsciiAscii("2A") },
+    [
+      ...(inSubdir ? [{ blocks: 0, name: [PETSCII_LEFT_ARROW], type: "DIR" }] : []),
+      ...subdirs.map((d) => ({ blocks: 0, name: name(petsciiName(d)), type: "DIR" })),
+      ...files.map((f) => ({ blocks: Math.max(1, Math.ceil(f.size / 254)), name: name(petsciiName(basename(f))), type: "PRG" })),
+    ],
+    65535,
+  );
+}
+
+/** A D64 mounted with `CD:` lists its own header, entries and BAM free count, as on the firmware. */
+function d64DirectoryProgram(image: Uint8Array, filter?: string): Uint8Array {
+  const bamOff = 357 * 256;
+  const bam = image.subarray(bamOff, bamOff + 256);
+  let free = 0;
+  for (let t = 1; t <= 35; t++) if (t !== 18) free += bam[4 * t] ?? 0;
+  const shown = listD64Directory(image).filter((e) => !filter || filter === "*" || matchPattern(e.name, filter));
+  return cbmDirectoryProgram(
+    { name: bam.subarray(0x90, 0xa0), id: bam.subarray(0xa2, 0xa4), dos: bam.subarray(0xa5, 0xa7) },
+    shown.map((e) => {
+      const raw = image.subarray(e.slot + 5, e.slot + 21);
+      const end = raw.indexOf(0xa0);
+      return {
+        blocks: e.blocks,
+        name: raw.subarray(0, end < 0 ? 16 : end),
+        type: CBM_FILE_TYPES[e.type & 7] ?? "???",
+        open: !(e.type & 0x80),
+        locked: Boolean(e.type & 0x40),
+      };
+    }),
+    free,
+  );
+}
+
+/** The D64 that `CD:NAME.D64` mounted; other image kinds keep the card listing. */
+function mountedD64(): Uint8Array | null {
+  return mountedDiskImage && isAcceptedD64ByteLength(mountedDiskImage.byteLength) ? mountedDiskImage : null;
+}
+
+/** `filter` (a `$:NAME*` pattern) applies to the mounted D64; card callers filter `files` themselves. */
+function sdDirectoryProgram(files: SdFile[], subdirs: string[], inSubdir: boolean, filter?: string): Uint8Array {
+  const d64 = mountedD64();
+  return d64 ? d64DirectoryProgram(d64, filter) : cardDirectoryProgram(files, subdirs, inSubdir);
+}
+
+/** A PRG on the mounted D64 by exact name or `*` / `?` pattern (first match, like the DOS). */
+function mountedD64Prg(pattern: string): Uint8Array | null {
+  const d64 = mountedD64();
+  if (!d64) return null;
+  const want = pattern.toUpperCase();
+  const entry = listD64Directory(d64).find(
+    (e) => e.prg && (e.name.toUpperCase() === want || matchPattern(e.name, want)),
+  );
+  return entry ? readD64Prg(d64, entry.name) : null;
 }
 
 function parseDirFilter(raw: string): { part: number; filter: string } {
@@ -1078,27 +1140,7 @@ async function handleRead(ram: Uint8Array) {
       const re = new RegExp(`^${pat}$`, "i");
       files = files.filter((f) => re.test(petsciiName(basename(f))) || re.test(basename(f)));
     }
-    const out: number[] = [1, 8];
-    let ptr = 2049;
-    const line = (link: number, text: string) => {
-      const raw = petsciiAscii(text);
-      const addr = ptr + 5 + raw.length;
-      out.push(addr & 255, addr >> 8, link & 255, link >> 8, 34);
-      for (const b of raw) out.push(b);
-      out.push(34, 0);
-      ptr = addr;
-    };
-    line(0, `0 "${"GROK64 SD".toUpperCase().padEnd(16).slice(0, 16)}  SD 2A`);
-    if (currentDir) line(0, `${"0".padStart(4)} "←" DIR`);
-    for (const d of subdirs) {
-      line(0, `${"0".padStart(4)} "${petsciiName(d).padEnd(16)}" DIR`);
-    }
-    for (const f of files) {
-      line(Math.max(1, Math.ceil(f.size / 254)), `"${petsciiName(basename(f)).padEnd(16)}" PRG`);
-    }
-    line(65535, "BLOCKS FREE");
-    out.push(0, 0);
-    const bytes = Uint8Array.from(out);
+    const bytes = sdDirectoryProgram(files, subdirs, Boolean(currentDir), spec.filter);
     const addr = track === 0 ? 2049 : ram[195] | (ram[196] << 8) || 2049;
     ram.set(bytes.subarray(2), addr);
     const end = addr + bytes.length - 2;
@@ -1152,7 +1194,7 @@ async function handleOpen(ram: Uint8Array) {
   const mode = ram[51203] || 0;
   const sa = ram[51204] || 0;
   const upper = name.toUpperCase();
-  if (mode === 15 || /^(CD|MD|RD|S:|I|X|N|U|CP|G-P)/i.test(name)) {
+  if (mode === 15) {
     if (name) await runSdCommand(name);
     openFiles.set(sa, { sa, name, data: petsciiAscii(`${lastStatus}\r`), pos: 0, write: true, cmd: true });
     queueFile(ram, sa, mode);
@@ -1172,7 +1214,7 @@ async function handleOpen(ram: Uint8Array) {
     openFiles.set(sa, {
       sa,
       name,
-      data: buildLinkedDirectoryBytes(files, sub, Boolean(currentDir)),
+      data: sdDirectoryProgram(files, sub, Boolean(currentDir)),
       pos: 0,
       write: false,
       cmd: false,
@@ -1367,7 +1409,8 @@ function nameFromBuf(buf: number[]): string {
 function wasmOpenFileOnChannel(dev: number, sec: number, raw: string) {
   const ch = wasmCh(dev, sec);
   const upper = raw.toUpperCase();
-  if (sec === 15 || /^(CD|MD|RD|S:|I|X|N|U|CP|G-P)/i.test(raw)) {
+  // DOS commands only arrive on channel 15; on 0-14 the name is a file name (INSIDE, NUVIE, …).
+  if (sec === 15) {
     void runSdCommand(raw).then((st) => {
       ch.data = petsciiAscii(`${st}\r`);
       ch.pos = 0;
@@ -1384,11 +1427,17 @@ function wasmOpenFileOnChannel(dev: number, sec: number, raw: string) {
   if (raw.startsWith("$") || upper.includes("$=") || raw === "") {
     const sub = syncSubdirsInDir(currentPart);
     const files = syncFilesInDir(currentPart);
-    ch.data = buildLinkedDirectoryBytes(files, sub, Boolean(currentDir));
+    ch.data = sdDirectoryProgram(files, sub, Boolean(currentDir));
     ch.pos = 0;
     return;
   }
-  const file = syncFindFile(currentPart, raw.replace(/^:/, "").replace(/[\r,].*$/, ""));
+  const pattern = raw.replace(/^:/, "").replace(/[\r,].*$/, "");
+  if (mountedD64()) {
+    ch.data = mountedD64Prg(pattern) ?? new Uint8Array(0);
+    ch.pos = 0;
+    return;
+  }
+  const file = syncFindFile(currentPart, pattern);
   ch.data = file ? new Uint8Array(file.data) : new Uint8Array(0);
   ch.pos = 0;
 }
@@ -1523,14 +1572,19 @@ export const grok64WasmIecHost = {
       }
     }
   },
+  /**
+   * VICE `vdrive_iec_read` status: EOF ($40) travels with the last byte, so the bus device sends it
+   * with EOI; nothing to send (file not found) is $42, after which the device stops talking.
+   */
   iecRead(dev: number, sec: number): number {
     const ch = wasmCh(dev, sec & 0x0f);
     if (ch.pos >= ch.data.length) {
-      wasmIecReadSt = 0x40;
+      wasmIecReadSt = 0x42;
       return 0xc7;
     }
-    wasmIecReadSt = 0;
-    return ch.data[ch.pos++] ?? 0xc7;
+    const b = ch.data[ch.pos++] ?? 0xc7;
+    wasmIecReadSt = ch.pos >= ch.data.length ? 0x40 : 0;
+    return b;
   },
   get iecReadSt() {
     return wasmIecReadSt;

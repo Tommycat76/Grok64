@@ -225,32 +225,24 @@ export function readD64Prg(image: Uint8Array, filePattern: string): Uint8Array |
     return n === want || n === upper || `${n}.PRG` === upper;
   });
   if (!entry) return null;
-  const dirOff = entry.slot;
-  const track = image[dirOff + 3]!;
-  const sector = image[dirOff + 4]!;
-  const blocks = image[dirOff + 30]! | (image[dirOff + 31]! << 8);
-  const payload = new Uint8Array(Math.max(2, blocks * 254 + 2));
-  let t = track;
-  let s = sector;
-  let written = 0;
-  let guard = 0;
-  while (t && guard++ < 512 && written < payload.length - 2) {
+  // The file as the DOS sends it: its own load address first, then the rest of the sector chain.
+  const out: number[] = [];
+  const seen = new Set<number>();
+  let t = image[entry.slot + 3]!;
+  let s = image[entry.slot + 4]!;
+  while (t >= 1 && t <= 35) {
     const off = lba(t, s) * 256;
-    if (off + 256 > image.byteLength) break;
+    if (off + 256 > image.byteLength || seen.has(off)) break;
+    seen.add(off);
     const linkT = image[off]!;
     const linkS = image[off + 1]!;
-    const chunkLen = linkT ? 254 : Math.max(0, (image[off + 1] ?? 0) - 1);
-    const chunk = image.subarray(off + 2, off + 2 + Math.min(254, chunkLen || 254));
-    if (written + chunk.length > payload.length - 2) break;
-    payload.set(chunk, 2 + written);
-    written += chunk.length;
+    const len = linkT ? 254 : Math.max(0, linkS - 1);
+    for (let i = 0; i < len; i++) out.push(image[off + 2 + i]!);
     if (!linkT) break;
     t = linkT;
     s = linkS;
   }
-  payload[0] = 0x01;
-  payload[1] = 0x08;
-  return payload.subarray(0, 2 + written);
+  return Uint8Array.from(out);
 }
 
 export function listD64Directory(data: Uint8Array): D64DirEntry[] {
