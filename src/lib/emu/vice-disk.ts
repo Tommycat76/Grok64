@@ -679,6 +679,72 @@ export function viceDriveBusProbe(emu: ViceDiskEmu | null, unit: IecUnit = 8, dr
   };
 }
 
+/** VICE DriveNType values whose DOS runs the 1541 power-on routine (1540, 1541, 1541-II). */
+const DRIVE_1541_FAMILY = new Set([1540, 1541, 1542]);
+/**
+ * Drive cycles from a drive CPU reset until 1541 DOS has finished its RAM/ROM test and armed the
+ * ATN interrupt (measured ~1.02M, idle bus lines from then on), plus margin for JiffyDOS ROMs.
+ */
+const DRIVE_1541_BOOT_CYCLES = 1_200_000;
+
+export type DriveFirmwareWait = {
+  unit: IecUnit;
+  type: number | null;
+  clkStart: number | null;
+  clkEnd: number | null;
+  waitedMs: number;
+  timedOut: boolean;
+};
+
+function nextFrame(): Promise<void> {
+  if (typeof requestAnimationFrame !== "function") return new Promise((r) => setTimeout(r, 16));
+  return new Promise((r) => requestAnimationFrame(() => r()));
+}
+
+/**
+ * Hold a floppy mount until the drive DOS can answer the bus. Any drive CPU reset (drive type
+ * write, power-on) restarts the drive clock at 0; an ATN edge sent while the DOS is still in its
+ * power-on test is never seen, so a LOAD typed then hangs at SEARCHING with DATA held low.
+ */
+export async function waitDriveFirmwareReady(
+  emu: ViceDiskEmu | null,
+  unit: IecUnit = 8,
+  timeoutMs = 3000,
+): Promise<DriveFirmwareWait> {
+  const mod = diskMod(emu);
+  if (mod) bindGrok64DiskExports(mod, emu);
+  const api = grok64DiskApi(mod);
+  const type = api?.driveUnitType?.(unit) ?? null;
+  const readClk = () => {
+    const c = api?.driveCpuClock?.(unit);
+    return typeof c === "number" && c >= 0 ? c : null;
+  };
+  const clkStart = readClk();
+  const t0 = performance.now();
+  let clk = clkStart;
+  let timedOut = false;
+  if (type != null && DRIVE_1541_FAMILY.has(type)) {
+    while (clk != null && clk < DRIVE_1541_BOOT_CYCLES) {
+      if (performance.now() - t0 >= timeoutMs) {
+        timedOut = true;
+        break;
+      }
+      await nextFrame();
+      clk = readClk();
+    }
+  }
+  const out: DriveFirmwareWait = {
+    unit,
+    type,
+    clkStart,
+    clkEnd: clk,
+    waitedMs: Math.round(performance.now() - t0),
+    timedOut,
+  };
+  if (out.waitedMs > 0 || timedOut) glog("drive-firmware-wait", out);
+  return out;
+}
+
 export type ViceDriveLiveProbe = {
   attachPath: string | null;
   fsPathLabel: string | null;

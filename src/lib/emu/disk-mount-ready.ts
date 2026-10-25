@@ -16,7 +16,7 @@ import type { IecDrive, IecUnit } from "./types";
 import { isIosPhone } from "./detect";
 import { glog } from "./debug";
 import { runMountStage } from "./disk-mount-stage";
-import { ensureViceLastAttachRecorded, lastViceDiskAttach } from "./vice-disk";
+import { ensureViceLastAttachRecorded, lastViceDiskAttach, waitDriveFirmwareReady } from "./vice-disk";
 
 /**
  * After a disk image is on unit 8: true drive, hard reset to bare READY.
@@ -48,6 +48,7 @@ export async function presentFloppyMountReady(
     ensureViceLastAttachRecorded(emu, live.unit);
     await runMountStage("flush-after-reattach", () => flushEmuFs(emu, isIosPhone() ? 2000 : 400));
     ensureViceLastAttachRecorded(emu, live.unit);
+    await runMountStage("drive-firmware-ready", () => waitDriveFirmwareReady(emu, live.unit));
     bumpCrtPaint(emu);
     return;
   }
@@ -78,5 +79,6 @@ export async function presentFloppyMountReady(
     );
   }
   ensureViceLastAttachRecorded(emu, live.unit);
+  await runMountStage("drive-firmware-ready", () => waitDriveFirmwareReady(emu, live.unit));
   bumpCrtPaint(emu);
 }

@@ -142,6 +142,7 @@ import {
   viceLoadDollarDiagForAbout,
   viceWasmWorkDiskDiag,
   viceAttachRcLabel,
+  waitDriveFirmwareReady,
 } from "@/lib/emu/vice-disk";
 import { bindGrok64WasmExports } from "@/lib/emu/grok64-vice-bridge";
 import {
@@ -3755,6 +3756,7 @@ export function Grok64App() {
         throw new Error(`IEC bus reconcile failed (rc=${busRc}) ${viceDiskLastAttachDiag(emuRef.current) ?? ""}`);
       }
       await flushEmuFs(emuRef.current, 600);
+      await waitDriveFirmwareReady(emuRef.current, unit);
     } catch (err) {
       glog("insert-disk-fail", { err: String(err) });
       toast.error(err instanceof Error ? err.message : "Insert failed — drive attach error");
