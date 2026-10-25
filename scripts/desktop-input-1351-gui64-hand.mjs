@@ -656,10 +656,9 @@ async function tapCbmI(hand) {
 
 function isSelectInputDialog(before, after) {
   if (!after?.img) return false;
-  if (looksLikeSelectInput(after.img)) return true;
   if (looksLikeAboutBox(after.img)) return false;
-  if (!before?.img) return false;
-  return looksLikeCenteredDialog(before, after) && notepadHasIcons(after.img) && !looksLikeAboutBox(after.img);
+  if (before?.img && openedMenuKind(before, after).kind === "geos") return false;
+  return looksLikeSelectInput(after.img);
 }
 
 async function waitSelectInput(hand, before, ms = 8000) {
@@ -1119,7 +1118,7 @@ async function test1351(hand, prefix) {
   return out;
 }
 
-/** C= + I opens Select Input Device on the official boot disk (real-UI proof). Menu walk is fallback. */
+/** geos → select input → COMM 1351(a) → OK. C= + I opens GEOS info on this disk. */
 async function activateGeos1351(hand) {
   const out = { steps: [], file: "COMM 1351(a)", via: "select-input" };
   await ensureMouse(hand, false);
@@ -1128,17 +1127,8 @@ async function activateGeos1351(hand) {
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
 
-  await tapCbmI(hand);
-  out.steps.push("cbm-i");
-  let dlg = await waitSelectInput(hand, before, 10000);
-  if (!isSelectInputDialog(before, dlg)) {
-    await tapCbmI(hand);
-    out.steps.push("cbm-i-retry");
-    dlg = await waitSelectInput(hand, before, 6000);
-  }
-  out.dialog = isSelectInputDialog(before, dlg);
-
-  if (!out.dialog) {
+  let dlg = before;
+  {
     out.landGeos = await landOnGeosWord(hand);
     out.steps.push(onGeosWord(out.landGeos?.landed) ? "on-geos" : "geos-miss");
     await hand.shot("10-1351-preclick.png");
@@ -1181,11 +1171,6 @@ async function activateGeos1351(hand) {
           out.steps.push("about-box");
           await clickJoy(hand, { downMs: 110 });
           await sleep(250);
-          break;
-        }
-        if (i > 0 && isSelectInputDialog(before, row)) {
-          out.steps.push("select-input-menu");
-          dlg = row;
           break;
         }
         const ptr = findMenuPointer(row.img);
