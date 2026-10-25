@@ -657,20 +657,13 @@ async function activateGeos1351(hand) {
   await ensureWasd(hand, false);
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
-  // Home to the geos menu, then step right onto page (item 6 of 7).
-  await holdJoy(hand, 0, 1, 400);
+  // WASD D on this deskTop parks the pointer on "select". One step right is "page".
+  await holdJoy(hand, 1, 0, 200);
+  out.steps.push("select-to-page");
   await clickJoy(hand);
-  await sleep(200);
-  await holdJoy(hand, -1, 0, 2000);
-  await holdJoy(hand, 0, -1, 2000);
-  out.steps.push("home-geos");
-  await hand.shot("10-1351-home.png");
-  for (let i = 0; i < 5; i++) await holdJoy(hand, 1, 0, 280);
-  out.steps.push("menu-page");
-  await clickJoy(hand);
-  await sleep(300);
+  await sleep(350);
   await hand.shot("10-1351-page-menu.png");
-  await holdJoy(hand, 0, 1, 160);
+  await holdJoy(hand, 0, 1, 150);
   await clickJoy(hand);
   await sleep(1000);
   let page2 = await snapshot(hand.page);
