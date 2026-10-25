@@ -1240,10 +1240,16 @@ async function activateGeos1351(hand) {
           break;
         }
         if (ptr && ptr.y > 68) await holdJoy(hand, 0, -1, 44);
-        else await holdJoy(hand, 0, 1, ptr && ptr.y <= 16 ? 70 : 48);
+        else await holdJoy(hand, 0, 1, 70);
         await sleep(160);
       }
       dlg = await waitSelectInput(hand, before, 4000);
+      if (looksLikeAboutBox(dlg.img)) {
+        out.steps.push("about-not-input");
+        await clickJoy(hand, { downMs: 110 });
+        await sleep(300);
+        dlg = await snapshot(hand.page);
+      }
     }
     out.dialog = isSelectInputDialog(before, dlg);
   }
