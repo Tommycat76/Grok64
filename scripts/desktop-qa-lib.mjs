@@ -644,6 +644,7 @@ export async function waitGeosBoot(
 
 /** Power-on screen of BASIC V2 (stock or JiffyDOS KERNAL) with nothing typed below READY. */
 function coldStartScreen(text) {
+  if (/SEARCHING FOR|LOADING|SAVING BOOT|BOOTING GEOS/i.test(text)) return false;
   return /BASIC V2/i.test(text) && /BYTES FREE/i.test(text) && /READY\./.test(text) && text.replace(/\s+/g, "").length < 220;
 }
 

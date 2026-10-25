@@ -31,6 +31,7 @@ const shotRoot = join(cwd, "screenshots", "input-1351-gui64-hand");
 const outDir = join(cwd, "artifacts", "input-1351-gui64-hand");
 const deskTopMs = Number(process.env.GROK64_HAND_DESKTOP_MS || "240000");
 const modes = (process.env.GROK64_HAND_JIFFY || "off,on").split(",").map((s) => s.trim() === "on");
+const wantGui64 = (process.env.GROK64_HAND_GUI64 || "on") !== "off";
 mkdirSync(shotRoot, { recursive: true });
 mkdirSync(join(shotRoot, "boot"), { recursive: true });
 mkdirSync(outDir, { recursive: true });
@@ -715,12 +716,19 @@ async function activateGeos1351(hand) {
 }
 
 async function bootOfficialGeos(hand, disk) {
+  await hand.page.evaluate(() => window.__g64?.kbdReleaseAll?.());
   await hand.clickCrtAndType("NEW");
   await sleep(600);
   await hand.clickCrtAndType('LOAD"BOOT",8,1');
   let loadLine = await hand.waitTypedLine('LOAD"BOOT",8,1');
+  if (!loadLine.found) {
+    const typed = await hand.screenText();
+    const compact = typed.replace(/\s+/g, "").toUpperCase();
+    loadLine = { ...loadLine, found: compact.includes('LOAD"BOOT",8,1') || /SEARCHING FOR BOOT|LOADING/i.test(typed) };
+  }
   const typed = await hand.screenText();
   if (/SAVING BOOT/i.test(typed) && !/SEARCHING FOR BOOT|LOADING/i.test(typed)) {
+    await hand.page.evaluate(() => window.__g64?.kbdReleaseAll?.());
     await hand.clickCrtAndType("NEW");
     await sleep(400);
     const jiffy = await hand.page.evaluate(() => window.__g64?.jiffyLive?.());
@@ -821,8 +829,9 @@ async function runGui64(hand, cart, tag) {
     // Empty-desktop LMB is a no-op; drive 8 must open to prove the button.
     await ensureMouse(hand, true);
     await ensurePort(hand, 1);
-    await holdJoy(hand, -1, -1, 900);
-    await holdJoy(hand, 1, 1, 160);
+    // C= menu is the large bottom-left target; empty desktop LMB is a no-op.
+    await holdJoy(hand, -1, 1, 1400);
+    await holdJoy(hand, 0, -1, 80);
     const driveClick = await pointerProbe(hand, "drive8-click", async () => {
       const left = hand.page.getByRole("button", { name: "Left mouse button" }).first();
       await hand.click(left, "1351 left");
@@ -889,9 +898,7 @@ async function main() {
         }
         writeRun(run);
       }
-      if (process.env.GROK64_HAND_SKIP_GUI64 === "1") {
-        run.gui64.skipped = true;
-      } else {
+      if (wantGui64 && process.env.GROK64_HAND_SKIP_GUI64 !== "1") {
         try {
           run.gui64.ntsc = await runGui64(hand, ntsc, "gui64-ntsc");
         } catch (err) {
@@ -903,6 +910,8 @@ async function main() {
         } catch (err) {
           run.gui64.pal = { pass: false, error: String(err?.stack || err) };
         }
+      } else {
+        run.gui64.skipped = true;
       }
       run.coreAfter = await hand.coreStatus();
       run.errors = hand.errors.slice(0, 12);
@@ -921,7 +930,7 @@ async function main() {
     }
   });
 
-  const skipGui = process.env.GROK64_HAND_SKIP_GUI64 === "1";
+  const skipGui = !wantGui64 || process.env.GROK64_HAND_SKIP_GUI64 === "1";
   run.pass = Boolean(
     (run.geos.jiffyOff?.pass ?? !modes.includes(false)) &&
       (run.geos.jiffyOn?.pass ?? !modes.includes(true)) &&
