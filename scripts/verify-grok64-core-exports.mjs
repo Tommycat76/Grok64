@@ -21,6 +21,8 @@ const seven = join(process.cwd(), "node_modules/7zip-bin/linux/x64/7za");
 const tmp = join(process.cwd(), ".build/grok64-core-verify");
 
 const REQUIRED = [
+  "grok64_retro_keyboard",
+  "grok64_main_cpu_clock",
   "grok64_disk_attach",
   "grok64_disk_attach_deferred",
   "grok64_disk_detach",

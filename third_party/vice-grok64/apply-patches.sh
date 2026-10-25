@@ -7,35 +7,17 @@ cp "$PATCH_ROOT/vice/grok64_sd2iec.c" "$VICE_ROOT/vice/src/serial/grok64_sd2iec.
 cp "$PATCH_ROOT/vice/grok64_sd2iec.h" "$VICE_ROOT/vice/src/serial/grok64_sd2iec.h"
 cp "$PATCH_ROOT/libretro/grok64_exports.c" "$VICE_ROOT/libretro/grok64_exports.c"
 
+# D64 error info goes through stock VICE (fsimage-probe.c / fsimage-dxx.c / gcr.c) untouched.
+# Trees built from an earlier script carry an fsimage-dxx.c edit; restore the stock file.
 FSDXX="$VICE_ROOT/vice/src/diskimage/fsimage-dxx.c"
-if ! grep -q fsimage_dxx_fdc_error_for_gcr "$FSDXX"; then
-  python3 <<PY
-from pathlib import Path
-p = Path("$FSDXX")
-text = p.read_text()
-needle = "static log_t fsimage_dxx_log = LOG_DEFAULT;\n\n"
-insert = """static log_t fsimage_dxx_log = LOG_DEFAULT;
+if grep -q fsimage_dxx_fdc_error_for_gcr "$FSDXX"; then
+  git -C "$VICE_ROOT" checkout -- vice/src/diskimage/fsimage-dxx.c
+fi
 
-/* D64 error-info tail: byte 0 is used on some images; VICE read path treats 0 like OK. */
-static fdc_err_t fsimage_dxx_fdc_error_for_gcr(fdc_err_t rf)
-{
-    if (rf == 0) {
-        return CBMDOS_FDC_ERR_OK;
-    }
-    return rf;
-}
-
-"""
-if needle not in text:
-    raise SystemExit("fsimage-dxx.c layout changed")
-text = text.replace(needle, insert, 1)
-old = "                            rf = fsimage->error_info.map[sectors];\n"
-new = old + "                            rf = fsimage_dxx_fdc_error_for_gcr(rf);\n"
-if old not in text:
-    raise SystemExit("fsimage-dxx GCR rf assignment not found")
-text = text.replace(old, new, 1)
-p.write_text(text)
-PY
+# A configured 1541 must not be flipped to 1541-II (each type set resets the drive CPU),
+# and JiffyDOS must reach it through DosName1541 as well as DosName1541ii.
+if ! grep -q "Grok64: a configured 1541" "$VICE_ROOT/libretro/libretro-core.c"; then
+  git -C "$VICE_ROOT" apply "$PATCH_ROOT/patches/libretro-keep-1541-drive.patch"
 fi
 
 # Makefile.x64sc

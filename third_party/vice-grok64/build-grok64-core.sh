@@ -13,6 +13,8 @@ bash "${ROOT}/third_party/vice-grok64/apply-patches.sh" "${VICE}"
 
 cd "${VICE}"
 emmake make clean EMUTYPE=x64sc
+# `make clean` keeps the archive and `ar rcs` only adds members, so objects of removed sources would linger.
+rm -f "${VICE}/vice_x64sc_libretro_emscripten.bc"
 emmake make -j"$(nproc)" platform=emscripten EMUTYPE=x64sc
 
 GROK64_EXPORTS_O="${VICE}/build/libretro/grok64_exports.o"

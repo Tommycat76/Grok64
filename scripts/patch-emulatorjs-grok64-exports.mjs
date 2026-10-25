@@ -19,6 +19,7 @@ const GROK64_EXPORTS = [
   "_grok64_kbdbuf_flush",
   "_grok64_cartridge_trigger_freeze",
   "_grok64_retro_keyboard",
+  "_grok64_main_cpu_clock",
   "_grok64_disk_attach",
   "_grok64_disk_attach_deferred",
   "_grok64_disk_detach",

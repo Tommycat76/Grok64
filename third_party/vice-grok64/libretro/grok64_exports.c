@@ -8,6 +8,7 @@
 #include "fliplist.h"
 #include "kbdbuf.h"
 #include "machine.h"
+#include "maincpu.h"
 #include "vdrive/vdrive.h"
 #include "vdrive/vdrive-bam.h"
 #include "drive/drive.h"
@@ -21,7 +22,9 @@
 #include "cbmdos.h"
 #include "vice-event.h"
 #include "resources.h"
+#include "diskimage/fsimage.h"
 #include <errno.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -340,6 +343,15 @@ void grok64_retro_keyboard(unsigned code, int down, unsigned character, unsigned
 {
     retro_keyboard_event(down != 0, code, character, (uint16_t)mod);
     process_key(0);
+}
+
+/* Emulated C64 CPU cycles; drops back to a few cycles on machine reset. */
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+double grok64_main_cpu_clock(void)
+{
+    return (double)maincpu_clk;
 }
 
 #ifdef __EMSCRIPTEN__
@@ -791,6 +803,7 @@ static void grok64_vice_apply_safe_floppy_profile_unit(unsigned int unit)
 {
     char res[48];
     unsigned int u;
+    int v = 0;
 
     resources_set_int("VirtualDevices", 0);
     resources_set_int("DriveTrueEmulation", 1);
@@ -822,8 +835,11 @@ static void grok64_vice_apply_safe_floppy_profile_unit(unsigned int unit)
         snprintf(res, sizeof(res), "Drive%uRAMA000", u);
         resources_set_int(res, 0);
     }
+    /* Writing DriveNType, even unchanged, detaches the disk and resets the drive CPU. */
     snprintf(res, sizeof(res), "Drive%uType", unit);
-    resources_set_int(res, DRIVE_TYPE_1541);
+    if (resources_get_int(res, &v) != 0 || v != DRIVE_TYPE_1541) {
+        resources_set_int(res, DRIVE_TYPE_1541);
+    }
 }
 
 #ifdef __EMSCRIPTEN__
@@ -1127,10 +1143,131 @@ int grok64_work_disk_refresh(int unit)
     return last_disk_attach_rc;
 }
 
+static int grok64_appendf(char *out, int out_len, int pos, const char *fmt, ...)
+{
+    va_list ap;
+    int n;
+
+    if (pos < 0 || pos >= out_len - 1) {
+        return pos;
+    }
+    va_start(ap, fmt);
+    n = vsnprintf(out + pos, (size_t)(out_len - pos), fmt, ap);
+    va_end(ap);
+    if (n < 0) {
+        return pos;
+    }
+    return (pos + n >= out_len) ? out_len - 1 : pos + n;
+}
+
+static int grok64_error_code_digit(int code)
+{
+    return code > 15 ? 15 : code;
+}
+
+static int grok64_hex_bytes(char *out, int out_len, int pos, const uint8_t *p, int n)
+{
+    int i;
+
+    for (i = 0; i < n; i++) {
+        pos = grok64_appendf(out, out_len, pos, "%02x", p[i]);
+    }
+    return pos;
+}
+
+/* 1541 DOS state read straight from drive RAM (no bus traffic): job queue $00-$05 with
+   its track/sector table $06-$11, master disk ID $12/$13, last header read $16-$1A
+   (ID, ID, track, sector, checksum), command buffer $0200 (the name the drive received)
+   and the error channel text at $02D5. */
+static int grok64_dos1541_json(int unit, char *out, int out_len, int pos)
+{
+    const diskunit_context_t *du;
+    const uint8_t *ram;
+    unsigned int dnr = (unsigned int)unit - 8;
+    int i;
+
+    du = (dnr < NUM_DISK_UNITS) ? diskunit_context[dnr] : NULL;
+    if (!du || !du->enable
+        || (du->type != DRIVE_TYPE_1540 && du->type != DRIVE_TYPE_1541
+            && du->type != DRIVE_TYPE_1541II)) {
+        return grok64_appendf(out, out_len, pos, "null");
+    }
+    ram = du->drive_ram;
+    pos = grok64_appendf(out, out_len, pos, "{\"jobsHex\":\"");
+    pos = grok64_hex_bytes(out, out_len, pos, ram + 0x00, 6);
+    pos = grok64_appendf(out, out_len, pos, "\",\"jobTsHex\":\"");
+    pos = grok64_hex_bytes(out, out_len, pos, ram + 0x06, 12);
+    pos = grok64_appendf(out, out_len, pos, "\",\"diskIdHex\":\"");
+    pos = grok64_hex_bytes(out, out_len, pos, ram + 0x12, 2);
+    pos = grok64_appendf(out, out_len, pos, "\",\"lastHeaderHex\":\"");
+    pos = grok64_hex_bytes(out, out_len, pos, ram + 0x16, 5);
+    pos = grok64_appendf(out, out_len, pos, "\",\"cmdHex\":\"");
+    pos = grok64_hex_bytes(out, out_len, pos, ram + 0x0200, 16);
+    pos = grok64_appendf(out, out_len, pos, "\",\"errorChannel\":\"");
+    for (i = 0; i < 36 && ram[0x02d5 + i] != 0x0d; i++) {
+        uint8_t c = ram[0x02d5 + i];
+        pos = grok64_appendf(out, out_len, pos, "%c",
+                             (c >= 0x20 && c < 0x7f && c != '"' && c != '\\') ? c : '.');
+    }
+    return grok64_appendf(out, out_len, pos, "\"}");
+}
+
+/* Error-info table of the image as VICE holds it: code histogram, track 18 codes
+   (one hex digit per sector) and the sectors flagged with an error (code above 1). */
+static int grok64_error_info_json(disk_image_t *img, char *out, int out_len, int pos)
+{
+    fsimage_t *fs;
+    const uint8_t *map;
+    int hist[256];
+    int entries, i, idx, flagged = 0, listed = 0, first = 1;
+    unsigned int t, s, spt;
+
+    fs = (img && img->device == DISK_IMAGE_DEVICE_FS) ? img->media.fsimage : NULL;
+    if (!fs || !fs->error_info.map || fs->error_info.len <= 0) {
+        return grok64_appendf(out, out_len, pos, "{\"present\":false}");
+    }
+    map = fs->error_info.map;
+    entries = fs->error_info.len;
+    memset(hist, 0, sizeof(hist));
+    for (i = 0; i < entries; i++) {
+        hist[map[i]]++;
+    }
+    pos = grok64_appendf(out, out_len, pos, "{\"present\":true,\"entries\":%d,\"codes\":{", entries);
+    for (i = 0; i < 256; i++) {
+        if (hist[i]) {
+            pos = grok64_appendf(out, out_len, pos, "%s\"%d\":%d", first ? "" : ",", i, hist[i]);
+            first = 0;
+        }
+    }
+    pos = grok64_appendf(out, out_len, pos, "},\"track18\":\"");
+    for (s = 0; s < 19; s++) {
+        idx = disk_image_check_sector(img, 18, s);
+        pos = grok64_appendf(out, out_len, pos, "%x",
+                             (idx >= 0 && idx < entries) ? grok64_error_code_digit(map[idx]) : 0);
+    }
+    pos = grok64_appendf(out, out_len, pos, "\",\"flagged\":[");
+    for (t = 1; t <= img->tracks; t++) {
+        spt = disk_image_sector_per_track(img->type, t);
+        for (s = 0; s < spt; s++) {
+            idx = disk_image_check_sector(img, t, s);
+            if (idx < 0 || idx >= entries || map[idx] <= CBMDOS_FDC_ERR_OK) {
+                continue;
+            }
+            flagged++;
+            if (listed < 48) {
+                pos = grok64_appendf(out, out_len, pos, "%s[%u,%u,%d]", listed ? "," : "", t, s, map[idx]);
+                listed++;
+            }
+        }
+    }
+    pos = grok64_appendf(out, out_len, pos, "],\"flaggedCount\":%d}", flagged);
+    return pos;
+}
+
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
 #endif
-static char last_load_dollar_diag_json[6144];
+static char last_load_dollar_diag_json[8192];
 
 #ifdef __EMSCRIPTEN__
 EMSCRIPTEN_KEEPALIVE
@@ -1179,12 +1316,25 @@ const char *grok64_load_dollar_diag_capture(int unit)
     }
     pos += snprintf(out + pos, out_len - pos, "\"");
 
-    pos += snprintf(out + pos, out_len - pos, ",\"c64FnamLen\":%d,\"c64FnambHex\":\"",
-                    (int)grok64_c64_read(0x00b7));
-    for (i = 0; i < 16 && pos < out_len - 4; i++) {
-        pos += snprintf(out + pos, out_len - pos, "%02x", grok64_c64_read((uint16_t)(0x00bb + i)));
+    {
+        uint16_t fnam_ptr;
+        uint8_t fnam_len;
+        int j;
+
+        fnam_len = grok64_c64_read(0x00b7);
+        fnam_ptr = (uint16_t)grok64_c64_read(0x00bb) | ((uint16_t)grok64_c64_read(0x00bc) << 8);
+        pos += snprintf(out + pos, out_len - pos,
+                        ",\"c64FnamLen\":%d,\"c64FnamPtr\":%u,\"c64FnambHex\":\"",
+                        (int)fnam_len, (unsigned)fnam_ptr);
+        for (i = 0; i < 16 && pos < out_len - 4; i++) {
+            pos += snprintf(out + pos, out_len - pos, "%02x", grok64_c64_read((uint16_t)(0x00bb + i)));
+        }
+        pos += snprintf(out + pos, out_len - pos, "\",\"c64FnamAtPtrHex\":\"");
+        for (j = 0; j < 24 && pos < out_len - 4; j++) {
+            pos += snprintf(out + pos, out_len - pos, "%02x", grok64_c64_read(fnam_ptr + (uint16_t)j));
+        }
+        pos += snprintf(out + pos, out_len - pos, "\"");
     }
-    pos += snprintf(out + pos, out_len - pos, "\"");
 
     vd = file_system_get_vdrive((unsigned int)unit);
     if (vd) {
@@ -1251,6 +1401,7 @@ const char *grok64_load_dollar_diag_capture(int unit)
         }
         out[pos++] = c;
     }
+    pos += snprintf(out + pos, out_len - pos, "\",\"imgBamIdHex\":\"%02x%02x", t18[0xa2], t18[0xa3]);
     pos += snprintf(out + pos, out_len - pos, "\",\"imgTrack18Sector0Hex\":\"");
     for (i = 0; i < 32 && pos < out_len - 4; i++) {
         pos += snprintf(out + pos, out_len - pos, "%02x", t18[i]);
@@ -1259,7 +1410,11 @@ const char *grok64_load_dollar_diag_capture(int unit)
     for (i = 0; i < 64 && pos < out_len - 4; i++) {
         pos += snprintf(out + pos, out_len - pos, "%02x", t18s1[i]);
     }
-    pos += snprintf(out + pos, out_len - pos, "\"}");
+    pos = grok64_appendf(out, out_len, pos, "\",\"errorInfo\":");
+    pos = grok64_error_info_json(img, out, out_len, pos);
+    pos = grok64_appendf(out, out_len, pos, ",\"dos1541\":");
+    pos = grok64_dos1541_json(unit, out, out_len, pos);
+    pos = grok64_appendf(out, out_len, pos, "}");
     return last_load_dollar_diag_json;
 }
 

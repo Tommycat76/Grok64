@@ -12,7 +12,7 @@ import {
 import type { Grok64WasmModule } from "./grok64-wasm-bind";
 
 /** Bumped when WASM bind strategy changes; About / QA can detect stale app JS. */
-export const GROK64_WASM_BIND_REV = "diskapi-v22-core-faaf40949509";
+export const GROK64_WASM_BIND_REV = "diskapi-v25-core-cfb3626633a0";
 
 export type Grok64DiskApi = {
   diskAttach: (unit: number, drive: number, path: string) => number;
@@ -62,6 +62,7 @@ export type Grok64WasmApi = {
   kbdbufFlush: () => void;
   cartridgeTriggerFreeze: () => void;
   retroKeyboard: (code: number, down: number, character: number, mod: number) => void;
+  mainCpuClock?: () => number | null;
   retroGetMemoryData: (id: number) => number;
   retroGetMemorySize: (id: number) => number;
 };

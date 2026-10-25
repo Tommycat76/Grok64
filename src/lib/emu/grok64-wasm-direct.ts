@@ -43,6 +43,7 @@ const EXPECTED_GROK64_EXPORTS = [
   "grok64_kbdbuf_flush",
   "grok64_cartridge_trigger_freeze",
   "grok64_retro_keyboard",
+  "grok64_main_cpu_clock",
   "grok64_disk_attach",
   "grok64_disk_attach_deferred",
   "grok64_disk_detach",
@@ -599,6 +600,12 @@ export function bindGrok64WasmApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
     },
     retroKeyboard: (code, down, character, modbits) => {
       resolveWasmExport(mod, "grok64_retro_keyboard")?.(code, down, character, modbits);
+    },
+    mainCpuClock: () => {
+      const fn = resolveWasmExport(mod, "grok64_main_cpu_clock");
+      if (!fn) return null;
+      const clk = Number(fn());
+      return Number.isFinite(clk) ? clk : null;
     },
     retroGetMemoryData: (id) => {
       const fn = resolveWasmExport(mod, "retro_get_memory_data");
