@@ -418,6 +418,31 @@ function looksLikeSelectInput(img) {
   return barFrac > 0.35 && emptyN > 0 && emptyLight / emptyN > 0.55 && okN > 0 && okDark / okN > 0.05;
 }
 
+/** Dark sprite in the empty dialog mid (VICE gray pointer). Null if it's on the list/OK. */
+function findDialogPointer(img) {
+  const c = contentRect(img);
+  if (!c) return null;
+  const { data, width, height } = img;
+  let sx = 0;
+  let sy = 0;
+  let n = 0;
+  for (let gy = 68; gy <= 104; gy++) {
+    for (let gx = 88; gx <= 210; gx++) {
+      const x = Math.round(c.x + (gx / 320) * c.w);
+      const y = Math.round(c.y + (gy / 200) * c.h);
+      if (x < 0 || y < 0 || x >= width || y >= height) continue;
+      const i = (y * width + x) * 4;
+      if (data[i] + data[i + 1] + data[i + 2] < 300) {
+        sx += gx;
+        sy += gy;
+        n += 1;
+      }
+    }
+  }
+  if (n < 3 || n > 120) return null;
+  return { gx: sx / n, gy: sy / n, n };
+}
+
 async function stillGeosDesk(hand) {
   const desk = await canvasLooksLikeGeosDesktop(hand.page);
   const text = await hand.screenText();
@@ -722,11 +747,13 @@ async function click1351Left(hand) {
 }
 
 async function pickComm1351InDialog(hand, dlg) {
-  // Joystick locate pulses also move this dialog's list highlight. After C= + I
-  // the pointer sits in the empty mid; hop onto COMM, click, then walk to OK
-  // with host 1351 deltas (the row click can load the mouse and freeze the stick).
+  // Joystick locate pulses also move this dialog's list highlight. Hop onto COMM
+  // from wherever the pointer is (empty mid after C= + I, menu bar after geos
+  // menu), click, then walk to OK with host 1351 deltas.
   const ok = geosMap(dlg.img, 204, 114);
-  await hopJoy(hand, -1, -1, 3, 100);
+  const here = findDialogPointer(dlg.img);
+  if (here && here.gx > 90 && here.gy > 50) await hopJoy(hand, -1, -1, 3, 100);
+  else await hopJoy(hand, 1, 1, 4, 100);
   await hand.shot("10-1351-toward-comm.png");
   await clickJoy(hand, { downMs: 120 });
   await sleep(350);
