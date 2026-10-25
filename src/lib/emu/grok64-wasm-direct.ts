@@ -80,6 +80,9 @@ const EXPECTED_GROK64_EXPORTS = [
   "grok64_drive_set_type",
   "grok64_reu_attach",
   "grok64_reu_size_kb",
+  "grok64_mouse_move",
+  "grok64_mouse_buttons",
+  "grok64_mouse_plug",
 ] as const;
 
 function wasmUtf8JsonExport(
@@ -633,6 +636,29 @@ export function bindGrok64WasmApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
       const fn = resolveWasmExport(mod, "retro_get_memory_size");
       return fn ? Number(fn(id)) : 0;
     },
+    ...(resolveWasmExport(mod, "grok64_mouse_move")
+      ? {
+          mouseMove: (dx: number, dy: number) => {
+            resolveWasmExport(mod, "grok64_mouse_move")?.(dx, dy);
+          },
+        }
+      : {}),
+    ...(resolveWasmExport(mod, "grok64_mouse_buttons")
+      ? {
+          mouseButtons: (left: number, right: number) => {
+            resolveWasmExport(mod, "grok64_mouse_buttons")?.(left, right);
+          },
+        }
+      : {}),
+    ...(resolveWasmExport(mod, "grok64_mouse_plug")
+      ? {
+          mousePlug: (port: number, on: number) => {
+            const fn = resolveWasmExport(mod, "grok64_mouse_plug");
+            if (!fn) return -99;
+            return Number(fn(port, on));
+          },
+        }
+      : {}),
   };
   return true;
 }

@@ -48,7 +48,7 @@ import { grok64RetroKeyboardAvailable } from "./grok64-keyboard";
 import { reportMountFailure, runMountStage } from "./disk-mount-stage";
 import { grok64DiskApi, grok64WasmApi } from "./grok64-api";
 import { GROK64_REU_IMAGE_PATH, snapReuKb } from "./reu-image";
-import { grok64DiskAttachCallableEmu } from "./grok64-wasm-direct";
+import { bindGrok64WasmApiDirect, grok64DiskAttachCallableEmu } from "./grok64-wasm-direct";
 import { grok64CoreBuildIdForUrl, grok64CoreManifestSummary, GROK64_CORE_BUILD_ID } from "./grok64-core-build";
 import { appendGrok64CoreUrlCacheParams } from "./grok64-core-url";
 import {
@@ -1310,6 +1310,45 @@ const hostMouseBtn = { left: false, right: false };
 let hostMouseHeld = { ax: 0, ay: 0 };
 let hostMouseFlushAt = 0;
 
+function grok64MouseApi(emu: EjsInstance | null) {
+  const mod = emu?.Module as Parameters<typeof bindGrok64WasmExports>[0] | undefined;
+  if (!mod) return null;
+  bindGrok64WasmExports(mod, emu);
+  if (!grok64WasmApi(mod)?.mouseMove) bindGrok64WasmApiDirect(mod, emu);
+  return grok64WasmApi(mod);
+}
+
+/** True when the core exposes grok64_mouse_move (real VICE 1351 POT path). */
+export function vice1351Direct(emu: EjsInstance | null): boolean {
+  return typeof grok64MouseApi(emu)?.mouseMove === "function";
+}
+
+/** Pixel deltas into VICE mouse_move — 1351 POT X/Y. */
+export function feedVice1351Move(emu: EjsInstance | null, dx: number, dy: number): boolean {
+  const fn = grok64MouseApi(emu)?.mouseMove;
+  if (!fn || !Number.isFinite(dx) || !Number.isFinite(dy)) return false;
+  const ix = Math.round(dx);
+  const iy = Math.round(dy);
+  if (ix === 0 && iy === 0) return true;
+  fn(ix, iy);
+  return true;
+}
+
+/** 1351 left = FIRE, right = UP — VICE mouse_1351_button_*. */
+export function feedVice1351Buttons(emu: EjsInstance | null, left: boolean, right: boolean): boolean {
+  const fn = grok64MouseApi(emu)?.mouseButtons;
+  if (!fn) return false;
+  fn(left ? 1 : 0, right ? 1 : 0);
+  return true;
+}
+
+/** Mouse resource + JoyPortNDevice = 1351 or joystick. */
+export function feedVice1351Plug(emu: EjsInstance | null, port: JoyPort, on: boolean): number {
+  const fn = grok64MouseApi(emu)?.mousePlug;
+  if (!fn) return -99;
+  return fn(port, on ? 1 : 0);
+}
+
 export function addHostMouseDelta(dx: number, dy: number) {
   addMouse1351Delta(hostMouse1351, dx, dy);
 }
@@ -1319,8 +1358,16 @@ export function setHostMouseButtons(left: boolean, right: boolean) {
   hostMouseBtn.right = right;
 }
 
-/** Hold this frame's analog until the next VICE poll (~one video frame). */
+/** Direct mouse_move when the core has it; else analog leftover for one VICE poll. */
 export function flushHostMouse1351(emu: EjsInstance | null, periodMs = 20) {
+  if (vice1351Direct(emu)) {
+    const dx = hostMouse1351.x;
+    const dy = hostMouse1351.y;
+    resetMouse1351Accum(hostMouse1351);
+    feedVice1351Move(emu, dx, dy);
+    feedVice1351Buttons(emu, hostMouseBtn.left, hostMouseBtn.right);
+    return;
+  }
   const now = typeof performance !== "undefined" ? performance.now() : Date.now();
   if (now - hostMouseFlushAt >= periodMs) {
     hostMouseFlushAt = now;
@@ -1335,6 +1382,7 @@ export function clearHostMouse1351(emu: EjsInstance | null) {
   hostMouseBtn.right = false;
   hostMouseHeld = { ax: 0, ay: 0 };
   hostMouseFlushAt = 0;
+  feedVice1351Buttons(emu, false, false);
   clearMouseAnalog(emu);
 }
 

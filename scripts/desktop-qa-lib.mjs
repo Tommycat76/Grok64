@@ -251,7 +251,7 @@ export const TOM_REUSED_PROFILE = {
 
 /** zustand persist entry of `useEmu` (src/lib/emu/store.ts `name` / `version`). */
 const SETTINGS_KEY = "grok64-settings";
-const SETTINGS_VERSION = 12;
+const SETTINGS_VERSION = 14;
 
 export async function seedTomReusedProfile(page, overrides = {}) {
   const merged = { ...TOM_REUSED_PROFILE, ...overrides };
@@ -278,6 +278,7 @@ export async function seedTomReusedProfile(page, overrides = {}) {
         iecDrive: p.iecDrive,
         iecUnit: p.iecUnit,
         joyPort: 2,
+        wasdIsJoy: false,
       };
       localStorage.setItem(key, JSON.stringify({ state, version: prev?.version ?? version }));
       return true;

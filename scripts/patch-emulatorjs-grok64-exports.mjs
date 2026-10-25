@@ -56,6 +56,9 @@ const GROK64_EXPORTS = [
   "_grok64_drive_set_type",
   "_grok64_reu_attach",
   "_grok64_reu_size_kb",
+  "_grok64_mouse_move",
+  "_grok64_mouse_buttons",
+  "_grok64_mouse_plug",
 ];
 
 let text = readFileSync(makefile, "utf8");

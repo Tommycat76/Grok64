@@ -68,6 +68,9 @@ export type Grok64WasmApi = {
   mainCpuClock?: () => number | null;
   retroGetMemoryData: (id: number) => number;
   retroGetMemorySize: (id: number) => number;
+  mouseMove?: (dx: number, dy: number) => void;
+  mouseButtons?: (left: number, right: number) => void;
+  mousePlug?: (port: number, on: number) => number;
 };
 
 export type Grok64ModuleBag = Grok64WasmModule & {

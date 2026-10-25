@@ -23,6 +23,9 @@
 #include "vice-event.h"
 #include "resources.h"
 #include "diskimage/fsimage.h"
+#include "joyport.h"
+#include "mouse.h"
+#include "mouse_1351.h"
 #include <errno.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -1604,4 +1607,51 @@ int grok64_reu_size_kb(void)
         return -1;
     }
     return kb;
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void grok64_mouse_move(int dx, int dy)
+{
+    mouse_move((float)dx, (float)dy);
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+void grok64_mouse_buttons(int left, int right)
+{
+    mouse_1351_button_left(left ? 1 : 0);
+    mouse_1351_button_right(right ? 1 : 0);
+}
+
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int grok64_mouse_plug(int port, int on)
+{
+    const char *this_res;
+    const char *other_res;
+
+    if (port == 1) {
+        this_res = "JoyPort1Device";
+        other_res = "JoyPort2Device";
+    } else if (port == 2) {
+        this_res = "JoyPort2Device";
+        other_res = "JoyPort1Device";
+    } else {
+        return -2;
+    }
+
+    if (resources_set_int("Mouse", on ? 1 : 0) < 0) {
+        return -1;
+    }
+    if (resources_set_int(this_res, on ? JOYPORT_ID_MOUSE_1351 : JOYPORT_ID_JOYSTICK) < 0) {
+        return -3;
+    }
+    if (on && resources_set_int(other_res, JOYPORT_ID_JOYSTICK) < 0) {
+        return -4;
+    }
+    return 0;
 }

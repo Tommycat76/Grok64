@@ -461,6 +461,9 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         if (version < 14) {
           p.wasdIsJoy = false;
         }
+        if (version < 14) {
+          p.wasdIsJoy = false;
+        }
         if (version < 7) {
           if (!p.reuSize) p.reuSize = "none";
           if (!p.iecDrive || !["1541", "1581", "sd2iec", "cmdhd"].includes(p.iecDrive as string)) {

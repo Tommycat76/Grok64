@@ -95,6 +95,7 @@ import {
   setHostMouseButtons,
   flushHostMouse1351,
   clearHostMouse1351,
+  feedVice1351Plug,
   audioLocked,
   unlockAudio,
   suspendAudio,
@@ -1266,6 +1267,7 @@ export function Grok64App() {
         sessionUnitRef.current = 8;
         const geosMap = { ...stGeos.iecMap, 8: "1541" as const };
         clearHostMouse1351(emuRef.current);
+        feedVice1351Plug(emuRef.current, stGeos.joyPort, true);
         disarmAutostart(emuRef.current, "disk");
         const ok = await bootGeosFloppy(emuRef.current, new Uint8Array(buf), name, 8, geosMap);
         if (!ok) return false;
@@ -1556,6 +1558,8 @@ export function Grok64App() {
           reuSize: st.reuSize,
           showKeyboard: st.showKeyboard,
           mouseMode: st.mouseMode,
+          wasdIsJoy: st.wasdIsJoy,
+          stickGate: st.stickGate,
           cart: cartLiveRef.current,
         };
       },
@@ -4494,6 +4498,11 @@ export function Grok64App() {
     resetStickPrecision(stickPrecisionRef.current);
   }, [s.stickGate]);
   useEffect(() => {
+    if (s.wasdIsJoy) return;
+    wasdJoyRef.current = { up: false, down: false, left: false, right: false };
+    emitJoyRef.current();
+  }, [s.wasdIsJoy]);
+  useEffect(() => {
     stickPrecisionRef.current.periodMs = frameMsForStandard(resolved.standard);
   }, [resolved.standard]);
   const onVector = useCallback((x: number, y: number, centerHold?: boolean) => {
@@ -4726,6 +4735,7 @@ export function Grok64App() {
         vice_ram_expansion_unit: s.reuSize,
       });
       if (s.mouseMode) plugJoysticks(emu, s.joyPort);
+      feedVice1351Plug(emu, s.joyPort, s.mouseMode);
       return;
     }
     const extras = expansionOpts();
@@ -4734,6 +4744,7 @@ export function Grok64App() {
     void syncJiffy(emu, "none");
     if (s.mouseMode) plugJoysticks(emu, s.joyPort);
     else setJoyVector(emu, 0, 0, false, 1);
+    feedVice1351Plug(emu, s.joyPort, s.mouseMode);
   }, [s.reuSize, s.iecDrive, s.iecUnit, s.mouseMode, s.joyPort, s.machineId, s.scpuSimm, s.scpuTurbo, expansionOpts, syncJiffy]);
   useEffect(() => {
     const emu = emuRef.current;

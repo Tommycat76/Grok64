@@ -59,6 +59,9 @@ const REQUIRED = [
   "grok64_drive_set_type",
   "grok64_reu_attach",
   "grok64_reu_size_kb",
+  "grok64_mouse_move",
+  "grok64_mouse_buttons",
+  "grok64_mouse_plug",
 ];
 
 rmSync(tmp, { recursive: true, force: true });
