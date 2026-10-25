@@ -32,6 +32,7 @@ const outDir = join(cwd, "artifacts", "input-1351-gui64-hand");
 const deskTopMs = Number(process.env.GROK64_HAND_DESKTOP_MS || "240000");
 const modes = (process.env.GROK64_HAND_JIFFY || "off,on").split(",").map((s) => s.trim() === "on");
 mkdirSync(shotRoot, { recursive: true });
+mkdirSync(join(shotRoot, "boot"), { recursive: true });
 mkdirSync(outDir, { recursive: true });
 
 function sha1Of(path) {
@@ -164,40 +165,70 @@ async function importOnly(hand, file, prefix) {
 }
 
 async function playFromLibrary(hand, file, prefix) {
+  await hand.closeSheet().catch(() => {});
+  await hand.key("Escape").catch(() => {});
+  await sleep(300);
   await hand.openLibrary();
   const card = hand.page.locator(".g64-card").filter({ has: hand.page.getByText(file.name, { exact: true }) }).first();
   await card.waitFor({ state: "attached", timeout: 30_000 });
-  const play = hand.page.getByRole("button", { name: new RegExp(`^(Play|Run) ${file.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) });
-  await play.waitFor({ state: "attached", timeout: 20_000 });
-  await hand.reveal(play, `Play ${file.name}`);
-  await hand.shot(`${prefix}-row.png`);
-  await hand.click(play, `Play ${file.name}`);
+  const play = hand.page.getByRole("button", { name: `Play ${file.name}`, exact: true });
+  const run = hand.page.getByRole("button", { name: `Run ${file.name}`, exact: true });
+  const btn = (await play.count()) ? play.first() : run.first();
+  await btn.waitFor({ state: "attached", timeout: 20_000 });
+  try {
+    await hand.reveal(btn, `Play ${file.name}`);
+    await hand.shot(`${prefix}-row.png`);
+    await hand.click(btn, `Play ${file.name}`);
+  } catch {
+    await tapBox(hand, btn, `Play ${file.name}`);
+  }
   await waitFor(async () => !(await hand.sheetOpen()), 15_000);
 }
 
-async function chip(hand, text) {
-  return hand.page.locator(".g64-chip").filter({ hasText: new RegExp(`^${text}$`) }).first();
+async function tapBox(hand, locator, label) {
+  const box = await locator.boundingBox();
+  if (!box || box.width < 4 || box.height < 4) throw new Error(`${label}: no box`);
+  await hand.xmove(box.x + box.width / 2, box.y + box.height / 2);
+  await sleep(80);
+  await hand.sh("xdotool", ["click", "1"]);
 }
 
-async function ensureChip(hand, text, on, attr = "data-on") {
-  const el = await chip(hand, text);
-  await el.waitFor({ state: "visible", timeout: 15_000 });
-  const cur = (await el.getAttribute(attr)) === "true";
+async function ensureSetting(hand, label, on, read) {
+  const cur = await read();
   if (cur === on) return { clicked: false, on };
-  await hand.click(el, `${text} → ${on ? "on" : "off"}`);
+  await hand.closeSheet().catch(() => {});
+  await hand.openSettings();
+  const row = hand.page.locator(".g64-row").filter({ hasText: label }).first();
+  await row.waitFor({ state: "attached", timeout: 15_000 });
+  const sw = row.locator('button[role="switch"]').first();
+  await hand.reveal(sw, label);
+  await hand.click(sw, `${label} → ${on ? "on" : "off"}`);
   await sleep(250);
-  const after = (await el.getAttribute(attr)) === "true";
-  if (after !== on) throw new Error(`${text} chip stayed ${after ? "on" : "off"}`);
+  await hand.closeSheet();
+  const after = await read();
+  if (after !== on) throw new Error(`${label} stayed ${after ? "on" : "off"}`);
   return { clicked: true, on };
+}
+
+async function ensureMouse(hand, on) {
+  return ensureSetting(hand, "1351 mouse + touchpad", on, () =>
+    hand.page.evaluate(() => window.__g64?.settings?.()?.mouseMode === true),
+  );
+}
+
+async function ensureWasd(hand, on) {
+  return ensureSetting(hand, "Keyboard joystick (WASD)", on, () =>
+    hand.page.evaluate(() => window.__g64?.settings?.()?.wasdIsJoy === true),
+  );
 }
 
 async function ensurePort(hand, port) {
   for (let i = 0; i < 4; i++) {
     const cur = await hand.page.evaluate(() => window.__g64?.joyPort?.() ?? null);
     if (cur === port) return { port };
-    const btn = hand.page.getByRole("button", { name: /Joystick port \d, tap to swap/ }).first();
-    await hand.click(btn, `P${cur} → swap`);
-    await sleep(200);
+    const btn = hand.page.locator(".g64-port").filter({ hasText: /^P[12]$/ }).first();
+    await tapBox(hand, btn, `P${cur} → swap`);
+    await sleep(250);
   }
   const cur = await hand.page.evaluate(() => window.__g64?.joyPort?.() ?? null);
   if (cur !== port) throw new Error(`port stayed ${cur}, wanted ${port}`);
@@ -262,8 +293,8 @@ async function uploadRom(hand, label, path) {
 
 async function basicKbjoy(hand, prefix) {
   const out = {};
-  await ensureChip(hand, "MOUSE", false);
-  await ensureChip(hand, "WASD", false, "data-kbjoy");
+  await ensureMouse(hand, false);
+  await ensureWasd(hand, false);
   out.chipOff = await hand.page.evaluate(() => document.querySelector("[data-kbjoy]")?.getAttribute("data-kbjoy"));
   await hand.clickCrtAndType("NEW");
   await sleep(500);
@@ -273,7 +304,7 @@ async function basicKbjoy(hand, prefix) {
   const typed = await hand.screenText();
   out.offTypesLetters = /AD/.test(typed) && typed.length >= before.length;
   await hand.shot(`${prefix}-kbjoy-off-ad.png`);
-  await ensureChip(hand, "WASD", true, "data-kbjoy");
+  await ensureWasd(hand, true);
   out.chipOn = await hand.page.evaluate(() => {
     const root = document.querySelector("[data-kbjoy]");
     return {
@@ -292,7 +323,7 @@ async function basicKbjoy(hand, prefix) {
   out.midTail = mid.split("\n").filter((l) => l.trim()).slice(-3);
   out.afterOnTail = afterOn.split("\n").filter((l) => l.trim()).slice(-3);
   await hand.shot(`${prefix}-kbjoy-on-ws.png`);
-  await ensureChip(hand, "WASD", false, "data-kbjoy");
+  await ensureWasd(hand, false);
   out.pass = Boolean(out.offTypesLetters && out.onSwallowsLetters);
   return out;
 }
@@ -308,9 +339,9 @@ async function pointerProbe(hand, name, act, { settle = 450 } = {}) {
 
 async function testStickAndWasd(hand, prefix) {
   const out = {};
-  await ensureChip(hand, "MOUSE", false);
+  await ensureMouse(hand, false);
   await ensurePort(hand, 1);
-  await ensureChip(hand, "WASD", false, "data-kbjoy");
+  await ensureWasd(hand, false);
   const right = await pointerProbe(hand, "stick-right", () => holdStick(hand, "right", 900), { settle: 200 });
   await savePng(hand.shotDir(), `${prefix}-stick-right-before.png`, right.b64Before);
   await savePng(hand.shotDir(), `${prefix}-stick-right-after.png`, right.b64After);
@@ -321,12 +352,12 @@ async function testStickAndWasd(hand, prefix) {
   const coast = movedEnough(afterHold, afterRelease, { minChanged: 80, minInk: 6 });
   out.stick = { moved: right.pass, changed: right.changed, inkDist: right.inkDist, dx: right.dx, dy: right.dy };
   out.stickSteady = { coastChanged: coast.changed, coastInk: coast.inkDist, pass: !coast.pass || coast.inkDist < 6 };
-  await ensureChip(hand, "WASD", true, "data-kbjoy");
+  await ensureWasd(hand, true);
   const wasd = await pointerProbe(hand, "wasd-d", () => holdWasd(hand, "d", 900), { settle: 200 });
   await savePng(hand.shotDir(), `${prefix}-wasd-d-after.png`, wasd.b64After);
   await hand.shot(`${prefix}-wasd-d.png`);
   out.wasd = { moved: wasd.pass, changed: wasd.changed, inkDist: wasd.inkDist, dx: wasd.dx, dy: wasd.dy };
-  await ensureChip(hand, "WASD", false, "data-kbjoy");
+  await ensureWasd(hand, false);
   out.pass = Boolean(out.stick.moved && out.stickSteady.pass && out.wasd.moved);
   return out;
 }
@@ -334,7 +365,7 @@ async function testStickAndWasd(hand, prefix) {
 async function test1351(hand, prefix) {
   const out = {};
   await ensurePort(hand, 1);
-  await ensureChip(hand, "MOUSE", true);
+  await ensureMouse(hand, true);
   out.opts = await hand.page.evaluate(() => window.__g64?.runtimeViceOpts?.() ?? null);
   out.settings = await hand.page.evaluate(() => window.__g64?.settings?.() ?? null);
   const pad = hand.page.locator(".g64-touchpad").first();
@@ -431,8 +462,15 @@ async function runGui64(hand, cart, tag) {
   hand.setShotDir(shotDir);
   const trace = { cart: cart.name, tag };
   await hand.ensurePowered();
+  await hand.closeSheet().catch(() => {});
+  await hand.key("Escape").catch(() => {});
+  await sleep(400);
   trace.library = await importOnly(hand, cart, "00-import");
-  await playFromLibrary(hand, cart, "01-play");
+  const already = await hand.page.evaluate(() => {
+    const t = window.__g64?.title?.() ?? "";
+    return Boolean(window.__g64?.running?.() && !window.__g64?.booting?.() && /GUI64|\.crt/i.test(t));
+  });
+  if (!already) await playFromLibrary(hand, cart, "01-play");
   const running = await waitFor(
     async () => (await hand.page.evaluate(() => window.__g64?.running?.() && !window.__g64?.booting?.())) || null,
     180_000,
