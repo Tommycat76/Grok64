@@ -615,6 +615,35 @@ function inMinusBox(g) {
   return Boolean(g && g.x >= 238 && g.x <= 260 && g.y >= 16 && g.y <= 28);
 }
 
+async function landOnGeosWord(hand) {
+  const trace = { hops: [] };
+  const horiz = [
+    [-1, 0],
+    [1, 0],
+  ];
+  for (let i = 0; i < 14; i++) {
+    const snap = await snapshot(hand.page);
+    const loc = await locatePointer(hand, { dirs: horiz, pulseMs: 40 });
+    const g = toGeos(loc, snap.img);
+    if (g) trace.hops.push({ i, x: +g.x.toFixed(1), y: +g.y.toFixed(1) });
+    if (g && g.x <= 40 && g.y <= 16) {
+      trace.landed = g;
+      return trace;
+    }
+    if (!g) {
+      await holdJoy(hand, -1, 0, 70);
+      continue;
+    }
+    if (g.y > 16) await holdJoy(hand, 0, -1, 70);
+    else if (g.x > 40) await holdJoy(hand, -1, 0, 70);
+    else await holdJoy(hand, 1, 0, 50);
+  }
+  const snap = await snapshot(hand.page);
+  const loc = await locatePointer(hand, { dirs: horiz, pulseMs: 40 });
+  trace.landed = toGeos(loc, snap.img);
+  return trace;
+}
+
 async function landOnPageNumber(hand) {
   const trace = { hops: [] };
   const dirs = [
@@ -880,16 +909,28 @@ async function activateGeos1351(hand) {
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
 
-  // WASD parks on "select". Four snaps left is geos.
-  for (let i = 0; i < 4; i++) await holdJoy(hand, -1, 0, 130);
-  out.steps.push("to-geos");
+  // WASD parks on "select". geos is the leftmost word (GEOS x < 42). Long
+  // left pulses skip to "view" and "by name" empties the icon notepad.
+  out.landGeos = await landOnGeosWord(hand);
+  out.steps.push(out.landGeos?.landed && out.landGeos.landed.x <= 42 ? "on-geos" : "geos-miss");
   await clickJoy(hand);
   await sleep(450);
   await hand.shot("10-1351-geos-menu.png");
-  // geos info → select printer → select input (avoid a fourth down: that is RESET).
-  await holdJoy(hand, 0, 1, 110);
-  await holdJoy(hand, 0, 1, 110);
-  await holdJoy(hand, 0, 1, 110);
+  const menu = await snapshot(hand.page);
+  const menuPtr = toGeos(await locatePointer(hand, { dirs: [[1, 0], [-1, 0]], pulseMs: 40 }), menu.img);
+  if (menuPtr && menuPtr.x > 48) {
+    out.steps.push("wrong-menu");
+    await clickJoy(hand);
+    await sleep(250);
+    out.landGeos = await landOnGeosWord(hand);
+    await clickJoy(hand);
+    await sleep(450);
+    await hand.shot("10-1351-geos-menu.png");
+  }
+  // geos info → select printer → select input (a fourth down is RESET).
+  await holdJoy(hand, 0, 1, 100);
+  await holdJoy(hand, 0, 1, 100);
+  await holdJoy(hand, 0, 1, 100);
   await clickJoy(hand);
   await sleep(900);
   out.steps.push("select-input-menu");
