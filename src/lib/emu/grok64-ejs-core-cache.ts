@@ -5,7 +5,7 @@
 import { GROK64_CORE_BUILD_ID, GROK64_CORE_GLUE_SHA12 } from "./grok64-core-build.generated";
 import { grok64CoreBuildIdForUrl } from "./grok64-core-build";
 import { appendGrok64CoreUrlCacheParams, expectedGrok64GlueSha12FromUrl } from "./grok64-core-url";
-import { grok64CoreBuildMatchesExpected, loadedCoreGlueInfo } from "./grok64-core-loaded";
+import { grok64CoreBuildMatchesExpected, loadedCoreGlueInfo, runningCoreMismatch } from "./grok64-core-loaded";
 import { grok64DiskAttachCallableEmu } from "./grok64-wasm-direct";
 
 export const GROK64_IEC_CORE_BLOB = "vice_x64sc-grok64-iec-wasm.data";
@@ -32,6 +32,9 @@ export function isLegacyViceX64scCoreStorageKey(key: string): boolean {
 
 const MANIFEST_LS = "grok64.ejsCoreManifestBuildId";
 const AUTO_RELOAD_SS = "grok64.coreCacheAutoReload";
+const STICKY_SS = "grok64.coreStaleSticky";
+/** First reload drops IDB; second also evicts Cache Storage that re-served the stale blob. */
+export const CORE_REFRESH_BUDGET = 2;
 
 type CacheMeta = {
   key: string;
@@ -61,6 +64,79 @@ export function grok64CoreBlobUrl(): string | null {
 function viceCoreUrl(meta: CacheMeta): boolean {
   const u = String(meta.url ?? meta.filename ?? "");
   return /vice_.*wasm\.data/i.test(u) || u.includes(GROK64_IEC_CORE_BLOB);
+}
+
+/** Cache Storage / SW request URLs that can keep a stale VICE .data blob. */
+export function isGrok64CoreCacheRequestUrl(url: string): boolean {
+  const u = String(url);
+  if (u.includes(GROK64_IEC_CORE_BLOB)) return true;
+  if (/vice_[^/?#]*wasm\.data/i.test(u)) return true;
+  return /\/cores\/vice_/i.test(u) && /\.data(\?|$)/i.test(u);
+}
+
+export function grok64CoreRefreshAttempts(): number {
+  if (typeof sessionStorage === "undefined") return 0;
+  try {
+    const raw = sessionStorage.getItem(AUTO_RELOAD_SS);
+    if (!raw) return 0;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  } catch {
+    return 0;
+  }
+}
+
+export function grok64CoreStaleSticky(): boolean {
+  if (typeof sessionStorage === "undefined") return false;
+  try {
+    return sessionStorage.getItem(STICKY_SS) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function markCoreRefreshAttempt(): number {
+  const next = grok64CoreRefreshAttempts() + 1;
+  try {
+    sessionStorage.setItem(AUTO_RELOAD_SS, String(next));
+    if (next >= CORE_REFRESH_BUDGET) sessionStorage.setItem(STICKY_SS, "1");
+  } catch {
+    /* ignore */
+  }
+  return next;
+}
+
+function clearCoreRefreshMarks(): void {
+  try {
+    sessionStorage.removeItem(AUTO_RELOAD_SS);
+    sessionStorage.removeItem(STICKY_SS);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Evict VICE / Grok64 core blobs from Cache Storage. Never unregisters the PWA service worker. */
+export async function purgeGrok64CoreCacheStorage(reason = "core-cache-storage"): Promise<Grok64EjsCachePurgeResult> {
+  if (typeof caches === "undefined") return { removed: 0, reason: `${reason}:no-caches` };
+  let removed = 0;
+  try {
+    const names = await caches.keys();
+    for (const name of names) {
+      const cache = await caches.open(name);
+      const reqs = await cache.keys();
+      for (const req of reqs) {
+        if (!isGrok64CoreCacheRequestUrl(req.url)) continue;
+        try {
+          if (await cache.delete(req)) removed++;
+        } catch {
+          /* ignore one entry */
+        }
+      }
+    }
+  } catch {
+    return { removed, reason: `${reason}:error` };
+  }
+  return { removed, reason };
 }
 
 function urlBuildId(url: string): string | null {
@@ -294,6 +370,7 @@ export async function syncEmulatorJsCoreCacheWithManifest(): Promise<Grok64EjsCa
   removed += (await purgeAllEmulatorJsCoreRows(`${reason}:boot-all-core`)).removed;
   removed += (await purgeEmulatorJsViceCoreCache(reason)).removed;
   removed += (await purgeEmulatorJsLegacyCoreViceRows(reason)).removed;
+  removed += (await purgeGrok64CoreCacheStorage(`${reason}:cache-storage`)).removed;
   if (manifestBump) {
     try {
       localStorage.setItem(MANIFEST_LS, GROK64_CORE_BUILD_ID);
@@ -330,6 +407,7 @@ export async function forceFreshGrok64CoreDownloadCache(): Promise<void> {
   await purgeAllEmulatorJsCoreRows("force-fresh-core");
   await purgeEmulatorJsViceCoreCache("force-fresh-core");
   await purgeEmulatorJsLegacyCoreViceRows("force-fresh-core");
+  await purgeGrok64CoreCacheStorage("force-fresh-core");
 }
 
 function openLegacyIdbDb(dbName: string, storeName = EJS_LEGACY_CORE_STORE): Promise<IDBDatabase | null> {
@@ -565,19 +643,57 @@ export async function qaSeedStaleEmulatorJsCoreCacheRow(): Promise<{ key: string
 }
 
 /**
+ * QA: put stock vice *.data bytes in Cache Storage under the current Grok64 URL
+ * (dirty profile / SW cache shape). Does not touch the grok64 library DB.
+ */
+export async function qaSeedStaleGrok64CoreCacheStorage(): Promise<{
+  cache: string;
+  url: string;
+  bytes: number;
+} | null> {
+  if (typeof caches === "undefined" || typeof window === "undefined") return null;
+  const root = grok64ViceCoreRoot();
+  if (!root) return null;
+  const rel = `${root.startsWith("/") ? root : `/${root}`}/cores/vice_x64sc-wasm.data`;
+  const stockUrl = `${window.location.origin}${rel}`;
+  const res = await fetch(stockUrl, { cache: "no-store" });
+  if (!res.ok) return null;
+  const buf = await res.arrayBuffer();
+  const canonical = grok64CoreBlobUrl();
+  if (!canonical) return null;
+  const cacheName = "grok64-qa-stale-core";
+  const cache = await caches.open(cacheName);
+  await cache.put(
+    canonical,
+    new Response(buf, { headers: { "Content-Type": "application/octet-stream" } }),
+  );
+  return { cache: cacheName, url: canonical, bytes: buf.byteLength };
+}
+
+/**
  * `coreStarted: false` when only the glue has been seen (EmulatorJS `initGameCore`): the WASM is not
  * instantiated yet, so missing exports say nothing about staleness and must not force a reload.
+ *
+ * A running core with no `grok64_disk_attach` always refreshes (Tom dirty-profile case), even when
+ * glue was never recorded. Budget is two reloads so Cache Storage can be evicted after the first.
  */
 export async function maybeAutoRefreshStaleEmulatorCore(
   emu: { Module?: unknown } | null,
   { coreStarted = true }: { coreStarted?: boolean } = {},
 ): Promise<boolean> {
   if (!grok64ViceCoreRoot() || !GROK64_CORE_BUILD_ID) return false;
-  if (typeof sessionStorage !== "undefined" && sessionStorage.getItem(AUTO_RELOAD_SS)) return false;
+
+  if (coreStarted) {
+    for (let i = 0; i < 40; i++) {
+      if (grok64DiskAttachCallableEmu(emu)) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+  }
 
   for (let i = 0; i < 60; i++) {
     const g = loadedCoreGlueInfo();
     if (!g) {
+      if (coreStarted) break;
       await new Promise((r) => setTimeout(r, 50));
       continue;
     }
@@ -586,39 +702,33 @@ export async function maybeAutoRefreshStaleEmulatorCore(
     await new Promise((r) => setTimeout(r, 50));
   }
 
-  const glue = loadedCoreGlueInfo();
-  if (!glue || glue.glueBytes <= 0) return false;
-
   const exportsOk = grok64DiskAttachCallableEmu(emu);
+  const glue = loadedCoreGlueInfo();
+  if (!coreStarted && (!glue || glue.glueBytes <= 0)) return false;
+
+  const report = runningCoreMismatch({
+    coreStarted,
+    diskExportsPresent: exportsOk,
+    glue,
+  });
   const matches = grok64CoreBuildMatchesExpected();
-  if (exportsOk && matches) {
+  if (!report.mismatch && exportsOk && (matches || !glue?.glueSha12)) {
+    clearCoreRefreshMarks();
+    return false;
+  }
+  if (!report.mismatch) return false;
+
+  if (grok64CoreRefreshAttempts() >= CORE_REFRESH_BUDGET) {
     try {
-      sessionStorage.removeItem(AUTO_RELOAD_SS);
+      sessionStorage.setItem(STICKY_SS, "1");
     } catch {
       /* ignore */
     }
     return false;
   }
 
-  const glueShaMismatch =
-    Boolean(glue.glueSha12 && GROK64_CORE_GLUE_SHA12 && glue.glueSha12 !== GROK64_CORE_GLUE_SHA12);
-  const needsRefresh =
-    !glue.glueHasDiskExports ||
-    glueShaMismatch ||
-    (glue.glueSha12 != null && !matches) ||
-    (coreStarted &&
-      glue.glueHasDiskExports &&
-      glue.glueSha12 === GROK64_CORE_GLUE_SHA12 &&
-      GROK64_CORE_GLUE_SHA12 &&
-      !exportsOk);
-  if (!needsRefresh) return false;
-
   await forceFreshGrok64CoreDownloadCache();
-  try {
-    sessionStorage.setItem(AUTO_RELOAD_SS, "1");
-  } catch {
-    /* ignore */
-  }
+  markCoreRefreshAttempt();
   window.location.reload();
   return true;
 }

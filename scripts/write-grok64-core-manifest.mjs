@@ -17,6 +17,7 @@ const buildId = sha256.slice(0, 12);
 let glueSha12 = "";
 const seven = join(root, "node_modules/7zip-bin/linux/x64/7za");
 const glueTmp = join(root, ".build/grok64-glue-sha");
+const prevGen = join(root, "src/lib/emu/grok64-core-build.generated.ts");
 if (existsSync(seven)) {
   rmSync(glueTmp, { recursive: true, force: true });
   mkdirSync(glueTmp, { recursive: true });
@@ -29,6 +30,11 @@ if (existsSync(seven)) {
       glueSha12 = "";
     }
   }
+}
+if (!glueSha12 && existsSync(prevGen)) {
+  const prev = readFileSync(prevGen, "utf8");
+  const m = prev.match(/GROK64_CORE_GLUE_SHA12 = "([a-f0-9]+)"/);
+  if (m) glueSha12 = m[1];
 }
 
 const manifest = {

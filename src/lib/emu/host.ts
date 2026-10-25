@@ -56,8 +56,11 @@ import {
   grok64CoreBuildMatchesExpected,
   loadedCoreGlueInfo,
   recordGrok64CoreGlue,
+  runningCoreMismatch,
 } from "./grok64-core-loaded";
 import {
+  grok64CoreRefreshAttempts,
+  grok64CoreStaleSticky,
   maybeAutoRefreshStaleEmulatorCore,
   patchEmulatorJsDownloaderCoreCacheBypass,
   patchFetchNoStoreForGrok64Core,
@@ -124,9 +127,13 @@ import { stopIosPresent, stripIosPresent } from "./ios-present";
 import {
   addMouse1351Delta,
   createMouse1351Accum,
+  createMouse1351ButtonLatch,
   crtDisplayBox,
   dpadForAxes,
   hostDragTo1351,
+  noteMouse1351ButtonPress,
+  resetMouse1351ButtonLatch,
+  takeMouse1351Buttons,
   resetMouse1351Accum,
   takeMouse1351Counts,
   takeMouse1351Frame,
@@ -224,6 +231,11 @@ export type Grok64CoreStatus = {
   loadedGlueHasDiskExports: boolean;
   coreUrlBuildId: string | null;
   iecBackend: string;
+  mismatch: boolean;
+  mismatchReason: string | null;
+  coreRefreshAttempt: number;
+  coreStaleSticky: boolean;
+  mouseButtons: boolean;
 };
 
 export function grok64CoreStatus(emu: EjsInstance | null): Grok64CoreStatus {
@@ -233,6 +245,11 @@ export function grok64CoreStatus(emu: EjsInstance | null): Grok64CoreStatus {
   const wasmApi = grok64WasmApi(mod);
   const manifest = grok64CoreManifestSummary();
   const diskExportsPresent = grok64DiskAttachCallableEmu(emu) || grok64DiskExportsReady(emu);
+  const mismatch = runningCoreMismatch({
+    coreStarted: true,
+    diskExportsPresent,
+    glue: loadedCoreGlueInfo(),
+  });
   return {
     kind: "vice_x64sc-grok64-iec",
     blobUrl: grok64CoreBlobUrl(),
@@ -251,6 +268,11 @@ export function grok64CoreStatus(emu: EjsInstance | null): Grok64CoreStatus {
     loadedGlueHasDiskExports: loadedCoreGlueInfo()?.glueHasDiskExports ?? false,
     coreUrlBuildId: manifest.urlBuildId,
     iecBackend: grok64ViceCoreRoot() ? "grok64-datapath" : "cdn-stock",
+    mismatch: mismatch.mismatch,
+    mismatchReason: mismatch.reason,
+    coreRefreshAttempt: grok64CoreRefreshAttempts(),
+    coreStaleSticky: grok64CoreStaleSticky(),
+    mouseButtons: typeof grok64MouseApi(emu)?.mouseButtons === "function",
   };
 }
 
@@ -1331,6 +1353,7 @@ export function clearMouseAnalog(emu: EjsInstance | null) {
 
 const hostMouse1351 = createMouse1351Accum();
 const hostMouseBtn = { left: false, right: false };
+const hostMouseBtnLatch = createMouse1351ButtonLatch();
 let hostMouseHeld = { ax: 0, ay: 0 };
 let hostMouseFlushAt = 0;
 
@@ -1390,16 +1413,20 @@ export function addHostDrag1351(dx: number, dy: number, display?: { w: number; h
 }
 
 export function setHostMouseButtons(left: boolean, right: boolean) {
+  if (left && !hostMouseBtn.left) noteMouse1351ButtonPress(hostMouseBtnLatch, true, false);
+  if (right && !hostMouseBtn.right) noteMouse1351ButtonPress(hostMouseBtnLatch, false, true);
   hostMouseBtn.left = left;
   hostMouseBtn.right = right;
 }
 
 /** Direct mouse_move when the core has it; else analog leftover for one VICE poll. */
 export function flushHostMouse1351(emu: EjsInstance | null, periodMs = 20) {
+  const buttons = takeMouse1351Buttons(hostMouseBtnLatch, hostMouseBtn);
   if (vice1351Direct(emu)) {
     const { dx, dy } = takeMouse1351Counts(hostMouse1351);
     feedVice1351Move(emu, dx, dy);
-    feedVice1351Buttons(emu, hostMouseBtn.left, hostMouseBtn.right);
+    const buttonsOk = feedVice1351Buttons(emu, buttons.left, buttons.right);
+    if (!buttonsOk) setMouseAnalog(emu, 0, 0, buttons.left, buttons.right);
     return;
   }
   const now = typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -1407,11 +1434,12 @@ export function flushHostMouse1351(emu: EjsInstance | null, periodMs = 20) {
     hostMouseFlushAt = now;
     hostMouseHeld = takeMouse1351Frame(hostMouse1351);
   }
-  setMouseAnalog(emu, hostMouseHeld.ax, hostMouseHeld.ay, hostMouseBtn.left, hostMouseBtn.right);
+  setMouseAnalog(emu, hostMouseHeld.ax, hostMouseHeld.ay, buttons.left, buttons.right);
 }
 
 export function clearHostMouse1351(emu: EjsInstance | null) {
   resetMouse1351Accum(hostMouse1351);
+  resetMouse1351ButtonLatch(hostMouseBtnLatch);
   hostMouseBtn.left = false;
   hostMouseBtn.right = false;
   hostMouseHeld = { ax: 0, ay: 0 };

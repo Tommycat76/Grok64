@@ -1,7 +1,7 @@
 /**
  * About / QA: log *.data fetches and enumerate SW, Cache Storage, IndexedDB.
  */
-import { GROK64_IEC_CORE_BLOB } from "./grok64-ejs-core-cache";
+import { GROK64_IEC_CORE_BLOB, isGrok64CoreCacheRequestUrl } from "./grok64-ejs-core-cache";
 
 export type Grok64DataFetchLogEntry = {
   kind: "fetch" | "xhr";
@@ -24,6 +24,7 @@ export type Grok64IdbDatabaseDiag = {
 
 export type Grok64CacheEnvironmentDiag = {
   cacheStorageKeys: string[];
+  cacheStorageCoreUrls: string[];
   serviceWorkers: { scope: string; scriptURL: string; state: string }[];
   dataFetches: Grok64DataFetchLogEntry[];
   indexedDatabases: Grok64IdbDatabaseDiag[];
@@ -163,9 +164,16 @@ async function diagOneIdbDatabase(name: string): Promise<Grok64IdbDatabaseDiag> 
 
 export async function grok64CacheEnvironmentDiag(): Promise<Grok64CacheEnvironmentDiag> {
   const cacheStorageKeys: string[] = [];
+  const cacheStorageCoreUrls: string[] = [];
   try {
     if (typeof caches !== "undefined") {
       cacheStorageKeys.push(...(await caches.keys()));
+      for (const name of cacheStorageKeys) {
+        const cache = await caches.open(name);
+        for (const req of await cache.keys()) {
+          if (isGrok64CoreCacheRequestUrl(req.url)) cacheStorageCoreUrls.push(req.url);
+        }
+      }
     }
   } catch {
     /* ignore */
@@ -202,6 +210,7 @@ export async function grok64CacheEnvironmentDiag(): Promise<Grok64CacheEnvironme
 
   return {
     cacheStorageKeys,
+    cacheStorageCoreUrls,
     serviceWorkers,
     dataFetches: grok64DataFetchLog(),
     indexedDatabases,

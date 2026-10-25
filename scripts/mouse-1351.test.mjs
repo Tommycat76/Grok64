@@ -18,6 +18,10 @@ const {
   readRealPointerFeed,
   resetRealPointerFeed,
   takeMouse1351Frame,
+  createMouse1351ButtonLatch,
+  noteMouse1351ButtonPress,
+  takeMouse1351Buttons,
+  MOUSE_1351_BUTTON_HOLD_FRAMES,
 } = await server.ssrLoadModule("/src/lib/emu/mouse-1351.ts");
 await server.close();
 
@@ -101,4 +105,19 @@ test("real pointer feed counts hover and drag separately and ignores helper-size
   assert.equal(feed.dragMoves, 1);
   assert.equal(feed.lastDx, -2);
   assert.equal(feed.lastDy, 4);
+});
+
+test("a click that is released immediately still holds the 1351 left button for a few flushes", () => {
+  const latch = createMouse1351ButtonLatch();
+  noteMouse1351ButtonPress(latch, true, false);
+  const first = takeMouse1351Buttons(latch, { left: false, right: false });
+  assert.equal(first.left, true);
+  assert.equal(first.right, false);
+  let seen = 1;
+  while (seen < 8) {
+    const next = takeMouse1351Buttons(latch, { left: false, right: false });
+    if (!next.left) break;
+    seen++;
+  }
+  assert.equal(seen, MOUSE_1351_BUTTON_HOLD_FRAMES);
 });

@@ -11,7 +11,9 @@ const {
 } = await server.ssrLoadModule("/src/lib/emu/grok64-wasm-direct.ts");
 const { prepareDriveForAttach, driveTypeForAttach, lastViceDiskAttach, recordViceLastAttach } =
   await server.ssrLoadModule("/src/lib/emu/vice-disk.ts");
-const { formatViceReattachFailure } = await server.ssrLoadModule("/src/lib/emu/disk-mount-ready.ts");
+const { formatViceReattachFailure, formatMissingDiskExportsMessage } = await server.ssrLoadModule(
+  "/src/lib/emu/disk-mount-ready.ts",
+);
 await server.close();
 
 test("a numeric wasm ident is still invocable when ccall exists", () => {
@@ -122,8 +124,8 @@ test("last attach lives on globalThis so the toast can show the VICE reason", ()
   const last = lastViceDiskAttach(8);
   assert.equal(last.path, "/data/saves/grok64_iec8.d64");
   const msg = formatViceReattachFailure(-99, last, last.viceDiag);
-  assert.match(msg, /rc=-99/);
-  assert.match(msg, /path=\/data\/saves\/grok64_iec8\.d64/);
-  assert.match(msg, /vice=fs_stat/);
-  assert.match(msg, /reason=js-exports-missing/);
+  assert.match(msg, /old VICE core without disk attach/);
+  assert.match(msg, /need /);
+  assert.doesNotMatch(msg, /VICE disk reattach failed \(rc=-99\)/);
+  assert.match(formatMissingDiskExportsMessage({ loadedBuildId: "stale-no-disk-exports", expectedBuildId: "36a7cd049a97" }), /stale-no-disk-exports/);
 });

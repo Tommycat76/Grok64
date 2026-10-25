@@ -24,12 +24,40 @@ import {
   viceDiskLastAttachDiag,
   waitDriveFirmwareReady,
 } from "./vice-disk";
+import { GROK64_CORE_BUILD_ID } from "./grok64-core-build.generated";
+import { grok64CoreBuildIdLoaded, loadedCoreGlueInfo, runningCoreMismatch } from "./grok64-core-loaded";
+import { grok64DiskAttachCallableEmu } from "./grok64-wasm-direct";
+import { maybeAutoRefreshStaleEmulatorCore } from "./grok64-ejs-core-cache";
+
+export function formatMissingDiskExportsMessage(report?: {
+  loadedBuildId?: string | null;
+  expectedBuildId?: string | null;
+} | null): string {
+  const loaded = report?.loadedBuildId || grok64CoreBuildIdLoaded() || "unknown";
+  const need = report?.expectedBuildId || GROK64_CORE_BUILD_ID || "current";
+  return `This browser is running an old VICE core without disk attach (loaded ${loaded}, need ${need}). Reload the page so it can fetch the current core.`;
+}
+
+function isMissingDiskExportsAttach(last: ReturnType<typeof lastViceDiskAttach>): boolean {
+  if (!last) return false;
+  return (
+    last.jsReason === "js-exports-missing" ||
+    last.stage === "exports-missing" ||
+    last.stage === "js-exports-missing"
+  );
+}
 
 export function formatViceReattachFailure(
   rc: number,
   last: ReturnType<typeof lastViceDiskAttach>,
   viceDiag: string | null,
 ): string {
+  if (isMissingDiskExportsAttach(last) || (rc === -99 && last?.cReached === false && last?.jsReason === "js-exports-missing")) {
+    return formatMissingDiskExportsMessage({
+      loadedBuildId: grok64CoreBuildIdLoaded(),
+      expectedBuildId: GROK64_CORE_BUILD_ID,
+    });
+  }
   const vice = last?.viceDiag ?? viceDiag;
   const bits = [
     last?.path ? `path=${last.path}` : null,
@@ -42,6 +70,22 @@ export function formatViceReattachFailure(
   ].filter(Boolean);
   const extra = bits.length ? ` ${bits.join(" ")}` : "";
   return `VICE disk reattach failed (rc=${rc})${extra}`;
+}
+
+/** Fetch the manifest core when the running one is stale or missing disk attach. */
+export async function ensureCurrentGrok64CoreForDisk(emu: EjsInstance | null): Promise<void> {
+  const refreshed = await maybeAutoRefreshStaleEmulatorCore(emu, { coreStarted: true });
+  if (refreshed) {
+    throw new Error("Updating the VICE core to the current build. Insert the disk again after the page reloads.");
+  }
+  const report = runningCoreMismatch({
+    coreStarted: true,
+    diskExportsPresent: grok64DiskAttachCallableEmu(emu),
+    glue: loadedCoreGlueInfo(),
+  });
+  if (report.mismatch && !report.diskExportsPresent) {
+    throw new Error(formatMissingDiskExportsMessage(report));
+  }
 }
 
 function reattachFailure(emu: EjsInstance, unit: IecUnit, rc: number): Error {
@@ -61,6 +105,7 @@ export async function presentFloppyMountReady(
   opts?: { afterDriveRefresh?: boolean },
 ): Promise<void> {
   if (!emu) return;
+  await ensureCurrentGrok64CoreForDisk(emu);
   disarmAutostart(emu, "disk");
   const slot = sessionDiskOnUnit(live.unit);
   const diskKind = slot ? kindOf(slot.name) : null;

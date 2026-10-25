@@ -185,6 +185,37 @@ export function resetRealPointerFeed(): void {
   realPointerFeed.lastAt = 0;
 }
 
+/** Hold a 1351 click long enough for one VICE poll (~3 NTSC frames). */
+export const MOUSE_1351_BUTTON_HOLD_FRAMES = 3;
+
+export type Mouse1351ButtonLatch = { left: number; right: number };
+
+export function createMouse1351ButtonLatch(): Mouse1351ButtonLatch {
+  return { left: 0, right: 0 };
+}
+
+export function resetMouse1351ButtonLatch(latch: Mouse1351ButtonLatch): void {
+  latch.left = 0;
+  latch.right = 0;
+}
+
+/** Rising-edge press: keep the button down for a few flushes even if pointerup is immediate. */
+export function noteMouse1351ButtonPress(latch: Mouse1351ButtonLatch, left: boolean, right: boolean): void {
+  if (left) latch.left = MOUSE_1351_BUTTON_HOLD_FRAMES;
+  if (right) latch.right = MOUSE_1351_BUTTON_HOLD_FRAMES;
+}
+
+export function takeMouse1351Buttons(
+  latch: Mouse1351ButtonLatch,
+  held: { left: boolean; right: boolean },
+): { left: boolean; right: boolean } {
+  const left = held.left || latch.left > 0;
+  const right = held.right || latch.right > 0;
+  if (latch.left > 0) latch.left -= 1;
+  if (latch.right > 0) latch.right -= 1;
+  return { left, right };
+}
+
 export function crtDisplayBox(root?: ParentNode | Document | null): { w: number; h: number } {
   const doc = root ?? (typeof document !== "undefined" ? document : null);
   const canvas = doc?.querySelector?.(".g64-screen canvas") as HTMLElement | null;

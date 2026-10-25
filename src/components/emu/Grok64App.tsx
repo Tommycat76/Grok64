@@ -136,7 +136,7 @@ import {
   grok64WorkDiskRefreshExportReady,
   type Grok64ModuleBag,
 } from "@/lib/emu/grok64-api";
-import { grok64Utf8PathMarshalProbe, grok64WasmExportDiagEmu } from "@/lib/emu/grok64-wasm-direct";
+import { grok64DiskAttachCallableEmu, grok64Utf8PathMarshalProbe, grok64WasmExportDiagEmu } from "@/lib/emu/grok64-wasm-direct";
 import {
   bindGrok64DiskExports,
   grok64DiskExportsReady,
@@ -329,8 +329,13 @@ import {
   qaSeedStaleEmulatorJsCoreCacheRow,
   qaSeedStaleEmulatorJsCoreCacheWithStockBlob,
   qaSeedEmulatorJsLegacyCoreStockBlob,
+  qaSeedStaleGrok64CoreCacheStorage,
   grok64LegacyCoreIdbDiag,
+  grok64CoreRefreshAttempts,
+  grok64CoreStaleSticky,
+  forceFreshGrok64CoreDownloadCache,
 } from "@/lib/emu/grok64-ejs-core-cache";
+import { runningCoreMismatch, loadedCoreGlueInfo } from "@/lib/emu/grok64-core-loaded";
 import { grok64CacheEnvironmentDiag, patchGrok64DataFetchInstrumentation } from "@/lib/emu/grok64-cache-diag";
 import { readBuildId } from "@/lib/emu/build-id";
 import {
@@ -910,7 +915,17 @@ export function Grok64App() {
       qaSeedStaleEmulatorJsCoreCache: () => qaSeedStaleEmulatorJsCoreCacheRow(),
       qaSeedStaleEmulatorJsCoreCacheBlob: () => qaSeedStaleEmulatorJsCoreCacheWithStockBlob(),
       qaSeedEmulatorJsLegacyCore: () => qaSeedEmulatorJsLegacyCoreStockBlob(),
+      qaSeedStaleGrok64CoreCacheStorage: () => qaSeedStaleGrok64CoreCacheStorage(),
+      qaForceFreshGrok64Core: () => forceFreshGrok64CoreDownloadCache(),
       qaEmulatorJsCoreCacheCount: () => qaCountEmulatorJsCoreCacheRows(),
+      runningCoreMismatch: () =>
+        runningCoreMismatch({
+          coreStarted: true,
+          diskExportsPresent: grok64DiskAttachCallableEmu(emuRef.current),
+          glue: loadedCoreGlueInfo(),
+        }),
+      coreRefreshAttempt: () => grok64CoreRefreshAttempts(),
+      coreStaleSticky: () => grok64CoreStaleSticky(),
       librarySnapshot: async () => {
         const items = await listLibrary();
         const snap = [];

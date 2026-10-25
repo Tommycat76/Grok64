@@ -88,3 +88,72 @@ export function grok64CoreBuildMatchesExpected(): boolean {
   }
   return grok64CoreBuildIdLoaded() === GROK64_CORE_BUILD_ID;
 }
+
+export type Grok64CoreMismatchInput = {
+  coreStarted?: boolean;
+  diskExportsPresent?: boolean;
+  glue?: Grok64LoadedCoreGlue | null;
+  expectedBuildId?: string | null;
+  expectedGlueSha12?: string | null;
+};
+
+export type Grok64CoreMismatch = {
+  mismatch: boolean;
+  reason: string | null;
+  loadedBuildId: string | null;
+  expectedBuildId: string;
+  diskExportsPresent: boolean;
+  glueHasDiskExports: boolean;
+  glueRecorded: boolean;
+  glueSha12: string | null;
+  expectedGlueSha12: string;
+};
+
+/**
+ * Compare the core that actually ran (glue fingerprint + WASM exports) with the
+ * manifest. A dirty profile can keep a cached blob that never exposes
+ * `grok64_disk_attach` — that is a mismatch even when glue was never recorded.
+ */
+export function runningCoreMismatch(input: Grok64CoreMismatchInput = {}): Grok64CoreMismatch {
+  const coreStarted = input.coreStarted !== false;
+  const glue = input.glue === undefined ? loadedCoreGlueInfo() : input.glue;
+  const expectedBuildId = input.expectedBuildId ?? GROK64_CORE_BUILD_ID ?? "";
+  const expectedGlueSha12 = input.expectedGlueSha12 ?? GROK64_CORE_GLUE_SHA12 ?? "";
+  const diskExportsPresent = Boolean(input.diskExportsPresent);
+  const glueRecorded = Boolean(glue && glue.glueBytes > 0);
+  const glueHasDiskExports = Boolean(glue?.glueHasDiskExports);
+  const glueSha12 = glue?.glueSha12 ?? null;
+
+  let loadedBuildId: string | null = null;
+  if (glueRecorded) {
+    if (!glueHasDiskExports) loadedBuildId = "stale-no-disk-exports";
+    else if (expectedGlueSha12 && glueSha12 === expectedGlueSha12) loadedBuildId = expectedBuildId || glueSha12;
+    else loadedBuildId = glueSha12 ?? (glueHasDiskExports ? expectedBuildId || null : null);
+  }
+
+  let reason: string | null = null;
+  if (glueRecorded && !glueHasDiskExports) {
+    reason = "glue-missing-disk-exports";
+  } else if (glueSha12 && expectedGlueSha12 && glueSha12 !== expectedGlueSha12) {
+    reason = "glue-sha-mismatch";
+  } else if (coreStarted && !diskExportsPresent) {
+    reason = "wasm-exports-missing";
+  }
+
+  if (diskExportsPresent && reason === "wasm-exports-missing") reason = null;
+  if (diskExportsPresent && reason == null && glueRecorded && glueHasDiskExports && glueSha12 && expectedGlueSha12 && glueSha12 !== expectedGlueSha12) {
+    reason = "glue-sha-mismatch";
+  }
+
+  return {
+    mismatch: reason != null,
+    reason,
+    loadedBuildId,
+    expectedBuildId,
+    diskExportsPresent,
+    glueHasDiskExports,
+    glueRecorded,
+    glueSha12,
+    expectedGlueSha12,
+  };
+}
