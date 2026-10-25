@@ -195,6 +195,42 @@ async function snapshot(page) {
   return { b64, img, src, ink: contrastCentroid(img) || inkCentroid(img) };
 }
 
+/** Playwright CRT shot — VICE dumps hide the GEOS sprite; the compositor shows it. */
+async function uiSnapshot(hand) {
+  const b64 = await screenPng(hand.page);
+  const img = await decodeShot(hand.page, b64);
+  return { b64, img, src: "screen", ink: contrastCentroid(img) || inkCentroid(img) };
+}
+
+/** Bright GEOS arrow on the color CRT. VICE-gray dumps do not have this blob. */
+function findWhitePointer(img) {
+  const c = contentRect(img);
+  if (!c || !img) return null;
+  const { data, width, height } = img;
+  const x0 = Math.max(0, Math.floor(c.x + c.w * 0.12));
+  const x1 = Math.min(width, Math.ceil(c.x + c.w * 0.88));
+  const y0 = Math.max(0, Math.floor(c.y + c.h * 0.14));
+  const y1 = Math.min(height, Math.ceil(c.y + c.h * 0.78));
+  for (const thr of [720, 660, 600]) {
+    let sx = 0;
+    let sy = 0;
+    let n = 0;
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const i = (y * width + x) * 4;
+        const s = data[i] + data[i + 1] + data[i + 2];
+        if (s >= thr && Math.abs(data[i] - data[i + 1]) < 18) {
+          sx += x;
+          sy += y;
+          n += 1;
+        }
+      }
+    }
+    if (n >= 5 && n <= 280) return { x: sx / n, y: sy / n, n, thr };
+  }
+  return null;
+}
+
 function movedEnough(before, after, { minChanged = 40, minInk = 2.5 } = {}) {
   const diff = frameDiff(before.img, after.img);
   const dx = before.ink && after.ink ? after.ink.x - before.ink.x : 0;
@@ -374,37 +410,54 @@ function looksLikeCenteredDialog(before, after) {
   return diff.changed >= 350;
 }
 
+function geosSample(img, gx, gy) {
+  const c = contentRect(img);
+  if (!c || !img) return 0;
+  const { data, width, height } = img;
+  const x = Math.round(c.x + (gx / 320) * c.w);
+  const y = Math.round(c.y + (gy / 200) * c.h);
+  if (x < 0 || y < 0 || x >= width || y >= height) return 0;
+  const i = (y * width + x) * 4;
+  return data[i] + data[i + 1] + data[i + 2];
+}
+
+function inputRowDark(img, y0, y1) {
+  let dark = 0;
+  let n = 0;
+  for (let gy = y0; gy <= y1; gy++) {
+    for (let gx = 92; gx <= 168; gx++) {
+      n += 1;
+      if (geosSample(img, gx, gy) < 300) dark += 1;
+    }
+  }
+  return n ? dark / n : 0;
+}
+
+/** Which Select Input line is the dark bar — VICE dumps show this even when the sprite is missing. */
+function whichInputHighlight(img) {
+  if (!img) return "none";
+  const joy = inputRowDark(img, 44, 53);
+  const comm = inputRowDark(img, 54, 65);
+  if (comm > 0.35 && comm > joy + 0.06) return "comm";
+  if (joy > 0.35 && joy > comm + 0.06) return "joystick";
+  if (comm > 0.4) return "comm";
+  if (joy > 0.4) return "joystick";
+  return "none";
+}
+
 /** Official Select Input Device: JOYSTICK highlight bar, empty mid, OK at bottom-right. */
 function looksLikeSelectInput(img) {
   const c = contentRect(img);
   if (!c) return false;
-  const { data, width, height } = img;
-  const sample = (gx, gy) => {
-    const x = Math.round(c.x + (gx / 320) * c.w);
-    const y = Math.round(c.y + (gy / 200) * c.h);
-    if (x < 0 || y < 0 || x >= width || y >= height) return 0;
-    const i = (y * width + x) * 4;
-    return data[i] + data[i + 1] + data[i + 2];
-  };
-  const rowDark = (y0, y1) => {
-    let dark = 0;
-    let n = 0;
-    for (let gy = y0; gy <= y1; gy++) {
-      for (let gx = 92; gx <= 168; gx++) {
-        n += 1;
-        if (sample(gx, gy) < 300) dark += 1;
-      }
-    }
-    return n ? dark / n : 0;
-  };
-  // JOYSTICK highlight is y≈44–54; COMM 1351(a) is y≈54–66 after ArrowDown.
-  const barFrac = Math.max(rowDark(44, 54), rowDark(54, 66));
+  const joy = inputRowDark(img, 44, 54);
+  const comm = inputRowDark(img, 54, 66);
+  const barFrac = Math.max(joy, comm);
   let emptyLight = 0;
   let emptyN = 0;
   for (let gy = 70; gy <= 100; gy += 2) {
     for (let gx = 96; gx <= 200; gx += 2) {
       emptyN += 1;
-      if (sample(gx, gy) > 380) emptyLight += 1;
+      if (geosSample(img, gx, gy) > 380) emptyLight += 1;
     }
   }
   let okDark = 0;
@@ -412,10 +465,10 @@ function looksLikeSelectInput(img) {
   for (let gy = 108; gy <= 120; gy++) {
     for (let gx = 188; gx <= 224; gx++) {
       okN += 1;
-      if (sample(gx, gy) < 300) okDark += 1;
+      if (geosSample(img, gx, gy) < 300) okDark += 1;
     }
   }
-  const midDark = rowDark(70, 100);
+  const midDark = inputRowDark(img, 70, 100);
   // About-box VICE dumps are a dark prose rectangle (barFrac≈1, midDark≈0.4).
   // Select Input is a light box with one highlight band and an empty mid.
   return (
@@ -716,33 +769,63 @@ async function hopJoy(hand, x, y, hops, ms = 90) {
 }
 
 async function locatePointer1351(hand) {
-  const before = await snapshot(hand.page);
-  await hand.page.evaluate(() => window.__g64?.addMouseDelta?.(10, 0));
+  const before = await uiSnapshot(hand);
+  const seen = findWhitePointer(before.img);
+  if (seen) return seen;
+  await hand.page.evaluate(() => window.__g64?.addMouseDelta?.(6, 0));
   await sleep(90);
-  const after = await snapshot(hand.page);
-  const diff = frameDiff(before.img, after.img, { skipTop: 4 });
-  if (diff.changed >= 6) return { x: diff.cx, y: diff.cy, changed: diff.changed };
-  return null;
+  const after = await uiSnapshot(hand);
+  return findWhitePointer(after.img);
 }
 
-async function walk1351To(hand, tx, ty, { timeout = 4500, close = 10 } = {}) {
+async function walkJoyToUi(hand, tx, ty, { timeout = 5500, close = 12 } = {}) {
   const t0 = Date.now();
   let last = null;
   while (Date.now() - t0 < timeout) {
-    const loc = await locatePointer1351(hand);
+    const ui = await uiSnapshot(hand);
+    const loc = findWhitePointer(ui.img);
     if (!loc) {
-      await hand.page.evaluate(() => window.__g64?.addMouseDelta?.(14, 8));
-      await sleep(80);
+      await holdJoy(hand, 0, -1, 70);
+      await sleep(70);
       continue;
     }
     last = loc;
     const dx = tx - loc.x;
     const dy = ty - loc.y;
     if (Math.hypot(dx, dy) <= close) return loc;
-    const stepX = Math.max(-22, Math.min(22, dx * 0.45));
-    const stepY = Math.max(-22, Math.min(22, dy * 0.45));
+    const sx = Math.abs(dx) > 5 ? Math.sign(dx) : 0;
+    const sy = Math.abs(dy) > 5 ? Math.sign(dy) : 0;
+    if (!sx && !sy) return loc;
+    const ms = Math.min(240, Math.max(55, Math.hypot(dx, dy) * 1.6));
+    await holdJoy(hand, sx, sy, ms);
+    await sleep(70);
+  }
+  return last;
+}
+
+async function walk1351To(hand, tx, ty, { timeout = 4500, close = 10 } = {}) {
+  const t0 = Date.now();
+  let last = null;
+  let lost = 0;
+  while (Date.now() - t0 < timeout) {
+    const loc = await locatePointer1351(hand);
+    if (!loc) {
+      lost += 1;
+      // Off-CRT: creep back onto the desktop, never dump more right/down.
+      await hand.page.evaluate(() => window.__g64?.addMouseDelta?.(-5, -3));
+      await sleep(90);
+      if (lost > 8) break;
+      continue;
+    }
+    lost = 0;
+    last = loc;
+    const dx = tx - loc.x;
+    const dy = ty - loc.y;
+    if (Math.hypot(dx, dy) <= close) return loc;
+    const stepX = Math.max(-6, Math.min(6, dx * 0.4));
+    const stepY = Math.max(-6, Math.min(6, dy * 0.4));
     await hand.page.evaluate(({ stepX, stepY }) => window.__g64?.addMouseDelta?.(stepX, stepY), { stepX, stepY });
-    await sleep(80);
+    await sleep(90);
   }
   return last;
 }
@@ -758,27 +841,79 @@ async function click1351Left(hand) {
 }
 
 async function pickComm1351InDialog(hand, dlg) {
-  // Joystick locate pulses also move this dialog's list highlight. Hop onto COMM
-  // from wherever the pointer is (empty mid after C= + I, menu bar after geos
-  // menu), click, then walk to OK with host 1351 deltas.
-  const ok = geosMap(dlg.img, 204, 114);
-  const here = findDialogPointer(dlg.img);
-  if (here && here.gx > 90 && here.gy > 50) await hopJoy(hand, -1, -1, 3, 100);
-  else await hopJoy(hand, 1, 1, 4, 100);
+  // VICE dumps hide the sprite. Track the white pointer on the CRT, walk onto
+  // COMM, click, then (once the 1351 driver may be live) creep to OK. Joystick
+  // hops after COMM is selected also move the list highlight — avoid them.
+  const out = { hops: [], which: "none", closed: false };
+  await ensureMouse(hand, false);
+  await ensurePort(hand, 1);
+  const ui0 = await uiSnapshot(hand);
+  const comm = geosMap(ui0.img, 118, 60);
+  const ok = geosMap(ui0.img, 204, 114);
+  out.ptr0 = findWhitePointer(ui0.img);
+  if (comm) out.landComm = await walkJoyToUi(hand, comm.x, comm.y, { timeout: 6000, close: 11 });
+  else await hopJoy(hand, 0, -1, 8, 80);
   await hand.shot("10-1351-toward-comm.png");
   await clickJoy(hand, { downMs: 120 });
   await sleep(350);
   await hand.shot("10-1351-comm-clicked.png");
-  await hopJoy(hand, 1, 1, 4, 110);
+
+  let vice = await snapshot(hand.page);
+  out.which = whichInputHighlight(vice.img);
+  if (!looksLikeSelectInput(vice.img)) {
+    out.closed = true;
+    return out;
+  }
+
+  for (let i = 0; i < 5 && out.which !== "comm"; i++) {
+    const ui = await uiSnapshot(hand);
+    const target = geosMap(ui.img, 118, 60);
+    if (target) await walkJoyToUi(hand, target.x, target.y, { timeout: 2500, close: 11 });
+    else await holdJoy(hand, 0, out.which === "joystick" ? 1 : -1, 140);
+    await clickJoy(hand, { downMs: 120 });
+    await sleep(280);
+    vice = await snapshot(hand.page);
+    out.which = whichInputHighlight(vice.img);
+    out.hops.push({ i, which: out.which });
+    await savePng(hand.shotDir(), `10-1351-comm-try-${i}.png`, vice.b64);
+    if (!looksLikeSelectInput(vice.img)) {
+      out.closed = true;
+      return out;
+    }
+  }
+
+  if (out.which !== "comm") return out;
+
+  await clickJoy(hand, { double: true, downMs: 100, gapMs: 80 });
+  await sleep(450);
+  vice = await snapshot(hand.page);
+  if (!looksLikeSelectInput(vice.img)) {
+    out.closed = true;
+    return out;
+  }
+
   await ensureMouse(hand, true);
   await ensurePort(hand, 1);
-  if (ok) await walk1351To(hand, ok.x, ok.y, { timeout: 5000, close: 10 });
+  const uiOk = await uiSnapshot(hand);
+  const okNow = geosMap(uiOk.img, 204, 114) || ok;
+  if (okNow) out.parked = await walk1351To(hand, okNow.x, okNow.y, { timeout: 4500, close: 8 });
   const parked = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-on-ok.png", parked.b64);
   await hand.shot("10-1351-on-ok-ui.png");
   await click1351Left(hand);
-  await clickJoy(hand, { downMs: 110 });
   await sleep(400);
+  vice = await snapshot(hand.page);
+  if (!looksLikeSelectInput(vice.img)) {
+    out.closed = true;
+    return out;
+  }
+
+  await tapC64Key(hand, "Enter", "Enter");
+  await sleep(350);
+  vice = await snapshot(hand.page);
+  out.closed = !looksLikeSelectInput(vice.img);
+  out.which = whichInputHighlight(vice.img);
+  return out;
 }
 
 async function locatePointer(hand, { dirs = null, pulseMs = 55 } = {}) {
@@ -1234,7 +1369,7 @@ async function activateGeos1351(hand) {
 
   await tapCbmI(hand);
   out.steps.push("cbm-i");
-  let dlg = await waitSelectInput(hand, before, 2500);
+  let dlg = await waitSelectInput(hand, before, 8000);
   if (looksLikeAboutBox(dlg.img)) {
     out.steps.push("cbm-i-about");
     await clickJoy(hand, { downMs: 110 });
@@ -1326,15 +1461,21 @@ async function activateGeos1351(hand) {
   if (out.dialog) {
     await savePng(hand.shotDir(), "10-1351-input-dialog.png", dlg.b64);
     await hand.shot("10-1351-input-dialog-ui.png");
-    await pickComm1351InDialog(hand, dlg);
+    const pick = await pickComm1351InDialog(hand, dlg);
+    out.pick = pick;
     out.steps.push("pick-1351");
-    // RETURN only — another ArrowDown moves focus off COMM onto the icon gadget.
-    for (let i = 0; i < 4; i++) {
-      const now = await snapshot(hand.page);
-      if (!isSelectInputDialog(before, now)) break;
-      await tapC64Key(hand, "Enter", "Enter");
+    if (pick?.closed) {
+      out.steps.push("ok");
+    } else {
+      // RETURN only while COMM is the highlighted driver.
+      for (let i = 0; i < 3; i++) {
+        const now = await snapshot(hand.page);
+        if (!isSelectInputDialog(before, now)) break;
+        if (whichInputHighlight(now.img) !== "comm") break;
+        await tapC64Key(hand, "Enter", "Enter");
+      }
+      out.steps.push("ok");
     }
-    out.steps.push("ok");
     for (let i = 0; i < 16; i++) {
       await sleep(400);
       const now = await snapshot(hand.page);
