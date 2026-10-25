@@ -2,6 +2,7 @@ import { Disc3, FolderOpen, Play } from "lucide-react";
 import { Drawer } from "vaul";
 import { KIND_LABEL, isDiskKind } from "@/lib/emu/formats";
 import { isWorkDisk, listLibrary, updateFileUnit } from "@/lib/emu/library";
+import { floppyInsertUnit } from "@/lib/emu/play-session";
 import { useEmu } from "@/lib/emu/store";
 import type { LibraryItem } from "@/lib/emu/types";
 import { IecUnitSeg } from "@/components/emu/IecUnitSeg";
@@ -17,7 +18,7 @@ interface Props {
 export function DiskMountSheet({ open, onOpenChange, onPlay, onInsert, onBrowse }: Props) {
   const library = useEmu((s) => s.library);
   const running = useEmu((s) => s.running);
-  const defaultUnit = useEmu((s) => s.iecUnit);
+  const iecMap = useEmu((s) => s.iecMap);
   const setLibrary = useEmu((s) => s.setLibrary);
   const disks = library.filter((i) => isDiskKind(i.kind) && !isWorkDisk(i.name));
 
@@ -51,7 +52,7 @@ export function DiskMountSheet({ open, onOpenChange, onPlay, onInsert, onBrowse 
                   <span>{(item.size / 1024).toFixed(0)} KB</span>
                   <IecUnitSeg
                     compact
-                    value={item.iecUnit ?? defaultUnit}
+                    value={item.iecUnit ?? floppyInsertUnit(iecMap, item.kind)}
                     onChange={(unit) => {
                       void updateFileUnit(item.id, unit).then(refreshLibrary);
                     }}

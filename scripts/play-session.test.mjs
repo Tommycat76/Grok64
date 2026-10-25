@@ -112,6 +112,13 @@ test("Insert of a D64 uses the 1541 in Tom's map, not the selected CMD HD", () =
   assert.deepEqual(userAttachFromMap(map), { iec: "cmdhd", unit: 9 });
 });
 
+test("Load Disk default unit stays on the 1541 when Settings iecUnit is the CMD HD and a 1581 is also saved", () => {
+  const map = { 8: "1541", 9: "cmdhd", 10: "1581", 11: "none" };
+  assert.equal(floppyInsertUnit(map, "d64"), 8);
+  assert.equal(floppyInsertUnit(map, "d81"), 10);
+  assert.match(floppyInsertRejection("d64", map, 9), /CMD HD/);
+});
+
 test("CMD HD on unit 9 keeps a 1541 on 8 — floppy Play does not gut CMD", () => {
   assert.equal(cmdKeepsFloppyUnit8({ iec: "cmdhd", unit: 9 }), true);
   assert.equal(floppyNeedsRecycle("cmdhd", "8_d64", { iec: "cmdhd", unit: 9 }), false);

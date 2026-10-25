@@ -82,22 +82,37 @@ export const CRT_FRAME_H = 272;
 /**
  * Host CSS-pixel drag → 1351 counts for VICE `mouse_move`.
  *
- * One CSS pixel is one 1351 count on both axes. Scaling down to the 384×272
- * glass starved small drags (they rounded to 0) while WASD still fed +4
- * counts/frame — GEOS then looked like it was reading a joystick. GEOS
- * applies its own 1351 sensitivity; do not pre-shrink here.
+ * VICE only has relative motion (no get/set pointer). A 1:1 CSS-pixel count
+ * overshoots the ~384×272 glass when the host glass is ~2× wider, so the
+ * C64 pointer races to the edges. Scale host deltas to CRT coordinates and
+ * keep the fractional remainder in the accumulator so small moves still land.
+ * The host cursor is hidden over the glass — the user aims with the 1351.
  */
 export function hostDragTo1351(
   dx: number,
   dy: number,
-  _displayW?: number,
-  _displayH?: number,
-  _frameW = CRT_FRAME_W,
-  _frameH = CRT_FRAME_H,
+  displayW?: number,
+  displayH?: number,
+  frameW = CRT_FRAME_W,
+  frameH = CRT_FRAME_H,
 ): { dx: number; dy: number } {
   const x = Number.isFinite(dx) ? dx : 0;
   const y = Number.isFinite(dy) ? dy : 0;
-  return { dx: x, dy: y };
+  const w = displayW && displayW > 1 ? displayW : frameW;
+  const h = displayH && displayH > 1 ? displayH : frameH;
+  return {
+    dx: x * (frameW / w),
+    dy: y * (frameH / h),
+  };
+}
+
+/** Integer 1351 counts this flush; leftover fractions stay in the accum. */
+export function takeMouse1351Counts(acc: Mouse1351Accum): { dx: number; dy: number } {
+  const dx = Math.trunc(acc.x) || 0;
+  const dy = Math.trunc(acc.y) || 0;
+  acc.x -= dx;
+  acc.y -= dy;
+  return { dx, dy };
 }
 
 export type HostPointerPos = { x: number; y: number };

@@ -7,8 +7,11 @@ const {
   bindGrok64DiskApiDirect,
   grok64DiskAttachInvocable,
   exportIdentPresent,
+  lastGrok64DiskAttachJsReason,
 } = await server.ssrLoadModule("/src/lib/emu/grok64-wasm-direct.ts");
-const { prepareDriveForAttach, driveTypeForAttach } = await server.ssrLoadModule("/src/lib/emu/vice-disk.ts");
+const { prepareDriveForAttach, driveTypeForAttach, lastViceDiskAttach, recordViceLastAttach } =
+  await server.ssrLoadModule("/src/lib/emu/vice-disk.ts");
+const { formatViceReattachFailure } = await server.ssrLoadModule("/src/lib/emu/disk-mount-ready.ts");
 await server.close();
 
 test("a numeric wasm ident is still invocable when ccall exists", () => {
@@ -73,4 +76,54 @@ test("driveSetType wrapper rc=-99 does not abort attach", () => {
     _grok64_disk_attach: () => 0,
   };
   assert.equal(prepareDriveForAttach({ Module: mod }, 8, "/data/saves/geos.d64"), 0);
+});
+
+test("a stale diskAttach wrapper is not treated as ready", () => {
+  const stub = { grok64DiskApi: { diskAttach: () => -99 } };
+  assert.equal(bindGrok64DiskApiDirect(stub), false);
+});
+
+test("Insert attach uses the raw export on a sibling bag when the bound Module is a ccall stub", () => {
+  const heap = new Uint8Array(4096);
+  const calls = [];
+  const live = {
+    _grok64_disk_attach: (unit, drive, ptr) => {
+      calls.push({ unit, drive, ptr });
+      return 0;
+    },
+    allocateUTF8: () => 16,
+    _free: () => {},
+    HEAPU8: heap,
+  };
+  const stub = {
+    grok64_disk_attach: 1,
+    ccall: () => -99,
+  };
+  assert.equal(bindGrok64DiskApiDirect(stub, { Module: stub, gameManager: { Module: live } }), true);
+  assert.equal(stub.grok64DiskApi.diskAttach(8, 0, "/data/saves/geos.d64"), 0);
+  assert.equal(calls.length, 1);
+  assert.equal(lastGrok64DiskAttachJsReason(), "c-ok");
+});
+
+test("last attach lives on globalThis so the toast can show the VICE reason", () => {
+  recordViceLastAttach(8, {
+    path: "/data/saves/grok64_iec8.d64",
+    rc: -99,
+    before: "/data/saves/vice_work.d64",
+    after: null,
+    at: Date.now(),
+    stage: "js-exports-missing",
+    jsReason: "js-exports-missing",
+    viceDiag: "fs_stat /data/saves/grok64_iec8.d64 errno=44",
+    wasmFsStat: -44,
+    driveType: 1541,
+    cReached: false,
+  });
+  const last = lastViceDiskAttach(8);
+  assert.equal(last.path, "/data/saves/grok64_iec8.d64");
+  const msg = formatViceReattachFailure(-99, last, last.viceDiag);
+  assert.match(msg, /rc=-99/);
+  assert.match(msg, /path=\/data\/saves\/grok64_iec8\.d64/);
+  assert.match(msg, /vice=fs_stat/);
+  assert.match(msg, /reason=js-exports-missing/);
 });

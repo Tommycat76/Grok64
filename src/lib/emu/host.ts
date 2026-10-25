@@ -75,9 +75,9 @@ import {
   viceDiskAttachCandidates,
   grok64IecAttachD64Path,
   probeViceAttachPaths,
+  viceReattachDisk,
   viceReattachDiskAsync,
   viceRetroSaveDirectory,
-  recordViceLastAttach,
   ensureViceLastAttachRecorded,
   refreshViceWorkDiskAttached,
   grok64DiskModule,
@@ -87,7 +87,6 @@ import {
   viceBusSerialRoutingOk,
   viceDriveBusProbe,
   grok64IecAttachD81Path,
-  prepareDriveForAttach,
   viceUnitIsMfmDrive,
   attachesOwnImageOnly,
 } from "./vice-disk";
@@ -129,6 +128,7 @@ import {
   dpadForAxes,
   hostDragTo1351,
   resetMouse1351Accum,
+  takeMouse1351Counts,
   takeMouse1351Frame,
 } from "./mouse-1351";
 
@@ -1397,9 +1397,7 @@ export function setHostMouseButtons(left: boolean, right: boolean) {
 /** Direct mouse_move when the core has it; else analog leftover for one VICE poll. */
 export function flushHostMouse1351(emu: EjsInstance | null, periodMs = 20) {
   if (vice1351Direct(emu)) {
-    const dx = hostMouse1351.x;
-    const dy = hostMouse1351.y;
-    resetMouse1351Accum(hostMouse1351);
+    const { dx, dy } = takeMouse1351Counts(hostMouse1351);
     feedVice1351Move(emu, dx, dy);
     feedVice1351Buttons(emu, hostMouseBtn.left, hostMouseBtn.right);
     return;
@@ -2825,41 +2823,11 @@ export async function viceReattachDiskOnEmuThread(
 ): Promise<number> {
   if (!emu || !path?.trim()) return -1;
   return runSerializedDiskAttach(async () => {
-    const bags = emuWasmModuleBags(emu);
-    for (const bag of bags) {
+    for (const bag of emuWasmModuleBags(emu)) {
       bindGrok64WasmExports(bag, emu);
       bindGrok64DiskExports(bag, emu);
     }
-    let api = grok64DiskApi(grok64DiskModule(emu));
-    if (!api?.diskAttach) {
-      for (const bag of bags) {
-        bindGrok64DiskExports(bag, emu);
-        const next = grok64DiskApi(bag);
-        if (next?.diskAttach) {
-          api = next;
-          break;
-        }
-      }
-    }
-    if (!api?.diskAttach) {
-      recordViceLastAttach(unit, { path, rc: -99, before: null, after: null, at: Date.now(), stage: "exports-missing" });
-      glog("vice-disk-reattach", { unit, path, rc: -99, stage: "exports-missing" });
-      return -99;
-    }
-    const typeRc = prepareDriveForAttach(emu, unit, path);
-    if (typeRc < 0) {
-      recordViceLastAttach(unit, { path, rc: typeRc, before: null, after: null, at: Date.now(), stage: "set-type" });
-      glog("vice-disk-reattach", { unit, path, rc: typeRc, diag: viceDiskLastAttachDiag(emu), stage: "set-type" });
-      return typeRc;
-    }
-    api.diskDetach?.(unit, drive);
-    let rc = api.diskAttach(unit, drive, path) ?? -1;
-    const attachRc = api.diskLastAttachRc?.();
-    if (rc < 0 && typeof attachRc === "number" && attachRc >= 0) rc = attachRc;
-    const after = rc === 0 ? viceAttachedImage(emu, unit, drive) : null;
-    recordViceLastAttach(unit, { path, rc, before: null, after, at: Date.now(), stage: "disk-attach" });
-    glog("vice-disk-reattach", { unit, path, rc, after, syncAttach: true, stage: "disk-attach" });
-    return rc;
+    return viceReattachDisk(emu, unit, path, drive);
   });
 }
 

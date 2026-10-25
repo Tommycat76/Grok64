@@ -284,7 +284,7 @@ export async function seedTomReusedProfile(page, overrides = {}) {
         iecDrive: p.iecDrive,
         iecUnit: p.iecUnit,
         joyPort: 2,
-        wasdIsJoy: false,
+        wasdIsJoy: p.wasdIsJoy === true,
       };
       localStorage.setItem(key, JSON.stringify({ state, version: prev?.version ?? version }));
       return true;

@@ -18,6 +18,7 @@ import {
   grok64DiskAttachCallableEmu,
   grok64DiskAttachInvocable,
   grok64DiskAttachInvocableEmu,
+  lastGrok64DiskAttachJsReason,
 } from "./grok64-wasm-direct";
 import { isGrok64DiskExportsBound, markGrok64DiskExportsBound } from "./grok64-wasm-bind";
 import { sessionDiskOnUnit } from "./session-media";
@@ -42,7 +43,8 @@ function diskMod(emu: ViceDiskEmu | null): Grok64ModuleBag | null {
   const bags = emuWasmModuleBags(emu);
   const e = emu as { Module?: Grok64ModuleBag & { UTF8ToString?: (ptr: number) => string } } | null;
   const mod =
-    bags.find((m) => grok64DiskAttachInvocable(m) || grok64DiskAttachCallable(m)) ??
+    bags.find((m) => grok64DiskAttachCallable(m)) ??
+    bags.find((m) => grok64DiskAttachInvocable(m)) ??
     bags[0] ??
     e?.Module ??
     null;
@@ -145,23 +147,35 @@ export type ViceDiskAttachRecord = {
   after: string | null;
   at: number;
   stage?: string;
+  viceDiag?: string | null;
+  jsReason?: string;
+  wasmFsStat?: number | null;
+  driveType?: number | null;
+  cReached?: boolean;
+  attachRc?: number | null;
 };
 
-const lastAttachByUnit = new Map<number, ViceDiskAttachRecord>();
+const ATTACH_STORE = "__g64LastViceDiskAttachByUnit";
+
+function attachStore(): Map<number, ViceDiskAttachRecord> {
+  const g = globalThis as typeof globalThis & { [ATTACH_STORE]?: Map<number, ViceDiskAttachRecord> };
+  if (!g[ATTACH_STORE]) g[ATTACH_STORE] = new Map();
+  return g[ATTACH_STORE];
+}
 
 export function lastViceDiskAttach(unit: IecUnit = 8): ViceDiskAttachRecord | null {
-  return lastAttachByUnit.get(unit) ?? null;
+  return attachStore().get(unit) ?? null;
 }
 
 export function recordViceLastAttach(unit: IecUnit, record: ViceDiskAttachRecord): void {
-  lastAttachByUnit.set(unit, record);
+  attachStore().set(unit, record);
 }
 
 /** QA / About: when VICE already has an image but attach skipped recording (work-disk refresh path). */
 export function ensureViceLastAttachRecorded(emu: ViceDiskEmu | null, unit: IecUnit = 8): void {
   const path = viceAttachedImage(emu, unit);
   if (!path?.trim()) return;
-  const last = lastAttachByUnit.get(unit);
+  const last = attachStore().get(unit);
   if (last?.rc === 0 && last.after) return;
   recordViceLastAttach(unit, {
     path,
@@ -182,13 +196,9 @@ export function bindGrok64DiskExports(mod: Grok64ModuleBag, emu?: ViceDiskEmu | 
 
 export function grok64DiskExportsReady(emu: ViceDiskEmu | null): boolean {
   for (const mod of emuWasmModuleBags(emu)) {
-    if (!grok64DiskAttachInvocable(mod)) bindGrok64DiskExports(mod, emu);
+    bindGrok64DiskExports(mod, emu);
   }
-  if (grok64DiskAttachInvocableEmu(emu) || grok64DiskAttachCallableEmu(emu)) return true;
-  for (const mod of emuWasmModuleBags(emu)) {
-    if (typeof grok64DiskApi(mod)?.diskAttach === "function") return true;
-  }
-  return false;
+  return grok64DiskAttachCallableEmu(emu) || grok64DiskAttachInvocableEmu(emu);
 }
 
 let diskAttachChain: Promise<void> = Promise.resolve();
@@ -491,12 +501,14 @@ export function refreshViceWorkDiskAttached(emu: ViceDiskEmu | null, unit: IecUn
       out === 0
         ? diskNameFromModule(mod, unit, 0)
         : null;
-    lastAttachByUnit.set(unit, {
+    recordViceLastAttach(unit, {
       path: `${viceRetroSaveDirectory(emu) ?? "/data/saves"}/vice_work.d64`,
       rc: out,
       before: null,
       after,
       at: Date.now(),
+      stage: "work-disk-refresh",
+      viceDiag: viceDiskLastAttachDiag(emu),
     });
     glog("vice-work-disk-refresh", { unit, rc: out, after });
     return out;
@@ -532,37 +544,103 @@ function viceReattachDiskSync(
   drive = 0,
 ): number {
   if (!path?.trim()) return -1;
+  const note = (record: ViceDiskAttachRecord) => {
+    recordViceLastAttach(unit, record);
+    glog("vice-disk-reattach", {
+      unit,
+      path: record.path,
+      rc: record.rc,
+      after: record.after,
+      stage: record.stage,
+      viceDiag: record.viceDiag,
+      jsReason: record.jsReason,
+      wasmFsStat: record.wasmFsStat,
+      driveType: record.driveType,
+      cReached: record.cReached,
+    });
+  };
   if (!grok64DiskExportsReady(emu)) {
-    lastAttachByUnit.set(unit, { path, rc: -99, before: null, after: null, at: Date.now(), stage: "exports-missing" });
+    note({
+      path,
+      rc: -99,
+      before: viceAttachedImage(emu, unit, drive),
+      after: null,
+      at: Date.now(),
+      stage: "exports-missing",
+      jsReason: "js-exports-missing",
+      viceDiag: viceDiskLastAttachDiag(emu),
+      wasmFsStat: viceWasmFsStatBytes(emu, path),
+      cReached: false,
+    });
     return -99;
   }
   const mod = diskMod(emu)!;
   bindGrok64DiskExports(mod, emu);
   const api = grok64DiskApi(mod);
-  if (!api?.diskAttach) return -99;
+  if (!api?.diskAttach) {
+    note({
+      path,
+      rc: -99,
+      before: viceAttachedImage(emu, unit, drive),
+      after: null,
+      at: Date.now(),
+      stage: "exports-missing",
+      jsReason: "js-exports-missing",
+      viceDiag: viceDiskLastAttachDiag(emu),
+      wasmFsStat: viceWasmFsStatBytes(emu, path),
+      cReached: false,
+    });
+    return -99;
+  }
   try {
+    const before = viceAttachedImage(emu, unit, drive);
+    const rcBefore = typeof api.diskLastAttachRc === "function" ? api.diskLastAttachRc() : null;
+    const diagBefore = viceDiskLastAttachDiag(emu);
+    const driveType = api.driveUnitType?.(unit) ?? null;
+    const wasmFsStat = viceWasmFsStatBytes(emu, path);
     const typeRc = prepareDriveForAttach(emu, unit, path);
     if (typeRc < 0) {
-      lastAttachByUnit.set(unit, { path, rc: typeRc, before: null, after: null, at: Date.now() });
+      note({
+        path,
+        rc: typeRc,
+        before,
+        after: null,
+        at: Date.now(),
+        stage: "set-type",
+        viceDiag: viceDiskLastAttachDiag(emu),
+        wasmFsStat,
+        driveType,
+        cReached: false,
+      });
       return typeRc;
     }
-    api.diskDetach?.(unit, drive);
+    // C grok64_disk_attach already detaches. A JS detach-then-stub-attach
+    // empties unit 8 and lets the work-disk manager remount WORK DISK.
     let rc = api.diskAttach(unit, drive, path) ?? -1;
     const attachRc = api.diskLastAttachRc?.();
-    if (typeof attachRc === "number") rc = attachRc;
-    const after = rc === 0 ? diskNameFromModule(mod, unit, drive) : null;
-    lastAttachByUnit.set(unit, { path, rc, before: null, after, at: Date.now() });
-    const jsSize = pathExistsOnFs(emu, path) ? pathByteLength(emu, path) : null;
-    const wasmStat = viceWasmFsStatBytes(emu, path);
-    glog("vice-disk-reattach", {
-      unit,
+    const viceDiag = viceDiskLastAttachDiag(emu);
+    const jsReason = lastGrok64DiskAttachJsReason();
+    const cReached =
+      (typeof attachRc === "number" && attachRc !== rcBefore) ||
+      (viceDiag != null && viceDiag !== diagBefore);
+    if (cReached && typeof attachRc === "number") rc = attachRc;
+    if (rc < 0 && cReached && before && before !== path && pathHasAttachableBytes(emu, before)) {
+      api.diskAttach(unit, drive, before);
+    }
+    const after = rc === 0 ? diskNameFromModule(mod, unit, drive) : viceAttachedImage(emu, unit, drive);
+    note({
       path,
       rc,
+      before,
       after,
-      attachRc: api.diskLastAttachRc?.(),
-      diag: viceDiskLastAttachDiag(emu),
-      jsFsBytes: jsSize,
-      wasmFsStat: wasmStat,
+      at: Date.now(),
+      stage: cReached ? "disk-attach" : jsReason || "js-never-reached-c",
+      viceDiag,
+      jsReason,
+      wasmFsStat,
+      driveType,
+      cReached,
+      attachRc: typeof attachRc === "number" ? attachRc : null,
     });
     return rc;
   } catch (e) {
@@ -574,6 +652,16 @@ function viceReattachDiskSync(
     if (e instanceof RangeError || (e instanceof Error && /call stack/i.test(e.message))) {
       throw e;
     }
+    note({
+      path,
+      rc: -1,
+      before: viceAttachedImage(emu, unit, drive),
+      after: null,
+      at: Date.now(),
+      stage: "js-exception",
+      jsReason: String(e),
+      viceDiag: viceDiskLastAttachDiag(emu),
+    });
     return -1;
   }
 }

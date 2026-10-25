@@ -118,6 +118,17 @@ function asFn(v: unknown): WasmFn | null {
   return typeof v === "function" ? (v as WasmFn) : null;
 }
 
+/** JS-side reason for the last grok64_disk_attach wrapper call (C never returns -99). */
+let lastJsAttachReason = "";
+
+export function lastGrok64DiskAttachJsReason(): string {
+  return lastJsAttachReason;
+}
+
+function noteJsAttachReason(reason: string): void {
+  lastJsAttachReason = reason;
+}
+
 /** All Emscripten Module bags that may host Grok64 exports (EJS sometimes uses __ejs.Module). */
 export function emuWasmModuleBags(emu: unknown): Grok64ModuleBag[] {
   const e = emu as {
@@ -141,8 +152,15 @@ export function emuWasmModuleBags(emu: unknown): Grok64ModuleBag[] {
   push(e?.gameManager?.Module);
   push(e?.EJS?.Module);
   push(w?.__ejs?.Module);
-  push(w?.Module);
-  push(w?.EJS?.Module);
+  // After CART OUT the previous EJS instance often remains on window.Module.
+  // A destroyed bag can still look "invocable" (ident + stub ccall → -99).
+  const liveHasExport = out.some(
+    (m) => grok64DiskAttachCallable(m) || resolveWasmExport(m, "grok64_mouse_move") != null,
+  );
+  if (!liveHasExport) {
+    push(w?.Module);
+    push(w?.EJS?.Module);
+  }
   return out;
 }
 
@@ -448,12 +466,18 @@ export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
   if (emu != null) diskBindEmu.set(mod, emu);
   const boundEmu = () => diskBindEmu.get(mod) ?? emu ?? { Module: mod };
 
-  if (!grok64DiskAttachInvocable(mod)) {
-    return typeof mod.grok64DiskApi?.diskAttach === "function";
+  if (
+    !grok64DiskAttachInvocable(mod) &&
+    !grok64DiskAttachCallableEmu(boundEmu()) &&
+    !grok64DiskAttachInvocableEmu(boundEmu())
+  ) {
+    return false;
   }
 
+  const exp = (name: string) => resolveWasmExportEmu(boundEmu(), name, mod);
+
   const callWithPath = (exportName: string, invoke: (fn: WasmFn, ptr: number) => number, path: string) => {
-    const fn = resolveWasmExport(mod, exportName);
+    const fn = exp(exportName);
     if (!fn) return -99;
     const rt = mergedWasmRuntime(boundEmu(), mod);
     const viaCcall = tryCcallStringArg(rt, exportName, path);
@@ -480,19 +504,30 @@ export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
     drive: number,
     path: string,
   ) => {
-    const fn = resolveWasmExport(mod, exportName);
-    // Direct WASM first. A 1-arg or stub ccall can return -99 without ever
-    // reaching file_system_attach_disk — that was the Insert toast while the
-    // work-disk path already had the image. C grok64_disk_attach never returns -99.
+    const fn = exp(exportName);
+    // Search every live bag. A CART-OUT leftover Module can still expose a
+    // ccall ident that returns -99 without reaching file_system_attach_disk.
+    // C grok64_disk_attach never returns -99.
     if (fn) {
       const direct = withUtf8Arg(boundEmu(), mod, path, (ptr) => Number(fn(unit, drive, ptr)));
-      if (direct !== GROK64_UTF8_MARSHAL_ERR && direct !== -99) return direct;
+      if (direct !== GROK64_UTF8_MARSHAL_ERR && direct !== -99) {
+        noteJsAttachReason(direct >= 0 ? "c-ok" : "c-rc");
+        return direct;
+      }
       const viaCcall = tryAttachCcall(exportName, unit, drive, path);
-      if (viaCcall != null) return viaCcall;
+      if (viaCcall != null) {
+        noteJsAttachReason(viaCcall >= 0 ? "ccall-ok" : "ccall-rc");
+        return viaCcall;
+      }
+      noteJsAttachReason(direct === GROK64_UTF8_MARSHAL_ERR ? "utf8-marshal" : "js-direct-99");
       return direct;
     }
     const viaCcall = tryAttachCcall(exportName, unit, drive, path);
-    if (viaCcall != null) return viaCcall;
+    if (viaCcall != null) {
+      noteJsAttachReason(viaCcall >= 0 ? "ccall-ok" : "ccall-rc");
+      return viaCcall;
+    }
+    noteJsAttachReason("js-exports-missing");
     return -99;
   };
 
@@ -504,41 +539,41 @@ export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
       resolveWasmExport(mod, "grok64_sd2iec_poll")?.();
     },
     diskDetach: (unit, drive) => {
-      resolveWasmExport(mod, "grok64_disk_detach")?.(unit, drive);
+      exp("grok64_disk_detach")?.(unit, drive);
     },
     diskGetName: (unit, drive) => {
-      const fn = resolveWasmExport(mod, "grok64_disk_get_name");
+      const fn = exp("grok64_disk_get_name");
       if (!fn) return 0;
       return Number(fn(unit, drive));
     },
     retroSaveDirectory: () => {
-      const fn = resolveWasmExport(mod, "grok64_retro_save_directory");
+      const fn = exp("grok64_retro_save_directory");
       if (!fn) return 0;
       return Number(fn());
     },
     diskLastAttachRc: () => {
-      const fn = resolveWasmExport(mod, "grok64_disk_last_attach_rc");
+      const fn = exp("grok64_disk_last_attach_rc");
       if (!fn) return -1;
       return Number(fn());
     },
     workDiskRefresh: (unit) => {
-      const fn = resolveWasmExport(mod, "grok64_work_disk_refresh");
+      const fn = exp("grok64_work_disk_refresh");
       if (!fn) return -99;
       return Number(fn(unit));
     },
     diskLastAttachDiag: () => {
-      const fn = resolveWasmExport(mod, "grok64_disk_last_attach_diag");
+      const fn = exp("grok64_disk_last_attach_diag");
       if (!fn) return 0;
       return Number(fn());
     },
     fsStatBytes: (path) => callWithPath("grok64_fs_stat_bytes", (fn, ptr) => Number(fn(ptr)), path),
     driveImageBytes: (unit, drive) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_image_bytes");
+      const fn = exp("grok64_drive_image_bytes");
       if (!fn) return null;
       return Number(fn(unit, drive));
     },
     driveBamDiskName: (unit, drive) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_bam_disk_name");
+      const fn = exp("grok64_drive_bam_disk_name");
       if (!fn) return null;
       const rt = mergedWasmRuntime(boundEmu(), mod);
       const alloc = resolveAlloc(rt);
@@ -553,121 +588,121 @@ export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
       }
     },
     driveLastErrorCode: (unit) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_last_error_code");
+      const fn = exp("grok64_drive_last_error_code");
       if (!fn) return null;
       return Number(fn(unit));
     },
     driveErrorChannel: (unit) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_error_channel");
+      const fn = exp("grok64_drive_error_channel");
       if (!fn) return null;
       const ptr = Number(fn(unit));
       if (!ptr) return "";
       return mod.UTF8ToString ? mod.UTF8ToString(ptr).trim() : "";
     },
     driveReloadImage: (unit, drive) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_reload_image");
+      const fn = exp("grok64_drive_reload_image");
       if (!fn) return -99;
       return Number(fn(unit, drive));
     },
     driveIecDevice: (unit) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_iec_device");
+      const fn = exp("grok64_drive_iec_device");
       if (!fn) return null;
       return Number(fn(unit));
     },
     driveVirtualDevice: (unit) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_virtual_device");
+      const fn = exp("grok64_drive_virtual_device");
       if (!fn) return null;
       return Number(fn(unit));
     },
     driveUnitTrueEmulation: (unit) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_unit_true_emulation");
+      const fn = exp("grok64_drive_unit_true_emulation");
       if (!fn) return null;
       return Number(fn(unit));
     },
     driveUnitType: (unit) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_unit_type");
+      const fn = exp("grok64_drive_unit_type");
       if (!fn) return null;
       return Number(fn(unit));
     },
     driveUnitEnabled: (unit) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_unit_enabled");
+      const fn = exp("grok64_drive_unit_enabled");
       if (!fn) return null;
       return Number(fn(unit));
     },
     romLoaded: () => {
-      const fn = resolveWasmExport(mod, "grok64_rom_loaded");
+      const fn = exp("grok64_rom_loaded");
       if (!fn) return null;
       return Number(fn());
     },
     driveSerialDeviceType: (unit) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_serial_device_type");
+      const fn = exp("grok64_drive_serial_device_type");
       if (!fn) return null;
       return Number(fn(unit));
     },
     driveVdriveErrorIsVirtual: (unit) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_vdrive_error_is_virtual");
+      const fn = exp("grok64_drive_vdrive_error_is_virtual");
       if (!fn) return null;
       return Number(fn(unit));
     },
     driveTdeImageBytes: (unit, drive = 0) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_tde_image_bytes");
+      const fn = exp("grok64_drive_tde_image_bytes");
       if (!fn) return null;
       return Number(fn(unit, drive));
     },
     driveGcrLoaded: (unit, drive = 0) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_gcr_loaded");
+      const fn = exp("grok64_drive_gcr_loaded");
       if (!fn) return null;
       return Number(fn(unit, drive));
     },
     driveVdriveImageSame: (unit, drive = 0) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_vdrive_image_same");
+      const fn = exp("grok64_drive_vdrive_image_same");
       if (!fn) return null;
       return Number(fn(unit, drive));
     },
     driveSyncTdeImage: (unit, drive = 0) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_sync_tde_image");
+      const fn = exp("grok64_drive_sync_tde_image");
       if (!fn) return -99;
       return Number(fn(unit, drive));
     },
     driveFilesystemDevice: (unit) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_filesystem_device");
+      const fn = exp("grok64_drive_filesystem_device");
       if (!fn) return null;
       return Number(fn(unit));
     },
     driveCpuClock: (unit) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_cpu_clock");
+      const fn = exp("grok64_drive_cpu_clock");
       if (!fn) return null;
       return Number(fn(unit));
     },
     driveIecBusLines: (unit) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_iec_bus_lines");
+      const fn = exp("grok64_drive_iec_bus_lines");
       if (!fn) return null;
       return Number(fn(unit));
     },
     iecBusReconcile: (unit) => {
-      const fn = resolveWasmExport(mod, "grok64_iec_bus_reconcile");
+      const fn = exp("grok64_iec_bus_reconcile");
       if (!fn) return -99;
       return Number(fn(unit));
     },
     loadDollarDiagCapture: (unit) => wasmUtf8JsonExport(mod, "grok64_load_dollar_diag_capture", unit),
     viceApplySafeFloppyProfile: (unit) => {
-      const fn = resolveWasmExport(mod, "grok64_vice_apply_safe_floppy_profile");
+      const fn = exp("grok64_vice_apply_safe_floppy_profile");
       if (!fn) return -99;
       return Number(fn(unit));
     },
     viceDriveResourceSnapshot: () => wasmUtf8JsonExport(mod, "grok64_vice_drive_resource_snapshot"),
     driveSetType: (unit, type) => {
-      const fn = resolveWasmExport(mod, "grok64_drive_set_type");
+      const fn = exp("grok64_drive_set_type");
       if (!fn) return -99;
       return Number(fn(unit, type));
     },
     reuAttach: (path, sizeKb) => {
-      const fn = resolveWasmExport(mod, "grok64_reu_attach");
+      const fn = exp("grok64_reu_attach");
       if (!fn) return -99;
       return withUtf8Arg(boundEmu(), mod, path, (ptr) => Number(fn(ptr, sizeKb)));
     },
     reuSizeKb: () => {
-      const fn = resolveWasmExport(mod, "grok64_reu_size_kb");
+      const fn = exp("grok64_reu_size_kb");
       if (!fn) return null;
       return Number(fn());
     },

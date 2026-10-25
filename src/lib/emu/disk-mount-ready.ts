@@ -25,15 +25,30 @@ import {
   waitDriveFirmwareReady,
 } from "./vice-disk";
 
+export function formatViceReattachFailure(
+  rc: number,
+  last: ReturnType<typeof lastViceDiskAttach>,
+  viceDiag: string | null,
+): string {
+  const vice = last?.viceDiag ?? viceDiag;
+  const bits = [
+    last?.path ? `path=${last.path}` : null,
+    last && last.attachRc != null ? `attachRc=${last.attachRc}` : last ? `attachRc=${last.rc}` : null,
+    last?.stage ? `stage=${last.stage}` : null,
+    last?.jsReason ? `reason=${last.jsReason}` : null,
+    vice ? `vice=${vice}` : null,
+    last?.driveType != null ? `driveType=${last.driveType}` : null,
+    last?.wasmFsStat != null ? `wasm=${last.wasmFsStat}` : null,
+  ].filter(Boolean);
+  const extra = bits.length ? ` ${bits.join(" ")}` : "";
+  return `VICE disk reattach failed (rc=${rc})${extra}`;
+}
+
 function reattachFailure(emu: EjsInstance, unit: IecUnit, rc: number): Error {
   if (rc === VICE_ATTACH_WRONG_DRIVE) {
     return new Error(`Drive #${unit} rejected the disk (${viceDiskLastAttachDiag(emu) ?? "wrong drive type for this image"})`);
   }
-  const last = lastViceDiskAttach(unit);
-  const extra = last
-    ? ` path=${last.path} attachRc=${last.rc}${last.stage ? ` stage=${last.stage}` : ""}`
-    : "";
-  return new Error(`VICE disk reattach failed (rc=${rc})${extra}`);
+  return new Error(formatViceReattachFailure(rc, lastViceDiskAttach(unit), viceDiskLastAttachDiag(emu)));
 }
 
 /**

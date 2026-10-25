@@ -944,8 +944,9 @@ div[class*="ejs_virtual"] {
   letter-spacing: 0.12em;
 }
 
-.g64-app[data-mouse="true"] .g64-screen {
-  cursor: crosshair;
+.g64-app[data-mouse="true"] .g64-screen,
+.g64-app[data-mouse="true"] .g64-screen canvas {
+  cursor: none;
 }
 
 .g64-stick {

@@ -96,6 +96,7 @@ import {
   setHostMouseButtons,
   flushHostMouse1351,
   clearHostMouse1351,
+  feedVice1351Buttons,
   feedVice1351Plug,
   vice1351Direct,
   vicePortDeviceOptions,
@@ -1419,6 +1420,8 @@ export function Grok64App() {
       hostDragTo1351: (dx, dy, w, h) => hostDragTo1351(Number(dx) || 0, Number(dy) || 0, Number(w) || 0, Number(h) || 0),
       vice1351Direct: () => vice1351Direct(emuRef.current),
       realMouseFeed: () => readRealPointerFeed(),
+      lastDiskAttach: (unit = 8) => lastViceDiskAttach(unit as 8 | 9 | 10 | 11),
+      lastDiskAttachDiag: () => viceDiskLastAttachDiag(emuRef.current),
       setMouseButtons: (left, right) => {
         mouseBtnRef.current = { left: !!left, right: !!right };
         setHostMouseButtons(!!left, !!right);
@@ -5431,6 +5434,7 @@ export function Grok64App() {
                   /* */
                 }
                 setHostMouseButtons(mouseBtnRef.current.left, mouseBtnRef.current.right);
+                feedVice1351Buttons(emuRef.current, mouseBtnRef.current.left, mouseBtnRef.current.right);
                 flushHostMouse1351(emuRef.current, frameMsForStandard(resolvedRef.current.standard));
               } else {
                 onFire(true, true);
@@ -5449,6 +5453,7 @@ export function Grok64App() {
                 else mouseBtnRef.current.left = false;
                 if (!mouseBtnRef.current.left && !mouseBtnRef.current.right) mousePtrRef.current = null;
                 setHostMouseButtons(mouseBtnRef.current.left, mouseBtnRef.current.right);
+                feedVice1351Buttons(emuRef.current, mouseBtnRef.current.left, mouseBtnRef.current.right);
                 flushHostMouse1351(emuRef.current, frameMsForStandard(resolvedRef.current.standard));
                 return;
               }

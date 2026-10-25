@@ -12,6 +12,7 @@ const {
   CRT_FRAME_W,
   dpadForAxes,
   hostDragTo1351,
+  takeMouse1351Counts,
   hostPointerMoveToDelta,
   noteRealPointerFeed,
   readRealPointerFeed,
@@ -54,19 +55,29 @@ test("nonzero analog axes hold the D-pad bits vice-libretro maps to 1351 POT", (
   assert.deepEqual(dpadForAxes(-1, 1), { left: true, right: false, up: false, down: true });
 });
 
-test("host drag is one CSS pixel per 1351 count on any display size", () => {
+test("host drag scales CSS pixels to the 384×272 CRT glass", () => {
   const native = hostDragTo1351(12, -12, CRT_FRAME_W, CRT_FRAME_H);
   assert.equal(native.dx, 12);
   assert.equal(native.dy, -12);
   const wide = hostDragTo1351(20, 20, 768, 544);
-  assert.equal(wide.dx, 20);
-  assert.equal(wide.dy, 20);
+  assert.equal(wide.dx, 10);
+  assert.equal(wide.dy, 10);
 });
 
-test("a taller-than-native box does not shrink vertical 1351 counts", () => {
+test("a taller-than-native box shrinks only the vertical 1351 counts", () => {
   const { dx, dy } = hostDragTo1351(10, 10, 384, 400);
   assert.equal(dx, 10);
-  assert.equal(dy, 10);
+  assert.ok(Math.abs(dy - 10 * (CRT_FRAME_H / 400)) < 1e-9);
+});
+
+test("fractional CRT-scale leftovers stay in the accumulator", () => {
+  const acc = createMouse1351Accum();
+  addMouse1351Delta(acc, 1.75, -0.25);
+  const first = takeMouse1351Counts(acc);
+  assert.equal(first.dx, 1);
+  assert.equal(first.dy, 0);
+  assert.ok(Math.abs(acc.x - 0.75) < 1e-9);
+  assert.ok(Math.abs(acc.y + 0.25) < 1e-9);
 });
 
 test("hover uses movementX/Y without a previous pointerdown sample", () => {
