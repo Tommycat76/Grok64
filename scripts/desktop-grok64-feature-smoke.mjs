@@ -7,8 +7,7 @@
  */
 import { chromium } from "playwright";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { basename, join } from "node:path";
 import {
   assertGrok64WasmCore,
   clearEmulatorJsCache,
@@ -18,6 +17,7 @@ import {
 } from "./desktop-grok64-core.mjs";
 import { CART_COMPAT_CATALOG, cartFixturePath } from "./cart-compat-catalog.mjs";
 import { synthJiffyPair } from "./drive-combo-qa-lib.mjs";
+import { geosBaselineD64 } from "./geos-fixture-lib.mjs";
 import {
   canvasLooksLikeCartMenu,
   grok64FloppyAutostartPoison,
@@ -88,8 +88,8 @@ async function ensureDirtyProfile(page, combo) {
   await waitForG64(page);
 }
 
-spawnSync(process.execPath, ["scripts/prepare-floppy-fixtures.mjs"], { stdio: "inherit" });
-const d64Path = join(process.cwd(), "fixtures", "geos", "GEOS_2.0.d64");
+const d64Path = geosBaselineD64().path;
+const d64Name = basename(d64Path);
 const ss5Entry = CART_COMPAT_CATALOG.find((c) => c.id === "ss5");
 const ss5Path = ss5Entry ? cartFixturePath(ss5Entry) : null;
 const ss5Name = "Super_Snapshot_v5.00_1990_NTSC.crt";
@@ -149,7 +149,7 @@ try {
     await page.evaluate(async ({ name, b64 }) => {
       const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
       await window.__g64?.importLibraryBytes?.(name, bin);
-    }, { name: "GEOS_2.0.d64", b64: d64B64 });
+    }, { name: d64Name, b64: d64B64 });
     await page.locator('button[aria-label="Software"]').click({ timeout: 15_000 });
     await page.waitForTimeout(400);
     await page.getByRole("button", { name: /On this device/i }).click();
@@ -161,7 +161,7 @@ try {
     await page.waitForTimeout(400);
     await page.getByRole("button", { name: /On this device/i }).click();
     await page.waitForTimeout(300);
-    await page.getByRole("button", { name: /Insert GEOS_2.0\.d64/i }).first().click({ timeout: 60_000 });
+    await page.getByRole("button", { name: `Insert ${d64Name}` }).first().click({ timeout: 60_000 });
     await waitRunning(page, 180_000);
     await page.waitForTimeout(3500);
     const diag = await page.evaluate(async () => window.__g64?.attachDiskDiag?.());

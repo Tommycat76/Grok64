@@ -12,6 +12,10 @@
  * it, or when it carries no error codes, the run skips. The library is seeded through a QA
  * hook in a headless browser, so this is a diagnostic: the hand gate is
  * scripts/desktop-xdotool-geos-hand-boot.mjs.
+ * That image's table marks track 18 sector 1 as a data checksum error, and stock VICE with
+ * true drive emulation answers FILE NOT FOUND for $ and GEOS on it, so no deskTop is expected
+ * here (docs/GEOS_REFERENCE_EMULATOR_COMPARISON.md); the hand gate checks that answer with
+ * GROK64_HAND_EXPECT=fnf.
  * Screenshots under screenshots/geos-insert-tom-hand/<jiffy-off|jiffy-on>/.
  */
 import { chromium } from "playwright";

@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
- * Dirty-profile style UI proof: About TDE probes, LOAD"$",8 + LIST (Jiffy on/off), deskTop.
+ * Dirty-profile style UI proof: About TDE probes, LOAD"$",8 + LIST (Jiffy on/off), deskTop, on the
+ * clean GEOS baseline disk (geosBaselineD64).
  */
 import { chromium } from "playwright";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { basename, join } from "node:path";
+import { geosBaselineD64 } from "./geos-fixture-lib.mjs";
 import {
   assertGrok64WasmCore,
   clearEmulatorJsCache,
@@ -30,15 +31,15 @@ const outDir = join(process.cwd(), "artifacts", "tde-dirty-hands-on");
 mkdirSync(shotDir, { recursive: true });
 mkdirSync(outDir, { recursive: true });
 
-spawnSync(process.execPath, ["scripts/prepare-floppy-fixtures.mjs"], { stdio: "inherit" });
-const d64Path = join(process.cwd(), "fixtures", "geos", "GEOS_2.0.d64");
+const d64Path = geosBaselineD64().path;
 if (!grok64DatapathFromEnv() || !existsSync(d64Path)) {
   console.log(JSON.stringify({ pass: false, skipped: true }));
   process.exit(0);
 }
 
-const d64Name = "GEOS_2.0.d64";
-const d64B64 = readFileSync(d64Path).toString("base64");
+const d64Name = basename(d64Path);
+const d64Bytes = readFileSync(d64Path);
+const d64B64 = d64Bytes.toString("base64");
 const trace = { buildId: grok64CoreBuildIdFromManifest(), steps: [] };
 
 async function importFile(page, filePath) {
@@ -64,7 +65,7 @@ async function runDisk(page) {
 
 function tdeProbeOk(live) {
   return (
-    live?.wasmTdeImageBytes === 175531 &&
+    live?.wasmTdeImageBytes === d64Bytes.length &&
     live?.wasmGcrLoaded === 1 &&
     live?.wasmVdriveImageSame === 1 &&
     baselineDriveLiveOk(live)

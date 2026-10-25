@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { d64ErrorInfoSummary } from "./d64-error-info-lib.mjs";
+import { d64ErrorInfoSummary, d64Layout } from "./d64-error-info-lib.mjs";
 
 /** Tom hand-signoff GEOS_2.0.d64 (175531, error-info tail) — prefix match. */
 export const TOM_GEOS_D64_SHA1_PREFIX = "c2162953";
@@ -44,6 +44,33 @@ export function geosD64Fingerprint(buf) {
     bamName,
     errorCodes: info.errorInfo ? info.badCount : 0,
   };
+}
+
+/** The image without its error-info table (first 174848 or 196608 bytes); null when it has none. */
+export function stripD64ErrorInfo(buf) {
+  const layout = d64Layout(buf.byteLength);
+  if (!layout?.errorInfo) return null;
+  return buf.subarray(0, layout.tracks === 40 ? 196608 : 174848);
+}
+
+/**
+ * GEOS boot disk for the 1541 baseline. Tom's GEOS_2.0.d64 marks track 18 sector 1 (the first
+ * directory block) as a data checksum error, so stock VICE with true drive emulation answers
+ * FILE NOT FOUND for $ and GEOS, as a real 1541 would; the baseline therefore uses that image
+ * (resolveGeosD64Path) with the table stripped, written to fixtures/geos/derived/, or
+ * GEOS64_en.d64 when it is not here.
+ */
+export function geosBaselineD64(cwd = process.cwd()) {
+  const tom = resolveGeosD64Path(cwd);
+  if (!existsSync(tom)) return { path: join(cwd, "fixtures", "geos", GEOS_EN_PLAIN_NAME), source: null, stripped: false };
+  const buf = readFileSync(tom);
+  const plain = stripD64ErrorInfo(buf);
+  if (!plain) return { path: tom, source: tom, stripped: false };
+  const dir = join(cwd, "fixtures", "geos", "derived");
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, "GEOS_2.0-stripped.d64");
+  writeFileSync(path, plain);
+  return { path, source: tom, stripped: true, sourceSha1: sha1Hex(buf), sha1: sha1Hex(plain) };
 }
 
 /**

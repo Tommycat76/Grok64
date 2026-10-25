@@ -1,14 +1,14 @@
 #!/usr/bin/env node
 /**
- * Tom emulator-baseline hands-on: GEOS_2.0.d64 (dirty profile) + SD2IEC IEC path.
+ * Tom emulator-baseline hands-on: the clean GEOS baseline disk (geosBaselineD64: GEOS_2.0.d64
+ * without its error-info table, or GEOS64_en.d64) on a dirty profile + SD2IEC IEC path.
  * Emits artifacts/geos-reference-baseline/compare-grok64.json for docs/GEOS_REFERENCE_EMULATOR_COMPARISON.md
  *
  *   npm run test:desktop-geos-baseline-hands-on
  */
 import { chromium } from "playwright";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { basename, join } from "node:path";
 import {
   assertGrok64WasmCore,
   clearEmulatorJsCache,
@@ -26,6 +26,7 @@ import {
   waitForG64,
   waitRunning,
 } from "./desktop-qa-lib.mjs";
+import { geosBaselineD64 } from "./geos-fixture-lib.mjs";
 
 const base = process.env.GROK64_BASE_URL || "http://127.0.0.1:8080/";
 const shotDir = join(process.cwd(), "screenshots", "geos-baseline-hands-on");
@@ -33,8 +34,7 @@ const outDir = join(process.cwd(), "artifacts", "geos-reference-baseline");
 mkdirSync(shotDir, { recursive: true });
 mkdirSync(outDir, { recursive: true });
 
-spawnSync(process.execPath, ["scripts/prepare-floppy-fixtures.mjs"], { stdio: "inherit" });
-const d64Path = join(process.cwd(), "fixtures", "geos", "GEOS_2.0.d64");
+const d64Path = geosBaselineD64().path;
 const report = {
   capturedAt: new Date().toISOString(),
   grok64CoreBuildId: grok64CoreBuildIdFromManifest(),
@@ -50,7 +50,7 @@ if (!grok64DatapathFromEnv() || !existsSync(d64Path)) {
   process.exit(0);
 }
 
-const d64Name = "GEOS_2.0.d64";
+const d64Name = basename(d64Path);
 const d64B64 = readFileSync(d64Path).toString("base64");
 
 function driveSettingsFromDiag(diag) {

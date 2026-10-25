@@ -5,8 +5,7 @@
  */
 import { chromium } from "playwright";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { basename, join } from "node:path";
 import {
   assertGrok64WasmCore,
   clearEmulatorJsCache,
@@ -24,7 +23,7 @@ import {
   waitForG64,
   waitRunning,
 } from "./desktop-qa-lib.mjs";
-import { GEOS_D64_EXPECTED_BYTES, geosD64Fingerprint } from "./geos-fixture-lib.mjs";
+import { geosBaselineD64, geosD64Fingerprint } from "./geos-fixture-lib.mjs";
 
 const base = process.env.GROK64_BASE_URL || "http://127.0.0.1:8080/";
 const shotDir = join(process.cwd(), "screenshots", "geos-insert-user-dirty");
@@ -32,22 +31,17 @@ const outDir = join(process.cwd(), "artifacts", "geos-insert-user-dirty");
 mkdirSync(shotDir, { recursive: true });
 mkdirSync(outDir, { recursive: true });
 
-spawnSync(process.execPath, ["scripts/prepare-floppy-fixtures.mjs"], { stdio: "inherit" });
-const d64Path = join(process.cwd(), "fixtures", "geos", "GEOS_2.0.d64");
+const d64Path = geosBaselineD64().path;
 if (!grok64DatapathFromEnv() || !existsSync(d64Path)) {
   console.log(JSON.stringify({ pass: false, skipped: true }));
   process.exit(0);
 }
 
-const d64Name = "GEOS_2.0.d64";
+const d64Name = basename(d64Path);
 const d64Bytes = readFileSync(d64Path);
 const d64Fp = geosD64Fingerprint(d64Bytes);
 const d64B64 = d64Bytes.toString("base64");
 const trace = { flow: "power-insert-type-load-dollar", librarySeed: "importLibraryBytes", geosD64: d64Fp };
-if (d64Fp.bytes !== GEOS_D64_EXPECTED_BYTES) {
-  console.log(JSON.stringify({ pass: false, skipped: true, reason: "wrong-geos-bytes", geosD64: d64Fp }));
-  process.exit(0);
-}
 
 async function powerCycle(page) {
   await page.locator('button[aria-label="Power off"]').first().click({ timeout: 15_000 });
