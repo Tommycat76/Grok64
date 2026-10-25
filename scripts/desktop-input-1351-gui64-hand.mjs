@@ -806,7 +806,7 @@ function onGeosWord(g) {
 
 /** Pointer on the geos menu's select input line (4th item; GEOS info / deskTop info / select printer / select input). */
 function onSelectInputItem(g) {
-  return Boolean(g && g.x < 90 && g.y >= 48 && g.y <= 72);
+  return Boolean(g && g.x < 90 && g.y >= 52 && g.y <= 68);
 }
 
 /** Gutter blob on an open menu — do not pulse, pulsing walks off the item. */
@@ -1243,9 +1243,12 @@ async function activateGeos1351(hand) {
       out.steps.push("geos-menu-fail");
     } else {
       out.menuWalk = [];
-      // Pointer stays on the geos word. A click there closes the menu.
-      // Four short downs: GEOS info, deskTop info, select printer, select input.
-      for (let i = 0; i < 8; i++) {
+      // 70ms moves the pointer ~3–4 GEOS pixels. select input is y≈54–66.
+      // Do not click on a hop count — four hops only reach deskTop info.
+      let prev = menuSnap;
+      for (let i = 0; i < 16; i++) {
+        await holdJoy(hand, 0, 1, 70);
+        await sleep(140);
         const row = await snapshot(hand.page);
         await savePng(hand.shotDir(), `10-1351-menu-walk-${i}.png`, row.b64);
         if (looksLikeAboutBox(row.img)) {
@@ -1254,17 +1257,22 @@ async function activateGeos1351(hand) {
           await sleep(250);
           break;
         }
-        const ptr = findMenuPointer(row.img);
-        if (ptr) out.menuWalk.push({ i, x: +ptr.x.toFixed(1), y: ptr.y, n: ptr.n, med: ptr.med });
-        if (onSelectInputItem(ptr) || i === 4) {
+        const c = contentRect(row.img);
+        const diff = c
+          ? frameDiff(prev.img, row.img, {
+              rect: { x: c.x, y: c.y, w: c.w * 0.35, h: c.h * 0.55 },
+              skipTop: 0,
+            })
+          : { changed: 0 };
+        const ptr = diff.changed >= 8 ? toGeos({ x: diff.cx, y: diff.cy }, row.img) : findMenuPointer(row.img);
+        if (ptr) out.menuWalk.push({ i, x: +ptr.x.toFixed(1), y: +ptr.y.toFixed(1), changed: diff.changed });
+        if (onSelectInputItem(ptr)) {
           await clickJoy(hand, { downMs: 110 });
           await sleep(900);
-          out.steps.push(onSelectInputItem(ptr) ? "select-input-menu" : "select-input-after-walk");
+          out.steps.push("select-input-menu");
           break;
         }
-        if (ptr && ptr.y > 68) await holdJoy(hand, 0, -1, 44);
-        else await holdJoy(hand, 0, 1, 70);
-        await sleep(160);
+        prev = row;
       }
       dlg = await waitSelectInput(hand, before, 4000);
       if (looksLikeAboutBox(dlg.img)) {
