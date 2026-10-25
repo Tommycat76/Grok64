@@ -272,6 +272,15 @@ try {
   }
   await shot("04-software-insert.png");
 
+  // Saved WASD-on eats A/D in LOAD"$",8 — turn it off through the chip first.
+  const wasdChip = page.locator(".g64-chip-gate").filter({ hasText: /^WASD$/ }).first();
+  if ((await wasdChip.getAttribute("data-on")) === "true") {
+    await wasdChip.click();
+    await page.waitForTimeout(250);
+  }
+  run.wasdBeforeType = await page.evaluate(() => window.__g64?.settings?.()?.wasdIsJoy);
+  if (run.wasdBeforeType !== false) throw new Error(`WASD still on before LOAD$: ${run.wasdBeforeType}`);
+
   await typeC64RealKeyboard(page, 'LOAD"$",8', { keyDelayMs: 90, lineEndMs: 1200 });
   const loadT0 = Date.now();
   let dollarScreen = "";
