@@ -12,7 +12,7 @@ import {
 import type { Grok64WasmModule } from "./grok64-wasm-bind";
 
 /** Bumped when WASM bind strategy changes; About / QA can detect stale app JS. */
-export const GROK64_WASM_BIND_REV = "diskapi-v27-core-ca4d09efaee4";
+export const GROK64_WASM_BIND_REV = "diskapi-v28-core-36a7cd049a97";
 
 export type Grok64DiskApi = {
   diskAttach: (unit: number, drive: number, path: string) => number;
