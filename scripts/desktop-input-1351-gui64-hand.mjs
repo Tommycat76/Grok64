@@ -746,6 +746,7 @@ async function tapCbmI(hand) {
 function isSelectInputDialog(before, after) {
   if (!after?.img) return false;
   if (looksLikeAboutBox(after.img)) return false;
+  if (before?.img && openedMenuKind(before, after).kind === "geos") return false;
   return looksLikeSelectInput(after.img);
 }
 
@@ -874,8 +875,6 @@ async function pickComm1351InDialog(hand, dlg) {
     closed: false,
   };
   const ok = geosMap(dlg.img, 204, 114);
-  if (ok) out.parked = await walkJoyToUi(hand, ok.x, ok.y, { timeout: 5000, close: 12 });
-  else await hopJoy(hand, 1, 1, 5, 90);
   await hand.shot("10-1351-toward-ok.png");
 
   for (let i = 0; i < 2; i++) {
@@ -904,9 +903,6 @@ async function pickComm1351InDialog(hand, dlg) {
       out.which = whichInputHighlight(vice.img);
     }
     out.highlight = out.which;
-    if (out.which === "comm" && ok) {
-      out.parked = await walkJoyToUi(hand, ok.x, ok.y, { timeout: 4000, close: 12 });
-    }
   }
 
   const marked = await snapshot(hand.page);
@@ -916,12 +912,26 @@ async function pickComm1351InDialog(hand, dlg) {
   await hand.shot("10-1351-comm-highlighted-ui.png");
 
   if (out.which === "comm") {
-    await tapC64Key(hand, "Enter", "Enter", 120);
-    await sleep(350);
+    // Pointer sits in the empty mid after the COMM click. Enter does not
+    // confirm this dialog. OK is down-right; highlight stays on COMM.
+    await holdJoy(hand, 1, 0, 850);
+    await sleep(80);
+    await holdJoy(hand, 0, 1, 320);
+    await sleep(120);
+    await hand.shot("10-1351-on-ok-preclick.png");
+    await clickJoy(hand, { downMs: 140 });
+    await sleep(400);
     let still = await snapshot(hand.page);
     if (looksLikeSelectInput(still.img)) {
-      await clickJoy(hand, { downMs: 130 });
+      await holdJoy(hand, 1, 0, 180);
+      await sleep(80);
+      await clickJoy(hand, { downMs: 140 });
       await sleep(400);
+      still = await snapshot(hand.page);
+    }
+    if (looksLikeSelectInput(still.img)) {
+      await tapC64Key(hand, "Enter", "Enter", 120);
+      await sleep(350);
       still = await snapshot(hand.page);
     }
     out.closed = !looksLikeSelectInput(still.img);
@@ -1377,7 +1387,7 @@ async function test1351(hand, prefix) {
   return out;
 }
 
-/** geos → select input → COMM 1351(a) → OK. C= + I opens GEOS info on this disk. */
+/** C= + I opens Select Input Device on the official boot disk (real-UI proof). Menu walk is fallback. */
 async function activateGeos1351(hand) {
   const out = { steps: [], file: "COMM 1351(a)", via: "select-input" };
   await ensureMouse(hand, false);
@@ -1386,8 +1396,16 @@ async function activateGeos1351(hand) {
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
 
-  let dlg = before;
-  out.dialog = isSelectInputDialog(before, before);
+  await tapCbmI(hand);
+  out.steps.push("cbm-i");
+  let dlg = await waitSelectInput(hand, before, 8000);
+  if (looksLikeAboutBox(dlg.img)) {
+    out.steps.push("cbm-i-about");
+    await clickJoy(hand, { downMs: 110 });
+    await sleep(300);
+    dlg = await snapshot(hand.page);
+  }
+  out.dialog = isSelectInputDialog(before, dlg);
 
   if (!out.dialog) {
     out.landGeos = await landOnGeosWord(hand);
