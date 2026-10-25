@@ -888,13 +888,21 @@ async function pickComm1351InDialog(hand, dlg) {
   }
 
   if (out.which !== "comm") {
-    // From OK / empty mid, COMM is up-left. 70ms ≈ 3–4 GEOS px.
-    await hopJoy(hand, -1, -1, 5, 80);
+    // C= + I leaves the pointer in the empty mid. COMM is straight up.
+    // Up-left overshoots into the title. 70ms ≈ 3–4 GEOS px.
+    await hopJoy(hand, 0, -1, 7, 80);
     await hand.shot("10-1351-toward-comm.png");
     await clickJoy(hand, { downMs: 120 });
     await sleep(300);
     let vice = await snapshot(hand.page);
     out.which = whichInputHighlight(vice.img);
+    if (out.which !== "comm") {
+      await hopJoy(hand, 0, 1, 2, 80);
+      await clickJoy(hand, { downMs: 120 });
+      await sleep(280);
+      vice = await snapshot(hand.page);
+      out.which = whichInputHighlight(vice.img);
+    }
     if (out.which !== "comm") {
       await hopJoy(hand, 0, 1, 2, 80);
       await clickJoy(hand, { downMs: 120 });
