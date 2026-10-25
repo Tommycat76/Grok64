@@ -7,6 +7,7 @@ import { createWriteStream, existsSync, mkdirSync, writeFileSync } from "node:fs
 import { pipeline } from "node:stream/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import { GEOS_EN_PLAIN_NAME } from "./geos-fixture-lib.mjs";
 
 const root = join(process.cwd(), "fixtures");
 const dirs = {
@@ -76,6 +77,36 @@ async function fetchGeos() {
     return;
   }
   await iaDownload(id, d64.name, join(dirs.geos, d64.name.replace(/\s+/g, "_")));
+}
+
+/** GEOS64.ZIP (Click Here Software): free to use, not to redistribute — never commit the extracted disk. */
+async function fetchGeosEnglish() {
+  const dest = join(dirs.geos, GEOS_EN_PLAIN_NAME);
+  if (existsSync(dest)) {
+    console.log("skip", dest);
+    return;
+  }
+  const url = process.env.GROK64_GEOS_EN_URL || "https://funet.silverdr.com/geos/c64/GEOS64.ZIP";
+  try {
+    const res = await fetch(url, {
+      redirect: "follow",
+      signal: AbortSignal.timeout(120_000),
+    });
+    if (!res.ok) {
+      console.warn("GEOS64.ZIP", res.status);
+      return;
+    }
+    const { unzipSync } = await import("fflate");
+    const d64 = unzipSync(new Uint8Array(await res.arrayBuffer()))["GEOS64.D64"];
+    if (d64?.byteLength !== 174848) {
+      console.warn("GEOS64.ZIP: no 174848-byte GEOS64.D64");
+      return;
+    }
+    writeFileSync(dest, d64);
+    console.log("ok", dest);
+  } catch (e) {
+    console.warn("GEOS64.ZIP:", e.message);
+  }
 }
 
 /** Optional: GROK64_WHEELS_URL=https://…/Wheels64.d64 (not redistributed in-repo). */
@@ -290,6 +321,7 @@ async function fetchBoulderDisk() {
 
 console.log("Fetching fixtures →", root);
 await fetchGeos();
+await fetchGeosEnglish();
 await fetchGeosG64();
 await fetchWheelsOptional();
 await fetchWheelsDisk();

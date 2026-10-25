@@ -228,19 +228,22 @@ export const TOM_REUSED_PROFILE = {
   iecUnit: 9,
 };
 
+/** zustand persist entry of `useEmu` (src/lib/emu/store.ts `name` / `version`). */
+const SETTINGS_KEY = "grok64-settings";
+const SETTINGS_VERSION = 12;
+
 export async function seedTomReusedProfile(page, overrides = {}) {
   const merged = { ...TOM_REUSED_PROFILE, ...overrides };
-  return page.evaluate((p) => {
-    try {
-      sessionStorage.removeItem("grok64-post-cart-out");
-    } catch {
-      /* ignore */
-    }
-    const data = {
-      state: {
-        powered: false,
-        running: false,
-        booting: false,
+  return page.evaluate(
+    ({ p, key, version }) => {
+      try {
+        sessionStorage.removeItem("grok64-post-cart-out");
+      } catch {
+        /* ignore */
+      }
+      const prev = JSON.parse(localStorage.getItem(key) || "null");
+      const state = {
+        ...(prev?.state ?? {}),
         machineId: p.machineId,
         videoStandard: p.videoStandard,
         coreMode: p.coreMode,
@@ -254,24 +257,35 @@ export async function seedTomReusedProfile(page, overrides = {}) {
         iecDrive: p.iecDrive,
         iecUnit: p.iecUnit,
         joyPort: 2,
-      },
-      version: 0,
-    };
-    localStorage.setItem("grok64-emu", JSON.stringify(data));
-    return true;
-  }, merged);
+      };
+      localStorage.setItem(key, JSON.stringify({ state, version: prev?.version ?? version }));
+      return true;
+    },
+    { p: merged, key: SETTINGS_KEY, version: SETTINGS_VERSION },
+  );
+}
+
+/** Throws unless the running app took the seeded settings. */
+export async function assertSessionFlags(page, want) {
+  const flags = await page.evaluate(() => window.__g64?.sessionFlags?.() ?? null);
+  const bad = Object.entries(want).filter(([k, v]) => flags?.[k] !== v);
+  if (!flags || bad.length) throw new Error(`settings not applied: want ${JSON.stringify(want)}, got ${JSON.stringify(flags)}`);
+  return flags;
 }
 
 export function patchLocalStorage(page, combo) {
-  return page.evaluate((combo) => {
+  return page.evaluate(({ combo, key: settingsKey }) => {
     try {
       sessionStorage.removeItem("grok64-post-cart-out");
     } catch {
       /* private mode */
     }
-    const keys = Object.keys(localStorage).filter((k) => k.includes("grok64"));
-    if (!keys.length) return false;
-    const raw = localStorage.getItem(keys[0]);
+    const key =
+      localStorage.getItem(settingsKey) != null
+        ? settingsKey
+        : Object.keys(localStorage).find((k) => k.includes("grok64"));
+    if (!key) return false;
+    const raw = localStorage.getItem(key);
     if (!raw) return false;
     const data = JSON.parse(raw);
     if (!data.state) return false;
@@ -311,9 +325,9 @@ export function patchLocalStorage(page, combo) {
         11: "none",
       };
     }
-    localStorage.setItem(keys[0], JSON.stringify(data));
+    localStorage.setItem(key, JSON.stringify(data));
     return true;
-  }, combo);
+  }, { combo, key: SETTINGS_KEY });
 }
 
 const C64_EXTRA = {
@@ -359,7 +373,11 @@ async function pressC64Stroke(page, stroke, delayMs) {
 /** Playwright trusted keyboard on the CRT canvas (not typeC64 / feedBasic). */
 export async function typeC64RealKeyboard(page, text, { keyDelayMs = 65, lineEndMs = 700 } = {}) {
   await page.evaluate(() => window.__g64?.kbdReleaseAll?.());
-  await page.locator("#grok64-player canvas, .g64-crt canvas").first().click({ timeout: 10_000 }).catch(() => {});
+  await page
+    .locator("#grok64-player canvas, .g64-crt canvas")
+    .first()
+    .click({ timeout: 10_000, force: true })
+    .catch(() => {});
   await page.waitForTimeout(300);
   for (const ch of text) {
     for (const stroke of c64Keystrokes(ch)) {
@@ -488,6 +506,116 @@ export function geosFloppyEvidence({ screen = "", session = null, wasmWorkDisk =
   };
 }
 
+/** Screen text below the last line that holds `command` (spaces ignored); null when it is gone. */
+export function screenTextAfterCommand(text, command) {
+  const want = command.replace(/\s+/g, "").toUpperCase();
+  const lines = text.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].replace(/\s+/g, "").toUpperCase().includes(want)) return lines.slice(i + 1).join("\n");
+  }
+  return null;
+}
+
+const BASIC_LOAD_ERROR = /FILE NOT FOUND|DEVICE NOT PRESENT|\?\w+ +ERROR/i;
+
+/** Wait for a typed BASIC command to come back with READY. or an error. */
+export async function waitBasicCommand(page, command, maxMs) {
+  const t0 = Date.now();
+  let after = null;
+  while (Date.now() - t0 < maxMs) {
+    await page.waitForTimeout(1000);
+    after = screenTextAfterCommand(await page.evaluate(() => window.__g64?.screenText?.() ?? ""), command);
+    if (after == null) continue;
+    if (BASIC_LOAD_ERROR.test(after)) return { error: true, ms: Date.now() - t0, after: after.trim().slice(0, 160) };
+    if (/READY\./.test(after)) return { error: false, ms: Date.now() - t0 };
+  }
+  return { error: true, timeout: true, ms: Date.now() - t0, after: after?.trim().slice(0, 160) ?? null };
+}
+
+/**
+ * After LOAD"GEOS",8,1 was typed: BSW boot disks return to READY. and need RUN (typed via
+ * `typeRun`); boot files that load into the stack page start GEOS by themselves. Resolves
+ * once the deskTop is on screen, the load failed, or time ran out. The menu bar is up before
+ * the deskTop has read the boot disk, so a found deskTop gets `settleMs` to fill its window.
+ * A boot that resets the C64 (cold-start banner back, typed command gone) resolves at once with
+ * `reset: true`; `bootingGeos` tells whether "BOOTING GEOS" was on screen before.
+ */
+export async function waitGeosBoot(
+  page,
+  { command = 'LOAD"GEOS",8,1', typeRun, loadMs = 180_000, deskTopMs = 240_000, settleMs = 20_000, onTick } = {},
+) {
+  const t0 = Date.now();
+  const out = { load: null, run: "not-needed", deskTop: null, bootingGeos: false };
+  let deskAt = 0;
+  let after = null;
+  let desk = null;
+  const screen = async () => {
+    const text = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
+    if (/BOOTING GEOS/i.test(text)) out.bootingGeos = true;
+    return text;
+  };
+  const resetTo = (text, last) => coldStartScreen(text) && screenTextAfterCommand(text, last) == null;
+  while (Date.now() - t0 < loadMs) {
+    await page.waitForTimeout(1000);
+    const text = await screen();
+    after = screenTextAfterCommand(text, command);
+    if (resetTo(text, command)) {
+      out.load = { error: false, ms: Date.now() - t0, ready: false, reset: true };
+      out.deskTop = { pass: false, reset: true, ms: Date.now() - t0 };
+      return out;
+    }
+    if (after != null && BASIC_LOAD_ERROR.test(after)) {
+      out.load = { error: true, ms: Date.now() - t0, after: after.trim().slice(0, 160) };
+      return out;
+    }
+    if (after != null && /READY\./.test(after)) {
+      out.load = { error: false, ms: Date.now() - t0, ready: true };
+      break;
+    }
+    if (Date.now() - deskAt >= 3000) {
+      deskAt = Date.now();
+      desk = await canvasLooksLikeGeosDesktop(page);
+      if (desk.pass) {
+        out.load = { error: false, ms: Date.now() - t0, ready: false, autostart: true };
+        out.deskTop = { pass: true, ms: Date.now() - t0, stats: desk.stats };
+        await page.waitForTimeout(settleMs);
+        return out;
+      }
+    }
+    await onTick?.(Date.now() - t0);
+  }
+  if (!out.load) {
+    if (after != null) {
+      out.load = { error: true, timeout: true, ms: Date.now() - t0, after: after.trim().slice(0, 160) };
+      return out;
+    }
+    out.load = { error: false, ms: Date.now() - t0, ready: false, leftBasic: true };
+  }
+  if (out.load.ready) {
+    await typeRun();
+    out.run = "typed";
+  }
+  const t1 = Date.now();
+  while (Date.now() - t1 < deskTopMs) {
+    await page.waitForTimeout(3000);
+    if (resetTo(await screen(), out.run === "typed" ? "RUN" : command)) {
+      out.deskTop = { pass: false, reset: true, ms: Date.now() - t0 };
+      return out;
+    }
+    desk = await canvasLooksLikeGeosDesktop(page);
+    if (desk.pass) break;
+    await onTick?.(Date.now() - t0);
+  }
+  out.deskTop = { pass: Boolean(desk?.pass), ms: Date.now() - t0, stats: desk?.stats, textTail: desk?.textTail };
+  if (desk?.pass) await page.waitForTimeout(settleMs);
+  return out;
+}
+
+/** Power-on screen of BASIC V2 (stock or JiffyDOS KERNAL) with nothing typed below READY. */
+function coldStartScreen(text) {
+  return /BASIC V2/i.test(text) && /BYTES FREE/i.test(text) && /READY\./.test(text) && text.replace(/\s+/g, "").length < 220;
+}
+
 /** Wait for LOAD"$" to finish (SEARCHING/LOADING cleared or IEC error). */
 export async function waitForDollarLoad(page, { maxMs = 45_000 } = {}) {
   const t0 = Date.now();
@@ -505,7 +633,11 @@ export async function waitForDollarLoad(page, { maxMs = 45_000 } = {}) {
 
 /** Type on the C64 canvas one key at a time (no kbdbuf / feedBasic). */
 export async function typeC64Screen(page, text, { keyDelayMs = 85, lineEndMs = 600 } = {}) {
-  await page.locator("#grok64-player canvas, .g64-crt canvas").first().click({ timeout: 10_000 }).catch(() => {});
+  await page
+    .locator("#grok64-player canvas, .g64-crt canvas")
+    .first()
+    .click({ timeout: 10_000, force: true })
+    .catch(() => {});
   for (const ch of text) {
     await page.evaluate(
       async ({ c, delay }) => {
