@@ -67,7 +67,7 @@ interface SettingsSlice {
   showJoystick: boolean;
   showKeyboard: boolean;
   arrowsAreJoy: boolean;
-  /** WASD is the digital stick so joystick-driver software (GEOS JOYSTICK) is usable from a keyboard. */
+  /** Off by default so W/A/S/D type letters. On = digital stick (GEOS JOYSTICK, etc.). */
   wasdIsJoy: boolean;
   stickGate: "4way" | "8way";
   jumpBtn: boolean;
@@ -193,7 +193,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       showJoystick: true,
       showKeyboard: false,
       arrowsAreJoy: false,
-      wasdIsJoy: true,
+      wasdIsJoy: false,
       stickGate: "4way",
       jumpBtn: false,
       reuSize: "none",
@@ -328,7 +328,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
     }),
     {
       name: "grok64-settings",
-      version: 13,
+      version: 14,
       storage: createJSONStorage(() =>
         typeof window === "undefined"
           ? {
@@ -456,7 +456,10 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
           if (!p.sid3Model) p.sid3Model = "default";
         }
         if (version < 13) {
-          if (typeof p.wasdIsJoy !== "boolean") p.wasdIsJoy = true;
+          if (typeof p.wasdIsJoy !== "boolean") p.wasdIsJoy = false;
+        }
+        if (version < 14) {
+          p.wasdIsJoy = false;
         }
         if (version < 7) {
           if (!p.reuSize) p.reuSize = "none";

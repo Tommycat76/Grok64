@@ -67,6 +67,17 @@ export function QuickDock({ onDisk, onReset, onSnapshot, onPauseToggle, onWarp, 
       >
         <MousePointer2 className="size-5" />
       </button>
+      <button
+        type="button"
+        className="g64-dock-btn"
+        data-on={s.wasdIsJoy ? "true" : "false"}
+        data-kbjoy={s.wasdIsJoy ? "true" : "false"}
+        aria-label={s.wasdIsJoy ? "Keyboard joystick on" : "Keyboard joystick off"}
+        title={s.wasdIsJoy ? "WASD is the joystick — tap to type letters" : "Keyboard joystick off — tap so WASD moves the stick"}
+        onClick={() => s.setWasdIsJoy(!s.wasdIsJoy)}
+      >
+        WASD
+      </button>
       <button type="button" className="g64-dock-btn" aria-label="Swap joystick port" title={`Port ${s.joyPort} — tap to swap`} onClick={onSwapJoy}>
         P{s.joyPort}
       </button>

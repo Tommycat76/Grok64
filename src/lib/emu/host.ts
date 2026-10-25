@@ -122,6 +122,12 @@ import type { SidLayout } from "./machines";
 import { RETRO_BTN } from "./types";
 import { glog } from "./debug";
 import { stopIosPresent, stripIosPresent } from "./ios-present";
+import {
+  addMouse1351Delta,
+  createMouse1351Accum,
+  resetMouse1351Accum,
+  takeMouse1351Frame,
+} from "./mouse-1351";
 
 const CDN_DATA = "https://cdn.emulatorjs.org/stable/data/";
 
@@ -597,10 +603,6 @@ function setVirtualPad(dx: number, dy: number, fire: boolean) {
   btn(13, dy > dead);
   btn(0, fire);
   btn(1, false);
-  padAxes[0] = 0;
-  padAxes[1] = 0;
-  padAxes[2] = 0;
-  padAxes[3] = 0;
   virtualPad0.timestamp = performance.now();
 }
 
@@ -833,10 +835,10 @@ function patchEjsInput() {
         'input_player1_down = "nul"\n' +
         'input_player1_left = "nul"\n' +
         'input_player1_right = "nul"\n' +
-        'input_player1_l_x_plus = "nul"\n' +
-        'input_player1_l_x_minus = "nul"\n' +
-        'input_player1_l_y_plus = "nul"\n' +
-        'input_player1_l_y_minus = "nul"\n' +
+        'input_player1_l_x_plus = "+0"\n' +
+        'input_player1_l_x_minus = "-0"\n' +
+        'input_player1_l_y_plus = "+1"\n' +
+        'input_player1_l_y_minus = "-1"\n' +
         'input_player1_up_axis = "nul"\n' +
         'input_player1_down_axis = "nul"\n' +
         'input_player1_left_axis = "nul"\n' +
@@ -1246,13 +1248,18 @@ export function setJoyVector(emu: EjsInstance | null, dx: number, dy: number, fi
   joyInput(emu, RETRO_BTN.B, fire, player);
   joyInput(emu, RETRO_BTN.A, false, player);
   joyInput(emu, RETRO_BTN.Y, false, player);
-  joyInput(emu, 16, false, player);
-  joyInput(emu, 17, false, player);
-  joyInput(emu, 18, false, player);
-  joyInput(emu, 19, false, player);
 }
 
-/** 1351 mouse via left analog stick (vice_analogmouse=left). */
+function analogStick(emu: EjsInstance | null, ax: number, ay: number, player = 0) {
+  const x = Math.round(Math.max(-1, Math.min(1, ax)) * 0x7fff);
+  const y = Math.round(Math.max(-1, Math.min(1, ay)) * 0x7fff);
+  rawSim(emu, player, 16, x > 0 ? x : 0);
+  rawSim(emu, player, 17, x < 0 ? -x : 0);
+  rawSim(emu, player, 18, y > 0 ? y : 0);
+  rawSim(emu, player, 19, y < 0 ? -y : 0);
+}
+
+/** 1351 mouse: analog stick this poll equals the leftover pixel deltas (see mouse-1351.ts). */
 export function setMouseAnalog(
   emu: EjsInstance | null,
   ax: number,
@@ -1273,6 +1280,7 @@ export function setMouseAnalog(
   btn(12, false);
   btn(13, false);
   virtualPad0.timestamp = performance.now();
+  analogStick(emu, cx, cy);
   try {
     emu?.gamepadEvent?.({ type: "axis", index: 0, label: "LEFT_STICK_X", gamepadIndex: 0, value: cx });
     emu?.gamepadEvent?.({ type: "axis", index: 1, label: "LEFT_STICK_Y", gamepadIndex: 0, value: cy });
@@ -1291,6 +1299,39 @@ export function setMouseAnalog(
 
 export function clearMouseAnalog(emu: EjsInstance | null) {
   setMouseAnalog(emu, 0, 0, false, false);
+}
+
+const hostMouse1351 = createMouse1351Accum();
+const hostMouseBtn = { left: false, right: false };
+let hostMouseHeld = { ax: 0, ay: 0 };
+let hostMouseFlushAt = 0;
+
+export function addHostMouseDelta(dx: number, dy: number) {
+  addMouse1351Delta(hostMouse1351, dx, dy);
+}
+
+export function setHostMouseButtons(left: boolean, right: boolean) {
+  hostMouseBtn.left = left;
+  hostMouseBtn.right = right;
+}
+
+/** Hold this frame's analog until the next VICE poll (~one video frame). */
+export function flushHostMouse1351(emu: EjsInstance | null, periodMs = 20) {
+  const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+  if (now - hostMouseFlushAt >= periodMs) {
+    hostMouseFlushAt = now;
+    hostMouseHeld = takeMouse1351Frame(hostMouse1351);
+  }
+  setMouseAnalog(emu, hostMouseHeld.ax, hostMouseHeld.ay, hostMouseBtn.left, hostMouseBtn.right);
+}
+
+export function clearHostMouse1351(emu: EjsInstance | null) {
+  resetMouse1351Accum(hostMouse1351);
+  hostMouseBtn.left = false;
+  hostMouseBtn.right = false;
+  hostMouseHeld = { ax: 0, ay: 0 };
+  hostMouseFlushAt = 0;
+  clearMouseAnalog(emu);
 }
 
 export function resetEmu(emu: EjsInstance | null) {

@@ -1,0 +1,41 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import { createServer } from "vite";
+
+const server = await createServer({ server: { middlewareMode: true }, appType: "custom" });
+const {
+  ANALOGMOUSE_UNITS_PER_FRAME,
+  analogAxesForDeltas,
+  addMouse1351Delta,
+  createMouse1351Accum,
+  takeMouse1351Frame,
+} = await server.ssrLoadModule("/src/lib/emu/mouse-1351.ts");
+await server.close();
+
+test("one host pixel becomes a 0.1 analog axis (10 units per full stick)", () => {
+  const { ax, ay, usedX, usedY } = analogAxesForDeltas(1, -2);
+  assert.equal(usedX, 1);
+  assert.equal(usedY, -2);
+  assert.equal(ax, 1 / ANALOGMOUSE_UNITS_PER_FRAME);
+  assert.equal(ay, -2 / ANALOGMOUSE_UNITS_PER_FRAME);
+});
+
+test("a large drag is capped per poll so leftover pixels stay in the accumulator", () => {
+  const acc = createMouse1351Accum();
+  addMouse1351Delta(acc, 25, 0);
+  const first = takeMouse1351Frame(acc);
+  assert.equal(first.ax, 1);
+  assert.ok(acc.x > 0);
+  const second = takeMouse1351Frame(acc);
+  assert.equal(second.ax, 1);
+  assert.equal(acc.x, 25 - ANALOGMOUSE_UNITS_PER_FRAME * 2);
+  const third = takeMouse1351Frame(acc);
+  assert.equal(third.ax, (25 - ANALOGMOUSE_UNITS_PER_FRAME * 2) / ANALOGMOUSE_UNITS_PER_FRAME);
+  assert.equal(acc.x, 0);
+});
+
+test("idle poll is zero analog — no leftover velocity", () => {
+  const acc = createMouse1351Accum();
+  const idle = takeMouse1351Frame(acc);
+  assert.deepEqual(idle, { ax: 0, ay: 0 });
+});

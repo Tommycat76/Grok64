@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeftRight, FastForward, Move } from "lucide-react";
 import type { JoyPort, PadSide } from "@/lib/emu/types";
 import { layoutStyle, type ControlId, type ControlLayout } from "@/lib/emu/control-layout";
-import { snapStick, STICK_OUTER_DEAD, STICK_TAP_HOLD_MS, STICK_TAP_MAX_MS } from "@/lib/emu/stick-precision.mjs";
+import { snapStick, STICK_OUTER_DEAD } from "@/lib/emu/stick-precision.mjs";
 import { Touchpad } from "@/components/emu/Touchpad";
 
 export type StickGate = "4way" | "8way";
@@ -129,8 +129,6 @@ export function TouchControls({
   mouseRef.current = mouseMode;
   const lastDir = useRef({ x: 0, y: 0 });
   const sentDir = useRef({ x: 0, y: 0 });
-  const tapHold = useRef<number | null>(null);
-  const downAt = useRef(0);
   const stickFingerDown = useRef(false);
   const stickCenterDrag = useRef(false);
 
@@ -292,12 +290,7 @@ export function TouchControls({
       if (lockedRef.current || layoutEditRef.current || active.has(id)) return;
       active.set(id, zones);
       if (zones.stick) {
-        if (tapHold.current) {
-          window.clearTimeout(tapHold.current);
-          tapHold.current = null;
-        }
         stickPid.current = id;
-        downAt.current = Date.now();
         stickFingerDown.current = true;
         stickCenterDrag.current = stickMagnitude(x, y) < STICK_OUTER_DEAD;
         syncStickHold();
@@ -328,19 +321,8 @@ export function TouchControls({
         stickFingerDown.current = false;
         stickCenterDrag.current = false;
         syncStickHold();
-        const held = Date.now() - downAt.current;
-        const dir = lastDir.current;
         const stillStick = [...active.values()].some((z) => z.stick);
-        if (!stillStick) {
-          if (held < STICK_TAP_MAX_MS && (dir.x !== 0 || dir.y !== 0)) {
-            tapHold.current = window.setTimeout(() => {
-              tapHold.current = null;
-              centerStick();
-            }, STICK_TAP_HOLD_MS);
-          } else {
-            centerStick();
-          }
-        }
+        if (!stillStick) centerStick();
       }
       syncButtons();
     };
@@ -613,7 +595,7 @@ export function TouchControls({
         <div className="g64-touchpad-wrap" style={pos("touchpad")} onPointerDown={(e) => startLayoutDrag("touchpad", e)}>
           <LayoutHandle show={layoutEdit} />
           <Touchpad
-            onDelta={(dx, dy) => onMouseDelta?.(dx * 2.4, dy * 2.4)}
+            onDelta={(dx, dy) => onMouseDelta?.(dx, dy)}
             onEnd={onMouseEnd}
             locked={locked}
             layoutEdit={layoutEdit}

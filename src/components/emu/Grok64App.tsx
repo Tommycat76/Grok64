@@ -91,8 +91,10 @@ import {
   setJoyVector,
   setPaused,
   setWarp,
-  setMouseAnalog,
-  clearMouseAnalog,
+  addHostMouseDelta,
+  setHostMouseButtons,
+  flushHostMouse1351,
+  clearHostMouse1351,
   audioLocked,
   unlockAudio,
   suspendAudio,
@@ -333,8 +335,8 @@ import {
   validateCrtImport,
   scanLibraryCartHealth,
 } from "@/lib/emu/cart-crt-diag";
-import { createMenuJoyGate, menuJoyStep, resetMenuJoyGate } from "@/lib/emu/menu-joy.mjs";
-import { applyStickPrecision, createStickPrecision, resetStickPrecision } from "@/lib/emu/stick-precision.mjs";
+import { createMenuJoyGate, resetMenuJoyGate } from "@/lib/emu/menu-joy.mjs";
+import { createStickPrecision, resetStickPrecision } from "@/lib/emu/stick-precision.mjs";
 import { publicUrl } from "@/lib/public-url";
 import { readScreenText, screenRamShowsGeosCatalog } from "@/lib/emu/screen-text";
 import { applyEmuVolume, gestureUnlockAudio, pokeAudioUnlock } from "@/lib/emu/audio-unlock";
@@ -484,7 +486,6 @@ export function Grok64App() {
   const wasdJoyRef = useRef({ up: false, down: false, left: false, right: false });
   const lastJoySentRef = useRef({ x: 0, y: 0, fire: false });
   const fireArmedAt = useRef(0);
-  const mouseVelRef = useRef({ x: 0, y: 0 });
   const mousePtrRef = useRef<{ x: number; y: number } | null>(null);
   const mouseBtnRef = useRef({ left: false, right: false });
   const [awaitingStart, setAwaitingStart] = useState(false);
@@ -560,32 +561,8 @@ export function Grok64App() {
     if (a.down || w.down) y = 1;
     if (jumpHeldRef.current) y = -1;
     const player = digitalJoyPlayer(useEmu.getState().mouseMode);
-    if (isMenuJoyMode()) {
-      const out = menuJoyStep(menuJoyGateRef.current, x, y, performance.now());
-      if (out.x === 0 && out.y === 0) {
-        const last = lastJoySentRef.current;
-        if (last.x === 0 && last.y === 0 && fire === last.fire) return;
-      }
-      lastJoySentRef.current = { x: out.x, y: out.y, fire };
-      setJoyVector(emu, out.x, out.y, fire, player);
-      return;
-    }
     resetMenuJoyGate(menuJoyGateRef.current);
-    const st = useEmu.getState();
-    if (st.stickGate === "4way") {
-      stickPrecisionRef.current.precision = true;
-      stickPrecisionRef.current.periodMs = frameMsForStandard(resolvedRef.current.standard);
-      const out = applyStickPrecision(
-        stickPrecisionRef.current,
-        { x, y },
-        performance.now(),
-        stickCenterHoldRef.current,
-      );
-      x = out.x;
-      y = out.y;
-    } else {
-      stickPrecisionRef.current.precision = false;
-    }
+    stickPrecisionRef.current.precision = false;
     const last = lastJoySentRef.current;
     if (x === last.x && y === last.y && fire === last.fire) return;
     lastJoySentRef.current = { x, y, fire };
@@ -1287,7 +1264,7 @@ export function Grok64App() {
         sessionIecRef.current = "1541";
         sessionUnitRef.current = 8;
         const geosMap = { ...stGeos.iecMap, 8: "1541" as const };
-        setMouseAnalog(emuRef.current, true);
+        clearHostMouse1351(emuRef.current);
         disarmAutostart(emuRef.current, "disk");
         const ok = await bootGeosFloppy(emuRef.current, new Uint8Array(buf), name, 8, geosMap);
         if (!ok) return false;
@@ -1415,11 +1392,19 @@ export function Grok64App() {
           iecMap: st.iecMap,
           joyPort: st.joyPort,
           mouseMode: st.mouseMode,
+          wasdIsJoy: st.wasdIsJoy,
         };
       },
       setShowKeyboard: (on) => useEmu.getState().setShowKeyboard(!!on),
       setSettingsOpen: (on) => useEmu.getState().setSettingsOpen(!!on),
       setJiffyDos: (on) => useEmu.getState().setJiffyDos(!!on),
+      setWasdIsJoy: (on) => useEmu.getState().setWasdIsJoy(!!on),
+      setMouseMode: (on) => useEmu.getState().setMouseMode(!!on),
+      addMouseDelta: (dx, dy) => addHostMouseDelta(Number(dx) || 0, Number(dy) || 0),
+      setMouseButtons: (left, right) => {
+        mouseBtnRef.current = { left: !!left, right: !!right };
+        setHostMouseButtons(!!left, !!right);
+      },
       setSidAddresses: (patch) => {
         const st = useEmu.getState();
         if (patch.sid2 !== undefined) st.setSid2Address(patch.sid2);
@@ -4357,7 +4342,9 @@ export function Grok64App() {
         else if (!cursorArrowsDown.delete(e.code)) return;
       }
       if (/^Key[WASD]$/.test(e.code) && useEmu.getState().wasdIsJoy) {
-        if (down) return;
+        e.preventDefault();
+        e.stopPropagation();
+        return;
       }
       const deferKeys = playLockRef.current || useEmu.getState().booting;
       if (deferKeys && !freezerFn) {
@@ -4545,18 +4532,14 @@ export function Grok64App() {
         void tickGrok64Iec(emu);
       }
       if (st.mouseMode && !playLockRef.current && !st.booting && st.running) {
-        const v = mouseVelRef.current;
-        const b = mouseBtnRef.current;
-        setMouseAnalog(emu, v.x, v.y, b.left, b.right);
-        mouseVelRef.current.x *= 0.72;
-        mouseVelRef.current.y *= 0.72;
-        if (Math.abs(mouseVelRef.current.x) < 0.01) mouseVelRef.current.x = 0;
-        if (Math.abs(mouseVelRef.current.y) < 0.01) mouseVelRef.current.y = 0;
+        setHostMouseButtons(mouseBtnRef.current.left, mouseBtnRef.current.right);
+        flushHostMouse1351(emu, frameMsForStandard(resolvedRef.current.standard));
         emitJoyVector();
       } else if (st.mouseMode) {
-        clearMouseAnalog(emu);
+        clearHostMouse1351(emu);
         emitJoyVector();
       } else {
+        clearHostMouse1351(emu);
         emitJoyVector();
       }
     };
@@ -4723,8 +4706,9 @@ export function Grok64App() {
           ? {
               vice_joyport_type: "3",
               vice_analogmouse: "left",
-              vice_mouse_speed: "120",
+              vice_mouse_speed: "100",
               vice_analogmouse_speed: "1.0",
+              vice_analogmouse_deadzone: "0",
             }
           : {}),
         vice_ram_expansion_unit: s.reuSize,
@@ -4979,6 +4963,7 @@ export function Grok64App() {
     "data-kb": s.powered && s.showKeyboard ? "true" : "false",
     "data-pad": s.padName ? "true" : "false",
     "data-mouse": s.mouseMode ? "true" : "false",
+    "data-kbjoy": s.wasdIsJoy ? "true" : "false",
     "data-layout-edit": s.layoutEdit ? "true" : "false",
     "data-running": s.running ? "true" : "false",
     "data-booting": s.booting ? "true" : "false",
@@ -5121,6 +5106,24 @@ export function Grok64App() {
           >
             MOUSE
           </button>
+          <button
+            type="button"
+            className="g64-chip g64-chip-gate g64-chip-pin"
+            data-on={s.wasdIsJoy ? "true" : "false"}
+            data-kbjoy={s.wasdIsJoy ? "true" : "false"}
+            title={
+              s.wasdIsJoy
+                ? "Keyboard joystick on — WASD is the stick. Tap to type W/A/S/D."
+                : "Keyboard joystick off — W/A/S/D type letters. Tap so WASD moves the stick."
+            }
+            onClick={() => {
+              const next = !s.wasdIsJoy;
+              s.setWasdIsJoy(next);
+              toast.message(next ? `WASD is the joystick — tap P${s.joyPort} to pick the port` : "WASD types letters");
+            }}
+          >
+            WASD
+          </button>
           {visibleHwButtons({
             cart: cartLive,
             sd2iec: mapHasDrive(s.iecMap, "sd2iec"),
@@ -5156,15 +5159,15 @@ export function Grok64App() {
             data-on={s.stickGate === "4way" ? "true" : "false"}
             title={
               s.stickGate === "4way"
-                ? "Slow 4-way D-pad — tap for 8-way"
-                : "Tap for slow cardinals (Paradroid, Boulder Dash)"
+                ? "4-way stick — hold a direction. Tap for 8-way."
+                : "8-way stick. Tap for cardinals only."
             }
             onClick={() => {
               const next = s.stickGate === "4way" ? "8way" : "4way";
               s.setStickGate(next);
               resetStickPrecision(stickPrecisionRef.current);
-              stickPrecisionRef.current.precision = next === "4way";
-              toast.message(next === "4way" ? "Cardinals — tap to step, hold to crawl" : "8-way C64 stick");
+              stickPrecisionRef.current.precision = false;
+              toast.message(next === "4way" ? "Cardinals — 4-way hold" : "8-way C64 stick");
             }}
           >
             CARDINALS
@@ -5359,7 +5362,8 @@ export function Grok64App() {
                 } catch {
                   /* */
                 }
-                setMouseAnalog(emuRef.current, 0, 0, mouseBtnRef.current.left, mouseBtnRef.current.right);
+                setHostMouseButtons(mouseBtnRef.current.left, mouseBtnRef.current.right);
+                flushHostMouse1351(emuRef.current, frameMsForStandard(resolvedRef.current.standard));
               } else {
                 onFire(true, true);
               }
@@ -5369,10 +5373,7 @@ export function Grok64App() {
               const prev = mousePtrRef.current;
               mousePtrRef.current = { x: e.clientX, y: e.clientY };
               if (!prev) return;
-              const rect = e.currentTarget.getBoundingClientRect();
-              const scale = Math.max(rect.width, rect.height, 120);
-              mouseVelRef.current.x = Math.max(-1, Math.min(1, mouseVelRef.current.x + (e.clientX - prev.x) / scale));
-              mouseVelRef.current.y = Math.max(-1, Math.min(1, mouseVelRef.current.y + (e.clientY - prev.y) / scale));
+              addHostMouseDelta(e.clientX - prev.x, e.clientY - prev.y);
             }}
             onPointerUp={(e) => {
               if (playLockRef.current || !s.running || s.booting) return;
@@ -5380,7 +5381,8 @@ export function Grok64App() {
                 if (e.button === 2) mouseBtnRef.current.right = false;
                 else mouseBtnRef.current.left = false;
                 if (!mouseBtnRef.current.left && !mouseBtnRef.current.right) mousePtrRef.current = null;
-                setMouseAnalog(emuRef.current, mouseVelRef.current.x, mouseVelRef.current.y, mouseBtnRef.current.left, mouseBtnRef.current.right);
+                setHostMouseButtons(mouseBtnRef.current.left, mouseBtnRef.current.right);
+                flushHostMouse1351(emuRef.current, frameMsForStandard(resolvedRef.current.standard));
                 return;
               }
               if (!pendingKickRef.current) onFire(false);
@@ -5390,7 +5392,8 @@ export function Grok64App() {
               if (s.mouseMode) {
                 mouseBtnRef.current = { left: false, right: false };
                 mousePtrRef.current = null;
-                setMouseAnalog(emuRef.current, mouseVelRef.current.x, mouseVelRef.current.y, false, false);
+                setHostMouseButtons(false, false);
+                flushHostMouse1351(emuRef.current, frameMsForStandard(resolvedRef.current.standard));
                 return;
               }
               if (!pendingKickRef.current) onFire(false);
@@ -5449,16 +5452,16 @@ export function Grok64App() {
         onMouseDelta={(dx, dy) => {
           unlockAudio(emuRef.current);
           if (playLockRef.current || useEmu.getState().booting) return;
-          mouseVelRef.current.x = dx;
-          mouseVelRef.current.y = dy;
+          addHostMouseDelta(dx, dy);
         }}
         onMouseEnd={() => {
-          mouseVelRef.current = { x: 0, y: 0 };
+          /* leftover pixels keep flushing; analog goes idle when the accumulator is empty */
         }}
         onMouseBtn={(left, right) => {
           unlockAudio(emuRef.current);
           if (playLockRef.current || useEmu.getState().booting || !useEmu.getState().running) return;
           mouseBtnRef.current = { left, right };
+          setHostMouseButtons(left, right);
         }}
         jumpEnabled={s.jumpBtn}
         joyPort={s.joyPort}

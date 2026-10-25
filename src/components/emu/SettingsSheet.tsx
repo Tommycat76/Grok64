@@ -89,9 +89,10 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               <Switch on={s.mouseMode} onToggle={() => s.setMouseMode(!s.mouseMode)} />
             </div>
             <p className="mb-3 text-xs text-fg-subtle">
-              1351 sits on the selected port; the other port stays a joystick. GEOS boots with its
-              JOYSTICK driver on Port 1 — tap P1, then WASD or the on-screen stick. After CONFIGURE
-              → COMM 1351, put the mouse on that port and use the screen, trackpad, or L/R buttons.
+              1351 sits on the selected port; the other port stays a joystick. Drag the screen or
+              the trackpad — those pixels become 1351 POT X/Y. L/R are the 1351 buttons. GEOS
+              JOYSTICK is Port 1: tap P1, turn Keyboard joystick on, then WASD or the on-screen
+              stick. After CONFIGURE → COMM 1351, put the mouse on that port.
             </p>
             {s.mouseMode ? (
               <div className="g64-field">
@@ -431,7 +432,7 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               <Switch on={s.showJoystick} onToggle={() => s.setShowJoystick(!s.showJoystick)} />
             </div>
             <div className="g64-row">
-              <span>WASD joystick</span>
+              <span>Keyboard joystick (WASD)</span>
               <Switch on={s.wasdIsJoy} onToggle={() => s.setWasdIsJoy(!s.wasdIsJoy)} />
             </div>
             <div className="g64-row">
@@ -439,10 +440,11 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               <Switch on={s.arrowsAreJoy} onToggle={() => s.setArrowsAreJoy(!s.arrowsAreJoy)} />
             </div>
             <p className="mb-3 text-xs text-fg-subtle">
-              Keyboard is the full C64 keyboard on computer, tablet, and phone. Right Ctrl is FIRE.
-              WASD (and arrows, if you turn that on) move the digital stick — needed for GEOS
-              JOYSTICK and other joystick-only software. A plugged-in gamepad is used first; the
-              on-screen stick stays up with the 1351 so both ports can be used.
+              Keyboard joystick is off unless you turn it on — W/A/S/D then type letters. When it
+              is on, WASD is a real digital stick (hold to move, needed for GEOS JOYSTICK). Arrow
+              keys stay the C64 cursor unless you flip that switch. Right Ctrl is FIRE. A plugged-in
+              gamepad is used first; the on-screen stick stays up with the 1351 so both ports can
+              be used.
             </p>
             {s.padName ? (
               <p className="mb-3 text-sm text-phosphor">Using controller: {s.padName}</p>

@@ -77,8 +77,9 @@ export function viceExpandOptions(opts: {
     o.vice_joyport = opts.joyPort === 1 ? "1" : "2";
     o.vice_joyport_type = "3";
     o.vice_analogmouse = "left";
-    o.vice_mouse_speed = "120";
+    o.vice_mouse_speed = "100";
     o.vice_analogmouse_speed = "1.0";
+    o.vice_analogmouse_deadzone = "0";
   } else {
     o.vice_joyport = opts.joyPort === 1 ? "1" : "2";
     o.vice_joyport_type = "1";

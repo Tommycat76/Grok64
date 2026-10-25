@@ -55,8 +55,9 @@ export function buildViceExtras(input: ViceExtrasInput): Record<string, string> 
     opts.vice_joyport = input.joyPort === 1 ? "1" : "2";
     opts.vice_joyport_type = "3";
     opts.vice_analogmouse = "left";
-    opts.vice_mouse_speed = "120";
+    opts.vice_mouse_speed = "100";
     opts.vice_analogmouse_speed = "1.0";
+    opts.vice_analogmouse_deadzone = "0";
   } else {
     opts.vice_joyport = input.joyPort === 1 ? "1" : "2";
     opts.vice_joyport_type = "1";
