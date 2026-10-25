@@ -888,28 +888,21 @@ async function pickComm1351InDialog(hand, dlg) {
   }
 
   if (out.which !== "comm") {
-    // C= + I leaves the pointer in the empty mid. COMM is straight up.
-    // Up-left overshoots into the title. 70ms ≈ 3–4 GEOS px.
-    await hopJoy(hand, 0, -1, 7, 80);
+    // C= + I leaves the pointer in the empty mid. Click, hop one line,
+    // repeat until the COMM bar lights. Fixed hop counts overshoot the title.
+    out.tries = [];
+    for (let i = 0; i < 12 && out.which !== "comm"; i++) {
+      await clickJoy(hand, { downMs: 110 });
+      await sleep(220);
+      const vice = await snapshot(hand.page);
+      out.which = whichInputHighlight(vice.img);
+      out.tries.push(out.which);
+      await savePng(hand.shotDir(), `10-1351-comm-try-${i}.png`, vice.b64);
+      if (out.which === "comm") break;
+      await holdJoy(hand, 0, i < 6 ? -1 : 1, 70);
+      await sleep(70);
+    }
     await hand.shot("10-1351-toward-comm.png");
-    await clickJoy(hand, { downMs: 120 });
-    await sleep(300);
-    let vice = await snapshot(hand.page);
-    out.which = whichInputHighlight(vice.img);
-    if (out.which !== "comm") {
-      await hopJoy(hand, 0, 1, 2, 80);
-      await clickJoy(hand, { downMs: 120 });
-      await sleep(280);
-      vice = await snapshot(hand.page);
-      out.which = whichInputHighlight(vice.img);
-    }
-    if (out.which !== "comm") {
-      await hopJoy(hand, 0, 1, 2, 80);
-      await clickJoy(hand, { downMs: 120 });
-      await sleep(280);
-      vice = await snapshot(hand.page);
-      out.which = whichInputHighlight(vice.img);
-    }
     out.highlight = out.which;
   }
 
