@@ -639,18 +639,71 @@ function inMinusBox(g) {
   return Boolean(g && g.x >= 238 && g.x <= 260 && g.y >= 16 && g.y <= 28);
 }
 
+/** Official deskTop menu bar: geos is x≈5–28 (center ~16). file starts ~32. */
+function onGeosWord(g) {
+  return Boolean(g && g.x >= 8 && g.x <= 24 && g.y >= 0 && g.y <= 16);
+}
+
+/** Dropdown left edge: geos ~5, file ~32, view ~70. */
+function openedMenuKind(before, after) {
+  if (!before?.img || !after?.img) return { kind: "none" };
+  const c = contentRect(after.img);
+  if (!c) return { kind: "none" };
+  const { data, width } = after.img;
+  const prev = before.img.data;
+  const cols = new Array(160).fill(0);
+  for (let gy = 18; gy < 96; gy++) {
+    for (let gx = 0; gx < 160; gx++) {
+      const x = Math.round(c.x + (gx / 320) * c.w);
+      const y = Math.round(c.y + (gy / 200) * c.h);
+      const i = (y * width + x) * 4;
+      const d =
+        Math.abs(data[i] - prev[i]) +
+        Math.abs(data[i + 1] - prev[i + 1]) +
+        Math.abs(data[i + 2] - prev[i + 2]);
+      if (d > 40) cols[gx] += 1;
+    }
+  }
+  let left = -1;
+  let right = -1;
+  let best = 0;
+  let bestL = -1;
+  let bestR = -1;
+  for (let gx = 0; gx < 160; gx++) {
+    if (cols[gx] >= 8) {
+      if (left < 0) left = gx;
+      right = gx;
+    } else if (left >= 0) {
+      if (right - left > best) {
+        best = right - left;
+        bestL = left;
+        bestR = right;
+      }
+      left = -1;
+    }
+  }
+  if (left >= 0 && right - left > best) {
+    bestL = left;
+    bestR = right;
+  }
+  if (bestL < 0 || bestR - bestL < 20) return { kind: "none" };
+  const kind = bestL <= 24 ? "geos" : bestL <= 55 ? "file" : "view";
+  return { kind, left: bestL, right: bestR };
+}
+
 async function landOnGeosWord(hand) {
   const trace = { hops: [] };
   const horiz = [
     [-1, 0],
     [1, 0],
   ];
-  for (let i = 0; i < 14; i++) {
+  for (let i = 0; i < 24; i++) {
     const snap = await snapshot(hand.page);
-    const loc = await locatePointer(hand, { dirs: horiz, pulseMs: 40 });
+    const lastX = trace.hops.length ? trace.hops[trace.hops.length - 1].x : 200;
+    const loc = await locatePointer(hand, { dirs: horiz, pulseMs: lastX <= 40 ? 22 : 40 });
     const g = toGeos(loc, snap.img);
     if (g) trace.hops.push({ i, x: +g.x.toFixed(1), y: +g.y.toFixed(1) });
-    if (g && g.x <= 26 && g.y <= 16) {
+    if (onGeosWord(g)) {
       trace.landed = g;
       return trace;
     }
@@ -659,11 +712,12 @@ async function landOnGeosWord(hand) {
       continue;
     }
     if (g.y > 16) await holdJoy(hand, 0, -1, 70);
-    else if (g.x > 26) await holdJoy(hand, -1, 0, 70);
-    else await holdJoy(hand, 1, 0, 50);
+    else if (g.x > 24) await holdJoy(hand, -1, 0, g.x > 40 ? 70 : 40);
+    else if (g.x < 8) await holdJoy(hand, 1, 0, 36);
+    else await holdJoy(hand, 1, 0, 30);
   }
   const snap = await snapshot(hand.page);
-  const loc = await locatePointer(hand, { dirs: horiz, pulseMs: 40 });
+  const loc = await locatePointer(hand, { dirs: horiz, pulseMs: 22 });
   trace.landed = toGeos(loc, snap.img);
   return trace;
 }
@@ -933,31 +987,45 @@ async function activateGeos1351(hand) {
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
 
-  // WASD parks on "select". geos is the leftmost word (GEOS x < 42). Long
-  // left pulses skip to "view" and "by name" empties the icon notepad.
+  // WASD parks on "select". geos is x≈5–28; file starts ~32. Do not click the gap.
   out.landGeos = await landOnGeosWord(hand);
-  out.steps.push(out.landGeos?.landed && out.landGeos.landed.x <= 26 ? "on-geos" : "geos-miss");
-  await clickJoy(hand);
-  await sleep(450);
-  await hand.shot("10-1351-geos-menu.png");
-  const menu = await snapshot(hand.page);
-  const menuPtr = toGeos(await locatePointer(hand, { dirs: [[1, 0], [-1, 0]], pulseMs: 40 }), menu.img);
-  if (menuPtr && menuPtr.x > 30) {
-    out.steps.push("wrong-menu");
-    await clickJoy(hand);
-    await sleep(250);
-    out.landGeos = await landOnGeosWord(hand);
+  out.steps.push(onGeosWord(out.landGeos?.landed) ? "on-geos" : "geos-miss");
+  await hand.shot("10-1351-preclick.png");
+  if (onGeosWord(out.landGeos?.landed)) {
     await clickJoy(hand);
     await sleep(450);
-    await hand.shot("10-1351-geos-menu.png");
   }
-  // geos info → select printer → select input (a fourth down is RESET).
-  await holdJoy(hand, 0, 1, 100);
-  await holdJoy(hand, 0, 1, 100);
-  await holdJoy(hand, 0, 1, 100);
-  await clickJoy(hand);
-  await sleep(900);
-  out.steps.push("select-input-menu");
+  await hand.shot("10-1351-geos-menu.png");
+  let menuSnap = await snapshot(hand.page);
+  out.menu = openedMenuKind(before, menuSnap);
+  if (out.menu.kind !== "geos") {
+    out.steps.push(out.menu.kind === "none" ? "no-menu" : "wrong-menu");
+    if (out.menu.kind !== "none") {
+      await clickJoy(hand);
+      await sleep(250);
+    }
+    out.landGeos = await landOnGeosWord(hand);
+    out.steps.push(onGeosWord(out.landGeos?.landed) ? "on-geos-retry" : "geos-miss-retry");
+    await hand.shot("10-1351-preclick-retry.png");
+    if (onGeosWord(out.landGeos?.landed)) {
+      await clickJoy(hand);
+      await sleep(450);
+    }
+    await hand.shot("10-1351-geos-menu.png");
+    menuSnap = await snapshot(hand.page);
+    out.menu = openedMenuKind(before, menuSnap);
+  }
+  if (out.menu.kind !== "geos") {
+    out.steps.push("geos-menu-fail");
+  } else {
+    // geos info → select printer → select input (a fourth down is RESET).
+    await holdJoy(hand, 0, 1, 90);
+    await holdJoy(hand, 0, 1, 90);
+    await holdJoy(hand, 0, 1, 90);
+    await clickJoy(hand);
+    await sleep(900);
+    out.steps.push("select-input-menu");
+  }
   let dlg = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-page-menu.png", dlg.b64);
   await hand.shot("10-1351-select-input.png");
