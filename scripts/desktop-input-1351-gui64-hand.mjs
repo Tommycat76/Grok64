@@ -926,9 +926,9 @@ async function pickComm1351InDialog(hand, dlg) {
     await sleep(400);
     let still = await snapshot(hand.page);
     if (looksLikeSelectInput(still.img)) {
-      // 850ms right stopped in the empty mid; 2000+700 overshot to the trash.
-      await hopJoy(hand, 1, 0, 16, 80);
-      await hopJoy(hand, 0, 1, 5, 80);
+      // 16 right + 5 down from COMM lands in the empty mid, just left of OK.
+      await hopJoy(hand, 1, 0, 22, 80);
+      await hopJoy(hand, 0, 1, 8, 80);
       await sleep(80);
       await clickJoy(hand, { downMs: 140 });
       await sleep(400);
