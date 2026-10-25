@@ -415,7 +415,18 @@ function looksLikeSelectInput(img) {
       if (sample(gx, gy) < 300) okDark += 1;
     }
   }
-  return barFrac > 0.35 && emptyN > 0 && emptyLight / emptyN > 0.55 && okN > 0 && okDark / okN > 0.05;
+  const midDark = rowDark(70, 100);
+  // About-box VICE dumps are a dark prose rectangle (barFrac≈1, midDark≈0.4).
+  // Select Input is a light box with one highlight band and an empty mid.
+  return (
+    barFrac > 0.35 &&
+    barFrac < 0.92 &&
+    midDark < 0.16 &&
+    emptyN > 0 &&
+    emptyLight / emptyN > 0.75 &&
+    okN > 0 &&
+    okDark / okN > 0.05
+  );
 }
 
 /** Dark sprite in the empty dialog mid (VICE gray pointer). Null if it's on the list/OK. */
@@ -859,7 +870,19 @@ function looksLikeAboutBox(img) {
   if (n < 200) return false;
   const wf = white / n;
   const df = dark / n;
-  return wf > 0.45 && df > 0.04 && df < 0.22;
+  let midDark = 0;
+  let midN = 0;
+  for (let gy = 70; gy <= 100; gy++) {
+    for (let gx = 96; gx <= 200; gx++) {
+      const x = Math.round(c.x + (gx / 320) * c.w);
+      const y = Math.round(c.y + (gy / 200) * c.h);
+      const i = (y * width + x) * 4;
+      midN += 1;
+      if (data[i] + data[i + 1] + data[i + 2] < 300) midDark += 1;
+    }
+  }
+  // Color about box, or VICE-gray prose rectangle (no empty mid).
+  return (wf > 0.45 && df > 0.04 && df < 0.22) || (midN > 0 && midDark / midN > 0.2);
 }
 
 /** Dropdown left edge: geos ~5, file ~32, view ~70. */
@@ -1200,7 +1223,7 @@ async function test1351(hand, prefix) {
   return out;
 }
 
-/** geos → select input → COMM 1351(a) → OK. C= + I opens GEOS info on this disk. */
+/** C= + I opens Select Input Device on the official boot disk (real-UI proof). Menu walk is fallback. */
 async function activateGeos1351(hand) {
   const out = { steps: [], file: "COMM 1351(a)", via: "select-input" };
   await ensureMouse(hand, false);
@@ -1209,8 +1232,12 @@ async function activateGeos1351(hand) {
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
 
-  let dlg = before;
-  {
+  await tapCbmI(hand);
+  out.steps.push("cbm-i");
+  let dlg = await waitSelectInput(hand, before, 8000);
+  out.dialog = isSelectInputDialog(before, dlg);
+
+  if (!out.dialog) {
     out.landGeos = await landOnGeosWord(hand);
     out.steps.push(onGeosWord(out.landGeos?.landed) ? "on-geos" : "geos-miss");
     await hand.shot("10-1351-preclick.png");
