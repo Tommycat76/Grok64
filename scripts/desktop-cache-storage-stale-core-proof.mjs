@@ -73,22 +73,18 @@ try {
   );
 
   const seeded = await page.evaluate(async () => {
-    const idb =
-      (await window.__g64?.qaSeedStaleEmulatorJsCoreCacheBlob?.()) ??
-      (await window.__g64?.qaSeedStaleEmulatorJsCoreCache?.());
-    const cache = await window.__g64?.qaSeedStaleGrok64CoreCacheStorage?.();
+    const broken = await window.__g64?.qaSeedBrokenGrok64CoreCaches?.();
     sessionStorage.setItem("grok64.coreCacheAutoReload", "1");
     sessionStorage.removeItem("grok64.coreStaleSticky");
     return {
-      idb,
-      cache,
+      broken,
       attempt: window.__g64?.coreRefreshAttempt?.(),
       lib: await window.__g64?.libraryIdbDiag?.(),
     };
   });
   trace.seeded = seeded;
-  if (!seeded?.cache?.bytes && !seeded?.idb?.bytes) {
-    throw new Error("failed to seed Cache Storage / IDB with a stock VICE blob");
+  if (!seeded?.broken?.bytes) {
+    throw new Error("failed to seed Cache Storage / IDB with a broken VICE blob");
   }
 
   await page.reload({ waitUntil: "domcontentloaded" });
@@ -130,11 +126,16 @@ try {
     blobUrl: core.status?.blobUrl,
   };
 
-  await page.evaluate(async (name) => window.__g64?.playLibraryByName?.(name), d64Name).catch(async () => {
-    await page.locator('button[aria-label="Software"]').click({ timeout: 15_000 }).catch(() => {});
-    await page.getByRole("button", { name: new RegExp(`^(Play|Run) ${d64Name.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&")}$`) }).click({ timeout: 30_000 });
-  });
-  await waitRunning(page, 180_000);
+  const inserted = await page.evaluate(async (name) => {
+    try {
+      await window.__g64?.insertLibraryByName?.(name);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, err: String(e?.message || e) };
+    }
+  }, d64Name);
+  trace.inserted = inserted;
+  await page.waitForTimeout(2000);
   await typeBasic(page, 'LOAD"$",8', { afterMs: 12_000 });
   await page.waitForTimeout(3000);
   await typeBasic(page, "LIST", { afterMs: 10_000 });

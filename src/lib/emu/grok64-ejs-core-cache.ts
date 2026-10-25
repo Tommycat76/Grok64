@@ -646,6 +646,56 @@ export async function qaSeedStaleEmulatorJsCoreCacheRow(): Promise<{ key: string
  * QA: put stock vice *.data bytes in Cache Storage under the current Grok64 URL
  * (dirty profile / SW cache shape). Does not touch the grok64 library DB.
  */
+/**
+ * QA: poison IDB + Cache Storage with bytes that are not the manifest core
+ * (no grok64_disk_attach). Boot purge + refresh must replace this blob.
+ */
+export async function qaSeedBrokenGrok64CoreCaches(): Promise<{
+  idbKey: string;
+  cache: string;
+  url: string;
+  bytes: number;
+} | null> {
+  if (typeof window === "undefined") return null;
+  const canonical = grok64CoreBlobUrl();
+  if (!canonical) return null;
+  const dummy = new Uint8Array(8192);
+  dummy.set(new TextEncoder().encode("STALE-VICE-CORE-NO-GROK64-DISK-ATTACH"));
+
+  if (typeof caches !== "undefined") {
+    const cache = await caches.open("grok64-qa-stale-core");
+    await cache.put(
+      canonical,
+      new Response(dummy, { headers: { "Content-Type": "application/octet-stream" } }),
+    );
+  }
+
+  patchIndexedDbForEmulatorJsCache();
+  const db = await openEjsCacheDb();
+  if (!db) return { idbKey: "", cache: "grok64-qa-stale-core", url: canonical, bytes: dummy.byteLength };
+  const key = `Obj-qa-broken-${Date.now()}`;
+  const now = Date.now();
+  await writeEjsCoreCacheBlob(
+    db,
+    key,
+    {
+      key,
+      url: canonical,
+      type: "Core",
+      filename: "vice_x64sc-wasm.data",
+      added: now,
+      lastAccessed: now,
+      fileSize: dummy.byteLength,
+      responseType: "arraybuffer",
+      cacheExpiry: now + 7 * 86400000,
+    },
+    "vice_x64sc-wasm.data",
+    dummy,
+  );
+  db.close();
+  return { idbKey: key, cache: "grok64-qa-stale-core", url: canonical, bytes: dummy.byteLength };
+}
+
 export async function qaSeedStaleGrok64CoreCacheStorage(): Promise<{
   cache: string;
   url: string;
