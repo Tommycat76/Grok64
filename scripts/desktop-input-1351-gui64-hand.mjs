@@ -482,6 +482,57 @@ function looksLikeSelectInput(img) {
   );
 }
 
+/** Dark GEOS pointer in the dialog, including the OK row. Skips the list highlight. */
+function findDialogSprite(img) {
+  const c = contentRect(img);
+  if (!c) return null;
+  const { data, width, height } = img;
+  let sx = 0;
+  let sy = 0;
+  let n = 0;
+  for (let gy = 68; gy <= 128; gy++) {
+    for (let gx = 80; gx <= 236; gx++) {
+      if (gy <= 66 && gx >= 92 && gx <= 168) continue;
+      const x = Math.round(c.x + (gx / 320) * c.w);
+      const y = Math.round(c.y + (gy / 200) * c.h);
+      if (x < 0 || y < 0 || x >= width || y >= height) continue;
+      const i = (y * width + x) * 4;
+      if (data[i] + data[i + 1] + data[i + 2] < 300) {
+        sx += gx;
+        sy += gy;
+        n += 1;
+      }
+    }
+  }
+  if (n < 5 || n > 220) return null;
+  return { gx: sx / n, gy: sy / n, n };
+}
+
+async function walkDialogSpriteTo(hand, tx, ty, { timeout = 4500, close = 10 } = {}) {
+  const t0 = Date.now();
+  let last = null;
+  while (Date.now() - t0 < timeout) {
+    const snap = await snapshot(hand.page);
+    const loc = findDialogSprite(snap.img);
+    if (!loc) {
+      await holdJoy(hand, 1, 0, 80);
+      await sleep(60);
+      continue;
+    }
+    last = loc;
+    const dx = tx - loc.gx;
+    const dy = ty - loc.gy;
+    if (Math.hypot(dx, dy) <= close) return loc;
+    const sx = Math.abs(dx) > 5 ? Math.sign(dx) : 0;
+    const sy = Math.abs(dy) > 5 ? Math.sign(dy) : 0;
+    if (!sx && !sy) return loc;
+    const ms = Math.min(220, Math.max(55, Math.hypot(dx, dy) * 2.2));
+    await holdJoy(hand, sx, sy, ms);
+    await sleep(70);
+  }
+  return last;
+}
+
 /** Dark sprite in the empty dialog mid (VICE gray pointer). Null if it's on the list/OK. */
 function findDialogPointer(img) {
   const c = contentRect(img);
@@ -874,7 +925,6 @@ async function pickComm1351InDialog(hand, dlg) {
     downs: 0,
     closed: false,
   };
-  const ok = geosMap(dlg.img, 204, 114);
   await hand.shot("10-1351-toward-ok.png");
 
   for (let i = 0; i < 2; i++) {
@@ -913,26 +963,18 @@ async function pickComm1351InDialog(hand, dlg) {
   await hand.shot("10-1351-comm-highlighted-ui.png");
 
   if (out.which === "comm") {
-    // Pointer sits in the empty mid after the COMM click. Enter does not
-    // confirm this dialog. OK is down-right; highlight stays on COMM.
-    await holdJoy(hand, 1, 0, 850);
-    await sleep(80);
-    await holdJoy(hand, 0, 1, 320);
-    await sleep(120);
+    // RETURN does not close this dialog. Pointer sits at ~172,80; OK is 204,114.
+    // Joystick hops do not move the list bar. Walk the dark sprite onto OK, then fire.
+    out.parked = await walkDialogSpriteTo(hand, 204, 114, { timeout: 4500, close: 10 });
     await hand.shot("10-1351-on-ok-preclick.png");
     await clickJoy(hand, { downMs: 140 });
     await sleep(400);
     let still = await snapshot(hand.page);
     if (looksLikeSelectInput(still.img)) {
-      await holdJoy(hand, 1, 0, 180);
-      await sleep(80);
+      await holdJoy(hand, 1, 0, 160);
+      await holdJoy(hand, 0, 1, 120);
       await clickJoy(hand, { downMs: 140 });
       await sleep(400);
-      still = await snapshot(hand.page);
-    }
-    if (looksLikeSelectInput(still.img)) {
-      await tapC64Key(hand, "Enter", "Enter", 120);
-      await sleep(350);
       still = await snapshot(hand.page);
     }
     out.closed = !looksLikeSelectInput(still.img);
