@@ -4,7 +4,60 @@
 
 **No-regression:** Flush + safe-profile work must **not** break any **Grok64-only** feature below (not only SD2IEC). After floppy isolate during flush, Grok64 **restores** the user IEC map via `viceRcSafeFloppyProfile` so **CMD HD/FD**, secondary units, and Settings layout stay live.
 
-**Grok64 core:** `faaf40949509` (VICE **3.9.0** lineage; rebuilt after removing nested attach/reconcile). Glue: `diskapi-v18-profile-persist-atn`.
+**Grok64 core:** `cfb3626633a0` (VICE **3.9.0** lineage; D64 error-info tables go to VICE untouched). Glue: `diskapi-v25-core-cfb3626633a0`.
+
+**1541 baseline media:** a clean GEOS 2.0 boot disk, i.e. one without an error-info table: Tom's `GEOS_2.0.d64` cut to its first 174848 bytes, or `GEOS64_en.d64` (`geosBaselineD64()` in `scripts/geos-fixture-lib.mjs`). `GEOS_2.0.d64` itself marks its first directory block unreadable, so a 1541 cannot list it (next section).
+
+---
+
+## GEOS_2.0.d64's error-info table, checked in stock VICE (2026-10-25)
+
+**Result:** with true drive emulation, stock desktop VICE 3.7.1 and 3.9 answer `LOAD"$",8` with `?FILE NOT FOUND` on a D64 whose error-info table marks track 18 sector 1 as a data checksum error, and the drive reports `23, READ ERROR,18,01`. That is what Grok64 does with Tom's `GEOS_2.0.d64`, so Grok64 is emulating the 1541 correctly and nothing in the emulator is changed for this image. With the table stripped, the same disk lists 16 files and boots to the GEOS deskTop in both VICE versions and in Grok64.
+
+**Tom's image.** `GEOS_2.0.d64` is 175531 bytes: a 35-track D64 plus a 683-byte error-info table. Tom counted 347 sectors with code 05 (data checksum error, DOS error 23), 335 with 01 (OK) and one 04 (data block not found, DOS error 22). Track 18 starts `01 05 01 05 05 01 05`, so 18/1 (the first directory block), 18/3, 18/4 and 18/6 are flagged. VICE writes each 05 sector to the GCR track with a wrong data checksum, so the emulated 1541 DOS fails on 18/1 exactly as a real drive would. If the table were accurate, the original disk could not have been read on a real 1541 at all, which points to a bad dump rather than copy protection.
+
+**Media used here.** Tom's exact file is not in the agent sandbox, so the runs use stand-ins built by `scripts/make-d64-error-table-standins.mjs` from `GEOS64_en.d64` (English GEOS 2.0 boot disk, 174848 bytes, sha1 `04274950a066…`):
+
+| Stand-in | Error-info table |
+|---|---|
+| `tom-density` | Tom's figures: 347 × 05, 335 × 01, one 04; track 18 starts with his seven codes, the rest is a fixed fill that keeps his totals |
+| `tom-t18` | only his seven track-18 codes (18/1, 18/3, 18/4, 18/6 = 05) |
+| `t18s1-05` | only 18/1 = 05 |
+| `all01` | every sector 01 |
+
+Stripping the table from any of them gives back `GEOS64_en.d64`. The reference script takes any D64 path, so it runs Tom's exact file the same way: `node scripts/vice-desktop-reference.mjs /path/GEOS_2.0.d64`.
+
+**Setup.** `scripts/vice-desktop-reference.mjs`: stock GTK `x64sc`, Ubuntu's VICE 3.7.1 package and VICE 3.9 built unmodified from the release tarball, `-default` with a fresh config, drive 8 a 1541 with `Drive8TrueEmulation=1` and `VirtualDevice8=0`, KERNAL 901227-03 and 1541 DOS 325302-01/901229-05. Every command is typed as X11 key presses into the VICE window, the C64 screen is read through VICE's remote monitor, and each step is screenshotted. A D64 with a table is also run as its first 174848 bytes.
+
+| Image | VICE, true drive emulation | `LOAD"$",8` | `LIST` | Error channel | `LOAD"GEOS",8,1` |
+|---|---|---|---|---|---|
+| `tom-density` | 3.9 | `?FILE NOT FOUND  ERROR` after about 9 s | nothing | `23 READ ERROR 18 1` | `?FILE NOT FOUND  ERROR` after about 8 s |
+| `tom-density` | 3.7.1, three runs | `?FILE NOT FOUND  ERROR` after about 9 s | nothing | `23 READ ERROR 18 1` | `?FILE NOT FOUND  ERROR` after about 8 s in two runs; in one run it stayed at `SEARCHING FOR GEOS` for the full 300 s |
+| table stripped (first 174848 bytes) | 3.7.1 and 3.9 | `LOADING`, `READY.` | 16 files, `259 BLOCKS FREE.` | `0 OK 0 0` | GEOS starts itself; deskTop with 16 files, 101 Kbytes used, 64 Kbytes free |
+| `tom-t18` | 3.7.1 and 3.9 | `?FILE NOT FOUND  ERROR` | nothing | `23 READ ERROR 18 1` | `?FILE NOT FOUND  ERROR` |
+| `t18s1-05` | 3.7.1 and 3.9 | `?FILE NOT FOUND  ERROR` | nothing | `23 READ ERROR 18 1` | `?FILE NOT FOUND  ERROR` |
+| `all01` | 3.7.1 and 3.9 | `LOADING`, `READY.` | 16 files, `259 BLOCKS FREE.` | `0 OK 0 0` | deskTop |
+
+The error channel is read with `10 OPEN1,8,15` / `20 INPUT#1,A,B$,C,D` / `30 PRINTA;B$;C;D` / `40 CLOSE1`, so `23 READ ERROR 18 1` is the drive's `23, READ ERROR,18,01`. One flagged directory block is enough to hide the whole disk; a table by itself is not the problem (`all01` boots).
+
+**Without true drive emulation** (diagnostic only, `VICE_REF_TDE=0`: VICE's virtual drive instead of the emulated 1541), both versions answer `LOAD"$",8` on `tom-density` and `t18s1-05` with `LOADING`, `READY.`, but `LIST` shows only the disk header and `259 BLOCKS FREE.` with no files, and the error channel says `0 OK 0 0`. The virtual drive reads the BAM, stops at the unreadable 18/1 (`vdrive_dir_find_next_slot` in `src/vdrive/vdrive-dir.c` returns on the read error) and does not report it. A setup without true drive emulation can therefore make this image look like it nearly works, but no file on it can be found.
+
+**Grok64, same media, by hand** (build `042ef66`, core `cfb3626633a0`; `scripts/desktop-xdotool-geos-hand-boot.mjs`: real Chrome, reused profile, X11 key presses, Insert from the library):
+
+| Image | JiffyDOS | `LOAD"$",8` / `LIST` | Error channel | `LOAD"GEOS",8,1` |
+|---|---|---|---|---|
+| `tom-density` | off | `?FILE NOT FOUND  ERROR`, nothing listed | `23 READ ERROR 18 1`; About's `dos1541` (read from the drive's RAM) shows `23,READ ERROR,18,01` | `?FILE NOT FOUND  ERROR` after 8.3 s |
+| `GEOS64_en.d64` (clean) | off | 16 files, `259 BLOCKS FREE.`, the same entries as the image's directory | `0 OK 0 0` | GEOS starts itself; deskTop after 76 s |
+
+In both runs Insert left `READY.` with nothing typed. JiffyDOS on was not run: this sandbox has no JiffyDOS ROMs, and the gate only counts a JiffyDOS run when JiffyDOS is live and its banner is on screen. Tom's retest of `b314120` (the core before this one) gave the same `FILE NOT FOUND` on his image with JiffyDOS on and off. JiffyDOS changes how bytes cross the serial bus, not how the 1541 reads a sector, so a flagged 18/1 is expected to fail the same way with it.
+
+Screenshots: `docs/screenshots/geos-error-table/` (`vice-*` are stock VICE's C64 screen plus one full VICE window, `grok64-*` the hand gate). Full runs: `screenshots/vice-reference/`, `artifacts/vice-reference/*.json`, `screenshots/geos-hand-boot/`, `artifacts/geos-hand-boot/results.json` (local, not committed).
+
+**Baseline.** The 1541 baseline uses a clean GEOS 2.0 image: `geosBaselineD64()` takes Tom's `GEOS_2.0.d64` from `private-c64/geos` (or `GROK64_GEOS_D64_PATH`), writes its first 174848 bytes to `fixtures/geos/derived/GEOS_2.0-stripped.d64` and uses that; without Tom's image it uses `GEOS64_en.d64`. The image with its table stays a separate check that expects `FILE NOT FOUND`:
+
+```bash
+GROK64_HAND_D64=private-c64/geos/GEOS_2.0.d64 GROK64_HAND_EXPECT=fnf node scripts/desktop-xdotool-geos-hand-boot.mjs
+```
 
 **Screenshot smoke (all Grok64-only surfaces):**  
 `npm run test:desktop-grok64-feature-smoke` → `screenshots/grok64-feature-smoke/*.png` + `artifacts/grok64-feature-smoke/smoke.json`  
@@ -20,10 +73,10 @@
 
 | Setting | VICE x64sc 3.9 (desktop) | VICE apt 3.7.1 (CI) | BMC64 3.3 | Denise | Grok64 WASM |
 |--------|---------------------------|---------------------|-----------|--------|-------------|
-| TDE | `DriveTrueEmulation=1` | same family | per-drive TDE | — | **on**, real serial |
-| Virtual devices | user defaults; use real 1541 for parity | package defaults | `VirtualDevices=0` | — | `VirtualDevices=0` |
-| GEOS on unit 8 | attach `.d64` | not run in CI | `file_system_attach_disk` | manual | Insert + flush/reattach + reconcile |
-| Native run in agent | not built (no 3.9 binary) | optional `apt install vice` | reference tree only | not in repo | primary |
+| TDE | `Drive8TrueEmulation=1` | `Drive8TrueEmulation=1` | per-drive TDE | — | **on**, real serial |
+| Virtual devices | `VirtualDevice8=0` | `VirtualDevice8=0` | `VirtualDevices=0` | — | `VirtualDevices=0` |
+| GEOS on unit 8 | `-8 image.d64` | `-8 image.d64` | `file_system_attach_disk` | manual | Library Insert |
+| Native run in agent | built from the 3.9 release tarball, `scripts/vice-desktop-reference.mjs` | Ubuntu package, same script | reference tree only | not in repo | primary |
 
 ---
 
@@ -65,15 +118,16 @@ npm run test:desktop-grok64-feature-smoke
 
 ---
 
-## GEOS_2.0.d64 steps — outcomes
+## GEOS boot disk steps — outcomes
 
-| Step | VICE 3.9 (expected) | Grok64 |
-|------|---------------------|--------|
-| Dirty profile (#8=1541, #9=CMD HD, REU, PAL) | user vicerc | seeded localStorage + IDB |
-| Power cycle + Insert | attach D64 | flush/reattach + reconcile + **map restore** |
-| `LOAD"$",8` / `LIST` | catalog | keyboard + feedBasic fallback; diag captured |
-| `deskTop` | LOAD GEOS / RUN | `test:desktop-tde-dirty-hands-on` |
-| Jiffy on/off | ROM pair | dirty Jiffy gate + feature smoke jiffy row |
+| Step | Stock VICE, clean image (baseline) | Stock VICE, table flags 18/1 | Grok64, clean image | Grok64, table flags 18/1 |
+|------|------------------------------------|------------------------------|---------------------|--------------------------|
+| Profile | fresh `-default` config | same | reused Chrome profile with Tom's stored settings | same |
+| Power cycle + Insert | `-8 image.d64`, `READY.` | same | Power off/on, Library Insert on unit 8, `READY.` with nothing typed | same |
+| `LOAD"$",8` / `LIST` | 16 files, `259 BLOCKS FREE.` | `?FILE NOT FOUND  ERROR`, nothing listed | 16 files, `259 BLOCKS FREE.` | `?FILE NOT FOUND  ERROR`, nothing listed |
+| Error channel | `0 OK 0 0` | `23 READ ERROR 18 1` | `0 OK 0 0` | `23 READ ERROR 18 1` |
+| `LOAD"GEOS",8,1` | GEOS starts itself, deskTop | `?FILE NOT FOUND  ERROR` | GEOS starts itself, deskTop | `?FILE NOT FOUND  ERROR` |
+| JiffyDOS | not used (Commodore ROMs) | not used | off; on needs the user's JiffyDOS ROMs, which the sandbox does not have | off; Tom's retest of `b314120` gave the same with JiffyDOS on |
 
 ---
 
@@ -94,3 +148,4 @@ npm run test:desktop-grok64-feature-smoke
 | Date | Notes |
 |------|--------|
 | 2026-10-24 | Full Grok64-only feature table + `test:desktop-grok64-feature-smoke`; post-flush IEC map restore; SD2IEC guards |
+| 2026-10-25 | `GEOS_2.0.d64`'s error-info table checked in stock VICE 3.7.1 and 3.9 with true drive emulation: `FILE NOT FOUND` for `$` and `GEOS`, as in Grok64; baseline moves to the table-stripped image; `scripts/vice-desktop-reference.mjs`, `scripts/make-d64-error-table-standins.mjs` |
