@@ -746,16 +746,36 @@ async function tapCbmI(hand) {
 function isSelectInputDialog(before, after) {
   if (!after?.img) return false;
   if (looksLikeAboutBox(after.img)) return false;
-  if (before?.img && openedMenuKind(before, after).kind === "geos") return false;
   return looksLikeSelectInput(after.img);
+}
+
+/** Dialog chrome is up but the JOYSTICK bar / OK may still be drawing. */
+function looksLikeSelectInputShell(img) {
+  if (!img || looksLikeAboutBox(img)) return false;
+  const midDark = inputRowDark(img, 70, 100);
+  let emptyLight = 0;
+  let emptyN = 0;
+  for (let gy = 70; gy <= 100; gy += 2) {
+    for (let gx = 96; gx <= 200; gx += 2) {
+      emptyN += 1;
+      if (geosSample(img, gx, gy) > 380) emptyLight += 1;
+    }
+  }
+  return emptyN > 0 && emptyLight / emptyN > 0.75 && midDark < 0.16;
 }
 
 async function waitSelectInput(hand, before, ms = 8000) {
   const t0 = Date.now();
   let last = await snapshot(hand.page);
-  while (Date.now() - t0 < ms) {
+  let sawShell = looksLikeSelectInputShell(last.img);
+  while (Date.now() - t0 < ms || (sawShell && Date.now() - t0 < ms + 5000)) {
     if (isSelectInputDialog(before, last)) return last;
+    if (looksLikeSelectInputShell(last.img)) sawShell = true;
     await sleep(350);
+    last = await snapshot(hand.page);
+  }
+  for (let i = 0; i < 8 && !isSelectInputDialog(before, last); i++) {
+    await sleep(400);
     last = await snapshot(hand.page);
   }
   return last;
@@ -1357,7 +1377,7 @@ async function test1351(hand, prefix) {
   return out;
 }
 
-/** C= + I opens Select Input Device on the official boot disk (real-UI proof). Menu walk is fallback. */
+/** geos → select input → COMM 1351(a) → OK. C= + I opens GEOS info on this disk. */
 async function activateGeos1351(hand) {
   const out = { steps: [], file: "COMM 1351(a)", via: "select-input" };
   await ensureMouse(hand, false);
@@ -1366,16 +1386,8 @@ async function activateGeos1351(hand) {
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
 
-  await tapCbmI(hand);
-  out.steps.push("cbm-i");
-  let dlg = await waitSelectInput(hand, before, 8000);
-  if (looksLikeAboutBox(dlg.img)) {
-    out.steps.push("cbm-i-about");
-    await clickJoy(hand, { downMs: 110 });
-    await sleep(300);
-    dlg = await snapshot(hand.page);
-  }
-  out.dialog = isSelectInputDialog(before, dlg);
+  let dlg = before;
+  out.dialog = isSelectInputDialog(before, before);
 
   if (!out.dialog) {
     out.landGeos = await landOnGeosWord(hand);
@@ -1438,18 +1450,22 @@ async function activateGeos1351(hand) {
         if (ptr) out.menuWalk.push({ i, x: +ptr.x.toFixed(1), y: +ptr.y.toFixed(1), changed: diff.changed });
         if (onSelectInputItem(ptr)) {
           await clickJoy(hand, { downMs: 110 });
-          await sleep(900);
+          await sleep(1200);
           out.steps.push("select-input-menu");
           break;
         }
         prev = row;
       }
-      dlg = await waitSelectInput(hand, before, 4000);
+      dlg = await waitSelectInput(hand, before, 8000);
       if (looksLikeAboutBox(dlg.img)) {
         out.steps.push("about-not-input");
         await clickJoy(hand, { downMs: 110 });
         await sleep(300);
         dlg = await snapshot(hand.page);
+      }
+      if (!isSelectInputDialog(before, dlg) && out.steps.includes("select-input-menu")) {
+        out.steps.push("wait-input-retry");
+        dlg = await waitSelectInput(hand, before, 6000);
       }
     }
     out.dialog = isSelectInputDialog(before, dlg);
