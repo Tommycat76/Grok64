@@ -426,12 +426,17 @@ async function pointerProbe(hand, name, act, { settle = 450 } = {}) {
   return { name, ...move, beforeInk: before.ink, afterInk: after.ink, b64Before: before.b64, b64After: after.b64 };
 }
 
-async function testStickAndWasd(hand, prefix) {
+async function testStickAndWasd(hand, prefix, { mouse = false } = {}) {
   const out = {};
-  await ensureMouse(hand, false);
+  await ensureMouse(hand, mouse);
   await ensurePort(hand, 1);
   await ensureWasd(hand, false);
-  const right = await pointerProbe(hand, "stick-right", () => holdStick(hand, "right", 1400), { settle: 250 });
+  const right = await pointerProbe(
+    hand,
+    "stick-right",
+    () => (mouse ? holdJoy(hand, 1, 0, 450) : holdStick(hand, "right", 1400)),
+    { settle: 250 },
+  );
   await savePng(hand.shotDir(), `${prefix}-stick-right-before.png`, right.b64Before);
   await savePng(hand.shotDir(), `${prefix}-stick-right-after.png`, right.b64After);
   await hand.shot(`${prefix}-stick-right.png`);
@@ -442,7 +447,7 @@ async function testStickAndWasd(hand, prefix) {
   out.stick = { moved: right.pass, changed: right.changed, inkDist: right.inkDist, dx: right.dx, dy: right.dy };
   out.stickSteady = { coastChanged: coast.changed, coastInk: coast.inkDist, pass: !coast.pass || coast.inkDist < 6 };
   await ensureWasd(hand, true);
-  const wasd = await pointerProbe(hand, "wasd-d", () => holdWasd(hand, "d", 1400), { settle: 250 });
+  const wasd = await pointerProbe(hand, "wasd-d", () => holdWasd(hand, "d", mouse ? 450 : 1400), { settle: 250 });
   await savePng(hand.shotDir(), `${prefix}-wasd-d-after.png`, wasd.b64After);
   await hand.shot(`${prefix}-wasd-d.png`);
   out.wasd = { moved: wasd.pass, changed: wasd.changed, inkDist: wasd.inkDist, dx: wasd.dx, dy: wasd.dy };
@@ -459,7 +464,9 @@ async function test1351(hand, prefix) {
   out.settings = await hand.page.evaluate(() => window.__g64?.settings?.() ?? null);
   const pad = hand.page.locator(".g64-touchpad").first();
   const padBox = await hand.reveal(pad, "trackpad");
-  const track = await pointerProbe(hand, "trackpad", () => dragBox(hand, padBox, { from: [0.15, 0.5], to: [0.85, 0.2] }));
+  const track = await pointerProbe(hand, "trackpad", () =>
+    dragBox(hand, padBox, { from: [0.4, 0.55], to: [0.62, 0.4], steps: 8, stepMs: 40 }),
+  );
   await savePng(hand.shotDir(), `${prefix}-trackpad-before.png`, track.b64Before);
   await savePng(hand.shotDir(), `${prefix}-trackpad-after.png`, track.b64After);
   await hand.shot(`${prefix}-trackpad.png`);
@@ -467,25 +474,30 @@ async function test1351(hand, prefix) {
 
   const crtBox = await hand.reveal(hand.crt(), "crt");
   const drag = await pointerProbe(hand, "canvas-drag", () =>
-    dragBox(hand, crtBox, { from: [0.3, 0.35], to: [0.75, 0.65], steps: 14, stepMs: 35 }),
+    dragBox(hand, crtBox, { from: [0.42, 0.4], to: [0.58, 0.52], steps: 8, stepMs: 35 }),
   );
   await savePng(hand.shotDir(), `${prefix}-drag-after.png`, drag.b64After);
   await hand.shot(`${prefix}-canvas-drag.png`);
   out.drag = { moved: drag.pass, changed: drag.changed, inkDist: drag.inkDist, dx: drag.dx, dy: drag.dy };
 
+  await hand.page.evaluate(() => {
+    for (let i = 0; i < 10; i++) window.__g64?.addMouseDelta?.(-14, -10);
+  });
+  await sleep(350);
+
   const left = hand.page.getByRole("button", { name: "Left mouse button" }).first();
   const click = await pointerProbe(hand, "left-click", async () => {
     await hand.click(left, "1351 left");
     await sleep(80);
-  }, { settle: 350 });
+  }, { settle: 450 });
   await savePng(hand.shotDir(), `${prefix}-click-after.png`, click.b64After);
   await hand.shot(`${prefix}-left-click.png`);
   out.click = { changed: click.changed, inkDist: click.inkDist, pass: click.changed >= 20 || click.inkDist >= 1.2 };
 
   const nudge = await pointerProbe(hand, "nudge", async () => {
-    await hand.page.evaluate(() => window.__g64?.addMouseDelta?.(90, 36));
-    await sleep(120);
-    await hand.page.evaluate(() => window.__g64?.addMouseDelta?.(90, 36));
+    await hand.page.evaluate(() => window.__g64?.addMouseDelta?.(28, 16));
+    await sleep(80);
+    await hand.page.evaluate(() => window.__g64?.addMouseDelta?.(28, 16));
   }, { settle: 400 });
   await savePng(hand.shotDir(), `${prefix}-nudge-after.png`, nudge.b64After);
   out.nudge = { moved: nudge.pass, changed: nudge.changed, inkDist: nudge.inkDist, dx: nudge.dx, dy: nudge.dy };
@@ -497,40 +509,47 @@ async function test1351(hand, prefix) {
 
 /** Page the official deskTop notepad and double-click COMM 1351(a). */
 async function activateGeos1351(hand) {
-  const out = { steps: [] };
+  const out = { steps: [], tries: 0 };
   await ensureMouse(hand, false);
   await ensurePort(hand, 1);
   await ensureWasd(hand, false);
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
-  await holdJoy(hand, 0, -1, 2200);
-  out.steps.push("up");
-  await holdJoy(hand, -1, 0, 2200);
-  out.steps.push("left");
-  await holdJoy(hand, 1, 0, 1100);
-  out.steps.push("page-x");
-  await clickJoy(hand);
-  await sleep(350);
-  await hand.shot("10-1351-page-menu.png");
-  out.steps.push("page-click");
-  await holdJoy(hand, 0, 1, 240);
-  await clickJoy(hand);
-  await sleep(900);
+  // Pin to the notepad clock (top-right), then step left onto "page".
+  await holdJoy(hand, 0, -1, 4200);
+  await holdJoy(hand, 1, 0, 4200);
+  out.steps.push("pin-clock");
+  await hand.shot("10-1351-clock.png");
+  let paged = { pass: false, changed: 0 };
+  for (let i = 0; i < 8 && !paged.pass; i++) {
+    out.tries = i + 1;
+    await holdJoy(hand, -1, 0, 260);
+    await clickJoy(hand);
+    await sleep(350);
+    await hand.shot(`10-1351-page-try-${i}.png`);
+    await holdJoy(hand, 0, 1, 240);
+    await clickJoy(hand);
+    await sleep(900);
+    const now = await snapshot(hand.page);
+    paged = movedEnough(before, now, { minChanged: 1200, minInk: 10 });
+    out.steps.push(`page-try-${i}`);
+  }
   const page2 = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-page2.png", page2.b64);
   await hand.shot("10-1351-page2-ui.png");
-  out.paged = movedEnough(before, page2, { minChanged: 80, minInk: 4 });
-  out.steps.push("page-next");
-  await holdJoy(hand, 1, 0, 1800);
-  await holdJoy(hand, 0, 1, 1400);
-  await clickJoy(hand, { double: true });
-  await sleep(2800);
+  out.paged = paged;
+  if (paged.pass) {
+    await holdJoy(hand, 1, 0, 2200);
+    await holdJoy(hand, 0, 1, 1800);
+    await clickJoy(hand, { double: true });
+    await sleep(2800);
+    out.steps.push("comm-open");
+  }
   const after = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-after.png", after.b64);
   await hand.shot("10-1351-after-ui.png");
-  out.after = movedEnough(page2, after, { minChanged: 20, minInk: 1.5 });
-  out.steps.push("comm-open");
-  out.pass = Boolean(out.paged.pass || out.after.pass);
+  out.after = movedEnough(page2, after, { minChanged: 80, minInk: 2 });
+  out.pass = Boolean(out.paged.pass);
   return out;
 }
 
@@ -603,11 +622,7 @@ async function runGui64(hand, cart, tag) {
   await hand.key("Escape").catch(() => {});
   await sleep(400);
   trace.library = await importOnly(hand, cart, "00-import");
-  const already = await hand.page.evaluate(() => {
-    const t = window.__g64?.title?.() ?? "";
-    return Boolean(window.__g64?.running?.() && !window.__g64?.booting?.() && /GUI64|\.crt/i.test(t));
-  });
-  if (!already) await playFromLibrary(hand, cart, "01-play");
+  await playFromLibrary(hand, cart, "01-play");
   const running = await waitFor(
     async () => (await hand.page.evaluate(() => window.__g64?.running?.() && !window.__g64?.booting?.())) || null,
     180_000,
@@ -622,7 +637,7 @@ async function runGui64(hand, cart, tag) {
   trace.gui = { pass: gui.pass, buckets: gui.stats?.buckets, geosDesk: gui.stats?.geosDesk, ink: gui.stats?.ink, src: gui.stats?.src };
   trace.video = await hand.page.evaluate(() => window.__g64?.video?.());
   if (trace.started) {
-    trace.joystick = await testStickAndWasd(hand, "03");
+    trace.joystick = await testStickAndWasd(hand, "03", { mouse: true });
     trace.mouse = await test1351(hand, "04");
   }
   const wantStd = /PAL/i.test(cart.name) ? "pal" : "ntsc";

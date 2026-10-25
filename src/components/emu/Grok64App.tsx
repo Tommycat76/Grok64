@@ -4550,6 +4550,18 @@ export function Grok64App() {
       }
       const liveMouse = st.mouseMode && !playLockRef.current && !st.booting && st.running;
       if (liveMouse) {
+        const j = joyRef.current;
+        const a = arrowJoyRef.current;
+        const w = wasdJoyRef.current;
+        let sx = j.x;
+        let sy = j.y;
+        if (a.left || w.left) sx = -1;
+        if (a.right || w.right) sx = 1;
+        if (a.up || w.up) sy = -1;
+        if (a.down || w.down) sy = 1;
+        if (Math.abs(sx) > 0.32 || Math.abs(sy) > 0.32) {
+          addHostMouseDelta(sx * 4, sy * 4);
+        }
         setHostMouseButtons(mouseBtnRef.current.left, mouseBtnRef.current.right);
         flushHostMouse1351(emu, frameMsForStandard(resolvedRef.current.standard));
         mouseLiveRef.current = true;
