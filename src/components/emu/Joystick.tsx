@@ -246,7 +246,6 @@ export function TouchControls({
         mouseR: hits.mouseR,
       };
     }
-    if (mouseRef.current) return null;
     let el = target instanceof Element ? target : null;
     if (!el) el = document.elementFromPoint(x, y);
     if (stickEl.current?.contains(el) || el?.closest(".g64-stick")) return { stick: true };
@@ -256,7 +255,7 @@ export function TouchControls({
 
   useEffect(() => {
     const host = root.current;
-    if (!host || mouseRef.current) return;
+    if (!host) return;
     const active = new Map<number, PointerZones>();
     let fireOn = false;
     let jumpOn = false;
@@ -567,14 +566,50 @@ export function TouchControls({
   const pos = (id: ControlId) => (layoutEdit && layout ? layoutStyle(layout[id], id) : undefined);
 
   if (mouseMode) {
+    const kx = vector?.x ?? knob.x;
+    const ky = vector?.y ?? knob.y;
     return (
       <div
         ref={root}
         className="g64-controls g64-controls-mouse"
         data-pad-side={padSide}
+        data-stick={stickHidden ? "false" : "true"}
         data-layout-edit={layoutEdit ? "true" : "false"}
       >
         {layoutEdit ? <div className="g64-layout-banner">Drag controls to reposition</div> : null}
+        {stickHidden ? null : (
+          <div className="g64-stick-col" style={pos("stick")} onPointerDown={(e) => startLayoutDrag("stick", e)}>
+            <LayoutHandle show={layoutEdit} />
+            <div
+              ref={stickEl}
+              className="g64-stick"
+              data-gate={gate}
+              aria-label="Joystick. Tap a direction or drag."
+            >
+              <span className="g64-stick-tick" data-dir="n" />
+              <span className="g64-stick-tick" data-dir="e" />
+              <span className="g64-stick-tick" data-dir="s" />
+              <span className="g64-stick-tick" data-dir="w" />
+              {gate === "8way" ? (
+                <>
+                  <span className="g64-stick-tick" data-dir="ne" />
+                  <span className="g64-stick-tick" data-dir="se" />
+                  <span className="g64-stick-tick" data-dir="sw" />
+                  <span className="g64-stick-tick" data-dir="nw" />
+                </>
+              ) : null}
+              <div
+                className="g64-knob"
+                style={
+                  {
+                    "--kx": String(kx),
+                    "--ky": String(ky),
+                  } as React.CSSProperties
+                }
+              />
+            </div>
+          </div>
+        )}
         <div className="g64-touchpad-wrap" style={pos("touchpad")} onPointerDown={(e) => startLayoutDrag("touchpad", e)}>
           <LayoutHandle show={layoutEdit} />
           <Touchpad

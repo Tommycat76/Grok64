@@ -854,6 +854,10 @@ div[class*="ejs_virtual"] {
   overflow: visible;
 }
 
+.g64-controls-mouse[data-stick="true"] {
+  grid-template-columns: auto 1fr auto;
+}
+
 .g64-controls-mouse[data-layout-edit="true"] {
   display: block;
   min-height: 148px;

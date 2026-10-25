@@ -1220,30 +1220,35 @@ function rawSim(emu: EjsInstance | null, player: number, index: number, value: n
   }
 }
 
-export function joyInput(emu: EjsInstance | null, index: number, down: boolean) {
+export function joyInput(emu: EjsInstance | null, index: number, down: boolean, player = 0) {
   const analog = index >= 16 && index <= 23;
   const value = down ? (analog ? 0x7fff : 1) : 0;
-  rawSim(emu, 0, index, value);
+  rawSim(emu, player, index, value);
 }
 
-export function setJoyVector(emu: EjsInstance | null, dx: number, dy: number, fire: boolean) {
+/** When a 1351 is on the selected port, digital stick goes to libretro player 1 (the other C64 port). */
+export function digitalJoyPlayer(mouseMode: boolean): 0 | 1 {
+  return mouseMode ? 1 : 0;
+}
+
+export function setJoyVector(emu: EjsInstance | null, dx: number, dy: number, fire: boolean, player = 0) {
   setVirtualPad(dx, dy, fire);
   const dead = 0.32;
   const left = dx < -dead;
   const right = dx > dead;
   const up = dy < -dead;
   const down = dy > dead;
-  joyInput(emu, RETRO_BTN.LEFT, left);
-  joyInput(emu, RETRO_BTN.RIGHT, right);
-  joyInput(emu, RETRO_BTN.UP, up);
-  joyInput(emu, RETRO_BTN.DOWN, down);
-  joyInput(emu, RETRO_BTN.B, fire);
-  joyInput(emu, RETRO_BTN.A, false);
-  joyInput(emu, RETRO_BTN.Y, false);
-  joyInput(emu, 16, false);
-  joyInput(emu, 17, false);
-  joyInput(emu, 18, false);
-  joyInput(emu, 19, false);
+  joyInput(emu, RETRO_BTN.LEFT, left, player);
+  joyInput(emu, RETRO_BTN.RIGHT, right, player);
+  joyInput(emu, RETRO_BTN.UP, up, player);
+  joyInput(emu, RETRO_BTN.DOWN, down, player);
+  joyInput(emu, RETRO_BTN.B, fire, player);
+  joyInput(emu, RETRO_BTN.A, false, player);
+  joyInput(emu, RETRO_BTN.Y, false, player);
+  joyInput(emu, 16, false, player);
+  joyInput(emu, 17, false, player);
+  joyInput(emu, 18, false, player);
+  joyInput(emu, 19, false, player);
 }
 
 /** 1351 mouse via left analog stick (vice_analogmouse=left). */

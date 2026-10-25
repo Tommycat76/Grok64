@@ -52,17 +52,14 @@ export function buildViceExtras(input: ViceExtrasInput): Record<string, string> 
   }
 
   if (input.mouse) {
-    const joyOn1 = input.joyPort === 1;
-    opts.vice_joyport = joyOn1 ? "1" : "2";
-    opts.vice_joyport_type = joyOn1 ? "3" : "1";
-    opts.vice_joyport2_type = joyOn1 ? "1" : "3";
+    opts.vice_joyport = input.joyPort === 1 ? "1" : "2";
+    opts.vice_joyport_type = "3";
     opts.vice_analogmouse = "left";
     opts.vice_mouse_speed = "120";
     opts.vice_analogmouse_speed = "1.0";
   } else {
     opts.vice_joyport = input.joyPort === 1 ? "1" : "2";
     opts.vice_joyport_type = "1";
-    opts.vice_joyport2_type = "1";
     opts.vice_analogmouse = "disabled";
   }
 

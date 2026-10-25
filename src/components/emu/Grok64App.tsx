@@ -85,6 +85,7 @@ import {
   remountSd2iecFromParts,
   restoreState,
   resetEmu,
+  digitalJoyPlayer,
   setJoyVector,
   setPaused,
   setWarp,
@@ -441,9 +442,11 @@ export function Grok64App() {
   const stickCenterHoldRef = useRef(false);
   const jumpHeldRef = useRef(false);
   const arrowJoyRef = useRef({ up: false, down: false, left: false, right: false });
+  const wasdJoyRef = useRef({ up: false, down: false, left: false, right: false });
   const lastJoySentRef = useRef({ x: 0, y: 0, fire: false });
   const fireArmedAt = useRef(0);
   const mouseVelRef = useRef({ x: 0, y: 0 });
+  const mousePtrRef = useRef<{ x: number; y: number } | null>(null);
   const mouseBtnRef = useRef({ left: false, right: false });
   const [awaitingStart, setAwaitingStart] = useState(false);
   const [iosResume, setIosResume] = useState(false);
@@ -488,6 +491,7 @@ export function Grok64App() {
   }, []);
   const clearMenuJoyInput = useCallback(() => {
     arrowJoyRef.current = { up: false, down: false, left: false, right: false };
+    wasdJoyRef.current = { up: false, down: false, left: false, right: false };
     resetMenuJoyGate(menuJoyGateRef.current);
     lastJoySentRef.current = { x: 0, y: 0, fire: false };
   }, []);
@@ -501,7 +505,7 @@ export function Grok64App() {
         j.y = 0;
         j.fire = false;
         lastJoySentRef.current = { x: 0, y: 0, fire: false };
-        setJoyVector(emu, 0, 0, false);
+        setJoyVector(emu, 0, 0, false, digitalJoyPlayer(useEmu.getState().mouseMode));
       }
       return;
     }
@@ -510,11 +514,13 @@ export function Grok64App() {
     let x = j.x;
     let y = j.y;
     const a = arrowJoyRef.current;
-    if (a.left) x = -1;
-    if (a.right) x = 1;
-    if (a.up) y = -1;
-    if (a.down) y = 1;
+    const w = wasdJoyRef.current;
+    if (a.left || w.left) x = -1;
+    if (a.right || w.right) x = 1;
+    if (a.up || w.up) y = -1;
+    if (a.down || w.down) y = 1;
     if (jumpHeldRef.current) y = -1;
+    const player = digitalJoyPlayer(useEmu.getState().mouseMode);
     if (isMenuJoyMode()) {
       const out = menuJoyStep(menuJoyGateRef.current, x, y, performance.now());
       if (out.x === 0 && out.y === 0) {
@@ -522,7 +528,7 @@ export function Grok64App() {
         if (last.x === 0 && last.y === 0 && fire === last.fire) return;
       }
       lastJoySentRef.current = { x: out.x, y: out.y, fire };
-      setJoyVector(emu, out.x, out.y, fire);
+      setJoyVector(emu, out.x, out.y, fire, player);
       return;
     }
     resetMenuJoyGate(menuJoyGateRef.current);
@@ -544,7 +550,7 @@ export function Grok64App() {
     const last = lastJoySentRef.current;
     if (x === last.x && y === last.y && fire === last.fire) return;
     lastJoySentRef.current = { x, y, fire };
-    setJoyVector(emu, x, y, fire);
+    setJoyVector(emu, x, y, fire, player);
   }, [isMenuJoyMode]);
   const emitJoyRef = useRef(() => {});
   emitJoyRef.current = emitJoyVector;
@@ -4172,11 +4178,15 @@ export function Grok64App() {
       }
       if (isJoyFireKey(e.code)) return;
       const down = e.type === "keydown";
+      const arrowsAreStick = isMenuJoyMode() || useEmu.getState().arrowsAreJoy;
       if (/^Arrow(Up|Down|Left|Right)$/.test(e.code)) {
-        // Menu joy mode: the arrow-key listener pulses the joystick; no cursor key too.
-        if (down && isMenuJoyMode()) return;
+        // Stick mode: the arrow-key listener pulses the joystick; no CRSR key too.
+        if (down && arrowsAreStick) return;
         if (down) cursorArrowsDown.add(e.code);
         else if (!cursorArrowsDown.delete(e.code)) return;
+      }
+      if (/^Key[WASD]$/.test(e.code) && useEmu.getState().wasdIsJoy) {
+        if (down) return;
       }
       const deferKeys = playLockRef.current || useEmu.getState().booting;
       if (deferKeys && !freezerFn) {
@@ -4371,8 +4381,10 @@ export function Grok64App() {
         mouseVelRef.current.y *= 0.72;
         if (Math.abs(mouseVelRef.current.x) < 0.01) mouseVelRef.current.x = 0;
         if (Math.abs(mouseVelRef.current.y) < 0.01) mouseVelRef.current.y = 0;
+        emitJoyVector();
       } else if (st.mouseMode) {
         clearMouseAnalog(emu);
+        emitJoyVector();
       } else {
         emitJoyVector();
       }
@@ -4536,6 +4548,14 @@ export function Grok64App() {
     if (playLockRef.current || playModeRef.current === "disk" || inGameplayRef.current) {
       applyRuntimeOptions(emu, {
         ...viceJoyOptions(s.joyPort),
+        ...(s.mouseMode
+          ? {
+              vice_joyport_type: "3",
+              vice_analogmouse: "left",
+              vice_mouse_speed: "120",
+              vice_analogmouse_speed: "1.0",
+            }
+          : {}),
         vice_ram_expansion_unit: s.reuSize,
       });
       if (s.mouseMode) plugJoysticks(emu, s.joyPort);
@@ -4546,6 +4566,7 @@ export function Grok64App() {
     applyRuntimeOptions(emu, extras);
     void syncJiffy(emu, "none");
     if (s.mouseMode) plugJoysticks(emu, s.joyPort);
+    else setJoyVector(emu, 0, 0, false, 1);
   }, [s.reuSize, s.iecDrive, s.iecUnit, s.mouseMode, s.joyPort, s.machineId, s.scpuSimm, s.scpuTurbo, expansionOpts, syncJiffy]);
   useEffect(() => {
     const emu = emuRef.current;
@@ -4686,22 +4707,35 @@ export function Grok64App() {
       ArrowLeft: "left",
       ArrowRight: "right",
     };
+    const WASD = { KeyW: "up", KeyS: "down", KeyA: "left", KeyD: "right" };
     const onArrow = (e) => {
       if (!s.running) return;
       const tag = e.target?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-      const dir = ARROW[e.code];
-      if (!dir) return;
-      if (!isMenuJoyMode()) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const on = e.type === "keydown";
-      if (on && e.repeat) return;
-      arrowJoyRef.current[dir] = on;
-      emitJoyVector();
+      const st = useEmu.getState();
+      const arrowDir = ARROW[e.code];
+      const wasdDir = WASD[e.code];
+      if (arrowDir && (isMenuJoyMode() || st.arrowsAreJoy)) {
+        e.preventDefault();
+        e.stopPropagation();
+        const on = e.type === "keydown";
+        if (on && e.repeat) return;
+        arrowJoyRef.current[arrowDir] = on;
+        emitJoyVector();
+        return;
+      }
+      if (wasdDir && st.wasdIsJoy) {
+        e.preventDefault();
+        e.stopPropagation();
+        const on = e.type === "keydown";
+        if (on && e.repeat) return;
+        wasdJoyRef.current[wasdDir] = on;
+        emitJoyVector();
+      }
     };
     const onBlur = () => {
       arrowJoyRef.current = { up: false, down: false, left: false, right: false };
+      wasdJoyRef.current = { up: false, down: false, left: false, right: false };
     };
     window.addEventListener("keydown", onArrow, true);
     window.addEventListener("keyup", onArrow, true);
@@ -4782,7 +4816,7 @@ export function Grok64App() {
     suppressHydrationWarning: true,
   };
   const padConnected = hasRealGamepad();
-  const showStick = s.powered && s.showJoystick && !padConnected && !s.mouseMode;
+  const showStick = s.powered && s.showJoystick && !padConnected;
   const showJoyChrome = s.powered;
   const showMousePad = s.powered && s.mouseMode && !padConnected;
   return (
@@ -5146,17 +5180,36 @@ export function Grok64App() {
               }
               e.preventDefault();
               if (s.mouseMode) {
-                mouseBtnRef.current.left = true;
-                setMouseAnalog(emuRef.current, 0, 0, true, mouseBtnRef.current.right);
+                mousePtrRef.current = { x: e.clientX, y: e.clientY };
+                if (e.button === 2) mouseBtnRef.current.right = true;
+                else mouseBtnRef.current.left = true;
+                try {
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                } catch {
+                  /* */
+                }
+                setMouseAnalog(emuRef.current, 0, 0, mouseBtnRef.current.left, mouseBtnRef.current.right);
               } else {
                 onFire(true, true);
               }
             }}
-            onPointerUp={() => {
+            onPointerMove={(e) => {
+              if (!s.mouseMode || playLockRef.current || !s.running || s.booting) return;
+              const prev = mousePtrRef.current;
+              mousePtrRef.current = { x: e.clientX, y: e.clientY };
+              if (!prev) return;
+              const rect = e.currentTarget.getBoundingClientRect();
+              const scale = Math.max(rect.width, rect.height, 120);
+              mouseVelRef.current.x = Math.max(-1, Math.min(1, mouseVelRef.current.x + (e.clientX - prev.x) / scale));
+              mouseVelRef.current.y = Math.max(-1, Math.min(1, mouseVelRef.current.y + (e.clientY - prev.y) / scale));
+            }}
+            onPointerUp={(e) => {
               if (playLockRef.current || !s.running || s.booting) return;
               if (s.mouseMode) {
-                mouseBtnRef.current.left = false;
-                setMouseAnalog(emuRef.current, mouseVelRef.current.x, mouseVelRef.current.y, false, mouseBtnRef.current.right);
+                if (e.button === 2) mouseBtnRef.current.right = false;
+                else mouseBtnRef.current.left = false;
+                if (!mouseBtnRef.current.left && !mouseBtnRef.current.right) mousePtrRef.current = null;
+                setMouseAnalog(emuRef.current, mouseVelRef.current.x, mouseVelRef.current.y, mouseBtnRef.current.left, mouseBtnRef.current.right);
                 return;
               }
               if (!pendingKickRef.current) onFire(false);
@@ -5164,11 +5217,15 @@ export function Grok64App() {
             onPointerCancel={() => {
               if (playLockRef.current || !s.running || s.booting) return;
               if (s.mouseMode) {
-                mouseBtnRef.current.left = false;
-                setMouseAnalog(emuRef.current, mouseVelRef.current.x, mouseVelRef.current.y, false, mouseBtnRef.current.right);
+                mouseBtnRef.current = { left: false, right: false };
+                mousePtrRef.current = null;
+                setMouseAnalog(emuRef.current, mouseVelRef.current.x, mouseVelRef.current.y, false, false);
                 return;
               }
               if (!pendingKickRef.current) onFire(false);
+            }}
+            onContextMenu={(e) => {
+              if (s.mouseMode) e.preventDefault();
             }}
           >
             <PlayerMount />

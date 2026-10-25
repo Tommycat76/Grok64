@@ -67,6 +67,8 @@ interface SettingsSlice {
   showJoystick: boolean;
   showKeyboard: boolean;
   arrowsAreJoy: boolean;
+  /** WASD is the digital stick so joystick-driver software (GEOS JOYSTICK) is usable from a keyboard. */
+  wasdIsJoy: boolean;
   stickGate: "4way" | "8way";
   jumpBtn: boolean;
   reuSize: ReuSize;
@@ -100,6 +102,7 @@ interface SettingsSlice {
   setShowJoystick: (v: boolean) => void;
   setShowKeyboard: (v: boolean) => void;
   setArrowsAreJoy: (v: boolean) => void;
+  setWasdIsJoy: (v: boolean) => void;
   setStickGate: (g: "4way" | "8way") => void;
   setJumpBtn: (v: boolean) => void;
   setReuSize: (v: ReuSize) => void;
@@ -190,6 +193,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       showJoystick: true,
       showKeyboard: false,
       arrowsAreJoy: false,
+      wasdIsJoy: true,
       stickGate: "4way",
       jumpBtn: false,
       reuSize: "none",
@@ -222,6 +226,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       setShowJoystick: (showJoystick) => set({ showJoystick }),
       setShowKeyboard: (showKeyboard) => set({ showKeyboard }),
       setArrowsAreJoy: (arrowsAreJoy) => set({ arrowsAreJoy }),
+      setWasdIsJoy: (wasdIsJoy) => set({ wasdIsJoy }),
       setStickGate: (stickGate) => set({ stickGate }),
       setJumpBtn: (jumpBtn) => set({ jumpBtn }),
       setReuSize: (reuSize) => set({ reuSize }),
@@ -323,7 +328,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
     }),
     {
       name: "grok64-settings",
-      version: 12,
+      version: 13,
       storage: createJSONStorage(() =>
         typeof window === "undefined"
           ? {
@@ -348,6 +353,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         crtFilter: s.crtFilter,
         showJoystick: s.showJoystick,
         arrowsAreJoy: s.arrowsAreJoy,
+        wasdIsJoy: s.wasdIsJoy,
         stickGate: s.stickGate,
         jumpBtn: s.jumpBtn,
         reuSize: s.reuSize,
@@ -382,6 +388,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
           "crtFilter",
           "showJoystick",
           "arrowsAreJoy",
+          "wasdIsJoy",
           "stickGate",
           "jumpBtn",
           "reuSize",
@@ -447,6 +454,9 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
           if (!p.sid3Address) p.sid3Address = "disabled";
           if (!p.sid2Model) p.sid2Model = "default";
           if (!p.sid3Model) p.sid3Model = "default";
+        }
+        if (version < 13) {
+          if (typeof p.wasdIsJoy !== "boolean") p.wasdIsJoy = true;
         }
         if (version < 7) {
           if (!p.reuSize) p.reuSize = "none";
