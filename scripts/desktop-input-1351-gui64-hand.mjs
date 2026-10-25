@@ -657,17 +657,25 @@ async function activateGeos1351(hand) {
   await ensureWasd(hand, false);
   const before = await snapshot(hand.page);
   await savePng(hand.shotDir(), "10-1351-before.png", before.b64);
-  // WASD D on this deskTop parks the pointer on "select". One step right is "page".
-  await holdJoy(hand, 1, 0, 200);
-  out.steps.push("select-to-page");
+  // WASD-D parks on "page" or "select". Click, then one step right if the menu did not open.
   await clickJoy(hand);
-  await sleep(350);
+  await sleep(400);
+  out.steps.push("click-page");
   await hand.shot("10-1351-page-menu.png");
-  await holdJoy(hand, 0, 1, 150);
+  out.menu = movedEnough(before, await snapshot(hand.page), { minChanged: 40, minInk: 1.2 });
+  if (!out.menu.pass) {
+    await holdJoy(hand, 1, 0, 200);
+    out.steps.push("select-to-page");
+    await clickJoy(hand);
+    await sleep(350);
+    await hand.shot("10-1351-page-menu-retry.png");
+  }
+  await holdJoy(hand, 0, 1, 160);
   await clickJoy(hand);
-  await sleep(1000);
+  await sleep(1200);
   let page2 = await snapshot(hand.page);
   out.paged = iconRegionChanged(before, page2, { minChanged: 180 });
+  if (!out.paged.pass) out.paged = movedEnough(before, page2, { minChanged: 400, minInk: 8 });
   if (!out.paged.pass) {
     out.steps.push("page-gadget");
     const gadget = pageGadgetPos(page2.img);
@@ -710,9 +718,16 @@ async function activateGeos1351(hand) {
 
 async function bootOfficialGeos(hand, disk) {
   await hand.page.evaluate(() => window.__g64?.kbdReleaseAll?.());
-  await hand.clickCrtAndType("NEW");
-  await sleep(600);
-  await hand.clickCrtAndType('LOAD"BOOT",8,1');
+  const jiffy = await hand.page.evaluate(() => window.__g64?.jiffyLive?.());
+  if (jiffy) {
+    // JiffyDOS + host xdotool prepends a "4"/← and turns NEW/LOAD into SAVE.
+    await hand.page.evaluate(async () => {
+      await window.__g64?.feedBasic?.('LOAD"BOOT",8,1');
+    });
+    await sleep(400);
+  } else {
+    await hand.clickCrtAndType('LOAD"BOOT",8,1');
+  }
   let loadLine = await hand.waitTypedLine('LOAD"BOOT",8,1');
   if (!loadLine.found) {
     const typed = await hand.screenText();
@@ -722,12 +737,12 @@ async function bootOfficialGeos(hand, disk) {
   const typed = await hand.screenText();
   if (/SAVING BOOT/i.test(typed) && !/SEARCHING FOR BOOT|LOADING/i.test(typed)) {
     await hand.page.evaluate(() => window.__g64?.kbdReleaseAll?.());
-    await hand.clickCrtAndType("NEW");
+    await sleep(200);
+    await hand.page.evaluate(async () => {
+      await window.__g64?.feedBasic?.('LOAD"BOOT",8,1');
+    });
     await sleep(400);
-    const jiffy = await hand.page.evaluate(() => window.__g64?.jiffyLive?.());
-    const retry = jiffy ? "%BOOT" : 'LOAD"BOOT",8,1';
-    await hand.clickCrtAndType(retry);
-    loadLine = (await hand.waitTypedLine(retry)) || loadLine;
+    loadLine = (await hand.waitTypedLine('LOAD"BOOT",8,1')) || loadLine;
   }
   await hand.shot("05-load-boot-typed.png");
   const boot = await waitGeosBoot(hand.page, {
