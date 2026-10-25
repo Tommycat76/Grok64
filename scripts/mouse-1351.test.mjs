@@ -12,6 +12,10 @@ const {
   CRT_FRAME_W,
   dpadForAxes,
   hostDragTo1351,
+  hostPointerMoveToDelta,
+  noteRealPointerFeed,
+  readRealPointerFeed,
+  resetRealPointerFeed,
   takeMouse1351Frame,
 } = await server.ssrLoadModule("/src/lib/emu/mouse-1351.ts");
 await server.close();
@@ -63,4 +67,27 @@ test("a taller-than-native box does not shrink vertical 1351 counts", () => {
   const { dx, dy } = hostDragTo1351(10, 10, 384, 400);
   assert.equal(dx, 10);
   assert.equal(dy, 10);
+});
+
+test("hover uses movementX/Y without a previous pointerdown sample", () => {
+  const first = hostPointerMoveToDelta({ movementX: 6, movementY: -4, clientX: 100, clientY: 80 }, null);
+  assert.equal(first.dx, 6);
+  assert.equal(first.dy, -4);
+  const next = hostPointerMoveToDelta({ movementX: 0, movementY: 0, clientX: 108, clientY: 82 }, first.next);
+  assert.equal(next.dx, 8);
+  assert.equal(next.dy, 2);
+});
+
+test("real pointer feed counts hover and drag separately and ignores helper-sized zeros", () => {
+  resetRealPointerFeed();
+  noteRealPointerFeed(0, 0, 0, false);
+  assert.equal(readRealPointerFeed().moves, 0);
+  noteRealPointerFeed(3, 1, 0, false);
+  noteRealPointerFeed(-2, 4, 1, false);
+  const feed = readRealPointerFeed();
+  assert.equal(feed.moves, 2);
+  assert.equal(feed.hoverMoves, 1);
+  assert.equal(feed.dragMoves, 1);
+  assert.equal(feed.lastDx, -2);
+  assert.equal(feed.lastDy, 4);
 });

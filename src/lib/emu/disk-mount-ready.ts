@@ -30,7 +30,10 @@ function reattachFailure(emu: EjsInstance, unit: IecUnit, rc: number): Error {
     return new Error(`Drive #${unit} rejected the disk (${viceDiskLastAttachDiag(emu) ?? "wrong drive type for this image"})`);
   }
   const last = lastViceDiskAttach(unit);
-  return new Error(`VICE disk reattach failed (rc=${rc})${last ? ` path=${last.path} attachRc=${last.rc}` : ""}`);
+  const extra = last
+    ? ` path=${last.path} attachRc=${last.rc}${last.stage ? ` stage=${last.stage}` : ""}`
+    : "";
+  return new Error(`VICE disk reattach failed (rc=${rc})${extra}`);
 }
 
 /**

@@ -5,14 +5,13 @@
  */
 
 import {
-  grok64DiskAttachCallable,
-  grok64DiskAttachCallableEmu,
+  grok64DiskAttachInvocableEmu,
   grok64WorkDiskRefreshCallableEmu,
 } from "./grok64-wasm-direct";
 import type { Grok64WasmModule } from "./grok64-wasm-bind";
 
 /** Bumped when WASM bind strategy changes; About / QA can detect stale app JS. */
-export const GROK64_WASM_BIND_REV = "diskapi-v28-core-36a7cd049a97";
+export const GROK64_WASM_BIND_REV = "diskapi-v30-insert-pointer";
 
 export type Grok64DiskApi = {
   diskAttach: (unit: number, drive: number, path: string) => number;
@@ -92,7 +91,7 @@ export function grok64WorkDiskRefreshExportReady(mod: Grok64ModuleBag | null | u
   return grok64WorkDiskRefreshCallableEmu(mod ? { Module: mod } : null);
 }
 
-/** True when grok64_disk_attach resolves to a WASM function. */
+/** True when grok64_disk_attach is a raw export or a ccall-invocable ident. */
 export function grok64DiskAttachExportReady(mod: Grok64ModuleBag | null | undefined): boolean {
-  return grok64DiskAttachCallableEmu(mod ? { Module: mod } : null);
+  return grok64DiskAttachInvocableEmu(mod ? { Module: mod } : null);
 }

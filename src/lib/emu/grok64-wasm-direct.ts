@@ -123,10 +123,15 @@ export function emuWasmModuleBags(emu: unknown): Grok64ModuleBag[] {
   const e = emu as {
     Module?: Grok64ModuleBag;
     gameManager?: { Module?: Grok64ModuleBag };
+    EJS?: { Module?: Grok64ModuleBag };
   } | null;
   const w =
     typeof window !== "undefined"
-      ? (window as unknown as { __ejs?: { Module?: Grok64ModuleBag } }).__ejs
+      ? (window as unknown as {
+          __ejs?: { Module?: Grok64ModuleBag };
+          Module?: Grok64ModuleBag;
+          EJS?: { Module?: Grok64ModuleBag };
+        })
       : null;
   const out: Grok64ModuleBag[] = [];
   const push = (m: Grok64ModuleBag | null | undefined) => {
@@ -134,27 +139,68 @@ export function emuWasmModuleBags(emu: unknown): Grok64ModuleBag[] {
   };
   push(e?.Module);
   push(e?.gameManager?.Module);
+  push(e?.EJS?.Module);
+  push(w?.__ejs?.Module);
   push(w?.Module);
+  push(w?.EJS?.Module);
   return out;
+}
+
+function wasmExportRecordBags(mod: Grok64ModuleBag | null | undefined): Record<string, unknown>[] {
+  if (!mod) return [];
+  const m = mod as WasmBag & Record<string, unknown>;
+  const bags: Array<Record<string, unknown> | undefined> = [
+    m,
+    m.wasmExports as Record<string, unknown> | undefined,
+    m.asm,
+    m.instance?.exports as Record<string, unknown> | undefined,
+    (m.asm as { asm?: Record<string, unknown> } | undefined)?.asm,
+    (m as { exports?: Record<string, unknown> }).exports,
+    (m.wasmExports as { exports?: Record<string, unknown> } | undefined)?.exports,
+  ];
+  return bags.filter((b): b is Record<string, unknown> => Boolean(b) && typeof b === "object");
 }
 
 /** Resolve a WASM export by logical name (no leading underscore). */
 export function resolveWasmExport(mod: Grok64ModuleBag | null | undefined, baseName: string): WasmFn | null {
   if (!mod) return null;
-  const m = mod as WasmBag & Record<string, unknown>;
   const names = [`_${baseName}`, baseName];
-  for (const n of names) {
-    const hit = asFn(m[n]);
-    if (hit) return hit;
-  }
-  for (const bag of [m.wasmExports, m.asm, m.instance?.exports as Record<string, unknown> | undefined]) {
-    if (!bag) continue;
+  for (const bag of wasmExportRecordBags(mod)) {
     for (const n of names) {
       const hit = asFn(bag[n]);
       if (hit) return hit;
     }
   }
   return null;
+}
+
+/** Name is present on a Module/asm/exports bag even when it is not yet a JS function. */
+export function exportIdentPresent(mod: Grok64ModuleBag | null | undefined, baseName: string): boolean {
+  if (resolveWasmExport(mod, baseName)) return true;
+  if (!mod) return false;
+  const names = [`_${baseName}`, baseName];
+  for (const bag of wasmExportRecordBags(mod)) {
+    for (const n of names) {
+      if (bag[n] != null) return true;
+    }
+  }
+  return false;
+}
+
+export function resolveWasmExportEmu(emu: unknown, baseName: string, primary?: Grok64ModuleBag | null): WasmFn | null {
+  const hit = resolveWasmExport(primary, baseName);
+  if (hit) return hit;
+  for (const bag of emuWasmModuleBags(emu)) {
+    const fn = resolveWasmExport(bag, baseName);
+    if (fn) return fn;
+  }
+  return null;
+}
+
+function moduleHasCcall(mod: Grok64ModuleBag | null | undefined): boolean {
+  if (!mod) return false;
+  const rt = mergedWasmRuntime({ Module: mod }, mod);
+  return typeof (grok64PristineCcall(rt) ?? rt.ccall) === "function";
 }
 
 function wasmRuntimeBags(emu: unknown, primary: Grok64ModuleBag | null): WasmBag[] {
@@ -324,6 +370,19 @@ export function grok64DiskAttachCallable(mod: Grok64ModuleBag | null | undefined
   return false;
 }
 
+/** Raw export, or a ccall-visible ident — Insert used to return rc=-99 when only ccall worked. */
+export function grok64DiskAttachInvocable(mod: Grok64ModuleBag | null | undefined): boolean {
+  if (grok64DiskAttachCallable(mod)) return true;
+  return exportIdentPresent(mod, "grok64_disk_attach") && moduleHasCcall(mod);
+}
+
+export function grok64DiskAttachInvocableEmu(emu: unknown): boolean {
+  for (const mod of emuWasmModuleBags(emu)) {
+    if (grok64DiskAttachInvocable(mod)) return true;
+  }
+  return false;
+}
+
 export function grok64WorkDiskRefreshCallable(mod: Grok64ModuleBag | null | undefined): boolean {
   return resolveWasmExport(mod, "grok64_work_disk_refresh") != null;
 }
@@ -389,8 +448,9 @@ export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
   if (emu != null) diskBindEmu.set(mod, emu);
   const boundEmu = () => diskBindEmu.get(mod) ?? emu ?? { Module: mod };
 
-  if (mod.grok64DiskApi && grok64DiskAttachCallable(mod)) return true;
-  if (!grok64DiskAttachCallable(mod)) return false;
+  if (!grok64DiskAttachInvocable(mod)) {
+    return typeof mod.grok64DiskApi?.diskAttach === "function";
+  }
 
   const callWithPath = (exportName: string, invoke: (fn: WasmFn, ptr: number) => number, path: string) => {
     const fn = resolveWasmExport(mod, exportName);
@@ -401,6 +461,19 @@ export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
     return withUtf8Arg(boundEmu(), mod, path, (ptr) => invoke(fn, ptr));
   };
 
+  const tryAttachCcall = (exportName: string, unit: number, drive: number, path: string): number | null => {
+    const rt = mergedWasmRuntime(boundEmu(), mod);
+    const ccall = grok64PristineCcall(rt) ?? rt.ccall;
+    if (!ccall) return null;
+    try {
+      const out = ccall(exportName, "number", ["number", "number", "string"], [unit, drive, path]);
+      if (typeof out === "number" && !Number.isNaN(out) && out !== -99) return out;
+    } catch {
+      /* try the raw export / other path */
+    }
+    return null;
+  };
+
   const callAttachWithPath = (
     exportName: string,
     unit: number,
@@ -408,18 +481,19 @@ export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
     path: string,
   ) => {
     const fn = resolveWasmExport(mod, exportName);
-    if (!fn) return -99;
-    const rt = mergedWasmRuntime(boundEmu(), mod);
-    const ccall = grok64PristineCcall(rt) ?? rt.ccall;
-    if (ccall) {
-      try {
-        const out = ccall(exportName, "number", ["number", "number", "string"], [unit, drive, path]);
-        if (typeof out === "number" && !Number.isNaN(out)) return out;
-      } catch {
-        /* fall through to UTF-8 pointer */
-      }
+    // Direct WASM first. A 1-arg or stub ccall can return -99 without ever
+    // reaching file_system_attach_disk — that was the Insert toast while the
+    // work-disk path already had the image. C grok64_disk_attach never returns -99.
+    if (fn) {
+      const direct = withUtf8Arg(boundEmu(), mod, path, (ptr) => Number(fn(unit, drive, ptr)));
+      if (direct !== GROK64_UTF8_MARSHAL_ERR && direct !== -99) return direct;
+      const viaCcall = tryAttachCcall(exportName, unit, drive, path);
+      if (viaCcall != null) return viaCcall;
+      return direct;
     }
-    return withUtf8Arg(boundEmu(), mod, path, (ptr) => Number(fn(unit, drive, ptr)));
+    const viaCcall = tryAttachCcall(exportName, unit, drive, path);
+    if (viaCcall != null) return viaCcall;
+    return -99;
   };
 
   mod.grok64DiskApi = {
@@ -602,9 +676,15 @@ export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
 }
 
 export function bindGrok64WasmApiDirect(mod: Grok64ModuleBag, emu?: unknown): boolean {
-  const hasSd2iec = resolveWasmExport(mod, "grok64_sd2iec_attach") != null;
-  const hasC64 = resolveWasmExport(mod, "grok64_c64_read") != null;
-  if (!hasSd2iec && !hasC64) return false;
+  const hasSd2iec = resolveWasmExportEmu(emu, "grok64_sd2iec_attach", mod) != null;
+  const hasC64 = resolveWasmExportEmu(emu, "grok64_c64_read", mod) != null;
+  const hasMouse = resolveWasmExportEmu(emu, "grok64_mouse_move", mod) != null;
+  if (!hasSd2iec && !hasC64 && !hasMouse && !mod.grok64WasmApi) return false;
+
+  const prev = mod.grok64WasmApi;
+  const mouseMove = resolveWasmExportEmu(emu, "grok64_mouse_move", mod);
+  const mouseButtons = resolveWasmExportEmu(emu, "grok64_mouse_buttons", mod);
+  const mousePlug = resolveWasmExportEmu(emu, "grok64_mouse_plug", mod);
 
   mod.grok64WasmApi = {
     sd2iecAttach: (unit) => {
@@ -656,26 +736,30 @@ export function bindGrok64WasmApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
       const fn = resolveWasmExport(mod, "retro_get_memory_size");
       return fn ? Number(fn(id)) : 0;
     },
-    ...(resolveWasmExport(mod, "grok64_mouse_move")
+    ...(mouseMove || prev?.mouseMove
       ? {
           mouseMove: (dx: number, dy: number) => {
-            resolveWasmExport(mod, "grok64_mouse_move")?.(dx, dy);
+            const fn = resolveWasmExportEmu(emu, "grok64_mouse_move", mod);
+            if (fn) fn(dx, dy);
+            else prev?.mouseMove?.(dx, dy);
           },
         }
       : {}),
-    ...(resolveWasmExport(mod, "grok64_mouse_buttons")
+    ...(mouseButtons || prev?.mouseButtons
       ? {
           mouseButtons: (left: number, right: number) => {
-            resolveWasmExport(mod, "grok64_mouse_buttons")?.(left, right);
+            const fn = resolveWasmExportEmu(emu, "grok64_mouse_buttons", mod);
+            if (fn) fn(left, right);
+            else prev?.mouseButtons?.(left, right);
           },
         }
       : {}),
-    ...(resolveWasmExport(mod, "grok64_mouse_plug")
+    ...(mousePlug || prev?.mousePlug
       ? {
           mousePlug: (port: number, on: number) => {
-            const fn = resolveWasmExport(mod, "grok64_mouse_plug");
-            if (!fn) return -99;
-            return Number(fn(port, on));
+            const fn = resolveWasmExportEmu(emu, "grok64_mouse_plug", mod);
+            if (fn) return Number(fn(port, on));
+            return prev?.mousePlug?.(port, on) ?? -99;
           },
         }
       : {}),

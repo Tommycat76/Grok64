@@ -281,7 +281,7 @@ import { putRom, removeRom } from "@/lib/emu/roms";
 import { snapshotDevice, readViewport, applyViewport, detectDevice, isIos, isIosPhone, isTouchMobile } from "@/lib/emu/detect";
 import { applyTabletContainFit, tabletBezelAvail, tabletGlassFillsBezel } from "@/lib/emu/tablet-fit";
 import { detectSoftwareStandard } from "@/lib/emu/region";
-import { hostDragTo1351 } from "@/lib/emu/mouse-1351";
+import { hostDragTo1351, hostPointerMoveToDelta, noteRealPointerFeed, readRealPointerFeed } from "@/lib/emu/mouse-1351";
 import { RETRO_BTN } from "@/lib/emu/types";
 import { feedBasicLine, readPrintTi } from "@/lib/emu/c64-keyboard";
 import { removeSessionCart, sessionDiskOnUnit, setSessionCart, setSessionDisk } from "@/lib/emu/session-media";
@@ -1410,11 +1410,15 @@ export function Grok64App() {
       setSettingsOpen: (on) => useEmu.getState().setSettingsOpen(!!on),
       setJiffyDos: (on) => useEmu.getState().setJiffyDos(!!on),
       setWasdIsJoy: (on) => useEmu.getState().setWasdIsJoy(!!on),
-      setMouseMode: (on) => useEmu.getState().setMouseMode(!!on),
+      setMouseMode: (on) => {
+        useEmu.getState().setMouseMode(!!on);
+        applySavedJoyAndMouse(emuRef.current, useEmu.getState().joyPort, !!on);
+      },
       addMouseDelta: (dx, dy) => addHostMouseDelta(Number(dx) || 0, Number(dy) || 0),
       addHostDrag: (dx, dy) => addHostDrag1351(Number(dx) || 0, Number(dy) || 0),
       hostDragTo1351: (dx, dy, w, h) => hostDragTo1351(Number(dx) || 0, Number(dy) || 0, Number(w) || 0, Number(h) || 0),
       vice1351Direct: () => vice1351Direct(emuRef.current),
+      realMouseFeed: () => readRealPointerFeed(),
       setMouseButtons: (left, right) => {
         mouseBtnRef.current = { left: !!left, right: !!right };
         setHostMouseButtons(!!left, !!right);
@@ -3917,6 +3921,8 @@ export function Grok64App() {
     setC64KeyboardDefer(true);
     const iec = floppyIecForKind(kind);
     const boot = bootFileName(file.name, kind);
+    setSessionDisk(item.name, media, unit);
+    useEmu.getState().setInsertedDiskName(item.name);
     const ok = mountDiskOnUnit(emuRef.current, unit, media, boot, iec);
     if (!ok) {
       toast.error("Could not mount that disk");
@@ -3968,8 +3974,6 @@ export function Grok64App() {
       : bam && /^[\x20-\x7e]+$/.test(bam)
         ? bam
         : item.name.replace(/\.[a-z0-9]{2,4}$/i, "");
-    setSessionDisk(item.name, media, unit);
-    useEmu.getState().setInsertedDiskName(item.name);
     focusGrok64Player();
     await waitRetroFrames(emuRef.current, 30);
     void logFloppyAttach("insert-disk", { name: item.name, bytes: media, libraryId: item.id });
@@ -4592,6 +4596,31 @@ export function Grok64App() {
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [emitJoyVector]);
+  useEffect(() => {
+    const onPointer = (e: PointerEvent | MouseEvent) => {
+      const st = useEmu.getState();
+      if (!st.mouseMode || playLockRef.current || !st.running || st.booting) return;
+      const screen = document.querySelector(".g64-screen") as HTMLElement | null;
+      const locked = typeof document !== "undefined" && Boolean(document.pointerLockElement);
+      const target = e.target as Node | null;
+      const over = Boolean(screen && target && (screen === target || screen.contains(target)));
+      const box = screen?.getBoundingClientRect();
+      if (!over && !locked) {
+        mousePtrRef.current = null;
+        return;
+      }
+      const { dx, dy, next } = hostPointerMoveToDelta(e, mousePtrRef.current);
+      mousePtrRef.current = next;
+      if (!dx && !dy) return;
+      const buttons = "buttons" in e ? Number(e.buttons) || 0 : 0;
+      noteRealPointerFeed(dx, dy, buttons, locked);
+      addHostDrag1351(dx, dy, box && box.width > 1 ? { w: box.width, h: box.height } : undefined);
+    };
+    window.addEventListener("pointermove", onPointer, { capture: true, passive: true });
+    return () => {
+      window.removeEventListener("pointermove", onPointer, true);
+    };
+  }, []);
   const expansionOpts = useCallback(() => {
     const st = useEmu.getState();
     return buildViceExtras({
@@ -5133,10 +5162,13 @@ export function Grok64App() {
             type="button"
             className="g64-chip g64-chip-gate g64-chip-pin"
             data-on={s.mouseMode ? "true" : "false"}
+            aria-pressed={s.mouseMode}
+            aria-label="1351 mouse"
             title={s.mouseMode ? "1351 mouse on — tap for joystick. Drag L/R in layout editor." : "1351 mouse + touchpad + L/R buttons"}
             onClick={() => {
               const next = !s.mouseMode;
               s.setMouseMode(next);
+              applySavedJoyAndMouse(emuRef.current, s.joyPort, next);
               toast.message(next ? `1351 mouse on port ${s.joyPort} — tap P1/P2 to swap` : "Joystick");
             }}
           >
@@ -5405,12 +5437,10 @@ export function Grok64App() {
               }
             }}
             onPointerMove={(e) => {
+              // Window capture listener owns movement (hover + lock). Keep last
+              // sample here so a drag that starts on the glass has a prev point.
               if (!s.mouseMode || playLockRef.current || !s.running || s.booting) return;
-              const prev = mousePtrRef.current;
-              mousePtrRef.current = { x: e.clientX, y: e.clientY };
-              if (!prev) return;
-              const box = e.currentTarget.getBoundingClientRect();
-              addHostDrag1351(e.clientX - prev.x, e.clientY - prev.y, { w: box.width, h: box.height });
+              if (!mousePtrRef.current) mousePtrRef.current = { x: e.clientX, y: e.clientY };
             }}
             onPointerUp={(e) => {
               if (playLockRef.current || !s.running || s.booting) return;

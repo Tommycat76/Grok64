@@ -100,6 +100,76 @@ export function hostDragTo1351(
   return { dx: x, dy: y };
 }
 
+export type HostPointerPos = { x: number; y: number };
+
+/**
+ * Real pointer/mouse event → 1351 counts.
+ * Prefer movementX/Y (hover and pointer-lock). Fall back to clientX/Y vs the last sample.
+ */
+export function hostPointerMoveToDelta(
+  ev: { movementX?: number; movementY?: number; clientX: number; clientY: number },
+  prev: HostPointerPos | null,
+): { dx: number; dy: number; next: HostPointerPos } {
+  const next = { x: ev.clientX, y: ev.clientY };
+  const mx = Number(ev.movementX);
+  const my = Number(ev.movementY);
+  if (Number.isFinite(mx) && Number.isFinite(my) && (mx !== 0 || my !== 0)) {
+    return { dx: mx, dy: my, next };
+  }
+  if (prev) return { dx: next.x - prev.x, dy: next.y - prev.y, next };
+  return { dx: 0, dy: 0, next };
+}
+
+export type RealPointerFeed = {
+  moves: number;
+  hoverMoves: number;
+  dragMoves: number;
+  lastDx: number;
+  lastDy: number;
+  buttons: number;
+  locked: boolean;
+  lastAt: number;
+};
+
+const realPointerFeed: RealPointerFeed = {
+  moves: 0,
+  hoverMoves: 0,
+  dragMoves: 0,
+  lastDx: 0,
+  lastDy: 0,
+  buttons: 0,
+  locked: false,
+  lastAt: 0,
+};
+
+/** Count a real canvas/window pointer event — never call this from addHostDrag helpers. */
+export function noteRealPointerFeed(dx: number, dy: number, buttons = 0, locked = false): void {
+  if (!Number.isFinite(dx) || !Number.isFinite(dy) || (dx === 0 && dy === 0)) return;
+  realPointerFeed.moves += 1;
+  if (buttons) realPointerFeed.dragMoves += 1;
+  else realPointerFeed.hoverMoves += 1;
+  realPointerFeed.lastDx = dx;
+  realPointerFeed.lastDy = dy;
+  realPointerFeed.buttons = buttons;
+  realPointerFeed.locked = locked;
+  realPointerFeed.lastAt = Date.now();
+}
+
+export function readRealPointerFeed(): RealPointerFeed {
+  return { ...realPointerFeed };
+}
+
+export function resetRealPointerFeed(): void {
+  realPointerFeed.moves = 0;
+  realPointerFeed.hoverMoves = 0;
+  realPointerFeed.dragMoves = 0;
+  realPointerFeed.lastDx = 0;
+  realPointerFeed.lastDy = 0;
+  realPointerFeed.buttons = 0;
+  realPointerFeed.locked = false;
+  realPointerFeed.lastAt = 0;
+}
+
 export function crtDisplayBox(root?: ParentNode | Document | null): { w: number; h: number } {
   const doc = root ?? (typeof document !== "undefined" ? document : null);
   const canvas = doc?.querySelector?.(".g64-screen canvas") as HTMLElement | null;

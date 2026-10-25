@@ -21,7 +21,7 @@ import {
   grok64WasmExportDiag,
   resolveWasmExport,
 } from "./grok64-wasm-direct";
-import { isGrok64WasmExportsBound, markGrok64WasmExportsBound } from "./grok64-wasm-bind";
+import { markGrok64WasmExportsBound } from "./grok64-wasm-bind";
 
 export type Grok64Emu = EjsLike;
 const asSd = (emu: Grok64Emu | null): EjsLike | null => emu;
@@ -47,9 +47,8 @@ export function probeGrok64ViceModule(emu: Grok64Emu | null): boolean {
   return Boolean(api?.sd2iecPoll || api?.sd2iecAttach || mod?.grok64Sd2iecHost);
 }
 
-/** Bind direct WASM export callers (idempotent, once per Module). */
+/** Bind direct WASM export callers. Re-run so mouse/disk exports that appear after first probe are wired. */
 export function bindGrok64WasmExports(mod: Grok64ModuleBag, emu?: Grok64Emu | null): void {
-  if (isGrok64WasmExportsBound(mod)) return;
   const wasmOk = bindGrok64WasmApiDirect(mod, emu);
   const diskOk = bindGrok64DiskApiDirect(mod, emu);
   if (wasmOk || diskOk || grok64DiskAttachCallable(mod) || resolveWasmExport(mod, "grok64_sd2iec_attach")) {

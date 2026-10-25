@@ -16,6 +16,8 @@ import {
   emuWasmModuleBags,
   grok64DiskAttachCallable,
   grok64DiskAttachCallableEmu,
+  grok64DiskAttachInvocable,
+  grok64DiskAttachInvocableEmu,
 } from "./grok64-wasm-direct";
 import { isGrok64DiskExportsBound, markGrok64DiskExportsBound } from "./grok64-wasm-bind";
 import { sessionDiskOnUnit } from "./session-media";
@@ -40,7 +42,10 @@ function diskMod(emu: ViceDiskEmu | null): Grok64ModuleBag | null {
   const bags = emuWasmModuleBags(emu);
   const e = emu as { Module?: Grok64ModuleBag & { UTF8ToString?: (ptr: number) => string } } | null;
   const mod =
-    bags.find((m) => grok64DiskAttachCallable(m)) ?? bags[0] ?? e?.Module ?? null;
+    bags.find((m) => grok64DiskAttachInvocable(m) || grok64DiskAttachCallable(m)) ??
+    bags[0] ??
+    e?.Module ??
+    null;
   if (mod && !mod.UTF8ToString) {
     const m = mod as Grok64ModuleBag & { UTF8ToString?: (ptr: number) => string };
     m.UTF8ToString =
@@ -106,15 +111,30 @@ export function prepareDriveForAttach(emu: ViceDiskEmu | null, unit: IecUnit, pa
   if (!mod) return 0;
   bindGrok64DiskExports(mod, emu);
   const api = grok64DiskApi(mod);
-  const live = api?.driveUnitType?.(unit) ?? null;
+  let setType = api?.driveSetType;
+  if (!setType) {
+    for (const bag of emuWasmModuleBags(emu)) {
+      bindGrok64DiskExports(bag, emu);
+      setType = grok64DiskApi(bag)?.driveSetType;
+      if (setType) break;
+    }
+  }
+  const live = (setType ? grok64DiskApi(diskMod(emu)) : api)?.driveUnitType?.(unit) ?? api?.driveUnitType?.(unit) ?? null;
   const want = driveTypeForAttach(kindOf(path), live);
   if (want == null) return 0;
-  if (!api?.driveSetType) {
-    glog("vice-drive-set-type-missing", { unit, live, want, path });
-    return -99;
+  if (!setType) {
+    // Do not invent rc=-99. C attach already coerces NONE/1541II; a missing
+    // helper must not abort Insert after the work-disk path already mounted.
+    glog("vice-drive-set-type-missing", { unit, live, want, path, proceed: true });
+    return 0;
   }
-  const rc = api.driveSetType(unit, want);
-  glog("vice-drive-set-type", { unit, live, want, rc, after: api.driveUnitType?.(unit) ?? null, path });
+  const rc = setType(unit, want);
+  if (rc === -99) {
+    // JS wrapper only — C grok64_drive_set_type never returns -99.
+    glog("vice-drive-set-type-missing", { unit, live, want, path, proceed: true, wrapperRc: rc });
+    return 0;
+  }
+  glog("vice-drive-set-type", { unit, live, want, rc, after: api?.driveUnitType?.(unit) ?? null, path });
   return rc < 0 ? rc : 0;
 }
 
@@ -124,6 +144,7 @@ export type ViceDiskAttachRecord = {
   before: string | null;
   after: string | null;
   at: number;
+  stage?: string;
 };
 
 const lastAttachByUnit = new Map<number, ViceDiskAttachRecord>();
@@ -161,9 +182,13 @@ export function bindGrok64DiskExports(mod: Grok64ModuleBag, emu?: ViceDiskEmu | 
 
 export function grok64DiskExportsReady(emu: ViceDiskEmu | null): boolean {
   for (const mod of emuWasmModuleBags(emu)) {
-    if (!grok64DiskAttachCallable(mod)) bindGrok64DiskExports(mod, emu);
+    if (!grok64DiskAttachInvocable(mod)) bindGrok64DiskExports(mod, emu);
   }
-  return grok64DiskAttachCallableEmu(emu);
+  if (grok64DiskAttachInvocableEmu(emu) || grok64DiskAttachCallableEmu(emu)) return true;
+  for (const mod of emuWasmModuleBags(emu)) {
+    if (typeof grok64DiskApi(mod)?.diskAttach === "function") return true;
+  }
+  return false;
 }
 
 let diskAttachChain: Promise<void> = Promise.resolve();
@@ -507,7 +532,10 @@ function viceReattachDiskSync(
   drive = 0,
 ): number {
   if (!path?.trim()) return -1;
-  if (!grok64DiskExportsReady(emu)) return -99;
+  if (!grok64DiskExportsReady(emu)) {
+    lastAttachByUnit.set(unit, { path, rc: -99, before: null, after: null, at: Date.now(), stage: "exports-missing" });
+    return -99;
+  }
   const mod = diskMod(emu)!;
   bindGrok64DiskExports(mod, emu);
   const api = grok64DiskApi(mod);

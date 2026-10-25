@@ -48,7 +48,7 @@ import { grok64RetroKeyboardAvailable } from "./grok64-keyboard";
 import { reportMountFailure, runMountStage } from "./disk-mount-stage";
 import { grok64DiskApi, grok64WasmApi } from "./grok64-api";
 import { GROK64_REU_IMAGE_PATH, snapReuKb } from "./reu-image";
-import { bindGrok64WasmApiDirect, grok64DiskAttachCallableEmu } from "./grok64-wasm-direct";
+import { bindGrok64WasmApiDirect, emuWasmModuleBags, grok64DiskAttachCallableEmu } from "./grok64-wasm-direct";
 import { grok64CoreBuildIdForUrl, grok64CoreManifestSummary, GROK64_CORE_BUILD_ID } from "./grok64-core-build";
 import { appendGrok64CoreUrlCacheParams } from "./grok64-core-url";
 import {
@@ -1335,6 +1335,11 @@ let hostMouseHeld = { ax: 0, ay: 0 };
 let hostMouseFlushAt = 0;
 
 function grok64MouseApi(emu: EjsInstance | null) {
+  for (const mod of emuWasmModuleBags(emu)) {
+    bindGrok64WasmExports(mod, emu);
+    if (!grok64WasmApi(mod)?.mouseMove) bindGrok64WasmApiDirect(mod, emu);
+    if (typeof grok64WasmApi(mod)?.mouseMove === "function") return grok64WasmApi(mod);
+  }
   const mod = emu?.Module as Parameters<typeof bindGrok64WasmExports>[0] | undefined;
   if (!mod) return null;
   bindGrok64WasmExports(mod, emu);
@@ -2820,23 +2825,40 @@ export async function viceReattachDiskOnEmuThread(
 ): Promise<number> {
   if (!emu || !path?.trim()) return -1;
   return runSerializedDiskAttach(async () => {
-    if (!grok64DiskExportsReady(emu)) return -99;
-    const mod = grok64DiskModule(emu) ?? (emu.Module as Parameters<typeof bindGrok64WasmExports>[0]);
-    bindGrok64DiskExports(mod, emu);
-    const api = grok64DiskApi(mod);
+    const bags = emuWasmModuleBags(emu);
+    for (const bag of bags) {
+      bindGrok64WasmExports(bag, emu);
+      bindGrok64DiskExports(bag, emu);
+    }
+    let api = grok64DiskApi(grok64DiskModule(emu));
+    if (!api?.diskAttach) {
+      for (const bag of bags) {
+        bindGrok64DiskExports(bag, emu);
+        const next = grok64DiskApi(bag);
+        if (next?.diskAttach) {
+          api = next;
+          break;
+        }
+      }
+    }
+    if (!api?.diskAttach) {
+      recordViceLastAttach(unit, { path, rc: -99, before: null, after: null, at: Date.now(), stage: "exports-missing" });
+      glog("vice-disk-reattach", { unit, path, rc: -99, stage: "exports-missing" });
+      return -99;
+    }
     const typeRc = prepareDriveForAttach(emu, unit, path);
     if (typeRc < 0) {
-      recordViceLastAttach(unit, { path, rc: typeRc, before: null, after: null, at: Date.now() });
+      recordViceLastAttach(unit, { path, rc: typeRc, before: null, after: null, at: Date.now(), stage: "set-type" });
       glog("vice-disk-reattach", { unit, path, rc: typeRc, diag: viceDiskLastAttachDiag(emu), stage: "set-type" });
       return typeRc;
     }
-    api?.diskDetach?.(unit, drive);
-    let rc = api?.diskAttach?.(unit, drive, path) ?? -1;
-    const attachRc = api?.diskLastAttachRc?.();
+    api.diskDetach?.(unit, drive);
+    let rc = api.diskAttach(unit, drive, path) ?? -1;
+    const attachRc = api.diskLastAttachRc?.();
     if (rc < 0 && typeof attachRc === "number" && attachRc >= 0) rc = attachRc;
     const after = rc === 0 ? viceAttachedImage(emu, unit, drive) : null;
-    recordViceLastAttach(unit, { path, rc, before: null, after, at: Date.now() });
-    glog("vice-disk-reattach", { unit, path, rc, after, syncAttach: true });
+    recordViceLastAttach(unit, { path, rc, before: null, after, at: Date.now(), stage: "disk-attach" });
+    glog("vice-disk-reattach", { unit, path, rc, after, syncAttach: true, stage: "disk-attach" });
     return rc;
   });
 }
