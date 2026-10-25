@@ -284,22 +284,29 @@ try {
   await typeC64RealKeyboard(page, 'LOAD"$",8', { keyDelayMs: 90, lineEndMs: 1200 });
   const loadT0 = Date.now();
   let dollarScreen = "";
-  let sawCatalog = false;
-  let sawWorkDisk = false;
+  let loadedDir = false;
   while (Date.now() - loadT0 < 90_000) {
     await page.waitForTimeout(1000);
     dollarScreen = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
-    if (/WORK\s*DISK/i.test(dollarScreen) && /BLOCKS FREE/i.test(dollarScreen)) {
-      sawWorkDisk = true;
+    if (/FILE NOT FOUND|\?FILE|DEVICE NOT PRESENT/i.test(dollarScreen)) break;
+    if (/SEARCHING FOR|LOADING/i.test(dollarScreen) && !/READY\.\s*$/m.test(dollarScreen)) continue;
+    if (/LOAD"\$",8/i.test(dollarScreen) && /READY/i.test(dollarScreen) && !/SEARCHING FOR/i.test(dollarScreen)) {
+      loadedDir = true;
       break;
     }
-    if (/(BOOT|GEOS|COMM 1351)/i.test(dollarScreen)) {
-      sawCatalog = true;
-      break;
-    }
-    if (/FILE NOT FOUND|\?FILE/i.test(dollarScreen)) break;
   }
-  run.dollar = { screen: dollarScreen.slice(0, 700), sawCatalog, sawWorkDisk };
+  if (loadedDir) {
+    await typeC64RealKeyboard(page, "LIST", { keyDelayMs: 90, lineEndMs: 1500 });
+    const listT0 = Date.now();
+    while (Date.now() - listT0 < 45_000) {
+      await page.waitForTimeout(800);
+      dollarScreen = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
+      if (/(BOOT|GEOS|COMM 1351|BLOCKS FREE|WORK\s*DISK)/i.test(dollarScreen)) break;
+    }
+  }
+  const sawCatalog = /(BOOT|GEOS|COMM 1351)/i.test(dollarScreen);
+  const sawWorkDisk = /WORK\s*DISK/i.test(dollarScreen);
+  run.dollar = { screen: dollarScreen.slice(0, 900), sawCatalog, sawWorkDisk, loadedDir };
   await shot("05-load-dollar.png");
   if (sawWorkDisk || !sawCatalog) {
     throw new Error(`LOAD"$",8 missed GEOS catalog work=${sawWorkDisk} geos=${sawCatalog}: ${dollarScreen.slice(0, 220)}`);
