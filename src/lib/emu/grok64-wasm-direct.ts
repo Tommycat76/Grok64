@@ -77,6 +77,7 @@ const EXPECTED_GROK64_EXPORTS = [
   "grok64_load_dollar_diag_capture",
   "grok64_vice_apply_safe_floppy_profile",
   "grok64_vice_drive_resource_snapshot",
+  "grok64_drive_set_type",
 ] as const;
 
 function wasmUtf8JsonExport(
@@ -556,6 +557,11 @@ export function bindGrok64DiskApiDirect(mod: Grok64ModuleBag, emu?: unknown): bo
       return Number(fn(unit));
     },
     viceDriveResourceSnapshot: () => wasmUtf8JsonExport(mod, "grok64_vice_drive_resource_snapshot"),
+    driveSetType: (unit, type) => {
+      const fn = resolveWasmExport(mod, "grok64_drive_set_type");
+      if (!fn) return -99;
+      return Number(fn(unit, type));
+    },
   };
   return true;
 }

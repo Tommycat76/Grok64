@@ -1,0 +1,16 @@
+--- a/retrodep/ui.c
++++ b/retrodep/ui.c
+@@ -284,10 +284,11 @@
+       log_resources_set_string("DosName1541ii", (const char*)tmp_str);
+       /* Grok64: VICE emulates 1541 and 1541-II alike, so a 1541 drive runs the same JiffyDOS ROM */
+       log_resources_set_string("DosName1541", (const char*)tmp_str);
++      /* Grok64: a drive without its JiffyDOS ROM installed keeps stock DOS, like a stock drive on a JiffyDOS C64 */
+       snprintf(tmp_str, sizeof(tmp_str), "%s%c%s", retro_system_data_directory, ARCHDEP_DIR_SEP_CHR, "JiffyDOS_1571_repl310654.bin");
+-      log_resources_set_string("DosName1571", (const char*)tmp_str);
++      log_resources_set_string("DosName1571", util_file_exists(tmp_str) ? (const char*)tmp_str : DRIVE_ROM1571_NAME);
+       snprintf(tmp_str, sizeof(tmp_str), "%s%c%s", retro_system_data_directory, ARCHDEP_DIR_SEP_CHR, "JiffyDOS_1581.bin");
+-      log_resources_set_string("DosName1581", (const char*)tmp_str);
++      log_resources_set_string("DosName1581", util_file_exists(tmp_str) ? (const char*)tmp_str : DRIVE_ROM1581_NAME);
+ 
+ #if defined(__X64__) || defined(__X64SC__)
+       switch (vice_opt.Model)

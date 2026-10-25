@@ -12,7 +12,7 @@ import {
 import type { Grok64WasmModule } from "./grok64-wasm-bind";
 
 /** Bumped when WASM bind strategy changes; About / QA can detect stale app JS. */
-export const GROK64_WASM_BIND_REV = "diskapi-v25-core-cfb3626633a0";
+export const GROK64_WASM_BIND_REV = "diskapi-v26-core-5e41e233b4cd";
 
 export type Grok64DiskApi = {
   diskAttach: (unit: number, drive: number, path: string) => number;
@@ -49,6 +49,7 @@ export type Grok64DiskApi = {
   loadDollarDiagCapture?: (unit: number) => Record<string, unknown> | null;
   viceApplySafeFloppyProfile?: (unit: number) => number;
   viceDriveResourceSnapshot?: () => Record<string, unknown> | null;
+  driveSetType?: (unit: number, type: number) => number;
 };
 
 export type Grok64WasmApi = {

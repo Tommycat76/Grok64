@@ -51,6 +51,9 @@ const GROK64_EXPORTS = [
   "_grok64_drive_cpu_clock",
   "_grok64_drive_iec_bus_lines",
   "_grok64_load_dollar_diag_capture",
+  "_grok64_vice_apply_safe_floppy_profile",
+  "_grok64_vice_drive_resource_snapshot",
+  "_grok64_drive_set_type",
 ];
 
 let text = readFileSync(makefile, "utf8");

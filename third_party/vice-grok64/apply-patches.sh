@@ -20,6 +20,11 @@ if ! grep -q "Grok64: a configured 1541" "$VICE_ROOT/libretro/libretro-core.c"; 
   git -C "$VICE_ROOT" apply "$PATCH_ROOT/patches/libretro-keep-1541-drive.patch"
 fi
 
+# JiffyDOS on without a JiffyDOS 1571/1581 ROM must leave that drive on stock DOS, not unload its ROM.
+if ! grep -q "Grok64: a drive without its JiffyDOS ROM" "$VICE_ROOT/retrodep/ui.c"; then
+  git -C "$VICE_ROOT" apply "$PATCH_ROOT/patches/libretro-jiffy-drive-rom-optional.patch"
+fi
+
 # Makefile.x64sc
 if ! grep -q grok64_sd2iec "$VICE_ROOT/Makefile.x64sc"; then
   sed -i 's|$(EMU)/serial/fsdrive.c|\\$(EMU)/serial/fsdrive.c \\\n    $(EMU)/serial/grok64_sd2iec.c \\|' "$VICE_ROOT/Makefile.x64sc"

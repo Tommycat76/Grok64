@@ -55,8 +55,13 @@ int grok64_iec_bus_reconcile(int unit);
 int grok64_drive_filesystem_device(int unit);
 int grok64_drive_cpu_clock(int unit);
 int grok64_drive_iec_bus_lines(int unit);
+int grok64_drive_set_type(int unit, int type);
+static int grok64_unit_vdrive_image(int unit, int drive, vdrive_t **vd_out, disk_image_t **img_out);
 
 extern void process_key(uint8_t disable_keys);
+
+/* Attach rc when the unit's true drive cannot read the image (D81 on a 1541, D64 on a 1581). */
+#define GROK64_ATTACH_WRONG_DRIVE (-97)
 
 #define GROK64_DISK_PATH_MAX 4096
 static int pending_disk_unit = 0;
@@ -145,6 +150,26 @@ static void grok64_clear_stale_vdrive_error(unsigned int unit)
         vd->buffers[15].buffer[0] = '\0';
         vd->last_code = 0;
     }
+}
+
+/* 1581 (WD1770) and CMD FD (PC8477) read MFM images; they never hold a GCR image. */
+static int grok64_drive_type_is_mfm(int dtype)
+{
+    return dtype == DRIVE_TYPE_1581 || dtype == DRIVE_TYPE_2000 || dtype == DRIVE_TYPE_4000;
+}
+
+/* True when the unit's live drive can read the image VICE's vdrive has attached on it. */
+static int grok64_unit_image_readable(unsigned int unit, unsigned int drive)
+{
+    disk_image_t *img = NULL;
+
+    if (unit < 8 || unit > 11 || !diskunit_context[unit - 8]) {
+        return 0;
+    }
+    if (grok64_unit_vdrive_image((int)unit, (int)drive, NULL, &img) != 0 || !img) {
+        return 0;
+    }
+    return drive_check_image_format(img->type, unit - 8) == 0;
 }
 
 static void grok64_disk_coerce_unit_1541(unsigned int unit)
@@ -457,6 +482,21 @@ int grok64_disk_attach(int unit, int drive, const char *path)
     } else {
         int sync_rc;
 
+        /* vdrive opens any image, so the attach succeeds even when the drive CPU cannot read it. */
+        if (!grok64_unit_image_readable((unsigned int)unit, (unsigned int)drive)) {
+            disk_image_t *img = NULL;
+            int img_type = -1;
+
+            if (grok64_unit_vdrive_image(unit, drive, NULL, &img) == 0 && img) {
+                img_type = (int)img->type;
+            }
+            snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
+                     "wrong drive: unit=%d drive type %u cannot read image type %d (%s)", unit,
+                     diskunit_context[unit - 8] ? diskunit_context[unit - 8]->type : 0u, img_type, path);
+            file_system_detach_disk((unsigned int)unit, (unsigned int)drive);
+            last_disk_attach_rc = GROK64_ATTACH_WRONG_DRIVE;
+            return last_disk_attach_rc;
+        }
         grok64_disk_sync_true_drive((unsigned int)unit);
         sync_rc = grok64_drive_reload_image(unit, drive);
         if (sync_rc < 0) {
@@ -554,14 +594,15 @@ int grok64_drive_bam_disk_name(int unit, int drive, char *out, int out_len)
     if (grok64_unit_vdrive_image(unit, drive, NULL, &img) != 0) {
         return -ENODEV;
     }
-    adr.track = 18;
+    /* 1581 header: track 40 sector 0, name at $04; 1541/1571 BAM: track 18 sector 0, name at $90. */
+    adr.track = img->type == DISK_IMAGE_TYPE_D81 ? 40 : 18;
     adr.sector = 0;
     if (disk_image_read_sector(img, sec, &adr) != 0) {
         return -EIO;
     }
     n = 0;
     for (i = 0; i < 16 && n < out_len - 1; i++) {
-        uint8_t c = sec[0x90 + i];
+        uint8_t c = sec[(img->type == DISK_IMAGE_TYPE_D81 ? 0x04 : 0x90) + i];
         if (c == 0xa0 || c == 0) {
             break;
         }
@@ -835,11 +876,62 @@ static void grok64_vice_apply_safe_floppy_profile_unit(unsigned int unit)
         snprintf(res, sizeof(res), "Drive%uRAMA000", u);
         resources_set_int(res, 0);
     }
-    /* Writing DriveNType, even unchanged, detaches the disk and resets the drive CPU. */
+    /* Writing DriveNType, even unchanged, detaches the disk and resets the drive CPU.
+       A 1581 / CMD FD holding an image it reads is the configured drive, not a stale one. */
     snprintf(res, sizeof(res), "Drive%uType", unit);
     if (resources_get_int(res, &v) != 0 || v != DRIVE_TYPE_1541) {
-        resources_set_int(res, DRIVE_TYPE_1541);
+        if (!(grok64_drive_type_is_mfm(v) && grok64_unit_image_readable(unit, 0))) {
+            resources_set_int(res, DRIVE_TYPE_1541);
+        }
     }
+}
+
+/* Sets DriveNType only when it differs: every write detaches the unit's disks and resets its CPU. */
+#ifdef __EMSCRIPTEN__
+EMSCRIPTEN_KEEPALIVE
+#endif
+int grok64_drive_set_type(int unit, int type)
+{
+    unsigned int dnr;
+    int cur = -1;
+
+    if (unit < 8 || unit > 11) {
+        return -EINVAL;
+    }
+    switch (type) {
+        case DRIVE_TYPE_NONE:
+        case DRIVE_TYPE_1541:
+        case DRIVE_TYPE_1541II:
+        case DRIVE_TYPE_1570:
+        case DRIVE_TYPE_1571:
+        case DRIVE_TYPE_1581:
+        case DRIVE_TYPE_2000:
+        case DRIVE_TYPE_4000:
+        case DRIVE_TYPE_CMDHD:
+            break;
+        default:
+            return -EINVAL;
+    }
+    dnr = (unsigned int)unit - 8;
+    if (!diskunit_context[dnr]) {
+        return -ENODEV;
+    }
+    if (resources_get_int_sprintf("Drive%dType", &cur, unit) == 0 && cur == type
+        && (int)diskunit_context[dnr]->type == type) {
+        return type;
+    }
+    if (type != DRIVE_TYPE_NONE && machine_drive_rom_check_loaded((unsigned int)type) < 0) {
+        snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
+                 "set-type: drive ROM for type %d not loaded (unit %d)", type, unit);
+        return -ENOENT;
+    }
+    if (resources_set_int_sprintf("Drive%dType", type, unit) != 0
+        || (int)diskunit_context[dnr]->type != type) {
+        snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
+                 "set-type: Drive%dType=%d rejected (live type %u)", unit, type, diskunit_context[dnr]->type);
+        return -EIO;
+    }
+    return type;
 }
 
 #ifdef __EMSCRIPTEN__
@@ -982,6 +1074,20 @@ int grok64_drive_sync_tde_image(int unit, int drive)
         grok64_note_attach_diag("sync-tde: no vdrive image");
         return -ENOENT;
     }
+    if (!diskunit_context[unit - 8]) {
+        grok64_note_attach_diag("sync-tde: no drive unit");
+        return -ENODEV;
+    }
+    if (drive_check_image_format(image->type, (unsigned int)unit - 8) < 0) {
+        snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
+                 "sync-tde: unit=%d drive type %u cannot read image type %u", unit,
+                 diskunit_context[unit - 8]->type, image->type);
+        return GROK64_ATTACH_WRONG_DRIVE;
+    }
+    /* 1581 / CMD FD: attach_disk_image handed this image to the WD1770 / PC8477 controller. */
+    if (grok64_drive_type_is_mfm((int)diskunit_context[unit - 8]->type)) {
+        return 0;
+    }
     drv = grok64_unit_drive((unsigned int)unit, (unsigned int)drive);
     if (drv && drv->image == image && drv->GCR_image_loaded) {
         if (disk_image_read_image(image) < 0) {
@@ -1101,7 +1207,8 @@ int grok64_drive_reload_image(int unit, int drive)
         grok64_note_attach_diag("reload: no vdrive/image");
         return -ENODEV;
     }
-    if (disk_image_read_image(image) < 0) {
+    /* Only an image the true drive holds has a GCR buffer; D81/DHD have none to rebuild. */
+    if (image->gcr != NULL && disk_image_read_image(image) < 0) {
         snprintf(last_disk_attach_diag, sizeof(last_disk_attach_diag),
                  "reload: vdrive disk_image_read_image unit=%d failed", unit);
         return -EIO;
