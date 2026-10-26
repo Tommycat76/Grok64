@@ -581,7 +581,7 @@ export function Grok64App() {
       return;
     }
     const j = joyRef.current;
-    const fire = fireOverride ?? j.fire;
+    let fire = fireOverride ?? j.fire;
     let x = j.x;
     let y = j.y;
     const a = arrowJoyRef.current;
