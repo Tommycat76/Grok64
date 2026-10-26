@@ -1,5 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
+import { u8ToB64 } from "./archive";
+import { callServerFnFirst } from "@/lib/server-fn-static";
 
 const BLOCKED = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|0\.|169\.254\.|::1|\[::1\])/i;
 const MAX = 6 * 1024 * 1024;
@@ -30,37 +32,55 @@ function filenameOf(url: string, header: string | null): string {
   }
 }
 
+async function importFromUrlCore(url: string): Promise<{ name: string; base64: string; size: number }> {
+  let raw = url.trim();
+  if (!/^https?:\/\//i.test(raw)) raw = `https://${raw}`;
+  const target = new URL(raw);
+  if (BLOCKED.test(target.hostname) || target.hostname === "0.0.0.0") {
+    throw new Error("That address cannot be fetched.");
+  }
+  const href = rewrite(target.toString());
+  const res = await fetch(href, {
+    redirect: "follow",
+    headers: {
+      Accept: "application/octet-stream,*/*",
+      "User-Agent": "Mozilla/5.0 (compatible; Grok64Emu/1.0)",
+    },
+  });
+  if (!res.ok) throw new Error(`Download failed (${res.status})`);
+  const len = Number(res.headers.get("content-length") ?? "0");
+  if (len > MAX) throw new Error("File is larger than 6 MB.");
+  const buf = new Uint8Array(await res.arrayBuffer());
+  if (buf.byteLength > MAX) throw new Error("File is larger than 6 MB.");
+  const ct = res.headers.get("content-type") ?? "";
+  if (ct.includes("text/html")) {
+    throw new Error(
+      "Got a web page instead of a disk image. On Drive, set the file to Anyone with the link, or use Files on iPhone.",
+    );
+  }
+  const name = filenameOf(href, res.headers.get("content-disposition"));
+  if (!OK_EXT.test(name) && !OK_EXT.test(target.pathname)) {
+    throw new Error("Not a C64 image (use .prg .d64 .crt .t64 .tap .zip .g64).");
+  }
+  return { name, base64: u8ToB64(buf), size: buf.byteLength };
+}
+
+/** Browser / static host — same rules as the serverFn handler. */
+export async function importFromUrlClient(url: string): Promise<{ name: string; base64: string; size: number }> {
+  return importFromUrlCore(url);
+}
+
+export async function importFromUrlResolved(url: string): Promise<{ name: string; base64: string; size: number }> {
+  const empty = { name: "", base64: "", size: 0 };
+  const res = await callServerFnFirst(
+    () => importFromUrlClient(url),
+    () => importFromUrl({ data: { url } }),
+    empty,
+  );
+  if (!res?.base64 || !res.name) throw new Error("Download failed");
+  return res;
+}
+
 export const importFromUrl = createServerFn({ method: "POST" })
   .validator(z.object({ url: z.string().min(4).max(2000) }))
-  .handler(async ({ data }) => {
-    let raw = data.url.trim();
-    if (!/^https?:\/\//i.test(raw)) raw = `https://${raw}`;
-    const target = new URL(raw);
-    if (BLOCKED.test(target.hostname) || target.hostname === "0.0.0.0") {
-      throw new Error("That address cannot be fetched.");
-    }
-    const href = rewrite(target.toString());
-    const res = await fetch(href, {
-      redirect: "follow",
-      headers: {
-        Accept: "application/octet-stream,*/*",
-        "User-Agent": "Mozilla/5.0 (compatible; Grok64Emu/1.0)",
-      },
-    });
-    if (!res.ok) throw new Error(`Download failed (${res.status})`);
-    const len = Number(res.headers.get("content-length") ?? "0");
-    if (len > MAX) throw new Error("File is larger than 6 MB.");
-    const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.byteLength > MAX) throw new Error("File is larger than 6 MB.");
-    const ct = res.headers.get("content-type") ?? "";
-    if (ct.includes("text/html")) {
-      throw new Error(
-        "Got a web page instead of a disk image. On Drive, set the file to Anyone with the link, or use Files on iPhone.",
-      );
-    }
-    const name = filenameOf(href, res.headers.get("content-disposition"));
-    if (!OK_EXT.test(name) && !OK_EXT.test(target.pathname)) {
-      throw new Error("Not a C64 image (use .prg .d64 .crt .t64 .tap .zip .g64).");
-    }
-    return { name, base64: buf.toString("base64"), size: buf.byteLength };
-  });
+  .handler(async ({ data }) => importFromUrlCore(data.url));

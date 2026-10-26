@@ -8,7 +8,7 @@ import { ACCEPT_EXT, displayKindOf, isDiskKind, kindLabelFor } from "@/lib/emu/f
 import { isReuImageName } from "@/lib/emu/reu-image";
 import { validateCrtImport } from "@/lib/emu/cart-crt-diag";
 import { isWorkDisk, listLibrary, putFile, removeFile, updateFileUnit } from "@/lib/emu/library";
-import { importFromUrl } from "@/lib/emu/import-url";
+import { importFromUrlResolved } from "@/lib/emu/import-url";
 import { b64ToU8, explodeArchive, pickBootFile, toArrayBuffer } from "@/lib/emu/archive";
 import { floppyInsertUnit } from "@/lib/emu/play-session";
 import { useEmu } from "@/lib/emu/store";
@@ -24,7 +24,7 @@ interface Props {
 export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
   const open = useEmu((s) => s.libraryOpen);
   const setOpen = useEmu((s) => s.setLibraryOpen);
-  const library = useEmu((s) => s.library);
+  const library = useEmu((s) => s.library) ?? [];
   const setLibrary = useEmu((s) => s.setLibrary);
   const running = useEmu((s) => s.running);
   const iecMap = useEmu((s) => s.iecMap);
@@ -102,7 +102,7 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
     if (!trimmed) return;
     setBusy(true);
     try {
-      const res = await importFromUrl({ data: { url: trimmed } });
+      const res = await importFromUrlResolved(trimmed);
       const bin = b64ToU8(res.base64);
       const parts = explodeArchive(res.name, bin);
       const saved: LibraryItem[] = [];

@@ -78,7 +78,15 @@ export function QuickDock({ onDisk, onReset, onSnapshot, onPauseToggle, onWarp, 
       >
         WASD
       </button>
-      <button type="button" className="g64-dock-btn" aria-label="Swap joystick port" title={`Port ${s.joyPort} — tap to swap`} onClick={onSwapJoy}>
+      <button
+        type="button"
+        className="g64-dock-btn"
+        aria-label={s.mouseMode ? `Swap 1351 port ${s.joyPort}` : `Swap joystick port ${s.joyPort}`}
+        title={
+          s.mouseMode ? `1351 on port ${s.joyPort} — tap to swap` : `Joystick on port ${s.joyPort} — tap to swap`
+        }
+        onClick={onSwapJoy}
+      >
         P{s.joyPort}
       </button>
       <button type="button" className="g64-dock-btn" aria-label={paused ? "Resume" : "Pause"} title={paused ? "Resume" : "Pause"} onClick={onPauseToggle}>

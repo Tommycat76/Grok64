@@ -4,16 +4,15 @@ import { toast } from "sonner";
 import {
   KIND_CHIPS,
   SOURCE_LABEL,
-  listCatalogFiles,
-  listCatalogFilesClient,
-  searchCatalog,
-  searchCatalogClient,
   downloadCatalogFile,
   downloadCatalogFileClient,
+  listCatalogFilesResolved,
+  searchCatalogResolved,
   type CatalogFile,
   type CatalogHit,
   type CatalogKind,
 } from "@/lib/emu/catalog";
+import { callServerFnFirst } from "@/lib/server-fn-static";
 import { explodeArchive, pickBootFile, toArrayBuffer, b64ToU8 } from "@/lib/emu/archive";
 import { validateCrtImport } from "@/lib/emu/cart-crt-diag";
 import { listLibrary, putFile } from "@/lib/emu/library";
@@ -35,18 +34,14 @@ async function fetchRemote(
     ...(file.url ? { url: file.url } : {}),
     ...(file.a64 ? { a64: file.a64 } : {}),
   };
-  try {
-    const res = await downloadCatalogFileClient(payload, { signal });
-    return { name: res.name || file.name, data: b64ToU8(res.base64) };
-  } catch {
-    /* static Plex hosts have no serverFn — try legacy path when client fetch fails */
-  }
-  try {
-    const res = await downloadCatalogFile({ data: payload });
-    return { name: res.name || file.name, data: b64ToU8(res.base64) };
-  } catch (err) {
-    throw err instanceof Error ? err : new Error("Download failed");
-  }
+  const empty = { name: file.name, base64: "", size: 0 };
+  const res = await callServerFnFirst(
+    () => downloadCatalogFileClient(payload, { signal }),
+    () => downloadCatalogFile({ data: payload }),
+    empty,
+  );
+  if (!res?.base64) throw new Error("Download failed");
+  return { name: res.name || file.name, data: b64ToU8(res.base64) };
 }
 
 export function CatalogPanel({ onPlay, onInsert }: Props) {
@@ -81,12 +76,10 @@ export function CatalogPanel({ onPlay, onInsert }: Props) {
     setHits([]);
     setOpenKey(null);
     try {
-      let res;
-      try {
-        res = await searchCatalog({ data: { query: q, kind: k } });
-      } catch {
-        res = await searchCatalogClient({ query: q, kind: k }, { signal: searchAbort.current.signal });
-      }
+      const res = await searchCatalogResolved(
+        { query: q, kind: k },
+        { signal: searchAbort.current.signal },
+      );
       if (gen !== searchGen.current) return;
       setHits(res.hits);
       setA64(res.a64);
@@ -158,13 +151,10 @@ export function CatalogPanel({ onPlay, onInsert }: Props) {
     try {
       let list = files[hit.key];
       if (!list) {
-        try {
-          list = await listCatalogFiles({ data: hit });
-        } catch {
-          list = await listCatalogFilesClient(hit);
-        }
-        setFiles((m) => ({ ...m, [hit.key]: list! }));
+        list = await listCatalogFilesResolved(hit);
+        setFiles((m) => ({ ...m, [hit.key]: list }));
       }
+      if (!list?.length) throw new Error("No files listed for that release.");
       if (list.length > 1 && mode !== "play") {
         setOpenKey(hit.key);
         return;

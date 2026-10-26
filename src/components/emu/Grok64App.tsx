@@ -4840,11 +4840,12 @@ export function Grok64App() {
   };
   const swapJoyPort = useCallback(() => {
     const st = useEmu.getState();
-    const next = st.joyPort === 2 ? 1 : 2;
-    st.setJoyPort(next);
-    applySavedJoyAndMouse(emuRef.current, next, st.mouseMode);
-    glog("port-swap", { next, mouse: st.mouseMode });
-    toast.message(st.mouseMode ? `Mouse → Port ${next}` : `Joystick → Port ${next}`);
+    const port: 1 | 2 = st.joyPort === 2 ? 1 : 2;
+    st.setJoyPort(port);
+    applySavedJoyAndMouse(emuRef.current, port, st.mouseMode);
+    glog("port-swap", { port, mouse: st.mouseMode });
+    const label = st.mouseMode ? `1351 on port ${port}` : `Joystick on port ${port}`;
+    toast.message(label);
   }, []);
   swapJoyPortRef.current = swapJoyPort;
   useEffect(() => {
@@ -5268,7 +5269,7 @@ export function Grok64App() {
               s.setMouseMode(next);
               if (next) mousePtrRef.current = null;
               applySavedJoyAndMouse(emuRef.current, s.joyPort, next);
-              toast.message(next ? `1351 mouse on port ${s.joyPort} — tap P1/P2 to swap` : "Joystick");
+              toast.message(next ? `1351 on port ${useEmu.getState().joyPort}` : "Joystick");
             }}
           >
             MOUSE

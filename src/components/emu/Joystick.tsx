@@ -516,8 +516,12 @@ export function TouchControls({
       <button
         type="button"
         className="g64-port"
-        aria-label={`Joystick port ${joyPort}, tap to swap`}
-        title={`Joystick port ${joyPort} — tap to swap`}
+        aria-label={
+          mouseMode ? `1351 mouse port ${joyPort}, tap to swap` : `Joystick port ${joyPort}, tap to swap`
+        }
+        title={
+          mouseMode ? `1351 on port ${joyPort} — tap to swap` : `Joystick on port ${joyPort} — tap to swap`
+        }
         onPointerDown={(e) => {
           e.preventDefault();
           onSwap();
