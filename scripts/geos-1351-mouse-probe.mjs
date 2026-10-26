@@ -51,7 +51,7 @@ try {
   assert.equal(bootOk, true, "bootGeos");
   for (let i = 0; i < 120; i++) {
     const r = await routing(page);
-    if (r?.geosPortStickAllowed) break;
+    if (r?.geosDeskSession || r?.geosRuntimeLive) break;
     await page.waitForTimeout(1000);
   }
 

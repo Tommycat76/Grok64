@@ -59,7 +59,7 @@ try {
   await page.evaluate(() => {
     window.__g64.holdStick?.(false);
     window.__g64.stick?.(0, 0);
-    window.__g64.primeGeosStickSessionForQa?.();
+    window.__g64.primeGeosDeskSessionForQa?.();
   });
   await page.waitForTimeout(200);
   await holdStickRight(page);

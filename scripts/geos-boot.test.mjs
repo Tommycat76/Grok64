@@ -12,6 +12,7 @@ const {
   geosBootSucceeded,
   geosAllowsPortStickOverride,
   geosHostStickOverrideWanted,
+  geosRuntimeActive,
   geosFamilyDesktopOk,
   isGeosFamilyDiskName,
   isWheelsDiskName,
@@ -52,10 +53,11 @@ describe("geos-boot", () => {
     assert.equal(geosBootSucceeded("deskTop V2.0", "GEOS64_2.0.d64"), true);
   });
 
-  it("GEOS port stick allowed on GEOS disk, not game disks", () => {
-    assert.equal(geosAllowsPortStickOverride(null, "GEOS Boot Disk.d64"), false);
-    assert.equal(geosAllowsPortStickOverride({}, "paradroid.d64"), false);
-    assert.equal(geosAllowsPortStickOverride({}, "GEOS Boot Disk.d64"), true);
+  it("GEOS runtime stick gate ignores inserted disk name", () => {
+    assert.equal(geosRuntimeActive(null), false);
+    assert.equal(geosRuntimeActive({}), false);
+    assert.equal(geosAllowsPortStickOverride({}, "GEOS Boot Disk.d64"), false);
     assert.equal(geosHostStickOverrideWanted({}, "GEOS Boot Disk.d64"), false);
+    assert.equal(geosBootSucceeded("deskTop V2.0", "GEOS64_2.0.d64"), true);
   });
 });

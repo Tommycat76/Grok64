@@ -89,35 +89,34 @@ export function geosBootLooksLaunched(screen: string): boolean {
   return /GEOS|DESK|DISK|DIRECTORY|GEODISC|WHEELS|deskTop/i.test(tail);
 }
 
-/**
- * GEOS stock JOYSTICK driver reads the CIA port where the 1351 lives (saved mouse
- * port). Engage host joystick override only while a GEOS-family system disk is
- * active and the machine is past BASIC/LOAD — not for opposite-port games.
- */
-/** True while a GEOS-family disk is running (not BASIC READY) — touch stick may use port-1 joystick briefly. */
-export function geosAllowsPortStickOverride(
-  emu: RamEmu | null,
-  insertedDiskName: string | null | undefined,
-): boolean {
-  const disk = (insertedDiskName || "").trim();
-  if (!emu || !disk || !isGeosFamilyDiskName(disk)) return false;
-  const screen = readScreenText(emu);
-  if (geosBootStuckAtBasic(screen)) return false;
-  if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen)) return false;
-  return true;
-}
-
-export function geosHostStickOverrideWanted(
-  emu: RamEmu | null,
-  insertedDiskName: string | null | undefined,
-): boolean {
-  const disk = (insertedDiskName || "").trim();
-  if (!emu || !disk || !isGeosFamilyDiskName(disk)) return false;
+/** GEOS deskTop / menu is running now (KERNAL heuristics — not inserted disk name). */
+export function geosRuntimeActive(emu: RamEmu | null): boolean {
+  if (!emu) return false;
   const screen = readScreenText(emu);
   if (geosBootStuckAtBasic(screen)) return false;
   if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen)) return false;
   if (/SEARCHING FOR|LOADING|LOAD"/i.test(screen)) return false;
-  if (geosBootSucceeded(screen, disk) || geosBootLooksLaunched(screen)) return true;
+  if (geosBootSucceeded(screen) || geosBootLooksLaunched(screen)) return true;
   if (screenRamShowsGeosCatalog(emu)) return true;
   return false;
+}
+
+/** @deprecated Use geosRuntimeActive — disk name is not a reliable GEOS-running signal. */
+export function geosAllowsPortStickOverride(
+  emu: RamEmu | null,
+  _insertedDiskName?: string | null | undefined,
+): boolean {
+  return geosRuntimeActive(emu);
+}
+
+export function geosHostStickOverrideWanted(
+  emu: RamEmu | null,
+  insertedDiskName?: string | null | undefined,
+): boolean {
+  const disk = (insertedDiskName || "").trim();
+  if (!geosRuntimeActive(emu)) return false;
+  if (disk && isWheelsDiskName(disk) && /REU|RAM\s*EXPANS|NO\s*REU|EXPANSION\s*NOT/i.test(readScreenText(emu))) {
+    return false;
+  }
+  return true;
 }
