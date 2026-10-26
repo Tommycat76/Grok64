@@ -527,10 +527,11 @@ export async function syncEmulatorJsCoreCacheWithManifest(): Promise<Grok64EjsCa
   return { removed, reason };
 }
 
-function rewriteCoreDownloadUrl(url: string): string {
-  if (!url || !isGrok64CoreCacheRequestUrl(url)) return url;
-  const canonical = grok64CoreBlobUrl();
-  if (canonical && /vice_.*wasm\.data/i.test(url)) return canonical;
+/** Pin any vice_*.data / IEC blob URL to the local Grok64 core. Never rewrite .js. */
+export function rewriteGrok64CoreDownloadUrl(url: string, canonical: string | null = grok64CoreBlobUrl()): string {
+  if (!url || !canonical) return url;
+  if (!isGrok64CoreCacheRequestUrl(url)) return url;
+  if (/vice_.*wasm\.data/i.test(url) || url.includes(GROK64_IEC_CORE_BLOB)) return canonical;
   return url;
 }
 
@@ -540,6 +541,20 @@ function noteCoreResponseBytes(res: Response | null): void {
   if (len > 0) noteGrok64CoreNetworkBytes(len);
 }
 
+function stripForbiddenCoreFetchCache(init?: RequestInit): RequestInit | undefined {
+  if (!init) return init;
+  const next: RequestInit = { ...init };
+  delete next.cache;
+  if (next.headers) {
+    const headers = new Headers(next.headers);
+    headers.delete("Cache-Control");
+    headers.delete("Pragma");
+    next.headers = headers;
+  }
+  return next;
+}
+
+/** Rewrite vice_*.data fetches to the local IEC blob. Never set cache or custom headers. */
 export function patchFetchNoStoreForGrok64Core(): void {
   if (typeof window === "undefined" || (window as unknown as { __g64CoreFetch?: boolean }).__g64CoreFetch) {
     return;
@@ -555,13 +570,13 @@ export function patchFetchNoStoreForGrok64Core(): void {
           : input instanceof Request
             ? input.url
             : "";
-    if (url.includes(GROK64_IEC_CORE_BLOB) || /\/cores\/vice_.*wasm\.data/i.test(url)) {
-      init = { ...init, cache: "no-store" };
-      const next = rewriteCoreDownloadUrl(url);
+    if (isGrok64CoreCacheRequestUrl(url)) {
+      const next = rewriteGrok64CoreDownloadUrl(url);
       if (next !== url) {
         url = next;
         input = next;
       }
+      init = stripForbiddenCoreFetchCache(init);
       const out = orig(input, init);
       void Promise.resolve(out).then((res) => noteCoreResponseBytes(res)).catch(() => undefined);
       return out;
@@ -570,7 +585,7 @@ export function patchFetchNoStoreForGrok64Core(): void {
   };
 }
 
-/** EmulatorJS `downloadFile` uses XHR, not fetch — no-store + heal nonce must wrap open/send. */
+/** EmulatorJS `downloadFile` uses XHR — rewrite vice_*.data to the local IEC blob; no request headers. */
 export function patchXhrNoStoreForGrok64Core(): void {
   if (typeof window === "undefined" || (window as unknown as { __g64CoreXhr?: boolean }).__g64CoreXhr) {
     return;
@@ -587,7 +602,7 @@ export function patchXhrNoStoreForGrok64Core(): void {
   ) {
     let href = String(url);
     if (isGrok64CoreCacheRequestUrl(href)) {
-      href = rewriteCoreDownloadUrl(href);
+      href = rewriteGrok64CoreDownloadUrl(href);
       (this as XMLHttpRequest & { __g64CoreXhr?: boolean }).__g64CoreXhr = true;
     }
     return origOpen.call(
@@ -600,12 +615,6 @@ export function patchXhrNoStoreForGrok64Core(): void {
   const origSend = XHR.prototype.send;
   XHR.prototype.send = function patchedSend(this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
     if ((this as XMLHttpRequest & { __g64CoreXhr?: boolean }).__g64CoreXhr) {
-      try {
-        this.setRequestHeader("Cache-Control", "no-cache");
-        this.setRequestHeader("Pragma", "no-cache");
-      } catch {
-        /* forbidden header on some browsers */
-      }
       this.addEventListener("load", () => {
         const len = Number(this.getResponseHeader("content-length") || 0);
         if (len > 0) noteGrok64CoreNetworkBytes(len);

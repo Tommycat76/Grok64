@@ -53,6 +53,59 @@ export function grok64CoreBlobUrl(baseUrl, { cacheBust = true } = {}) {
   return href;
 }
 
+export function isCdnViceCoreUrl(url) {
+  return /cdn\.emulatorjs\.org/i.test(String(url)) && /\/cores\/vice_/i.test(String(url));
+}
+
+/**
+ * Observe VICE core traffic. Does **not** abort CDN — a CORS/CDN miss must
+ * surface as a failed Power, the same way a dirty Vite profile fails.
+ */
+export function installGrok64CoreNetworkMonitor(page) {
+  const requests = [];
+  const responses = [];
+  page.on("request", (req) => {
+    const u = req.url();
+    if (!/\/cores\/vice_/i.test(u) && !/grok64-iec-wasm\.data/i.test(u)) return;
+    requests.push({
+      url: u,
+      method: req.method(),
+      headers: req.headers(),
+      resourceType: req.resourceType(),
+    });
+  });
+  page.on("response", (res) => {
+    const u = res.url();
+    if (!/\/cores\/vice_/i.test(u) && !/grok64-iec-wasm\.data/i.test(u)) return;
+    responses.push({ url: u, status: res.status() });
+  });
+  return {
+    requests,
+    responses,
+    reset() {
+      requests.length = 0;
+      responses.length = 0;
+    },
+    snapshot() {
+      const forbiddenHeaders = requests
+        .filter((r) => {
+          const h = r.headers || {};
+          const cc = String(h["cache-control"] ?? "").toLowerCase();
+          const pr = String(h["pragma"] ?? "").toLowerCase();
+          return /no-cache|no-store/.test(cc) || /no-cache/.test(pr);
+        })
+        .map((r) => ({ url: r.url, cacheControl: r.headers["cache-control"] ?? null, pragma: r.headers["pragma"] ?? null }));
+      return {
+        requestUrls: requests.map((r) => r.url),
+        responseStatus: responses.map((r) => ({ url: r.url, status: r.status })),
+        cdnVice: requests.filter((r) => isCdnViceCoreUrl(r.url)).map((r) => r.url),
+        forbiddenHeaders,
+        iec200: responses.some((r) => /vice_x64sc-grok64-iec-wasm\.data/i.test(r.url) && r.status === 200),
+      };
+    },
+  };
+}
+
 /** Block CDN / stock vice *.data; only allow the Grok64 IEC blob. */
 export async function installGrok64CoreNetworkGuard(page, baseUrl) {
   const allowed = grok64CoreBlobUrl(baseUrl);

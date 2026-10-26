@@ -6,8 +6,10 @@ const server = await createServer({ server: { middlewareMode: true }, appType: "
 const { runningCoreMismatch, bytesHaveGrok64DiskAttach } = await server.ssrLoadModule(
   "/src/lib/emu/grok64-core-loaded.ts",
 );
-const { isGrok64CoreCacheRequestUrl, isEmulatorJsViceCoreStorageKey, CORE_REFRESH_BUDGET, CORE_REFRESH_MAX } =
+const { isGrok64CoreCacheRequestUrl, isEmulatorJsViceCoreStorageKey, CORE_REFRESH_BUDGET, CORE_REFRESH_MAX, rewriteGrok64CoreDownloadUrl } =
   await server.ssrLoadModule("/src/lib/emu/grok64-ejs-core-cache.ts");
+const { applyGrok64LocalCoreDownloadArgs, ejsCoreDownloadLeaf, ejsDownloadFileArity, requestHasForbiddenCoreCacheHeader } =
+  await server.ssrLoadModule("/src/lib/emu/grok64-ejs-core-download.ts");
 const { displayKindOf, kindLabelFor } = await server.ssrLoadModule("/src/lib/emu/formats.ts");
 const { appendGrok64CoreUrlCacheParams, GROK64_CORE_HEAL_PENDING_SS, GROK64_CORE_AUTO_RELOAD_SS } =
   await server.ssrLoadModule("/src/lib/emu/grok64-core-url.ts");
@@ -161,6 +163,64 @@ test("heal nonce is added only while a heal reload is pending", () => {
     sessionStorage.removeItem(GROK64_CORE_HEAL_PENDING_SS);
     sessionStorage.removeItem(GROK64_CORE_AUTO_RELOAD_SS);
   }
+});
+
+test("stable 4-arg downloadFile keeps opts and sets notWithPath at index 2", () => {
+  const opts = { responseType: "arraybuffer", method: "GET" };
+  const next = applyGrok64LocalCoreDownloadArgs(
+    ["cores/vice_x64sc-wasm.data", null, false, opts],
+    4,
+    "http://local/cores/vice_x64sc-grok64-iec-wasm.data",
+  );
+  assert.equal(next[0], "http://local/cores/vice_x64sc-grok64-iec-wasm.data");
+  assert.equal(next[2], true);
+  assert.equal(typeof next[3], "object");
+  assert.equal(next[3].method, "GET");
+  assert.equal(next[3].responseType, "arraybuffer");
+  assert.notEqual(next[3], true);
+});
+
+test("stable 4-arg never treats args[3]=true as notWithPath when opts were smashed", () => {
+  const next = applyGrok64LocalCoreDownloadArgs(
+    ["https://cdn.emulatorjs.org/stable/data/cores/vice_x64sc-legacy-wasm.data", () => {}, true, true],
+    4,
+    "http://local/cores/vice_x64sc-grok64-iec-wasm.data",
+  );
+  assert.equal(next[2], true);
+  assert.equal(typeof next[3], "object");
+  assert.equal(next[3].method, "GET");
+});
+
+test("latest 8-arg downloadFile sets notWithPath at index 3 and dontCache at 6", () => {
+  function eight(_a, _b, _c, _d, _e, _f, _g, _h) {}
+  assert.equal(ejsDownloadFileArity(eight), 8);
+  const next = applyGrok64LocalCoreDownloadArgs(
+    ["cores/vice_x64sc-wasm.data?v=1", "Core", null, false, { method: "GET" }, false, false, false],
+    8,
+    "http://local/cores/vice_x64sc-grok64-iec-wasm.data",
+  );
+  assert.equal(next[3], true);
+  assert.equal(typeof next[4], "object");
+  assert.equal(next[6], true);
+  assert.equal(ejsCoreDownloadLeaf("cores/vice_x64sc-wasm.data?v=99"), "vice_x64sc-wasm.data");
+});
+
+test("core requests must not carry Cache-Control or Pragma", () => {
+  assert.equal(requestHasForbiddenCoreCacheHeader({ "cache-control": "no-cache" }), true);
+  assert.equal(requestHasForbiddenCoreCacheHeader({ Pragma: "no-cache" }), true);
+  assert.equal(requestHasForbiddenCoreCacheHeader({ accept: "*/*" }), false);
+});
+
+test("CDN vice .data rewrites to the local IEC blob when a canonical URL is known", () => {
+  const local = "http://127.0.0.1:8080/system/vice/emulatorjs/data/cores/vice_x64sc-grok64-iec-wasm.data";
+  assert.equal(
+    rewriteGrok64CoreDownloadUrl("https://cdn.emulatorjs.org/stable/data/cores/vice_x64sc-legacy-wasm.data", local),
+    local,
+  );
+  assert.equal(
+    rewriteGrok64CoreDownloadUrl("https://cdn.emulatorjs.org/stable/data/cores/vice_x64sc-wasm.js", local),
+    "https://cdn.emulatorjs.org/stable/data/cores/vice_x64sc-wasm.js",
+  );
 });
 
 test("disk-attach fingerprint scans the whole buffer, not a 2.5MB head", () => {

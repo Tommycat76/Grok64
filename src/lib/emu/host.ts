@@ -51,6 +51,7 @@ import { GROK64_REU_IMAGE_PATH, snapReuKb } from "./reu-image";
 import { bindGrok64WasmApiDirect, emuWasmModuleBags, grok64DiskAttachCallableEmu } from "./grok64-wasm-direct";
 import { grok64CoreBuildIdForUrl, grok64CoreManifestSummary, GROK64_CORE_BUILD_ID } from "./grok64-core-build";
 import { appendGrok64CoreUrlCacheParams } from "./grok64-core-url";
+import { applyGrok64LocalCoreDownloadArgs, ejsCoreDownloadLeaf, ejsDownloadFileArity } from "./grok64-ejs-core-download";
 import {
   grok64CoreBuildIdLoaded,
   grok64CoreBuildMatchesExpected,
@@ -670,12 +671,12 @@ export function prefetchViceCores() {
   if (typeof fetch === "undefined") return;
   if (grok64ViceCoreRoot()) {
     const blob = grok64CoreBlobUrl();
-    if (blob) void fetch(blob, { mode: "cors", credentials: "omit", cache: "no-store" }).catch(() => undefined);
+    if (blob) void fetch(blob, { mode: "cors", credentials: "omit" }).catch(() => undefined);
     return;
   }
   const blob = grok64CoreBlobUrl();
   if (blob) {
-    void fetch(blob, { mode: "cors", credentials: "omit", cache: "no-store" }).catch(() => undefined);
+    void fetch(blob, { mode: "cors", credentials: "omit" }).catch(() => undefined);
     return;
   }
   const names = isIosPhone() ? ["vice_x64sc"] : ["vice_x64sc"];
@@ -752,53 +753,41 @@ function patchEjsGrok64CoreDownload() {
   if (!proto?.downloadFile || proto.__g64Core) return;
   proto.__g64Core = true;
   const orig = proto.downloadFile;
+  const arity = ejsDownloadFileArity(orig);
   proto.downloadFile = function patchedDownload(...args: unknown[]) {
     const path = String(args[0] ?? "");
-    const leaf = path.split("?")[0].split("/").pop() ?? "";
+    const leaf = ejsCoreDownloadLeaf(path);
     const isViceCoreData = isGrok64ViceCoreDataLeaf(leaf);
-    const filePaths = (this as { config?: { filePaths?: Record<string, string> } }).config?.filePaths;
-    const canonical = grok64CoreBlobUrl();
-    if (isViceCoreData) {
+    const cfg = (this as { config?: { filePaths?: Record<string, string> } }).config;
+    const canonical = grok64CoreBlobUrl() ?? url;
+    const dt = (this as { downloadType?: { core?: { cdnFallback?: boolean } } }).downloadType;
+    if (dt?.core) dt.core.cdnFallback = false;
+    if (isViceCoreData || (/cdn\.emulatorjs\.org/i.test(path) && /\/cores\/vice_.*wasm\.data/i.test(path))) {
       void purgeAllEmulatorJsCoreRows("pre-vice-download").catch(() => undefined);
       void purgeEmulatorJsLegacyCoreViceRows("pre-vice-download").catch(() => undefined);
-      recordGrok64CoreLoad(leaf, filePaths?.[leaf] ?? canonical ?? url, filePaths?.[leaf] ? "filePaths" : "redirect");
-      if (canonical && filePaths) {
-        for (const name of GROK64_VICE_CORE_DATA_NAMES) {
-          filePaths[name] = canonical;
+      if (/cdn\.emulatorjs\.org/i.test(path)) {
+        recordBlockedStockCore(path);
+        recordGrok64CoreLoad(leaf || path, canonical, "blocked-cdn");
+      } else {
+        recordGrok64CoreLoad(leaf, canonical, "local-iec");
+      }
+      if (cfg) {
+        if (!cfg.filePaths) cfg.filePaths = {};
+        for (const name of GROK64_VICE_CORE_DATA_NAMES) cfg.filePaths[name] = canonical;
+        cfg.filePaths[leaf] = canonical;
+      }
+      args = applyGrok64LocalCoreDownloadArgs(args, arity, canonical);
+    }
+    const out = orig.apply(this, args);
+    if (out && typeof (out as Promise<unknown>).then === "function") {
+      return (out as Promise<unknown>).then((res) => {
+        if (res === -1 && isViceCoreData) {
+          throw new Error(`Grok64 core download failed for ${leaf}`);
         }
-      }
-      if (!filePaths?.[leaf]) {
-        args[0] = canonical ?? url;
-        if (args.length > 3) args[3] = true;
-      }
-      args[6] = true;
+        return res;
+      });
     }
-    if (/cdn\.emulatorjs\.org/i.test(path) && /\/cores\/vice_.*wasm\.data/i.test(path)) {
-      recordBlockedStockCore(path);
-      recordGrok64CoreLoad(leaf || path, url, "blocked-cdn");
-      args[0] = url;
-      if (args.length > 3) args[3] = true;
-    }
-    const dt = (this as { downloadType?: { core?: { cdnFallback?: boolean } } }).downloadType;
-    let prevFb: boolean | undefined;
-    if (isViceCoreData && dt?.core) {
-      prevFb = dt.core.cdnFallback;
-      dt.core.cdnFallback = false;
-    }
-    try {
-      const out = orig.apply(this, args);
-      if (out && typeof (out as Promise<unknown>).then === "function") {
-        return (out as Promise<unknown>).then((res) => {
-          if (res === -1 && isViceCoreData) {
-            throw new Error(`Grok64 core download failed for ${leaf}`);
-          }
-          return res;
-        });
-      }
-      return out;
-    } finally {
-      if (prevFb !== undefined && dt?.core) dt.core.cdnFallback = prevFb;
-    }
+    return out;
   };
 }
 
@@ -1029,9 +1018,6 @@ export async function bootEmulator(el: HTMLElement, cfg: BootConfig): Promise<Ej
     noAutoFocus: false,
     disableAutoLang: true,
     disableLocalStorage: true,
-    // EmulatorJS-core is keyed by filename, not URL. A dirty profile keeps the
-    // old VICE blob there even after we cache-bust the download URL.
-    disableDatabases: true,
     disableCue: true,
     language: "en-US",
     browserMode: 2,
