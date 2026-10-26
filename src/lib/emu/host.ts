@@ -136,8 +136,11 @@ import {
   addMouse1351Delta,
   createMouse1351Accum,
   type Mouse1351Accum,
+  createJoyFireLatch,
   createMouse1351ButtonLatch,
   createMouse1351CursorSync,
+  noteJoyFirePress,
+  takeJoyFireHeld,
   crtDisplayBox,
   dpadForAxes,
   hostDragTo1351,
@@ -1657,6 +1660,15 @@ const hostMouse1351 = createMouse1351Accum();
 const hostMouse1351Sync = createMouse1351CursorSync();
 const hostMouseBtn = { left: false, right: false };
 const hostMouseBtnLatch = createMouse1351ButtonLatch();
+const hostJoyFireLatch = createJoyFireLatch();
+
+export function noteHostJoyFirePress(): void {
+  noteJoyFirePress(hostJoyFireLatch);
+}
+
+export function takeHostJoyFireHeld(held: boolean): boolean {
+  return takeJoyFireHeld(hostJoyFireLatch, held);
+}
 let hostMouseHeld = { ax: 0, ay: 0 };
 let hostMouseFlushAt = 0;
 

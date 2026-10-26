@@ -90,6 +90,8 @@ import {
   hostMouseDualStickActive,
   hostMousePortJoystickOverrideActive,
   libretroStickJoyPort,
+  noteHostJoyFirePress,
+  takeHostJoyFireHeld,
   setJoyVector,
   setPaused,
   setWarp,
@@ -115,6 +117,7 @@ import {
   injectViceRc,
   bumpCrtPaint,
   tryGeosDiskAutostart,
+  ensureStockKernal,
   applyIecUnitFloppy,
   applyJiffyThenRefreshWorkDisk,
   detachLibretroWorkDiskManager,
@@ -233,8 +236,8 @@ import {
   geosFamilyLoadMs,
   geosFamilyPlayLockMs,
   isGeosFamilyDiskName,
-  isWheelsDiskName,
   reuForGeosFamilyDisk,
+  isWheelsDiskName,
 } from "@/lib/emu/geos-boot";
 import { HwHoldChip } from "@/components/emu/HwHoldChip";
 import {
@@ -586,7 +589,7 @@ export function Grok64App() {
       return;
     }
     const j = joyRef.current;
-    let fire = fireOverride ?? j.fire;
+    let fire = takeHostJoyFireHeld(fireOverride ?? j.fire);
     let x = j.x;
     let y = j.y;
     const a = arrowJoyRef.current;
@@ -3384,12 +3387,14 @@ export function Grok64App() {
         const playAttachUnit = attach?.unit ?? plan.live.unit;
         const floppyKind = kindOf(filename);
         const gcrFloppy = isGcrDiskKind(floppyKind);
+        const geosWanted =
+          opts.geosViceAutostart === true && isGeosFamilyDiskName(filename);
         s.setBooting(true, plan.status, 35);
         setC64KeyboardDefer(true);
         // Overwrite the mounted unit-8 image only. A new filename leaves
         // the blank work disk attached → FILE NOT FOUND (#60/#61).
-        const mounted = inPlaceAutostartTarget(bootFileOf(emuRef.current), bootName);
-        const wrote = mounted
+        let mounted = inPlaceAutostartTarget(bootFileOf(emuRef.current), bootName);
+        let wrote = mounted
           ? attach
             ? attachAutostartDisk(
                 emuRef.current,
@@ -3400,6 +3405,23 @@ export function Grok64App() {
               )
             : swapBootDisk(emuRef.current, payloadDisk, mounted)
           : false;
+        if (!wrote && geosWanted) {
+          const stMount = useEmu.getState();
+          const reu = reuForGeosFamilyDisk(filename, stMount.reuSize);
+          if (reu !== stMount.reuSize) {
+            stMount.setReuSize(reu);
+            applyRuntimeOptions(emuRef.current, { vice_ram_expansion_unit: reu });
+          }
+          stMount.setIecSlot(8, "1541");
+          wrote = await bootGeosFloppy(
+            emuRef.current,
+            payloadDisk,
+            filename,
+            playAttachUnit,
+            stMount.iecMap,
+          );
+          if (wrote) mounted = "WORK DISK.D64";
+        }
         if (wrote) {
           const bootAfterAttach = isGcrDiskKind(origKind)
             ? filename.replace(/^\//, "")
@@ -3482,7 +3504,9 @@ export function Grok64App() {
           if (attach) applyIecUnitFloppy(emuRef.current, playIec, playAttachUnit, floppyKind);
           const flushed = await flushEmuFs(emuRef.current, isIosPhone() ? 2000 : 800);
           glog("play-mount", { flushed, workDisk: lastAppliedWorkDisk(), ios: isIosPhone(), gcrFloppy });
-          const jiffyWantPlay = resolveJiffyWant(stNow.jiffyDos, stNow.fastLoadCart);
+          const jiffyWantPlay = geosWanted
+            ? false
+            : resolveJiffyWant(stNow.jiffyDos, stNow.fastLoadCart);
           try {
             if (attach && plan.kind === "floppy") {
               await applyJiffyThenRefreshWorkDisk(
@@ -3538,6 +3562,50 @@ export function Grok64App() {
               }, 800),
             );
           } else if (plan.kind === "floppy") {
+            const geosBoot =
+              opts.geosViceAutostart === true && isGeosFamilyDiskName(filename);
+            if (geosBoot) {
+              const stGeo = useEmu.getState();
+              const reu = reuForGeosFamilyDisk(filename, stGeo.reuSize);
+              if (reu !== stGeo.reuSize) {
+                stGeo.setReuSize(reu);
+                applyRuntimeOptions(emuRef.current, { vice_ram_expansion_unit: reu });
+              }
+              stGeo.setIecSlot(8, "1541");
+              try {
+                await runMountStage("present-floppy-ready", () =>
+                  presentFloppyMountReady(emuRef.current, plan.live, { afterDriveRefresh: true }),
+                );
+              } catch (err) {
+                reportMountFailure("present-floppy-ready", err, { filename, title });
+                useEmu.getState().setBooting(false);
+                setC64KeyboardDefer(false);
+                playLockRef.current = false;
+                return;
+              }
+              applyIecUnitFloppy(emuRef.current, playIec, playAttachUnit, kindOf(filename));
+              setSessionDisk(filename, payloadDisk, playAttachUnit);
+              await ensureStockKernal(emuRef.current);
+              await flushEmuFs(emuRef.current, isIosPhone() ? 2000 : 800);
+              const booted = await tryGeosDiskAutostart(emuRef.current, playAttachUnit);
+              if (booted) {
+                toast.success(`Inserted GEOS plain boot on drive ${playAttachUnit}`);
+                if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, keepLiveCrt || floppyKeep ? "play-recycle" : "hot-swap");
+                void logFloppyAttach("play-geos-autostart", {
+                  name: filename,
+                  bytes: payloadDisk,
+                  libraryId: opts.libraryId ?? null,
+                });
+                beginPlayLock(geosFamilyPlayLockMs(filename), `Booting ${title}…`);
+                return;
+              }
+              glog("geos-vice-autostart-fail", { filename, title });
+              toast.error("GEOS autostart did not start from that disk.");
+              useEmu.getState().setBooting(false);
+              setC64KeyboardDefer(false);
+              playLockRef.current = false;
+              return;
+            }
             disarmAutostart(emuRef.current, "disk");
             try {
               await runMountStage("present-floppy-ready", () =>
@@ -3917,6 +3985,7 @@ export function Grok64App() {
       }
       await playBuffer(file.name, file.data, {
         autostart: !mountOnlyDisk,
+        geosViceAutostart: isGeosFamilyDiskName(file.name),
         title: meta?.title ?? item.catalogTitle ?? item.name,
         libraryId: item.id,
         libraryStoredSize: file.size,
@@ -4275,6 +4344,7 @@ export function Grok64App() {
         }
         await playBufferRef.current(payload.name, payload.data, {
           autostart: !(recoverMountOnly || recoverCart),
+          geosViceAutostart: isGeosFamilyDiskName(payload.name),
           title: marker.title,
           libraryId: marker.libraryId ?? undefined,
           bundlePath: marker.bundlePath ?? undefined,
@@ -4620,6 +4690,7 @@ export function Grok64App() {
       return;
     }
     glogFire(down, { title: st.currentTitle, hasGm: Boolean(emuRef.current?.gameManager) });
+    if (down) noteHostJoyFirePress();
     joyRef.current.fire = down;
     if (down && clearStick && !stickDownRef.current) {
       joyRef.current.x = 0;
@@ -4664,7 +4735,7 @@ export function Grok64App() {
           setHostMousePortJoystickOverride(false);
           applySavedJoyAndMouse(emu, st.joyPort, true);
         }
-        if (!geosStickJoyRef.current && stickDrive) {
+        if (!geosStickJoyRef.current && stickDrive && !hostMouseDualStickActive()) {
           addHostMouseDelta(sx * 4, sy * 4);
         }
         setHostMouseButtons(mouseBtnRef.current.left, mouseBtnRef.current.right);
@@ -4695,6 +4766,11 @@ export function Grok64App() {
     });
     return () => setGrok64JoyMouseRestore(null);
   }, []);
+  useEffect(() => {
+    const emu = emuRef.current;
+    if (!emu || !s.running) return;
+    applySavedJoyAndMouse(emu, s.joyPort, s.mouseMode);
+  }, [s.joyPort, s.mouseMode, s.running]);
   useEffect(() => {
     const feedPointerSample = (
       ev: PointerEvent | MouseEvent,

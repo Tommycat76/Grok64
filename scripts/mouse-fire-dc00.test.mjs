@@ -42,6 +42,24 @@ test("MOUSE P1: inputRouting exposes stick on port 2", { skip: skipBrowser }, as
     assert.equal(route.stickPort, 2);
     assert.equal(route.digitalPlayer, 0);
     assert.equal(route.mouseDual, true);
+
+    await page.evaluate(() => {
+      window.__g64.setJoy?.(1, 0, false);
+    });
+    await page.waitForTimeout(80);
+    const idleStick = await page.evaluate(() => window.__g64.peek?.(0xdc00));
+    await page.evaluate(() => {
+      window.__g64.setJoy?.(1, 0, false);
+    });
+    await page.waitForTimeout(80);
+    const rightStick = await page.evaluate(() => window.__g64.peek?.(0xdc00));
+    if (typeof idleStick === "number" && typeof rightStick === "number") {
+      const rightBit = 0x08;
+      assert.ok(
+        (idleStick & rightBit) !== 0 && (rightStick & rightBit) === 0,
+        `stick right should pull $DC00 bit3 (idle=0x${idleStick.toString(16)} held=0x${rightStick.toString(16)})`,
+      );
+    }
   } finally {
     await browser.close();
   }

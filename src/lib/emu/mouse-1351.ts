@@ -250,6 +250,22 @@ export function takeMouse1351Buttons(
   return { left, right };
 }
 
+export type JoyFireLatch = { frames: number };
+
+export function createJoyFireLatch(): JoyFireLatch {
+  return { frames: 0 };
+}
+
+export function noteJoyFirePress(latch: JoyFireLatch): void {
+  latch.frames = MOUSE_1351_BUTTON_HOLD_FRAMES;
+}
+
+export function takeJoyFireHeld(latch: JoyFireLatch, held: boolean): boolean {
+  const down = held || latch.frames > 0;
+  if (latch.frames > 0) latch.frames -= 1;
+  return down;
+}
+
 export type CrtDisplayBox = { w: number; h: number; offsetX: number; offsetY: number };
 
 export function crtDisplayBox(root?: ParentNode | Document | null): CrtDisplayBox {
