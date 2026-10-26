@@ -598,10 +598,10 @@ export function Grok64App() {
     const stickActive = Math.abs(x) > 0.05 || Math.abs(y) > 0.05;
     const geosJoyStick = mouseOn && stickActive && geosStickJoyRef.current;
     const player = geosJoyStick ? (st.joyPort === 1 ? 0 : 1) : digitalJoyPlayer(mouseOn, st.joyPort);
-    if (mouseOn && !geosJoyStick) {
-      x = 0;
-      y = 0;
-      fire = false;
+    if (mouseOn && geosJoyStick) {
+      // GEOS joystick driver on the mouse port — stick stays on the 1351 port.
+    } else if (mouseOn) {
+      // 1351 on joyPort N; on-screen stick + FIRE drive the other port (Byte Hopper on P2, etc.).
     }
     resetMenuJoyGate(menuJoyGateRef.current);
     stickPrecisionRef.current.precision = false;
@@ -5136,7 +5136,7 @@ export function Grok64App() {
     suppressHydrationWarning: true,
   };
   const padConnected = hasRealGamepad();
-  const showStick = s.powered && s.showJoystick;
+  const showStick = s.powered && (s.showJoystick || s.mouseMode);
   const showJoyChrome = s.powered;
   const showMousePad = s.powered && s.mouseMode;
   return (

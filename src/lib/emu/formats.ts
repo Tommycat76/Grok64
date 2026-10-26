@@ -195,16 +195,71 @@ export function isWorkDiskImage(data: ArrayBuffer | Uint8Array): boolean {
   return d64DiskName(u8)?.toUpperCase() === "WORK DISK";
 }
 
-/** True when bytes look like an empty bundled blank.d64 (not a CRT and not a named WORK DISK). */
+/** True when a standard .d64 has a PETSCII disk name in the BAM (not the bundled WORK DISK). */
+export function d64HasBamDiskLabel(data: Uint8Array): boolean {
+  const label = d64DiskName(data);
+  if (!label) return false;
+  const t = label.trim();
+  if (!t || /^work\s*disk$/i.test(t)) return false;
+  return true;
+}
+
+/**
+ * True when bytes look like an empty bundled blank.d64.
+ * Many real disks zero-out low tracks — use BAM label + directory, not the first 4 KiB.
+ */
 export function isLikelyBlankD64Payload(data: Uint8Array): boolean {
   if (data.byteLength !== D64_STANDARD_SIZE) return false;
   if (parseCrtHeaderQuick(data)) return false;
   if (isWorkDiskImage(data)) return false;
-  const sample = Math.min(4096, data.byteLength);
-  for (let i = 0; i < sample; i++) {
-    if (data[i] !== 0) return false;
+  if (d64HasBamDiskLabel(data)) return false;
+  if (d64HasDirectoryEntries(data)) return false;
+  let nonZero = 0;
+  for (let i = 0; i < data.byteLength; i += 512) {
+    if (data[i] !== 0) {
+      nonZero += 1;
+      if (nonZero > 4) return false;
+    }
   }
   return true;
+}
+
+/** Any non-deleted 1541 directory slot (track 18 chain). */
+export function d64HasDirectoryEntries(data: Uint8Array): boolean {
+  if (data.byteLength < D64_STANDARD_SIZE) return false;
+  const bam = D64_BAM;
+  let track = data[bam] || 18;
+  let sector = data[bam + 1] || 1;
+  const seen = new Set<string>();
+  for (let hops = 0; hops < 18 && track >= 1 && track <= 35; hops++) {
+    const key = `${track}:${sector}`;
+    if (seen.has(key)) break;
+    seen.add(key);
+    const off = directorySectorOffset(track, sector);
+    if (off < 0 || off + 256 > data.byteLength) break;
+    const nextT = data[off]!;
+    const nextS = data[off + 1]!;
+    for (let i = 0; i < 8; i++) {
+      const type = data[off + i * 32 + 2]!;
+      if (type) return true;
+    }
+    track = nextT;
+    sector = nextS;
+    if (!track) break;
+  }
+  return false;
+}
+
+const D64_SECTORS = [0, ...Array(17).fill(21), ...Array(7).fill(19), ...Array(6).fill(18), ...Array(5).fill(17)];
+
+function d64TrackOffset(track: number): number {
+  let off = 0;
+  for (let t = 1; t < track; t++) off += D64_SECTORS[t] ?? 0;
+  return off;
+}
+
+function directorySectorOffset(track: number, sector: number): number {
+  return (d64TrackOffset(track) + sector) * 256;
 }
 
 function parseCrtHeaderQuick(data: Uint8Array): boolean {

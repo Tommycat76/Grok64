@@ -224,7 +224,7 @@ export function TouchControls({
   function buttonHits(x: number, y: number) {
     if (mouseRef.current) {
       return {
-        fire: false,
+        fire: hitRect(fireEl.current, x, y, BUTTON_HIT_PAD),
         jump: false,
         mouseL: hitRect(mouseLEl.current, x, y, BUTTON_HIT_PAD),
         mouseR: hitRect(mouseREl.current, x, y, BUTTON_HIT_PAD),
@@ -619,6 +619,18 @@ export function TouchControls({
         <div className="g64-mouse-col" style={pos("mouseL")}>
           <div className="g64-play-tools">{tools}</div>
           <div className="g64-mouse-row">
+            <div
+              ref={fireEl}
+              className="g64-fire"
+              data-down={fireDown ? "true" : "false"}
+              data-locked={locked ? "true" : "false"}
+              role="button"
+              aria-label="Fire (joystick port)"
+              onPointerDown={(e) => startLayoutDrag("fire", e)}
+            >
+              <LayoutHandle show={layoutEdit} />
+              FIRE
+            </div>
             <div
               ref={mouseLEl}
               className="g64-fire g64-mouse-btn"

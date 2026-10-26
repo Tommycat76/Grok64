@@ -56,14 +56,15 @@ export function validateFloppyLibraryPayload(
   if (!["d64", "d71", "d81", "g64", "g71"].includes(kind)) {
     return { ok: false, reason: "not-floppy" };
   }
-  if (isWorkDiskImage(bytes) || isLikelyBlankD64Payload(bytes)) {
+  if (isWorkDiskImage(bytes)) {
+    return { ok: false, reason: "blank-or-work-disk" };
+  }
+  if (isLikelyBlankD64Payload(bytes)) {
     return { ok: false, reason: "blank-or-work-disk" };
   }
   if (kind === "d64") {
     if (!isAcceptedD64ByteLength(bytes.byteLength)) return { ok: false, reason: "d64-wrong-size" };
     if (isG64Payload(bytes)) return { ok: false, reason: "gcr-bytes-with-d64-name" };
-    const label = d64DiskName(bytes);
-    if (!label || /^work\s*disk/i.test(label)) return { ok: false, reason: "missing-disk-label" };
   }
   if (isGcrDiskKind(kind)) {
     if (!isG64Payload(bytes)) return { ok: false, reason: "g64-bad-header" };
