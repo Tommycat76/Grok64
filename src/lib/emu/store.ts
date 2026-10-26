@@ -76,6 +76,8 @@ interface SettingsSlice {
   iecUnit: IecUnit;
   iecMap: IecMap;
   mouseMode: boolean;
+  /** VICE paddles on joyPort (mutually exclusive with 1351 mouseMode). */
+  paddleMode: boolean;
   padSide: PadSide;
   layoutEdit: boolean;
   controlLayout: ControlLayout;
@@ -110,6 +112,8 @@ interface SettingsSlice {
   setIecUnit: (v: IecUnit) => void;
   setIecSlot: (unit: IecUnit, slot: IecSlot) => void;
   setMouseMode: (v: boolean) => void;
+  setPaddleMode: (v: boolean) => void;
+  setPortPointer: (mode: "off" | "1351" | "paddle") => void;
   setPadSide: (v: PadSide) => void;
   setLayoutEdit: (v: boolean) => void;
   setControlPos: (id: ControlId, pos: Partial<ControlLayout[ControlId]>) => void;
@@ -201,6 +205,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       iecUnit: 8,
       iecMap: defaultIecMap(),
       mouseMode: false,
+      paddleMode: false,
       padSide: "left",
       layoutEdit: false,
       controlLayout: { ...DEFAULT_CONTROL_LAYOUT },
@@ -243,7 +248,15 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         }),
       setIecUnit: (iecUnit) => set({ iecUnit }),
       setIecSlot: (unit, slot) => set((s) => withIecMap(patchIecSlot(s.iecMap ?? defaultIecMap(), unit, slot))),
-      setMouseMode: (mouseMode) => set({ mouseMode }),
+      setMouseMode: (mouseMode) =>
+        set((s) => ({ mouseMode, paddleMode: mouseMode ? false : s.paddleMode })),
+      setPaddleMode: (paddleMode) =>
+        set((s) => ({ paddleMode, mouseMode: paddleMode ? false : s.mouseMode })),
+      setPortPointer: (mode) =>
+        set({
+          mouseMode: mode === "1351",
+          paddleMode: mode === "paddle",
+        }),
       setPadSide: (padSide) => set({ padSide }),
       setLayoutEdit: (layoutEdit) => set({ layoutEdit }),
       setControlPos: (id, pos) =>
@@ -328,7 +341,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
     }),
     {
       name: "grok64-settings",
-      version: 14,
+      version: 15,
       storage: createJSONStorage(() =>
         typeof window === "undefined"
           ? {
@@ -361,6 +374,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         iecUnit: s.iecUnit,
         iecMap: s.iecMap,
         mouseMode: s.mouseMode,
+        paddleMode: s.paddleMode,
         padSide: s.padSide,
         controlLayout: s.controlLayout,
         scpuSimm: s.scpuSimm,
@@ -396,6 +410,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
           "iecUnit",
           "iecMap",
           "mouseMode",
+          "paddleMode",
           "padSide",
           "controlLayout",
           "scpuSimm",
@@ -461,8 +476,8 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
         if (version < 14) {
           p.wasdIsJoy = false;
         }
-        if (version < 14) {
-          p.wasdIsJoy = false;
+        if (version < 15) {
+          p.paddleMode = false;
         }
         if (version < 7) {
           if (!p.reuSize) p.reuSize = "none";

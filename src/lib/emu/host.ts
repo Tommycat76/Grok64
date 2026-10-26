@@ -486,9 +486,9 @@ export function hostMouseDualStickActive(): boolean {
 }
 
 /** CIA port that receives libretro digital pad 0 (opposite port when 1351 is plugged). */
-export function libretroStickJoyPort(mouse: boolean, savedPort: JoyPort): JoyPort {
+export function libretroStickJoyPort(mouse: boolean, savedPort: JoyPort, paddle = false): JoyPort {
   const mousePort: JoyPort = savedPort === 1 ? 1 : 2;
-  if (!mouse || hostMousePortJoystickOverrideActive()) return mousePort;
+  if ((!mouse && !paddle) || hostMousePortJoystickOverrideActive()) return mousePort;
   return mousePort === 1 ? 2 : 1;
 }
 
@@ -1441,10 +1441,10 @@ export function viceJoyOptions(port: JoyPort): Record<string, string> {
   };
 }
 
-/** Joystick or 1351 on the user's saved port — never a title-based default. */
-export function vicePortDeviceOptions(port: JoyPort, mouse: boolean): Record<string, string> {
+/** Joystick, 1351, or paddles on the user's saved port — never a title-based default. */
+export function vicePortDeviceOptions(port: JoyPort, mouse: boolean, paddle = false): Record<string, string> {
   const mousePort: JoyPort = port === 1 ? 1 : 2;
-  if (!mouse) return viceJoyOptions(mousePort);
+  if (!mouse && !paddle) return viceJoyOptions(mousePort);
   if (hostMousePortJoystickOverrideActive()) {
     return {
       ...viceJoyOptions(mousePort),
@@ -1452,6 +1452,14 @@ export function vicePortDeviceOptions(port: JoyPort, mouse: boolean): Record<str
     };
   }
   const stickPort: JoyPort = mousePort === 1 ? 2 : 1;
+  if (paddle) {
+    return {
+      ...viceJoyOptions(stickPort),
+      vice_joyport: mousePort === 1 ? "1" : "2",
+      vice_joyport_type: "2",
+      vice_analogmouse: "disabled",
+    };
+  }
   return {
     ...viceJoyOptions(stickPort),
     vice_analogmouse: "left",
@@ -1462,16 +1470,29 @@ export function vicePortDeviceOptions(port: JoyPort, mouse: boolean): Record<str
   };
 }
 
-export function applySavedJoyAndMouse(emu: EjsInstance | null, port: JoyPort, mouse: boolean) {
+let hostPaddlePort = false;
+
+export function hostPaddlePortActive(): boolean {
+  return hostPaddlePort;
+}
+
+export function applySavedJoyAndMouse(
+  emu: EjsInstance | null,
+  port: JoyPort,
+  mouse: boolean,
+  paddle = false,
+) {
   const p = port === 1 ? 1 : 2;
   const plug1351 = mouse && !hostMousePortJoystickOverride;
-  hostMouseDualStick = plug1351;
+  const plugPaddle = paddle && !hostMousePortJoystickOverride;
+  hostMouseDualStick = plug1351 || plugPaddle;
+  hostPaddlePort = plugPaddle;
   if (emu) {
     // Libretro joyport_type + grok64_mouse_plug race → “1351 already on port N”.
     feedVice1351Plug(emu, 1, false);
     feedVice1351Plug(emu, 2, false);
   }
-  applyRuntimeOptions(emu, vicePortDeviceOptions(p, plug1351));
+  applyRuntimeOptions(emu, vicePortDeviceOptions(p, plug1351, plugPaddle));
   plugJoysticks(emu, p);
   if (plug1351) feedVice1351Plug(emu, p, true);
 }
@@ -1568,8 +1589,8 @@ export function joyInput(emu: EjsInstance | null, index: number, down: boolean, 
 }
 
 /** Libretro player index for simulateInput — player 0; vice_joyport selects the CIA port. */
-export function digitalJoyPlayer(mouseMode: boolean, joyPort: JoyPort = 2): 0 | 1 {
-  if (mouseMode) return 0;
+export function digitalJoyPlayer(mouseMode: boolean, joyPort: JoyPort = 2, paddleMode = false): 0 | 1 {
+  if (mouseMode || paddleMode) return 0;
   return joyPort === 2 ? 1 : 0;
 }
 
@@ -1838,6 +1859,11 @@ export function flushHostMouse1351Now(emu: EjsInstance | null) {
 
 export function flushHostMouse1351(emu: EjsInstance | null, periodMs = 20) {
   const buttons = takeMouse1351Buttons(hostMouseBtnLatch, hostMouseBtn);
+  if (hostPaddlePort) {
+    const { ax } = takeMouse1351Frame(hostMouse1351);
+    setMouseAnalog(emu, ax, 0, buttons.left, buttons.right);
+    return;
+  }
   if (vice1351Direct(emu)) {
     drainHostMouse1351Accum(emu, hostMouse1351);
     const buttonsOk = feedVice1351Buttons(emu, buttons.left, buttons.right);

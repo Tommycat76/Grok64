@@ -38,3 +38,7 @@ export function sessionMediaList(): SessionMediaSlot[] {
 export function sessionDiskOnUnit(unit = 8): SessionMediaSlot | null {
   return slots.find((s) => s.kind === "disk" && (s.unit ?? 8) === unit) ?? null;
 }
+
+export function sessionCartSlot(): SessionMediaSlot | null {
+  return slots.find((s) => s.kind === "cart") ?? null;
+}
