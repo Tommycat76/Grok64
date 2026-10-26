@@ -10,6 +10,7 @@ const server = await createServer({
 const {
   geosBootStuckAtBasic,
   geosBootSucceeded,
+  geosAllowsPortStickOverride,
   geosHostStickOverrideWanted,
   geosFamilyDesktopOk,
   isGeosFamilyDiskName,
@@ -51,15 +52,10 @@ describe("geos-boot", () => {
     assert.equal(geosBootSucceeded("deskTop V2.0", "GEOS64_2.0.d64"), true);
   });
 
-  it("GEOS host stick override wants GEOS disk past BASIC, not game disks", () => {
-    assert.equal(geosHostStickOverrideWanted(null, "GEOS Boot Disk.d64"), false);
-    assert.equal(geosHostStickOverrideWanted({}, "paradroid.d64"), false);
+  it("GEOS port stick allowed on GEOS disk, not game disks", () => {
+    assert.equal(geosAllowsPortStickOverride(null, "GEOS Boot Disk.d64"), false);
+    assert.equal(geosAllowsPortStickOverride({}, "paradroid.d64"), false);
+    assert.equal(geosAllowsPortStickOverride({}, "GEOS Boot Disk.d64"), true);
     assert.equal(geosHostStickOverrideWanted({}, "GEOS Boot Disk.d64"), false);
-    const emu = {};
-    assert.equal(
-      geosHostStickOverrideWanted(emu, "GEOS Boot Disk.d64"),
-      false,
-      "BASIC READY should not arm GEOS stick override",
-    );
   });
 });

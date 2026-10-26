@@ -63,11 +63,21 @@ try {
   });
   await page.waitForTimeout(200);
   await holdStickRight(page);
-  const geos = await page.evaluate(() => window.__g64.inputRouting?.());
-  assert.equal(geos.geosStickOverride, true, "GEOS session: mouse-port joystick override");
-  assert.equal(geos.mouseDual, false);
-  assert.equal(geos.stickPort, 1);
-  console.log("geos routing:", geos);
+  const geosHeld = await page.evaluate(() => window.__g64.inputRouting?.());
+  assert.equal(geosHeld.geosStickOverride, true, "GEOS disk: override while stick held");
+  assert.equal(geosHeld.mouseDual, false);
+  assert.equal(geosHeld.stickPort, 1);
+  console.log("geos routing (held):", geosHeld);
+
+  await page.evaluate(() => {
+    window.__g64.holdStick?.(false);
+    window.__g64.stick?.(0, 0);
+  });
+  for (let f = 0; f < 30; f++) await page.waitForTimeout(16);
+  const geosReleased = await page.evaluate(() => window.__g64.inputRouting?.());
+  assert.equal(geosReleased.geosStickOverride, false, "GEOS disk: override off when stick released");
+  assert.equal(geosReleased.mouseDual, true, "1351 dual-stick restored");
+  console.log("geos routing (released):", geosReleased);
 
   console.log("dual-stick-routing-probe: OK");
 } finally {

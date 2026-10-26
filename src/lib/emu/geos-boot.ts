@@ -94,6 +94,19 @@ export function geosBootLooksLaunched(screen: string): boolean {
  * port). Engage host joystick override only while a GEOS-family system disk is
  * active and the machine is past BASIC/LOAD — not for opposite-port games.
  */
+/** True while a GEOS-family disk is running (not BASIC READY) — touch stick may use port-1 joystick briefly. */
+export function geosAllowsPortStickOverride(
+  emu: RamEmu | null,
+  insertedDiskName: string | null | undefined,
+): boolean {
+  const disk = (insertedDiskName || "").trim();
+  if (!emu || !disk || !isGeosFamilyDiskName(disk)) return false;
+  const screen = readScreenText(emu);
+  if (geosBootStuckAtBasic(screen)) return false;
+  if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen)) return false;
+  return true;
+}
+
 export function geosHostStickOverrideWanted(
   emu: RamEmu | null,
   insertedDiskName: string | null | undefined,
