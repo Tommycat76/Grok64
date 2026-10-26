@@ -283,6 +283,17 @@ html, body, #app {
   color: #04120a;
   border-color: var(--color-phosphor);
 }
+.g64-chip-gate.g64-chip-pin[data-on="false"] {
+  background: var(--color-bg-elevated);
+  color: var(--color-fg-muted);
+  border-color: color-mix(in oklab, var(--color-fg) 16%, transparent);
+  box-shadow: none;
+}
+.g64-app[data-device="desktop"] .g64-top-rail .g64-chip-gate.g64-chip-pin[data-on="false"] {
+  background: color-mix(in oklab, var(--g64-toolbar-fill) 92%, #000);
+  color: color-mix(in oklab, var(--g64-toolbar-label) 58%, transparent);
+  border-color: var(--g64-toolbar-border);
+}
 .g64-chip {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -591,6 +602,27 @@ html, body, #app {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.g64-input-debug {
+  position: fixed;
+  left: 8px;
+  bottom: 8px;
+  z-index: 90;
+  margin: 0;
+  padding: 6px 8px;
+  max-width: min(96vw, 28rem);
+  border-radius: 8px;
+  background: color-mix(in oklab, #000 82%, transparent);
+  border: 1px solid color-mix(in oklab, var(--color-accent) 55%, transparent);
+  color: #e8f4ff;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  word-break: break-all;
+  pointer-events: none;
 }
 
 .g64-stage {

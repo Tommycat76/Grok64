@@ -3,6 +3,7 @@ import { iaDownloadUrl, iaMetadataUrl, iaSearchUrl, iaClientFetchUrl } from "./i
 import { z } from "zod";
 import { kindOf } from "./formats";
 import { isJunkRelease, u8ToB64 } from "./archive";
+import { asArray, callServerFnFirst } from "@/lib/server-fn-static";
 
 export type CatalogKind = "all" | "games" | "carts" | "disks" | "sid" | "demos";
 
@@ -367,6 +368,7 @@ function mergeHits(parts: CatalogHit[][]): CatalogHit[] {
   const seen = new Set<string>();
   const hits: CatalogHit[] = [];
   for (const list of parts) {
+    if (!list?.length) continue;
     for (const hit of list) {
       const k = `${hit.kindHint}:${hit.title.toLowerCase()}`;
       if (seen.has(hit.key) || seen.has(k)) continue;
@@ -488,6 +490,25 @@ export const searchCatalog = createServerFn({ method: "POST" })
   )
   .handler(async ({ data }) => searchCatalogClient(data));
 
+const SEARCH_EMPTY = { hits: [] as CatalogHit[], a64: false };
+
+/** Static dist / Plex: client catalog first; never leave hits undefined. */
+export async function searchCatalogResolved(
+  data: {
+    query: string;
+    kind: CatalogKind;
+    offset?: number;
+  },
+  opts?: { signal?: AbortSignal },
+): Promise<{ hits: CatalogHit[]; a64: boolean }> {
+  const res = await callServerFnFirst(
+    () => searchCatalogClient(data, opts),
+    () => searchCatalog({ data }),
+    SEARCH_EMPTY,
+  );
+  return { hits: asArray(res?.hits), a64: Boolean(res?.a64) };
+}
+
 const HitSchema = z.object({
   key: z.string(),
   title: z.string(),
@@ -513,6 +534,17 @@ export async function listCatalogFilesClient(data: z.infer<typeof HitSchema>): P
 export const listCatalogFiles = createServerFn({ method: "POST" })
   .validator(HitSchema)
   .handler(async ({ data }) => listCatalogFilesClient(data));
+
+export type CatalogHitInput = z.infer<typeof HitSchema>;
+
+export async function listCatalogFilesResolved(hit: CatalogHitInput): Promise<CatalogFile[]> {
+  const res = await callServerFnFirst(
+    () => listCatalogFilesClient(hit),
+    () => listCatalogFiles({ data: hit }),
+    [] as CatalogFile[],
+  );
+  return asArray(res);
+}
 
 function assertCatalogBinary(buf: Uint8Array) {
   if (buf.byteLength > MAX_FILE) throw new Error("File is larger than 6 MB.");

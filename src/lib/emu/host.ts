@@ -111,7 +111,12 @@ import {
 } from "./formats";
 import type { FastLoadCartKind } from "./jiffy-cart-compat";
 import { jiffyAllowedDuringCartBoot } from "./jiffy-cart-compat";
-import { readScreenText, screenTextHasReady } from "./screen-text";
+import {
+  geosBootLooksLaunched,
+  geosBootStuckAtBasic,
+  geosBootSucceeded,
+} from "./geos-boot";
+import { readScreenText, screenRamShowsGeosCatalog, screenTextHasReady } from "./screen-text";
 import { setSessionCart } from "./session-media";
 import type { SdPartition } from "./sd2iec";
 import type { Sd2iecVolume } from "./sd2iec-volume";
@@ -136,8 +141,11 @@ import {
   addMouse1351Delta,
   createMouse1351Accum,
   type Mouse1351Accum,
+  createJoyFireLatch,
   createMouse1351ButtonLatch,
   createMouse1351CursorSync,
+  noteJoyFirePress,
+  takeJoyFireHeld,
   crtDisplayBox,
   dpadForAxes,
   hostDragTo1351,
@@ -470,6 +478,24 @@ let keyboardArmed = false;
 let restartArmed = false;
 let webglPatched = false;
 let userJoyPort: JoyPort = 2;
+/** 1351 on one CIA port — digital stick/FIRE use simulateInput on the other port, not virtual pad 0. */
+let hostMouseDualStick = false;
+
+export function hostMouseDualStickActive(): boolean {
+  return hostMouseDualStick;
+}
+
+/** CIA port that receives libretro digital pad 0 (opposite port when 1351 is plugged). */
+export function libretroStickJoyPort(mouse: boolean, savedPort: JoyPort): JoyPort {
+  const mousePort: JoyPort = savedPort === 1 ? 1 : 2;
+  if (!mouse || hostMousePortJoystickOverrideActive()) return mousePort;
+  return mousePort === 1 ? 2 : 1;
+}
+
+/** Libretro gamepad 0 is wired to vice_joyport (opposite CIA port when 1351 dual-stick). */
+export function joyVectorUsesVirtualPad0(_geosMousePortStick = false): boolean {
+  return true;
+}
 
 /**
  * CriOS WebGL — restored #14 / #18 / #39 host wiring.
@@ -1417,11 +1443,17 @@ export function viceJoyOptions(port: JoyPort): Record<string, string> {
 
 /** Joystick or 1351 on the user's saved port — never a title-based default. */
 export function vicePortDeviceOptions(port: JoyPort, mouse: boolean): Record<string, string> {
-  const base = viceJoyOptions(port === 1 ? 1 : 2);
-  if (!mouse) return base;
+  const mousePort: JoyPort = port === 1 ? 1 : 2;
+  if (!mouse) return viceJoyOptions(mousePort);
+  if (hostMousePortJoystickOverrideActive()) {
+    return {
+      ...viceJoyOptions(mousePort),
+      vice_analogmouse: "disabled",
+    };
+  }
+  const stickPort: JoyPort = mousePort === 1 ? 2 : 1;
   return {
-    ...base,
-    vice_joyport_type: "3",
+    ...viceJoyOptions(stickPort),
     vice_analogmouse: "left",
     vice_mouse_speed: "100",
     vice_analogmouse_speed: "1.0",
@@ -1433,9 +1465,15 @@ export function vicePortDeviceOptions(port: JoyPort, mouse: boolean): Record<str
 export function applySavedJoyAndMouse(emu: EjsInstance | null, port: JoyPort, mouse: boolean) {
   const p = port === 1 ? 1 : 2;
   const plug1351 = mouse && !hostMousePortJoystickOverride;
+  hostMouseDualStick = plug1351;
+  if (emu) {
+    // Libretro joyport_type + grok64_mouse_plug race → “1351 already on port N”.
+    feedVice1351Plug(emu, 1, false);
+    feedVice1351Plug(emu, 2, false);
+  }
   applyRuntimeOptions(emu, vicePortDeviceOptions(p, plug1351));
   plugJoysticks(emu, p);
-  feedVice1351Plug(emu, p, plug1351);
+  if (plug1351) feedVice1351Plug(emu, p, true);
 }
 
 function padMap(): PadMap {
@@ -1485,8 +1523,10 @@ export function plugJoysticks(emu: EjsInstance | null, _port: JoyPort = 2) {
   window.setTimeout(() => ensureValue2(emu), 250);
   window.setTimeout(() => ensureValue2(emu), 1200);
   for (let i = 0; i < 16; i++) joyInput(emu, i, false);
+  const libretroJoyPort =
+    hostMouseDualStick && !hostMousePortJoystickOverrideActive() ? (_port === 1 ? 2 : 1) : _port;
   try {
-    emu.gameManager?.setVariable?.("vice_joyport", _port === 1 ? "1" : "2");
+    emu.gameManager?.setVariable?.("vice_joyport", libretroJoyPort === 1 ? "1" : "2");
   } catch {
     /* ignore */
   }
@@ -1527,10 +1567,10 @@ export function joyInput(emu: EjsInstance | null, index: number, down: boolean, 
   rawSim(emu, player, index, value);
 }
 
-/** Libretro player for the digital stick — opposite port when a 1351 uses the other port. */
+/** Libretro player index for simulateInput — player 0; vice_joyport selects the CIA port. */
 export function digitalJoyPlayer(mouseMode: boolean, joyPort: JoyPort = 2): 0 | 1 {
-  if (!mouseMode) return joyPort === 2 ? 1 : 0;
-  return joyPort === 1 ? 1 : 0;
+  if (mouseMode) return 0;
+  return joyPort === 2 ? 1 : 0;
 }
 
 /** GEOS joystick driver on the mouse port: unplug 1351 until cleared. */
@@ -1544,8 +1584,45 @@ export function hostMousePortJoystickOverrideActive(): boolean {
   return hostMousePortJoystickOverride;
 }
 
-export function setJoyVector(emu: EjsInstance | null, dx: number, dy: number, fire: boolean, player = 0) {
-  setVirtualPad(dx, dy, fire);
+/** For ?debug=input — virtual pad 0 bits fed to libretro. */
+export function virtualPadDebugSnapshot(): {
+  axes: number[];
+  dpad: { up: boolean; down: boolean; left: boolean; right: boolean; fire: boolean };
+} {
+  const b = padButtons;
+  return {
+    axes: [...padAxes],
+    dpad: {
+      up: Boolean(b[4]?.pressed),
+      down: Boolean(b[5]?.pressed),
+      left: Boolean(b[6]?.pressed),
+      right: Boolean(b[7]?.pressed),
+      fire: Boolean(b[8]?.pressed),
+    },
+  };
+}
+
+export function readViceJoyportVariable(emu: EjsInstance | null): string | null {
+  if (!emu?.gameManager) return runtimeViceOpts().vice_joyport ?? null;
+  try {
+    const gm = emu.gameManager as { getVariable?: (k: string) => string };
+    const live = gm.getVariable?.("vice_joyport");
+    if (live) return live;
+  } catch {
+    /* ignore */
+  }
+  return runtimeViceOpts().vice_joyport ?? null;
+}
+
+export function setJoyVector(
+  emu: EjsInstance | null,
+  dx: number,
+  dy: number,
+  fire: boolean,
+  player = 0,
+  geosMousePortStick = false,
+) {
+  if (joyVectorUsesVirtualPad0(geosMousePortStick)) setVirtualPad(dx, dy, fire);
   const dead = 0.32;
   const left = dx < -dead;
   const right = dx > dead;
@@ -1618,6 +1695,15 @@ const hostMouse1351 = createMouse1351Accum();
 const hostMouse1351Sync = createMouse1351CursorSync();
 const hostMouseBtn = { left: false, right: false };
 const hostMouseBtnLatch = createMouse1351ButtonLatch();
+const hostJoyFireLatch = createJoyFireLatch();
+
+export function noteHostJoyFirePress(): void {
+  noteJoyFirePress(hostJoyFireLatch);
+}
+
+export function takeHostJoyFireHeld(held: boolean): boolean {
+  return takeJoyFireHeld(hostJoyFireLatch, held);
+}
 let hostMouseHeld = { ax: 0, ay: 0 };
 let hostMouseFlushAt = 0;
 
@@ -2316,6 +2402,34 @@ async function finishMfmFloppyInsertIec(emu: EjsInstance, unit: IecUnit, iecMap?
   return 0;
 }
 
+/** After Software Insert: resync bytes + TDE when libretro still shows an empty work disk. */
+export async function reconcileInsertedFloppyGcr(
+  emu: EjsInstance | null,
+  unit: IecUnit,
+  diskKind: ReturnType<typeof kindOf> | null,
+): Promise<void> {
+  if (!emu || !diskKind) return;
+  if (diskKind === "d81") {
+    const bus = viceDriveBusProbe(emu, unit);
+    if (bus.serialDeviceLabel !== "real" || !viceUnitIsMfmDrive(emu, unit)) {
+      await ensureIecBusReconcile(emu, unit, undefined, { lightVicerc: true, skipReload: true });
+    }
+    return;
+  }
+  if (!isGcrDiskKind(diskKind) && diskKind !== "d64" && diskKind !== "d71") return;
+  let bus = viceDriveBusProbe(emu, unit);
+  const tdeOk = (bus.wasmTdeImageBytes ?? 0) > 174_000 && bus.wasmGcrLoaded === 1;
+  if (tdeOk && bus.serialDeviceLabel === "real") return;
+  resyncSessionDiskToVice(emu, unit);
+  const mod = grok64DiskModule(emu);
+  if (mod) bindGrok64DiskExports(mod, emu);
+  grok64DiskApi(mod)?.driveSyncTdeImage?.(unit, 0);
+  await flushEmuFs(emu, 400);
+  const rc = await ensureViceSessionDiskAttached(emu, unit, diskKind);
+  bus = viceDriveBusProbe(emu, unit);
+  glog("reconcile-inserted-gcr", { unit, diskKind, rc, bus });
+}
+
 /** Hard reset then re-attach unit 8 session disk when one is mounted (BMC64 flush pattern). */
 export async function hardResetAndFlushSessionDisk(emu: EjsInstance | null, iecMap?: IecMap): Promise<number> {
   if (!emu) return -1;
@@ -2328,8 +2442,14 @@ export async function hardResetAndFlushSessionDisk(emu: EjsInstance | null, iecM
 
 /** After C64 power-on when a session floppy is already mounted on unit 8. */
 export async function flushSessionDiskAfterPowerOn(emu: EjsInstance | null, iecMap?: IecMap): Promise<number> {
-  if (!emu || !sessionDiskOnUnit(8)?.name || iecMapUnitIsSd2iec(iecMap, 8)) return 0;
-  return bmc64FlushSessionDisk(emu, 8, iecMap);
+  if (!emu) return -1;
+  let last = 0;
+  for (const unit of [8, 9, 10, 11] as IecUnit[]) {
+    if (!sessionDiskOnUnit(unit)?.name || iecMapUnitIsSd2iec(iecMap, unit)) continue;
+    const rc = await bmc64FlushSessionDisk(emu, unit, iecMap);
+    if (rc < 0) last = rc;
+  }
+  return last;
 }
 
 /**
@@ -3286,7 +3406,8 @@ export async function ensureViceSessionDiskAttached(
 ): Promise<number> {
   if (!emu) return -1;
   detachGrok64Sd2iec(emu, unit);
-  applyIecUnitFloppy(emu, "1541", unit, diskKind);
+  const iec = diskKind === "d81" ? "1581" : "1541";
+  applyIecUnitFloppy(emu, iec, unit, diskKind);
   if (diskKind && !isGcrDiskKind(diskKind)) {
     await detachLibretroWorkDiskManager(emu, unit);
     const slot = sessionDiskOnUnit(unit);
@@ -3659,8 +3780,12 @@ export async function bootGeosFloppy(
   return ready;
 }
 
-/** VICE autostart LOAD"*",8,1 — fallback when typed LOAD"GEOS" returns to BASIC. */
-export async function tryGeosDiskAutostart(emu: EjsInstance | null, unit: IecUnit = 8): Promise<boolean> {
+/** VICE autostart LOAD"*",8,1 — GEOS deskTop is often graphical (READY alone is not enough). */
+export async function tryGeosDiskAutostart(
+  emu: EjsInstance | null,
+  unit: IecUnit = 8,
+  fileName?: string | null,
+): Promise<boolean> {
   if (!emu) return false;
   disarmAutostart(emu, "disk");
   applyRuntimeOptions(emu, {
@@ -3674,7 +3799,37 @@ export async function tryGeosDiskAutostart(emu: EjsInstance | null, unit: IecUni
   resetEmu(emu);
   await flushEmuFs(emu, 2000);
   bumpCrtPaint(emu);
-  return await waitForC64Ready(emu, 60_000);
+  const ready = await waitForC64Ready(emu, 90_000);
+  const disk = fileName?.trim() || "";
+  const geosOk = (screen: string) =>
+    geosBootSucceeded(screen, disk || undefined) || geosBootLooksLaunched(screen);
+  const hardFail = (screen: string) =>
+    geosBootStuckAtBasic(screen) || /FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen);
+
+  if (ready) {
+    const screen = readScreenText(emu);
+    if (hardFail(screen)) return false;
+    if (geosOk(screen) || screenRamShowsGeosCatalog(emu)) return true;
+  } else {
+    const screen = readScreenText(emu);
+    if (geosOk(screen) || screenRamShowsGeosCatalog(emu)) return true;
+    if (hardFail(screen)) return false;
+  }
+
+  const deadline = Date.now() + 55_000;
+  while (Date.now() < deadline) {
+    const screen = readScreenText(emu);
+    if (hardFail(screen)) return false;
+    if (geosOk(screen) || screenRamShowsGeosCatalog(emu)) return true;
+    if (!/SEARCHING FOR|LOADING|LOAD"/i.test(screen) && ready && !geosBootStuckAtBasic(screen)) {
+      return true;
+    }
+    await new Promise((r) => setTimeout(r, 400));
+    bumpCrtPaint(emu);
+  }
+  const tail = readScreenText(emu);
+  if (hardFail(tail)) return false;
+  return ready && !geosBootStuckAtBasic(tail);
 }
 
 export function attachAutostartDisk(

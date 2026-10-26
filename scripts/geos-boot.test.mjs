@@ -10,6 +10,9 @@ const server = await createServer({
 const {
   geosBootStuckAtBasic,
   geosBootSucceeded,
+  geosAllowsPortStickOverride,
+  geosHostStickOverrideWanted,
+  geosRuntimeActive,
   geosFamilyDesktopOk,
   isGeosFamilyDiskName,
   isWheelsDiskName,
@@ -47,6 +50,14 @@ describe("geos-boot", () => {
     const basic = "**** COMMODORE 64 BASIC V2 ****\n\nREADY.";
     assert.equal(geosBootStuckAtBasic(basic), true);
     assert.equal(geosBootSucceeded(basic, "GEOS64_2.0.d64"), false);
+    assert.equal(geosBootSucceeded("deskTop V2.0", "GEOS64_2.0.d64"), true);
+  });
+
+  it("GEOS runtime stick gate ignores inserted disk name", () => {
+    assert.equal(geosRuntimeActive(null), false);
+    assert.equal(geosRuntimeActive({}), false);
+    assert.equal(geosAllowsPortStickOverride({}, "GEOS Boot Disk.d64"), false);
+    assert.equal(geosHostStickOverrideWanted({}, "GEOS Boot Disk.d64"), false);
     assert.equal(geosBootSucceeded("deskTop V2.0", "GEOS64_2.0.d64"), true);
   });
 });

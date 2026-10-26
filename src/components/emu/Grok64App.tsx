@@ -87,6 +87,11 @@ import {
   restoreState,
   resetEmu,
   digitalJoyPlayer,
+  hostMouseDualStickActive,
+  hostMousePortJoystickOverrideActive,
+  libretroStickJoyPort,
+  noteHostJoyFirePress,
+  takeHostJoyFireHeld,
   setJoyVector,
   setPaused,
   setWarp,
@@ -94,6 +99,8 @@ import {
   addHostDrag1351,
   readSid1351Pots,
   lastVice1351PlugRc,
+  readViceJoyportVariable,
+  virtualPadDebugSnapshot,
   applySavedJoyAndMouse,
   setHostMouseButtons,
   flushHostMouse1351,
@@ -112,6 +119,7 @@ import {
   injectViceRc,
   bumpCrtPaint,
   tryGeosDiskAutostart,
+  ensureStockKernal,
   applyIecUnitFloppy,
   applyJiffyThenRefreshWorkDisk,
   detachLibretroWorkDiskManager,
@@ -119,6 +127,7 @@ import {
   ensureIecBusReconcile,
   bmc64FlushSessionDisk,
   finishFloppyInsertIec,
+  reconcileInsertedFloppyGcr,
   hardResetAndFlushSessionDisk,
   flushSessionDiskAfterPowerOn,
   resyncSessionDiskToVice,
@@ -229,8 +238,10 @@ import {
   geosFamilyLoadMs,
   geosFamilyPlayLockMs,
   isGeosFamilyDiskName,
-  isWheelsDiskName,
+  geosHostStickOverrideWanted,
+  geosRuntimeActive,
   reuForGeosFamilyDisk,
+  isWheelsDiskName,
 } from "@/lib/emu/geos-boot";
 import { HwHoldChip } from "@/components/emu/HwHoldChip";
 import {
@@ -290,6 +301,7 @@ import { detectSoftwareStandard } from "@/lib/emu/region";
 import {
   hostDragTo1351,
   hostPointerMoveToDelta,
+  hostPointerOverScreen,
   hostPointerScreenDrag,
   noteRealPointerFeed,
   readRealPointerFeed,
@@ -331,7 +343,15 @@ import { wrapForDiskSwap, prepareAutostartDisk, screenInvitesCracktroInput } fro
 import { isSid, psidToPrg } from "@/lib/emu/psid";
 import { explodeArchive, pickBootFile, toArrayBuffer } from "@/lib/emu/archive";
 import { BuildId } from "@/components/emu/BuildId";
-import { debugQueryOn, drive8LogLines, glog, glogFire, setDebugUi, subscribeLog } from "@/lib/emu/debug";
+import {
+  debugQueryOn,
+  drive8LogLines,
+  glog,
+  glogFire,
+  inputDebugQueryOn,
+  setDebugUi,
+  subscribeLog,
+} from "@/lib/emu/debug";
 import { grok64LibraryIdbDiag } from "@/lib/emu/library-diag";
 import { grok64ProfilePersistDiff } from "@/lib/emu/grok64-profile-diag";
 import {
@@ -495,6 +515,10 @@ export function Grok64App() {
   const playLockRef = useRef(false);
   /** Port-1 on-screen stick → GEOS joystick driver (unplug 1351 while stick is active). */
   const geosStickJoyRef = useRef(false);
+  /** Latched when GEOS deskTop is detected; cleared on Run/Insert/power/reset. */
+  const geosDeskSessionRef = useRef(false);
+  /** Real CRT pointer after GEOS stick — blocks re-latching port-1 joystick until stick lifts. */
+  const geosPortStickPausedByPointerRef = useRef(false);
   const playLockGen = useRef(0);
   const pendingSnapshotRef = useRef(null);
   const pendingCompanionRef = useRef<{ name: string; data: Uint8Array }[]>([]);
@@ -526,6 +550,7 @@ export function Grok64App() {
   const [diskOpen, setDiskOpen] = useState(false);
   const [railMoreOpen, setRailMoreOpen] = useState(false);
   const [logLines, setLogLines] = useState([]);
+  const [inputDebugText, setInputDebugText] = useState("");
   const [cartLive, setCartLive] = useState(false);
   const cartLiveRef = useRef(false);
   const resetReadyRef = useRef(() => {});
@@ -560,6 +585,33 @@ export function Grok64App() {
     const st = useEmu.getState();
     return st.running && !st.booting && !playLockRef.current && !inGameplayRef.current;
   }, []);
+  const releaseGeosPortStickOverride = useCallback(() => {
+    const hadJoy = geosStickJoyRef.current;
+    const hadOverride = hostMousePortJoystickOverrideActive();
+    if (!hadJoy && !hadOverride) return;
+    geosStickJoyRef.current = false;
+    setHostMousePortJoystickOverride(false);
+    const emu = emuRef.current;
+    if (emu) {
+      const st = useEmu.getState();
+      applySavedJoyAndMouse(emu, st.joyPort, st.mouseMode);
+    }
+  }, []);
+  const endGeosDeskSession = useCallback(() => {
+    geosDeskSessionRef.current = false;
+    geosPortStickPausedByPointerRef.current = false;
+    geosStickJoyRef.current = false;
+    setHostMousePortJoystickOverride(false);
+    const emu = emuRef.current;
+    if (emu) {
+      const st = useEmu.getState();
+      applySavedJoyAndMouse(emu, st.joyPort, st.mouseMode);
+    }
+  }, []);
+  const pauseGeosPortStickForPointer = useCallback(() => {
+    geosPortStickPausedByPointerRef.current = true;
+    releaseGeosPortStickOverride();
+  }, [releaseGeosPortStickOverride]);
   const clearMenuJoyInput = useCallback(() => {
     arrowJoyRef.current = { up: false, down: false, left: false, right: false };
     wasdJoyRef.current = { up: false, down: false, left: false, right: false };
@@ -581,7 +633,7 @@ export function Grok64App() {
       return;
     }
     const j = joyRef.current;
-    let fire = fireOverride ?? j.fire;
+    let fire = takeHostJoyFireHeld(fireOverride ?? j.fire);
     let x = j.x;
     let y = j.y;
     const a = arrowJoyRef.current;
@@ -596,17 +648,17 @@ export function Grok64App() {
     const stickActive = Math.abs(x) > 0.05 || Math.abs(y) > 0.05;
     const geosJoyStick = mouseOn && stickActive && geosStickJoyRef.current;
     const player = geosJoyStick ? (st.joyPort === 1 ? 0 : 1) : digitalJoyPlayer(mouseOn, st.joyPort);
-    if (mouseOn && !geosJoyStick) {
-      x = 0;
-      y = 0;
-      fire = false;
+    if (mouseOn && geosJoyStick) {
+      // GEOS joystick driver on the mouse port — stick stays on the 1351 port.
+    } else if (mouseOn) {
+      // 1351 on joyPort N; on-screen stick + FIRE drive the other port (Byte Hopper on P2, etc.).
     }
     resetMenuJoyGate(menuJoyGateRef.current);
     stickPrecisionRef.current.precision = false;
     const last = lastJoySentRef.current;
     if (x === last.x && y === last.y && fire === last.fire) return;
     lastJoySentRef.current = { x, y, fire };
-    setJoyVector(emu, x, y, fire, player);
+    setJoyVector(emu, x, y, fire, player, geosJoyStick);
   }, [isMenuJoyMode]);
   const emitJoyRef = useRef(() => {});
   emitJoyRef.current = emitJoyVector;
@@ -812,7 +864,47 @@ export function Grok64App() {
         joyRef.current.fire = down;
         emitJoyRef.current(down);
       },
+      peek: (addr: number) => readC64Byte(emuRef.current, addr),
+      digitalJoyPlayer: () => digitalJoyPlayer(useEmu.getState().mouseMode, useEmu.getState().joyPort),
+      inputRouting: () => {
+        const st = useEmu.getState();
+        const emu = emuRef.current;
+        return {
+          mouse: st.mouseMode,
+          savedPort: st.joyPort,
+          mouseDual: hostMouseDualStickActive(),
+          stickPort: libretroStickJoyPort(st.mouseMode, st.joyPort),
+          digitalPlayer: digitalJoyPlayer(st.mouseMode, st.joyPort),
+          geosStickOverride: hostMousePortJoystickOverrideActive(),
+          geosStickJoyRef: geosStickJoyRef.current,
+          geosRuntimeLive: geosRuntimeActive(emu),
+          geosDeskSession: geosDeskSessionRef.current,
+          geosPortStickPausedByPointer: geosPortStickPausedByPointerRef.current,
+          geosPortStickAllowed: geosDeskSessionRef.current,
+          geosHostStickWanted: geosHostStickOverrideWanted(emu, st.insertedDiskName),
+          viceJoyport: readViceJoyportVariable(emu),
+          pad: virtualPadDebugSnapshot(),
+        };
+      },
+      geosMousePos: () => {
+        const emu = emuRef.current;
+        if (!emu) return null;
+        const xlo = readC64Byte(emu, 0x3a);
+        const xhi = readC64Byte(emu, 0x3b);
+        const y = readC64Byte(emu, 0x3c);
+        if (xlo === null || y === null) return null;
+        return { x: xlo | ((xhi ?? 0) << 8), y };
+      },
       stickDown: () => stickDownRef.current,
+      /** QA: simulate on-screen stick finger-down (drives GEOS vs dual-stick routing). */
+      holdStick: (down) => {
+        stickDownRef.current = !!down;
+      },
+      primeGeosDeskSessionForQa: () => {
+        geosDeskSessionRef.current = true;
+      },
+      endGeosDeskSession: () => endGeosDeskSession(),
+      releaseGeosPortStickOverride: () => releaseGeosPortStickOverride(),
       stick: (x, y) => {
         joyRef.current.x = x;
         joyRef.current.y = y;
@@ -1203,6 +1295,7 @@ export function Grok64App() {
       iecErrorChannelProbe: (unit = 8) =>
         wasmIecDriveStateFromLive(viceDriveLiveProbe(emuRef.current, unit as 8)),
       hardReset: async () => {
+        endGeosDeskSession();
         await hardResetAndFlushSessionDisk(emuRef.current, useEmu.getState().iecMap);
         return true;
       },
@@ -1330,13 +1423,14 @@ export function Grok64App() {
         await flushEmuFs(emuRef.current, 3000);
         applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
         setPaused(emuRef.current, false);
-        if (await tryGeosDiskAutostart(emuRef.current, 8)) {
+        if (await tryGeosDiskAutostart(emuRef.current, 8, name)) {
           await feedBasicLine(emuRef.current, "RUN", { runcmd: true });
           const autoEnd = Date.now() + 120_000;
           while (Date.now() < autoEnd) {
             const screen = readScreenText(emuRef.current);
             if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen)) break;
             if (geosBootSucceeded(screen, name) || geosBootLooksLaunched(screen)) {
+              geosDeskSessionRef.current = true;
               bumpCrtPaint(emuRef.current);
               return true;
             }
@@ -1356,6 +1450,7 @@ export function Grok64App() {
               return geosDesk / (width * height);
             })();
             if (pix >= 0.1) {
+              geosDeskSessionRef.current = true;
               bumpCrtPaint(emuRef.current);
               return true;
             }
@@ -1402,6 +1497,7 @@ export function Grok64App() {
             const screen = readScreenText(emuRef.current);
             if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen)) break;
             if (geosBootSucceeded(screen, name) || geosBootLooksLaunched(screen)) {
+              geosDeskSessionRef.current = true;
               bumpCrtPaint(emuRef.current);
               return true;
             }
@@ -1411,6 +1507,7 @@ export function Grok64App() {
           }
           const screen = readScreenText(emuRef.current);
           if (geosBootSucceeded(screen, name) || geosBootLooksLaunched(screen)) {
+            geosDeskSessionRef.current = true;
             bumpCrtPaint(emuRef.current);
             return true;
           }
@@ -2538,6 +2635,11 @@ export function Grok64App() {
           autoloadWarp: autoloadWarpForPlay(playModeRef.current, spec.title),
         });
         applyIecUnit(emu, spec.live.iec, spec.live.unit);
+        {
+          const liveJoy = useEmu.getState();
+          applySavedJoyAndMouse(emu, liveJoy.joyPort, liveJoy.mouseMode);
+          scheduleJoyMouseRestore(emu);
+        }
         if (isIosPhone()) kickIosAfterEmuAction(emu, "settle", gen);
         beginPlayLock(playLockDuration(playModeRef.current, spec.title), `Loading ${spec.title}…`);
       } else {
@@ -2909,6 +3011,8 @@ export function Grok64App() {
   const playBuffer = useCallback(
     async (filename, data, opts = {}) => {
       await persistNow();
+      useEmu.getState().setSessionRestoreHint(null);
+      endGeosDeskSession();
       let mediaName = filename;
       playPayloadRef.current = { filename: mediaName, data, opts };
       const playUnit = opts.iecUnit ?? useEmu.getState().iecUnit;
@@ -3366,12 +3470,14 @@ export function Grok64App() {
         const playAttachUnit = attach?.unit ?? plan.live.unit;
         const floppyKind = kindOf(filename);
         const gcrFloppy = isGcrDiskKind(floppyKind);
+        const geosWanted =
+          opts.geosViceAutostart === true && isGeosFamilyDiskName(filename);
         s.setBooting(true, plan.status, 35);
         setC64KeyboardDefer(true);
         // Overwrite the mounted unit-8 image only. A new filename leaves
         // the blank work disk attached → FILE NOT FOUND (#60/#61).
-        const mounted = inPlaceAutostartTarget(bootFileOf(emuRef.current), bootName);
-        const wrote = mounted
+        let mounted = inPlaceAutostartTarget(bootFileOf(emuRef.current), bootName);
+        let wrote = mounted
           ? attach
             ? attachAutostartDisk(
                 emuRef.current,
@@ -3382,6 +3488,23 @@ export function Grok64App() {
               )
             : swapBootDisk(emuRef.current, payloadDisk, mounted)
           : false;
+        if (!wrote && geosWanted) {
+          const stMount = useEmu.getState();
+          const reu = reuForGeosFamilyDisk(filename, stMount.reuSize);
+          if (reu !== stMount.reuSize) {
+            stMount.setReuSize(reu);
+            applyRuntimeOptions(emuRef.current, { vice_ram_expansion_unit: reu });
+          }
+          stMount.setIecSlot(8, "1541");
+          wrote = await bootGeosFloppy(
+            emuRef.current,
+            payloadDisk,
+            filename,
+            playAttachUnit,
+            stMount.iecMap,
+          );
+          if (wrote) mounted = "WORK DISK.D64";
+        }
         if (wrote) {
           const bootAfterAttach = isGcrDiskKind(origKind)
             ? filename.replace(/^\//, "")
@@ -3464,7 +3587,9 @@ export function Grok64App() {
           if (attach) applyIecUnitFloppy(emuRef.current, playIec, playAttachUnit, floppyKind);
           const flushed = await flushEmuFs(emuRef.current, isIosPhone() ? 2000 : 800);
           glog("play-mount", { flushed, workDisk: lastAppliedWorkDisk(), ios: isIosPhone(), gcrFloppy });
-          const jiffyWantPlay = resolveJiffyWant(stNow.jiffyDos, stNow.fastLoadCart);
+          const jiffyWantPlay = geosWanted
+            ? false
+            : resolveJiffyWant(stNow.jiffyDos, stNow.fastLoadCart);
           try {
             if (attach && plan.kind === "floppy") {
               await applyJiffyThenRefreshWorkDisk(
@@ -3520,6 +3645,51 @@ export function Grok64App() {
               }, 800),
             );
           } else if (plan.kind === "floppy") {
+            const geosBoot =
+              opts.geosViceAutostart === true && isGeosFamilyDiskName(filename);
+            if (geosBoot) {
+              const stGeo = useEmu.getState();
+              const reu = reuForGeosFamilyDisk(filename, stGeo.reuSize);
+              if (reu !== stGeo.reuSize) {
+                stGeo.setReuSize(reu);
+                applyRuntimeOptions(emuRef.current, { vice_ram_expansion_unit: reu });
+              }
+              stGeo.setIecSlot(8, "1541");
+              try {
+                await runMountStage("present-floppy-ready", () =>
+                  presentFloppyMountReady(emuRef.current, plan.live, { afterDriveRefresh: true }),
+                );
+              } catch (err) {
+                reportMountFailure("present-floppy-ready", err, { filename, title });
+                useEmu.getState().setBooting(false);
+                setC64KeyboardDefer(false);
+                playLockRef.current = false;
+                return;
+              }
+              applyIecUnitFloppy(emuRef.current, playIec, playAttachUnit, kindOf(filename));
+              setSessionDisk(filename, payloadDisk, playAttachUnit);
+              await ensureStockKernal(emuRef.current);
+              await flushEmuFs(emuRef.current, isIosPhone() ? 2000 : 800);
+              const booted = await tryGeosDiskAutostart(emuRef.current, playAttachUnit, filename);
+              if (booted) {
+                geosDeskSessionRef.current = true;
+                toast.success(`Inserted GEOS plain boot on drive ${playAttachUnit}`);
+                if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, keepLiveCrt || floppyKeep ? "play-recycle" : "hot-swap");
+                void logFloppyAttach("play-geos-autostart", {
+                  name: filename,
+                  bytes: payloadDisk,
+                  libraryId: opts.libraryId ?? null,
+                });
+                beginPlayLock(geosFamilyPlayLockMs(filename), `Booting ${title}…`);
+                return;
+              }
+              glog("geos-vice-autostart-fail", { filename, title });
+              toast.error("GEOS autostart did not start from that disk.");
+              useEmu.getState().setBooting(false);
+              setC64KeyboardDefer(false);
+              playLockRef.current = false;
+              return;
+            }
             disarmAutostart(emuRef.current, "disk");
             try {
               await runMountStage("present-floppy-ready", () =>
@@ -3545,6 +3715,11 @@ export function Grok64App() {
               autoloadWarp: autoloadWarpForPlay(playModeRef.current, bootName),
             });
             applyIecUnit(emuRef.current, playIec, playAttachUnit);
+            {
+              const liveJoy = useEmu.getState();
+              applySavedJoyAndMouse(emuRef.current, liveJoy.joyPort, liveJoy.mouseMode);
+              scheduleJoyMouseRestore(emuRef.current);
+            }
             if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, keepLiveCrt || floppyKeep ? "play-recycle" : "hot-swap");
             beginPlayLock(playLockDuration(playModeRef.current, title), `Loading ${title}…`);
           }
@@ -3845,7 +4020,7 @@ export function Grok64App() {
       }
       notePlayMarker();
     },
-    [s, persistNow, startWithUrl, beginPlayLock, syncJiffy, finishFloppyMountReady, logFloppyAttach],
+    [s, persistNow, startWithUrl, beginPlayLock, syncJiffy, finishFloppyMountReady, logFloppyAttach, endGeosDeskSession],
   );
   playBufferRef.current = playBuffer;
   const playBundled = useCallback(
@@ -3899,6 +4074,7 @@ export function Grok64App() {
       }
       await playBuffer(file.name, file.data, {
         autostart: !mountOnlyDisk,
+        geosViceAutostart: isGeosFamilyDiskName(file.name),
         title: meta?.title ?? item.catalogTitle ?? item.name,
         libraryId: item.id,
         libraryStoredSize: file.size,
@@ -3911,6 +4087,8 @@ export function Grok64App() {
   playLocalRef.current = playLocal;
   const insertDisk = useCallback(async (item) => {
     s.setLibraryOpen(false);
+    s.setSessionRestoreHint(null);
+    endGeosDeskSession();
     const file = await getFile(item.id);
     if (!file) {
       toast.error("Missing disk");
@@ -4008,6 +4186,7 @@ export function Grok64App() {
       if (busRc < 0) {
         throw new Error(`IEC bus reconcile failed (rc=${busRc}) ${viceDiskLastAttachDiag(emuRef.current) ?? ""}`);
       }
+      await reconcileInsertedFloppyGcr(emuRef.current, unit, kind);
       await flushEmuFs(emuRef.current, 600);
       await waitDriveFirmwareReady(emuRef.current, unit);
     } catch (err) {
@@ -4031,7 +4210,7 @@ export function Grok64App() {
     void logFloppyAttach("insert-disk", { name: item.name, bytes: media, libraryId: item.id });
     finishFloppyMountReady();
     toast.success(`Inserted ${label} on drive ${unit}`);
-  }, [finishFloppyMountReady, logFloppyAttach, playBuffer, s]);
+  }, [finishFloppyMountReady, logFloppyAttach, playBuffer, s, endGeosDeskSession]);
   insertDiskRef.current = insertDisk;
   const toggleWarp = useCallback(() => {
     const next = !useEmu.getState().warped;
@@ -4104,6 +4283,7 @@ export function Grok64App() {
   const powerOff = useCallback(() => {
     const st = useEmu.getState();
     if (!st.powered && !st.booting) return;
+    endGeosDeskSession();
     glog("power-off");
     playLockRef.current = false;
     bootHoldRef.current = false;
@@ -4256,6 +4436,7 @@ export function Grok64App() {
         }
         await playBufferRef.current(payload.name, payload.data, {
           autostart: !(recoverMountOnly || recoverCart),
+          geosViceAutostart: isGeosFamilyDiskName(payload.name),
           title: marker.title,
           libraryId: marker.libraryId ?? undefined,
           bundlePath: marker.bundlePath ?? undefined,
@@ -4601,6 +4782,7 @@ export function Grok64App() {
       return;
     }
     glogFire(down, { title: st.currentTitle, hasGm: Boolean(emuRef.current?.gameManager) });
+    if (down) noteHostJoyFirePress();
     joyRef.current.fire = down;
     if (down && clearStick && !stickDownRef.current) {
       joyRef.current.x = 0;
@@ -4624,35 +4806,38 @@ export function Grok64App() {
         const j = joyRef.current;
         const a = arrowJoyRef.current;
         const w = wasdJoyRef.current;
-        let sx = j.x;
-        let sy = j.y;
-        if (a.left || w.left) sx = -1;
-        if (a.right || w.right) sx = 1;
-        if (a.up || w.up) sy = -1;
-        if (a.down || w.down) sy = 1;
-        const stickDrive = Math.abs(sx) > 0.12 || Math.abs(sy) > 0.12;
-        if (stickDrive) {
+        const touchStick = stickDownRef.current;
+        let sx = touchStick ? j.x : 0;
+        let sy = touchStick ? j.y : 0;
+        if (touchStick) {
+          if (a.left || w.left) sx = -1;
+          if (a.right || w.right) sx = 1;
+          if (a.up || w.up) sy = -1;
+          if (a.down || w.down) sy = 1;
+        }
+        const stickDrive = touchStick && (Math.abs(sx) > 0.12 || Math.abs(sy) > 0.12);
+        if (!touchStick && geosPortStickPausedByPointerRef.current) {
+          geosPortStickPausedByPointerRef.current = false;
+        }
+        const wantGeosPortStick =
+          stickDrive && geosDeskSessionRef.current && !geosPortStickPausedByPointerRef.current;
+        if (wantGeosPortStick) {
           if (!geosStickJoyRef.current) {
             geosStickJoyRef.current = true;
             setHostMousePortJoystickOverride(true);
             applySavedJoyAndMouse(emu, st.joyPort, true);
           }
         } else if (geosStickJoyRef.current) {
-          geosStickJoyRef.current = false;
-          setHostMousePortJoystickOverride(false);
-          applySavedJoyAndMouse(emu, st.joyPort, true);
+          releaseGeosPortStickOverride();
         }
-        if (!geosStickJoyRef.current && stickDrive) {
+        if (!geosStickJoyRef.current && stickDrive && !hostMouseDualStickActive()) {
           addHostMouseDelta(sx * 4, sy * 4);
         }
         setHostMouseButtons(mouseBtnRef.current.left, mouseBtnRef.current.right);
         flushHostMouse1351(emu, frameMsForStandard(resolvedRef.current.standard));
         mouseLiveRef.current = true;
       } else if (mouseLiveRef.current) {
-        if (geosStickJoyRef.current) {
-          geosStickJoyRef.current = false;
-          setHostMousePortJoystickOverride(false);
-        }
+        if (geosStickJoyRef.current) releaseGeosPortStickOverride();
         // Only clear on the falling edge. Doing this every frame while the
         // mouse is off released the digital stick before emitJoyVector's
         // unchanged-vector early-out could put the hold back.
@@ -4664,7 +4849,7 @@ export function Grok64App() {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [emitJoyVector]);
+  }, [emitJoyVector, releaseGeosPortStickOverride]);
   useEffect(() => {
     setGrok64JoyMouseRestore((emu) => {
       const st = useEmu.getState();
@@ -4674,30 +4859,85 @@ export function Grok64App() {
     return () => setGrok64JoyMouseRestore(null);
   }, []);
   useEffect(() => {
+    const emu = emuRef.current;
+    if (!emu || !s.running) return;
+    applySavedJoyAndMouse(emu, s.joyPort, s.mouseMode);
+  }, [s.joyPort, s.mouseMode, s.running]);
+  useEffect(() => {
+    const feedPointerSample = (
+      ev: PointerEvent | MouseEvent,
+      screen: HTMLElement,
+      rect: DOMRect,
+      locked: boolean,
+    ) => {
+      const { dx, dy, next } = hostPointerScreenDrag(ev, mousePtrRef.current, rect);
+      mousePtrRef.current = next;
+      const buttons = "buttons" in ev ? Number(ev.buttons) || 0 : 0;
+      if (!dx && !dy && !buttons) return;
+      pauseGeosPortStickForPointer();
+      if (dx || dy) noteRealPointerFeed(dx, dy, buttons, locked);
+      if (dx || dy) addHostMouseDelta(dx, dy);
+    };
     const onPointer = (e: PointerEvent | MouseEvent) => {
       const st = useEmu.getState();
       if (!st.mouseMode || playLockRef.current || !st.running || st.booting) return;
       const screen = document.querySelector(".g64-screen") as HTMLElement | null;
+      if (!screen) return;
       const locked = typeof document !== "undefined" && Boolean(document.pointerLockElement);
-      const target = e.target as Node | null;
-      const over = Boolean(screen && target && (screen === target || screen.contains(target)));
-      if (!over && !locked) {
+      const rect = screen.getBoundingClientRect();
+      const over = locked || hostPointerOverScreen(e.clientX, e.clientY, rect);
+      if (!over) {
         mousePtrRef.current = null;
         return;
       }
-      const rect = (screen ?? (target as HTMLElement))?.getBoundingClientRect?.();
-      if (!rect || rect.width < 2) return;
-      const { dx, dy, next } = hostPointerScreenDrag(e, mousePtrRef.current, rect);
-      mousePtrRef.current = next;
-      if (!dx && !dy) return;
-      const buttons = "buttons" in e ? Number(e.buttons) || 0 : 0;
-      noteRealPointerFeed(dx, dy, buttons, locked);
-      addHostMouseDelta(dx, dy);
+      if (rect.width < 2) return;
+      const coalesced =
+        e instanceof PointerEvent && typeof e.getCoalescedEvents === "function"
+          ? e.getCoalescedEvents()
+          : [e];
+      for (const ev of coalesced) feedPointerSample(ev, screen, rect, locked);
     };
     window.addEventListener("pointermove", onPointer, { capture: true, passive: true });
+    const onPointerDown = (e: PointerEvent) => {
+      const st = useEmu.getState();
+      if (!st.mouseMode || playLockRef.current || !st.running || st.booting) return;
+      const screen = document.querySelector(".g64-screen") as HTMLElement | null;
+      if (!screen) return;
+      const rect = screen.getBoundingClientRect();
+      const locked = typeof document !== "undefined" && Boolean(document.pointerLockElement);
+      if (!locked && !hostPointerOverScreen(e.clientX, e.clientY, rect)) return;
+      pauseGeosPortStickForPointer();
+    };
+    window.addEventListener("pointerdown", onPointerDown, { capture: true, passive: true });
     return () => {
       window.removeEventListener("pointermove", onPointer, true);
+      window.removeEventListener("pointerdown", onPointerDown, true);
     };
+  }, [pauseGeosPortStickForPointer]);
+  useEffect(() => {
+    if (!inputDebugQueryOn()) return;
+    let raf = 0;
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const emu = emuRef.current;
+      const st = useEmu.getState();
+      const route = {
+        mouse: st.mouseMode,
+        savedPort: st.joyPort,
+        mouseDual: hostMouseDualStickActive(),
+        stickPort: libretroStickJoyPort(st.mouseMode, st.joyPort),
+        digitalPlayer: digitalJoyPlayer(st.mouseMode, st.joyPort),
+        geosStickOverride: hostMousePortJoystickOverrideActive(),
+        geosStickJoyRef: geosStickJoyRef.current,
+        geosDeskSession: geosDeskSessionRef.current,
+        geosPortStickPausedByPointer: geosPortStickPausedByPointerRef.current,
+        viceJoyport: readViceJoyportVariable(emu),
+        pad: virtualPadDebugSnapshot(),
+      };
+      setInputDebugText(JSON.stringify(route, null, 0));
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
   }, []);
   const expansionOpts = useCallback(() => {
     const st = useEmu.getState();
@@ -4825,11 +5065,12 @@ export function Grok64App() {
   };
   const swapJoyPort = useCallback(() => {
     const st = useEmu.getState();
-    const next = st.joyPort === 2 ? 1 : 2;
-    st.setJoyPort(next);
-    applySavedJoyAndMouse(emuRef.current, next, st.mouseMode);
-    glog("port-swap", { next, mouse: st.mouseMode });
-    toast.message(st.mouseMode ? `Mouse → Port ${next}` : `Joystick → Port ${next}`);
+    const port: 1 | 2 = st.joyPort === 2 ? 1 : 2;
+    st.setJoyPort(port);
+    applySavedJoyAndMouse(emuRef.current, port, st.mouseMode);
+    glog("port-swap", { port, mouse: st.mouseMode });
+    const label = st.mouseMode ? `1351 on port ${port}` : `Joystick on port ${port}`;
+    toast.message(label);
   }, []);
   swapJoyPortRef.current = swapJoyPort;
   useEffect(() => {
@@ -5120,7 +5361,7 @@ export function Grok64App() {
     suppressHydrationWarning: true,
   };
   const padConnected = hasRealGamepad();
-  const showStick = s.powered && s.showJoystick;
+  const showStick = s.powered && (s.showJoystick || s.mouseMode);
   const showJoyChrome = s.powered;
   const showMousePad = s.powered && s.mouseMode;
   return (
@@ -5253,7 +5494,7 @@ export function Grok64App() {
               s.setMouseMode(next);
               if (next) mousePtrRef.current = null;
               applySavedJoyAndMouse(emuRef.current, s.joyPort, next);
-              toast.message(next ? `1351 mouse on port ${s.joyPort} — tap P1/P2 to swap` : "Joystick");
+              toast.message(next ? `1351 on port ${useEmu.getState().joyPort}` : "Joystick");
             }}
           >
             MOUSE
@@ -5485,6 +5726,11 @@ export function Grok64App() {
           ))}
         </div>
       ) : null}
+      {s.powered && inputDebugQueryOn() ? (
+        <pre className="g64-input-debug" aria-live="polite">
+          {inputDebugText}
+        </pre>
+      ) : null}
       <div className="g64-stage">
         <div className="g64-bezel">
           <div
@@ -5506,6 +5752,7 @@ export function Grok64App() {
               }
               e.preventDefault();
               if (s.mouseMode) {
+                pauseGeosPortStickForPointer();
                 mousePtrRef.current = { x: e.clientX, y: e.clientY };
                 if (e.button === 2) mouseBtnRef.current.right = true;
                 else mouseBtnRef.current.left = true;

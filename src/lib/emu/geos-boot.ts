@@ -1,3 +1,5 @@
+import type { RamEmu } from "./c64-memory";
+import { readScreenText, screenRamShowsGeosCatalog } from "./screen-text";
 import type { ReuSize } from "./types";
 
 /** GEOS 2.0, Wheels, gateWay, etc. — boot via 1541-II + named LOAD (never LOAD"*"). */
@@ -85,4 +87,36 @@ export function geosBootLooksLaunched(screen: string): boolean {
   if (/SEARCHING FOR|LOADING|LOAD"/i.test(tail)) return false;
   if (geosBootStuckAtBasic(tail)) return false;
   return /GEOS|DESK|DISK|DIRECTORY|GEODISC|WHEELS|deskTop/i.test(tail);
+}
+
+/** GEOS deskTop / menu is running now (KERNAL heuristics — not inserted disk name). */
+export function geosRuntimeActive(emu: RamEmu | null): boolean {
+  if (!emu) return false;
+  const screen = readScreenText(emu);
+  if (geosBootStuckAtBasic(screen)) return false;
+  if (/FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen)) return false;
+  if (/SEARCHING FOR|LOADING|LOAD"/i.test(screen)) return false;
+  if (geosBootSucceeded(screen) || geosBootLooksLaunched(screen)) return true;
+  if (screenRamShowsGeosCatalog(emu)) return true;
+  return false;
+}
+
+/** @deprecated Use geosRuntimeActive — disk name is not a reliable GEOS-running signal. */
+export function geosAllowsPortStickOverride(
+  emu: RamEmu | null,
+  _insertedDiskName?: string | null | undefined,
+): boolean {
+  return geosRuntimeActive(emu);
+}
+
+export function geosHostStickOverrideWanted(
+  emu: RamEmu | null,
+  insertedDiskName?: string | null | undefined,
+): boolean {
+  const disk = (insertedDiskName || "").trim();
+  if (!geosRuntimeActive(emu)) return false;
+  if (disk && isWheelsDiskName(disk) && /REU|RAM\s*EXPANS|NO\s*REU|EXPANSION\s*NOT/i.test(readScreenText(emu))) {
+    return false;
+  }
+  return true;
 }

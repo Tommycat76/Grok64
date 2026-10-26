@@ -28,6 +28,7 @@ const {
   MOUSE_1351_BUTTON_HOLD_FRAMES,
   createMouse1351CursorSync,
   hostPointerScreenDrag,
+  hostPointerOverScreen,
   syncHostPointerTo1351,
 } = await server.ssrLoadModule("/src/lib/emu/mouse-1351.ts");
 await server.close();
@@ -134,6 +135,13 @@ test("a click that is released immediately still holds the 1351 left button for 
     seen++;
   }
   assert.equal(seen, MOUSE_1351_BUTTON_HOLD_FRAMES);
+});
+
+test("hostPointerOverScreen uses client coords not event.target", () => {
+  const rect = { left: 10, top: 20, width: 384, height: 272, right: 394, bottom: 292, x: 10, y: 20, toJSON: () => ({}) };
+  assert.equal(hostPointerOverScreen(50, 50, rect), true);
+  assert.equal(hostPointerOverScreen(5, 50, rect), false);
+  assert.equal(hostPointerOverScreen(50, 400, rect), false);
 });
 
 test("hostPointerScreenDrag is relative-only (no absolute snap on first sample)", () => {
