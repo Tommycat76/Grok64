@@ -102,15 +102,40 @@ async function softwareInsertGeos() {
   return tag;
 }
 
-async function listGeos() {
-  await typeBasic(page, 'LOAD"$",8', { afterMs: 12_000 });
-  await page.waitForTimeout(3000);
-  const screen = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
-  if (!/LIST/i.test(screen)) {
-    await typeBasic(page, "LIST", { afterMs: 10_000 });
-    await page.waitForTimeout(2000);
+async function waitReadyScreen() {
+  for (let i = 0; i < 50; i++) {
+    const t = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
+    if (/READY\./i.test(t) && !/SEARCHING|LOADING/i.test(t)) return t;
+    await page.waitForTimeout(400);
   }
-  const after = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
+  return page.evaluate(() => window.__g64?.screenText?.() ?? "");
+}
+
+async function listGeos() {
+  await waitReadyScreen();
+  await page.waitForTimeout(4000);
+  await page
+    .locator("#grok64-player canvas, .g64-crt canvas")
+    .first()
+    .click({ timeout: 10_000, force: true })
+    .catch(() => undefined);
+  let after = "";
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await typeBasic(page, 'LOAD"$",8', { afterMs: 16_000, listAfterDollar: false });
+    await page.waitForTimeout(2500);
+    after = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
+    if (/BREAK/i.test(after)) {
+      await waitReadyScreen();
+      await page.waitForTimeout(3000);
+      continue;
+    }
+    if (!/LIST|GEOS|DESK TOP|BLOCKS FREE/i.test(after)) {
+      await typeBasic(page, "LIST", { afterMs: 12_000, listAfterDollar: false });
+      await page.waitForTimeout(2500);
+      after = await page.evaluate(() => window.__g64?.screenText?.() ?? "");
+    }
+    if (/GEOS|DESK TOP|BLOCKS FREE/i.test(after)) break;
+  }
   const diag = await page.evaluate(async () => window.__g64?.attachDiskDiag?.());
   const toasts = await toastTexts();
   const core = await page.evaluate(() => ({

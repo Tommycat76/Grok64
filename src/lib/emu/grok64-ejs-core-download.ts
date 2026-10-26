@@ -9,9 +9,9 @@
 
 export type EjsDownloadOpts = { responseType?: string; method?: string };
 
-export function ejsDownloadFileArity(downloadFile: { length?: number } | null | undefined): 4 | 8 {
-  const n = Number(downloadFile?.length ?? 4);
-  return n >= 6 ? 8 : 4;
+export function ejsDownloadFileArity(downloadFile: unknown): 4 | 8 {
+  const n = Number((downloadFile as { length?: number } | null | undefined)?.length ?? 4);
+  return Number.isFinite(n) && n >= 6 ? 8 : 4;
 }
 
 export function ejsCoreDownloadLeaf(path: string): string {
