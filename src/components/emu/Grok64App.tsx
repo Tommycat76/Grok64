@@ -92,7 +92,6 @@ import {
   setWarp,
   addHostMouseDelta,
   addHostDrag1351,
-  hostPointerScreenDrag,
   readSid1351Pots,
   lastVice1351PlugRc,
   applySavedJoyAndMouse,
@@ -287,7 +286,13 @@ import { putRom, removeRom } from "@/lib/emu/roms";
 import { snapshotDevice, readViewport, applyViewport, detectDevice, isIos, isIosPhone, isTouchMobile } from "@/lib/emu/detect";
 import { applyTabletContainFit, tabletBezelAvail, tabletGlassFillsBezel } from "@/lib/emu/tablet-fit";
 import { detectSoftwareStandard } from "@/lib/emu/region";
-import { hostDragTo1351, hostPointerMoveToDelta, noteRealPointerFeed, readRealPointerFeed } from "@/lib/emu/mouse-1351";
+import {
+  hostDragTo1351,
+  hostPointerMoveToDelta,
+  hostPointerScreenDrag,
+  noteRealPointerFeed,
+  readRealPointerFeed,
+} from "@/lib/emu/mouse-1351";
 import { RETRO_BTN } from "@/lib/emu/types";
 import { feedBasicLine, readPrintTi } from "@/lib/emu/c64-keyboard";
 import { removeSessionCart, sessionDiskOnUnit, setSessionCart, setSessionDisk } from "@/lib/emu/session-media";

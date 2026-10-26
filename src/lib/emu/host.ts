@@ -141,7 +141,6 @@ import {
   crtDisplayBox,
   dpadForAxes,
   hostDragTo1351,
-  hostPointerScreenDrag,
   noteMouse1351ButtonPress,
   resetMouse1351ButtonLatch,
   resetMouse1351CursorSync,
