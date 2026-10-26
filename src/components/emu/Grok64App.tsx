@@ -517,6 +517,8 @@ export function Grok64App() {
   const geosStickJoyRef = useRef(false);
   /** Latched when GEOS deskTop is detected; cleared on Run/Insert/power/reset. */
   const geosDeskSessionRef = useRef(false);
+  /** Real CRT pointer after GEOS stick — blocks re-latching port-1 joystick until stick lifts. */
+  const geosPortStickPausedByPointerRef = useRef(false);
   const playLockGen = useRef(0);
   const pendingSnapshotRef = useRef(null);
   const pendingCompanionRef = useRef<{ name: string; data: Uint8Array }[]>([]);
@@ -597,6 +599,7 @@ export function Grok64App() {
   }, []);
   const endGeosDeskSession = useCallback(() => {
     geosDeskSessionRef.current = false;
+    geosPortStickPausedByPointerRef.current = false;
     geosStickJoyRef.current = false;
     setHostMousePortJoystickOverride(false);
     const emu = emuRef.current;
@@ -605,6 +608,10 @@ export function Grok64App() {
       applySavedJoyAndMouse(emu, st.joyPort, st.mouseMode);
     }
   }, []);
+  const pauseGeosPortStickForPointer = useCallback(() => {
+    geosPortStickPausedByPointerRef.current = true;
+    releaseGeosPortStickOverride();
+  }, [releaseGeosPortStickOverride]);
   const clearMenuJoyInput = useCallback(() => {
     arrowJoyRef.current = { up: false, down: false, left: false, right: false };
     wasdJoyRef.current = { up: false, down: false, left: false, right: false };
@@ -872,6 +879,7 @@ export function Grok64App() {
           geosStickJoyRef: geosStickJoyRef.current,
           geosRuntimeLive: geosRuntimeActive(emu),
           geosDeskSession: geosDeskSessionRef.current,
+          geosPortStickPausedByPointer: geosPortStickPausedByPointerRef.current,
           geosPortStickAllowed: geosDeskSessionRef.current,
           geosHostStickWanted: geosHostStickOverrideWanted(emu, st.insertedDiskName),
           viceJoyport: readViceJoyportVariable(emu),
@@ -4808,7 +4816,11 @@ export function Grok64App() {
           if (a.down || w.down) sy = 1;
         }
         const stickDrive = touchStick && (Math.abs(sx) > 0.12 || Math.abs(sy) > 0.12);
-        const wantGeosPortStick = stickDrive && geosDeskSessionRef.current;
+        if (!touchStick && geosPortStickPausedByPointerRef.current) {
+          geosPortStickPausedByPointerRef.current = false;
+        }
+        const wantGeosPortStick =
+          stickDrive && geosDeskSessionRef.current && !geosPortStickPausedByPointerRef.current;
         if (wantGeosPortStick) {
           if (!geosStickJoyRef.current) {
             geosStickJoyRef.current = true;
@@ -4862,7 +4874,7 @@ export function Grok64App() {
       mousePtrRef.current = next;
       const buttons = "buttons" in ev ? Number(ev.buttons) || 0 : 0;
       if (!dx && !dy && !buttons) return;
-      releaseGeosPortStickOverride();
+      pauseGeosPortStickForPointer();
       if (dx || dy) noteRealPointerFeed(dx, dy, buttons, locked);
       if (dx || dy) addHostMouseDelta(dx, dy);
     };
@@ -4894,14 +4906,14 @@ export function Grok64App() {
       const rect = screen.getBoundingClientRect();
       const locked = typeof document !== "undefined" && Boolean(document.pointerLockElement);
       if (!locked && !hostPointerOverScreen(e.clientX, e.clientY, rect)) return;
-      releaseGeosPortStickOverride();
+      pauseGeosPortStickForPointer();
     };
     window.addEventListener("pointerdown", onPointerDown, { capture: true, passive: true });
     return () => {
       window.removeEventListener("pointermove", onPointer, true);
       window.removeEventListener("pointerdown", onPointerDown, true);
     };
-  }, [releaseGeosPortStickOverride]);
+  }, [pauseGeosPortStickForPointer]);
   useEffect(() => {
     if (!inputDebugQueryOn()) return;
     let raf = 0;
@@ -4918,6 +4930,7 @@ export function Grok64App() {
         geosStickOverride: hostMousePortJoystickOverrideActive(),
         geosStickJoyRef: geosStickJoyRef.current,
         geosDeskSession: geosDeskSessionRef.current,
+        geosPortStickPausedByPointer: geosPortStickPausedByPointerRef.current,
         viceJoyport: readViceJoyportVariable(emu),
         pad: virtualPadDebugSnapshot(),
       };
@@ -5739,7 +5752,7 @@ export function Grok64App() {
               }
               e.preventDefault();
               if (s.mouseMode) {
-                releaseGeosPortStickOverride();
+                pauseGeosPortStickForPointer();
                 mousePtrRef.current = { x: e.clientX, y: e.clientY };
                 if (e.button === 2) mouseBtnRef.current.right = true;
                 else mouseBtnRef.current.left = true;
