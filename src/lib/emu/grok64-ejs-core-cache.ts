@@ -17,6 +17,13 @@ import { grok64CoreBuildMatchesExpected, loadedCoreGlueInfo, runningCoreMismatch
 import { grok64DiskAttachCallableEmu } from "./grok64-wasm-direct";
 
 export const GROK64_IEC_CORE_BLOB = "vice_x64sc-grok64-iec-wasm.data";
+
+/** Versioned on-disk name — EmulatorJS IDB must not reuse stock `vice_x64sc-wasm.data` keys. */
+export function grok64IecCoreBlobLeaf(): string {
+  return GROK64_CORE_BUILD_ID
+    ? `vice_x64sc-grok64-iec-wasm-${GROK64_CORE_BUILD_ID}.data`
+    : GROK64_IEC_CORE_BLOB;
+}
 export const GROK64_LIBRARY_DB = "grok64";
 /** CDN stable EmulatorJS legacy per-core WASM cache (keyed by `vice_x64sc-wasm.data`, not URL). */
 export const EJS_LEGACY_CORE_DB = "EmulatorJS-core";
@@ -87,7 +94,7 @@ function grok64ViceCoreRoot(): string | null {
 export function grok64CoreBlobUrl(): string | null {
   const root = grok64ViceCoreRoot();
   if (!root || typeof window === "undefined" || !window.location?.origin) return null;
-  const rel = `${root.startsWith("/") ? root : `/${root}`}/cores/${GROK64_IEC_CORE_BLOB}`;
+  const rel = `${root.startsWith("/") ? root : `/${root}`}/cores/${grok64IecCoreBlobLeaf()}`;
   return appendGrok64CoreUrlCacheParams(`${window.location.origin}${rel}`);
 }
 
@@ -1250,68 +1257,12 @@ export async function qaSeedStaleGrok64CoreCacheStorage(): Promise<{
  * A running core with no `grok64_disk_attach` always refreshes (Tom dirty-profile case), even when
  * glue was never recorded. Sticky only after a real manifest-sized fetch still lacks exports.
  */
+/** Heal reloads removed — stale cores are blocked by manifest `buildStart` + local IEC serve. */
 export async function maybeAutoRefreshStaleEmulatorCore(
-  emu: { Module?: unknown } | null,
-  { coreStarted = true }: { coreStarted?: boolean } = {},
+  _emu: { Module?: unknown } | null,
+  _opts: { coreStarted?: boolean } = {},
 ): Promise<boolean> {
-  if (!grok64ViceCoreRoot() || !GROK64_CORE_BUILD_ID) return false;
-
-  if (coreStarted) {
-    for (let i = 0; i < 60; i++) {
-      if (grok64DiskAttachCallableEmu(emu)) break;
-      await new Promise((r) => setTimeout(r, 50));
-    }
-  }
-
-  for (let i = 0; i < 60; i++) {
-    const g = loadedCoreGlueInfo();
-    if (!g) {
-      if (coreStarted) break;
-      await new Promise((r) => setTimeout(r, 50));
-      continue;
-    }
-    if (!g.glueHasDiskExports) break;
-    if (g.glueSha12 != null) break;
-    await new Promise((r) => setTimeout(r, 50));
-  }
-
-  const exportsOk = grok64DiskAttachCallableEmu(emu);
-  const glue = loadedCoreGlueInfo();
-  if (!coreStarted && (!glue || glue.glueBytes <= 0)) return false;
-  // Glue-only: a missing disk-attach name can be "exports not bound yet". Wait for WASM.
-  if (!coreStarted && !glue?.glueHasDiskExports) return false;
-
-  const report = runningCoreMismatch({
-    coreStarted,
-    diskExportsPresent: exportsOk,
-    glue,
-  });
-  const matches = grok64CoreBuildMatchesExpected();
-  if (exportsOk && (!report.mismatch || report.reason === "glue-missing-disk-exports") && (matches || !glue?.glueSha12 || !glue.glueHasDiskExports)) {
-    clearCoreRefreshMarks();
-    return false;
-  }
-  if (!report.mismatch) return false;
-
-  const attempts = grok64CoreRefreshAttempts();
-  const glueIsPreExport = Boolean(glue && !glue.glueHasDiskExports && !exportsOk);
-  // A manifest-sized fetch (prefetch / rewritten XHR) is not proof the *running*
-  // core is current. Never go sticky while glue is still a pre-disk-export build.
-  const fetchedCurrent = lastCoreFetchLooksCurrent();
-  if (!glueIsPreExport && fetchedCurrent && attempts >= CORE_REFRESH_BUDGET) {
-    markCoreStaleSticky();
-    return false;
-  }
-  if (attempts >= CORE_REFRESH_MAX) {
-    markCoreStaleSticky();
-    return false;
-  }
-
-  dropVerifiedGrok64IecCoreBytesCache();
-  await forceFreshGrok64CoreDownloadCache();
-  beginCoreHealReload();
-  window.location.reload();
-  return true;
+  return false;
 }
 
 function viceCoreDownloadUrl(url: string): boolean {

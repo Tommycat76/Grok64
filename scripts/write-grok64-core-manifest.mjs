@@ -9,10 +9,13 @@ import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const corePath = join(root, "public/system/vice/emulatorjs/data/cores/vice_x64sc-grok64-iec-wasm.data");
+const coreDir = join(root, "public/system/vice/emulatorjs/data/cores");
+const corePath = join(coreDir, "vice_x64sc-grok64-iec-wasm.data");
 const bytes = readFileSync(corePath);
 const sha256 = createHash("sha256").update(bytes).digest("hex");
 const buildId = sha256.slice(0, 12);
+const versionedBlob = `vice_x64sc-grok64-iec-wasm-${buildId}.data`;
+writeFileSync(join(coreDir, versionedBlob), bytes);
 
 let glueSha12 = "";
 const seven = join(root, "node_modules/7zip-bin/linux/x64/7za");
@@ -38,13 +41,25 @@ if (!glueSha12 && existsSync(prevGen)) {
 }
 
 const manifest = {
-  blob: "vice_x64sc-grok64-iec-wasm.data",
+  blob: versionedBlob,
+  legacyBlob: "vice_x64sc-grok64-iec-wasm.data",
   sha256,
   buildId,
   glueSha12,
   bytes: bytes.byteLength,
   generatedAt: new Date().toISOString(),
 };
+
+const reportPath = join(coreDir, "reports/vice_x64sc.json");
+let report = { core: "vice_x64sc", buildStart: buildId, options: { supportsMouse: true, defaultWebGL2: true } };
+if (existsSync(reportPath)) {
+  try {
+    report = { ...JSON.parse(readFileSync(reportPath, "utf8")), buildStart: buildId };
+  } catch {
+    /* use default */
+  }
+}
+writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
 
 const publicManifest = join(root, "public/system/vice/emulatorjs/data/cores/grok64-core-manifest.json");
 writeFileSync(publicManifest, `${JSON.stringify(manifest, null, 2)}\n`);

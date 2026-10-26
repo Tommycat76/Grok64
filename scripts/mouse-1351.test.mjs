@@ -12,6 +12,8 @@ const {
   CRT_FRAME_W,
   dpadForAxes,
   hostDragTo1351,
+  objectFitContainContentBox,
+  crtDisplayBox,
   takeMouse1351Counts,
   hostPointerMoveToDelta,
   noteRealPointerFeed,
@@ -57,6 +59,13 @@ test("nonzero analog axes hold the D-pad bits vice-libretro maps to 1351 POT", (
   assert.deepEqual(dpadForAxes(0, 0), { left: false, right: false, up: false, down: false });
   assert.deepEqual(dpadForAxes(0.2, -0.4), { left: false, right: true, up: true, down: false });
   assert.deepEqual(dpadForAxes(-1, 1), { left: true, right: false, up: false, down: true });
+});
+
+test("object-fit contain uses inner drawable size not the outer box", () => {
+  const inner = objectFitContainContentBox(800, 400);
+  assert.ok(inner.w < 800);
+  assert.equal(inner.h, 400);
+  assert.ok(inner.offsetX > 0);
 });
 
 test("host drag scales CSS pixels to the 384×272 CRT glass", () => {

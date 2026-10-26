@@ -34,11 +34,6 @@ export function appendGrok64CoreUrlCacheParams(url: string): string {
     const glueParam = `grok64glue=${encodeURIComponent(GROK64_CORE_GLUE_SHA12)}`;
     out = out.includes("?") ? `${out}&${glueParam}` : `${out}?${glueParam}`;
   }
-  const heal = grok64CoreHealQueryParam();
-  if (heal) {
-    const healParam = `grok64heal=${encodeURIComponent(heal)}`;
-    out = out.includes("?") ? `${out}&${healParam}` : `${out}?${healParam}`;
-  }
   return out;
 }
 

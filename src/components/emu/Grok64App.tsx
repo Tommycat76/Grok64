@@ -4629,7 +4629,6 @@ export function Grok64App() {
       const locked = typeof document !== "undefined" && Boolean(document.pointerLockElement);
       const target = e.target as Node | null;
       const over = Boolean(screen && target && (screen === target || screen.contains(target)));
-      const box = screen?.getBoundingClientRect();
       if (!over && !locked) {
         mousePtrRef.current = null;
         return;
@@ -4639,7 +4638,7 @@ export function Grok64App() {
       if (!dx && !dy) return;
       const buttons = "buttons" in e ? Number(e.buttons) || 0 : 0;
       noteRealPointerFeed(dx, dy, buttons, locked);
-      addHostDrag1351(dx, dy, box && box.width > 1 ? { w: box.width, h: box.height } : undefined);
+      addHostDrag1351(dx, dy);
     };
     window.addEventListener("pointermove", onPointer, { capture: true, passive: true });
     return () => {

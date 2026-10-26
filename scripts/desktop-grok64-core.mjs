@@ -6,6 +6,11 @@ import { join } from "node:path";
 
 export const GROK64_IEC_CORE_FILE = "vice_x64sc-grok64-iec-wasm.data";
 
+export function grok64IecCoreFileFromManifest() {
+  const j = readCoreManifest();
+  return j?.blob ? String(j.blob) : GROK64_IEC_CORE_FILE;
+}
+
 function readCoreManifest() {
   try {
     const raw = readFileSync(
@@ -42,7 +47,7 @@ export function grok64DatapathFromEnv() {
 export function grok64CoreBlobUrl(baseUrl, { cacheBust = true } = {}) {
   const root = grok64DatapathFromEnv();
   if (!root) return null;
-  const path = `${root.startsWith("/") ? root : `/${root}`}/cores/${GROK64_IEC_CORE_FILE}`;
+  const path = `${root.startsWith("/") ? root : `/${root}`}/cores/${grok64IecCoreFileFromManifest()}`;
   let href = new URL(path, baseUrl).href;
   if (cacheBust) {
     const buildId = grok64CoreBuildIdFromManifest();
@@ -100,7 +105,9 @@ export function installGrok64CoreNetworkMonitor(page) {
         responseStatus: responses.map((r) => ({ url: r.url, status: r.status })),
         cdnVice: requests.filter((r) => isCdnViceCoreUrl(r.url)).map((r) => r.url),
         forbiddenHeaders,
-        iec200: responses.some((r) => /vice_x64sc-grok64-iec-wasm\.data/i.test(r.url) && r.status === 200),
+        iec200: responses.some(
+          (r) => /vice_x64sc-grok64-iec-wasm(-[a-f0-9]+)?\.data/i.test(r.url) && r.status === 200,
+        ),
       };
     },
   };
@@ -115,13 +122,14 @@ export async function installGrok64CoreNetworkGuard(page, baseUrl) {
     if (/cdn\.emulatorjs\.org/i.test(u) && /\/cores\/vice_.*wasm\.data/i.test(u)) {
       return route.abort("failed");
     }
-    if (/\/cores\/vice_.*wasm\.data/i.test(u) && !u.includes(GROK64_IEC_CORE_FILE)) {
+    const iecFile = grok64IecCoreFileFromManifest();
+    if (/\/cores\/vice_.*wasm\.data/i.test(u) && !u.includes(iecFile)) {
       if (allowed && u.startsWith(new URL(baseUrl).origin)) {
         return route.continue({ url: allowed });
       }
       return route.abort("failed");
     }
-    if (allowed && /\/cores\/vice_x64sc-grok64-iec-wasm\.data/i.test(u) && u.startsWith(new URL(baseUrl).origin)) {
+    if (allowed && /\/cores\/vice_x64sc-grok64-iec-wasm(-[a-f0-9]+)?\.data/i.test(u) && u.startsWith(new URL(baseUrl).origin)) {
       if (!u.includes("grok64core=") && allowed.includes("grok64core=")) {
         return route.continue({ url: allowed });
       }

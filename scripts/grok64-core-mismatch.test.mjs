@@ -151,15 +151,15 @@ test("Cache Storage matcher still hits a heal-nonce core URL", () => {
   );
 });
 
-test("heal nonce is added only while a heal reload is pending", () => {
-  const base = "https://app/system/vice/emulatorjs/data/cores/vice_x64sc-grok64-iec-wasm.data";
-  const before = appendGrok64CoreUrlCacheParams(base);
-  assert.doesNotMatch(before, /grok64heal=/);
+test("core URL never carries heal reload nonce (heal path removed)", () => {
+  const base = "https://app/system/vice/emulatorjs/data/cores/vice_x64sc-grok64-iec-wasm-36a7cd049a97.data";
+  const url = appendGrok64CoreUrlCacheParams(base);
+  assert.doesNotMatch(url, /grok64heal=/);
   if (typeof sessionStorage !== "undefined") {
     sessionStorage.setItem(GROK64_CORE_HEAL_PENDING_SS, "1");
     sessionStorage.setItem(GROK64_CORE_AUTO_RELOAD_SS, "2");
     const during = appendGrok64CoreUrlCacheParams(base);
-    assert.match(during, /grok64heal=2/);
+    assert.doesNotMatch(during, /grok64heal=/);
     sessionStorage.removeItem(GROK64_CORE_HEAL_PENDING_SS);
     sessionStorage.removeItem(GROK64_CORE_AUTO_RELOAD_SS);
   }

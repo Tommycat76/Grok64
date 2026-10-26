@@ -1,6 +1,9 @@
 {
   "core": "vice_x64sc",
-  "buildStart": "2025-06-14T17:47:12+00:00",
+  "buildStart": "36a7cd049a97",
   "buildEnd": "2025-06-14T17:48:47+00:00",
-  "options": { "supportsMouse": true, "defaultWebGL2": true }
+  "options": {
+    "supportsMouse": true,
+    "defaultWebGL2": true
+  }
 }

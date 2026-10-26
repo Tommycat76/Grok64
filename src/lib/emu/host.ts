@@ -65,6 +65,8 @@ import {
   grok64CoreHealPending,
   grok64CoreStaleSticky,
   isEmulatorJsViceCoreStorageKey,
+  grok64IecCoreBlobLeaf,
+  grok64UnusedViceScriptUrl,
   loadVerifiedGrok64IecCoreBytes,
   maybeAutoRefreshStaleEmulatorCore,
   patchEmulatorJsDownloaderCoreCacheBypass,
@@ -176,7 +178,7 @@ function withGrok64CoreCacheBust(url: string): string {
 export function grok64CoreBlobUrl(): string | null {
   const root = grok64ViceCoreRoot();
   if (!root) return null;
-  const rel = `${root.startsWith("/") ? root : `/${root}`}/cores/${GROK64_IEC_CORE_BLOB}`;
+  const rel = `${root.startsWith("/") ? root : `/${root}`}/cores/${grok64IecCoreBlobLeaf()}`;
   let url = rel;
   if (typeof window !== "undefined" && window.location?.origin) {
     url = `${window.location.origin}${rel}`;
@@ -204,11 +206,22 @@ export function isGrok64ViceCoreDataLeaf(leaf: string): boolean {
 }
 
 /** Per-file overrides (custom vice_x64sc WASM + shipped compression/reports). */
+const GROK64_VICE_CORE_JS_NAMES = [
+  "vice_x64sc-wasm.js",
+  "vice_x64sc-legacy-wasm.js",
+  "vice_x64sc-thread-wasm.js",
+  "vice_x64sc-thread-legacy-wasm.js",
+] as const;
+
 export function grok64EmulatorFilePaths(): Record<string, string> | undefined {
   const out: Record<string, string> = {};
   const core = grok64CoreBlobUrl();
+  const jsStub = grok64UnusedViceScriptUrl();
   if (core) {
     for (const name of GROK64_VICE_CORE_DATA_NAMES) out[name] = core;
+  }
+  if (jsStub) {
+    for (const name of GROK64_VICE_CORE_JS_NAMES) out[name] = jsStub;
   }
   for (const name of ["extract7z.js", "extractzip.js", "libunrar.js", "libunrar.wasm"]) {
     const local = grok64LocalDataUrl(`compression/${name}`);
@@ -892,9 +905,10 @@ function patchEjsInitGameCoreGlue() {
         if (!njs) throw new Error("IEC extract missing JS");
         recordGrok64CoreGlue(njs, nwasm ?? null);
         orig.call(self, njs, nwasm, nthread);
-      } catch {
+      } catch (err) {
         self.__g64IecSwap = false;
-        orig.call(self, js, wasm, thread);
+        console.error("Grok64 IEC core swap failed", err);
+        throw err;
       }
     })();
   };

@@ -79,6 +79,21 @@ export function resetMouse1351Accum(acc: Mouse1351Accum): void {
 export const CRT_FRAME_W = 384;
 export const CRT_FRAME_H = 272;
 
+/** Drawable area when content uses CSS object-fit: contain inside a box. */
+export function objectFitContainContentBox(
+  containerW: number,
+  containerH: number,
+  contentW = CRT_FRAME_W,
+  contentH = CRT_FRAME_H,
+): { w: number; h: number; offsetX: number; offsetY: number } {
+  const cw = containerW > 1 ? containerW : contentW;
+  const ch = containerH > 1 ? containerH : contentH;
+  const scale = Math.min(cw / contentW, ch / contentH);
+  const w = contentW * scale;
+  const h = contentH * scale;
+  return { w, h, offsetX: (cw - w) / 2, offsetY: (ch - h) / 2 };
+}
+
 /**
  * Host CSS-pixel drag → 1351 counts for VICE `mouse_move`.
  *
@@ -216,12 +231,31 @@ export function takeMouse1351Buttons(
   return { left, right };
 }
 
-export function crtDisplayBox(root?: ParentNode | Document | null): { w: number; h: number } {
+export type CrtDisplayBox = { w: number; h: number; offsetX: number; offsetY: number };
+
+export function crtDisplayBox(root?: ParentNode | Document | null): CrtDisplayBox {
   const doc = root ?? (typeof document !== "undefined" ? document : null);
-  const canvas = doc?.querySelector?.(".g64-screen canvas") as HTMLElement | null;
   const screen = doc?.querySelector?.(".g64-screen") as HTMLElement | null;
-  const el = canvas && canvas.getBoundingClientRect().width > 1 ? canvas : screen;
+  const canvas = doc?.querySelector?.(".g64-screen canvas") as HTMLElement | null;
+  const el = screen && screen.getBoundingClientRect().width > 1 ? screen : canvas;
   const r = el?.getBoundingClientRect?.();
-  if (r && r.width > 1 && r.height > 1) return { w: r.width, h: r.height };
-  return { w: CRT_FRAME_W, h: CRT_FRAME_H };
+  if (r && r.width > 1 && r.height > 1) {
+    return objectFitContainContentBox(r.width, r.height);
+  }
+  return { w: CRT_FRAME_W, h: CRT_FRAME_H, offsetX: 0, offsetY: 0 };
+}
+
+/** Map a host pointer position into CRT framebuffer coordinates (384×272). */
+export function hostClientToCrt(
+  clientX: number,
+  clientY: number,
+  screenRect: DOMRect,
+  box: CrtDisplayBox = objectFitContainContentBox(screenRect.width, screenRect.height),
+): { x: number; y: number } {
+  const lx = clientX - screenRect.left - box.offsetX;
+  const ly = clientY - screenRect.top - box.offsetY;
+  return {
+    x: (lx / box.w) * CRT_FRAME_W,
+    y: (ly / box.h) * CRT_FRAME_H,
+  };
 }
