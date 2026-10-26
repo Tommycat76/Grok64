@@ -51,6 +51,10 @@ export function applyGrok64LocalCoreDownloadArgs(
   return next;
 }
 
+export function isCdnViceCoreUrl(url: string): boolean {
+  return /cdn\.emulatorjs\.org/i.test(String(url)) && /\/cores\/vice_/i.test(String(url));
+}
+
 export function requestHasForbiddenCoreCacheHeader(headers: Record<string, string> | undefined | null): boolean {
   if (!headers) return false;
   for (const [key, value] of Object.entries(headers)) {

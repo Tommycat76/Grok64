@@ -211,16 +211,18 @@ test("core requests must not carry Cache-Control or Pragma", () => {
   assert.equal(requestHasForbiddenCoreCacheHeader({ accept: "*/*" }), false);
 });
 
-test("CDN vice .data rewrites to the local IEC blob when a canonical URL is known", () => {
+test("CDN vice .data rewrites to the local IEC blob; CDN .js stays on origin", () => {
   const local = "http://127.0.0.1:8080/system/vice/emulatorjs/data/cores/vice_x64sc-grok64-iec-wasm.data";
+  const unused = "http://127.0.0.1:8080/system/vice/emulatorjs/data/cores/grok64-vice-unused.js";
   assert.equal(
-    rewriteGrok64CoreDownloadUrl("https://cdn.emulatorjs.org/stable/data/cores/vice_x64sc-legacy-wasm.data", local),
+    rewriteGrok64CoreDownloadUrl("https://cdn.emulatorjs.org/stable/data/cores/vice_x64sc-legacy-wasm.data", local, unused),
     local,
   );
   assert.equal(
-    rewriteGrok64CoreDownloadUrl("https://cdn.emulatorjs.org/stable/data/cores/vice_x64sc-wasm.js", local),
-    "https://cdn.emulatorjs.org/stable/data/cores/vice_x64sc-wasm.js",
+    rewriteGrok64CoreDownloadUrl("https://cdn.emulatorjs.org/stable/data/cores/vice_x64sc-wasm.js", local, unused),
+    unused,
   );
+  assert.equal(isGrok64CoreCacheRequestUrl("https://cdn.emulatorjs.org/stable/data/cores/vice_x64sc-wasm.js"), true);
 });
 
 test("disk-attach fingerprint scans the whole buffer, not a 2.5MB head", () => {

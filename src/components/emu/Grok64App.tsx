@@ -331,6 +331,7 @@ import {
   qaSeedEmulatorJsLegacyCoreStockBlob,
   qaSeedStaleGrok64CoreCacheStorage,
   qaSeedBrokenGrok64CoreCaches,
+  qaSeedPreDiskExportCoreEverywhere,
   grok64LegacyCoreIdbDiag,
   grok64CoreRefreshAttempts,
   grok64CoreStaleSticky,
@@ -919,6 +920,8 @@ export function Grok64App() {
       qaSeedEmulatorJsLegacyCore: () => qaSeedEmulatorJsLegacyCoreStockBlob(),
       qaSeedStaleGrok64CoreCacheStorage: () => qaSeedStaleGrok64CoreCacheStorage(),
       qaSeedBrokenGrok64CoreCaches: () => qaSeedBrokenGrok64CoreCaches(),
+      qaSeedPreDiskExportCoreEverywhere: (bytes: Uint8Array | ArrayBuffer) =>
+        qaSeedPreDiskExportCoreEverywhere(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)),
       qaForceFreshGrok64Core: () => forceFreshGrok64CoreDownloadCache(),
       qaEmulatorJsCoreCacheCount: () => qaCountEmulatorJsCoreCacheRows(),
       runningCoreMismatch: () =>
