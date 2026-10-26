@@ -96,7 +96,12 @@ async function softwareInsertGeos() {
   const insertLabel = `Insert ${d64Name}`;
   await page.locator(`button[aria-label="${insertLabel}"]`).first().click({ timeout: 60_000 });
   await waitRunning(page, 90_000);
-  await page.waitForTimeout(2500);
+  await page.waitForTimeout(4000);
+  for (let i = 0; i < 20; i++) {
+    const img = await page.evaluate(async () => (await window.__g64?.attachDiskDiag?.())?.viceAttachedImage ?? "");
+    if (/geos|boot/i.test(String(img))) break;
+    await page.waitForTimeout(400);
+  }
   await page.keyboard.press("Escape").catch(() => undefined);
   await page.evaluate(() => window.__g64?.closeUiSheets?.());
   return tag;
