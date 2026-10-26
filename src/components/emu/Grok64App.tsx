@@ -99,6 +99,8 @@ import {
   addHostDrag1351,
   readSid1351Pots,
   lastVice1351PlugRc,
+  readViceJoyportVariable,
+  virtualPadDebugSnapshot,
   applySavedJoyAndMouse,
   setHostMouseButtons,
   flushHostMouse1351,
@@ -236,7 +238,6 @@ import {
   geosFamilyLoadMs,
   geosFamilyPlayLockMs,
   isGeosFamilyDiskName,
-  geosAllowsPortStickOverride,
   geosHostStickOverrideWanted,
   geosRuntimeActive,
   reuForGeosFamilyDisk,
@@ -342,7 +343,15 @@ import { wrapForDiskSwap, prepareAutostartDisk, screenInvitesCracktroInput } fro
 import { isSid, psidToPrg } from "@/lib/emu/psid";
 import { explodeArchive, pickBootFile, toArrayBuffer } from "@/lib/emu/archive";
 import { BuildId } from "@/components/emu/BuildId";
-import { debugQueryOn, drive8LogLines, glog, glogFire, setDebugUi, subscribeLog } from "@/lib/emu/debug";
+import {
+  debugQueryOn,
+  drive8LogLines,
+  glog,
+  glogFire,
+  inputDebugQueryOn,
+  setDebugUi,
+  subscribeLog,
+} from "@/lib/emu/debug";
 import { grok64LibraryIdbDiag } from "@/lib/emu/library-diag";
 import { grok64ProfilePersistDiff } from "@/lib/emu/grok64-profile-diag";
 import {
@@ -539,6 +548,7 @@ export function Grok64App() {
   const [diskOpen, setDiskOpen] = useState(false);
   const [railMoreOpen, setRailMoreOpen] = useState(false);
   const [logLines, setLogLines] = useState([]);
+  const [inputDebugText, setInputDebugText] = useState("");
   const [cartLive, setCartLive] = useState(false);
   const cartLiveRef = useRef(false);
   const resetReadyRef = useRef(() => {});
@@ -574,7 +584,9 @@ export function Grok64App() {
     return st.running && !st.booting && !playLockRef.current && !inGameplayRef.current;
   }, []);
   const releaseGeosPortStickOverride = useCallback(() => {
-    if (!geosStickJoyRef.current) return;
+    const hadJoy = geosStickJoyRef.current;
+    const hadOverride = hostMousePortJoystickOverrideActive();
+    if (!hadJoy && !hadOverride) return;
     geosStickJoyRef.current = false;
     setHostMousePortJoystickOverride(false);
     const emu = emuRef.current;
@@ -585,8 +597,14 @@ export function Grok64App() {
   }, []);
   const endGeosDeskSession = useCallback(() => {
     geosDeskSessionRef.current = false;
-    releaseGeosPortStickOverride();
-  }, [releaseGeosPortStickOverride]);
+    geosStickJoyRef.current = false;
+    setHostMousePortJoystickOverride(false);
+    const emu = emuRef.current;
+    if (emu) {
+      const st = useEmu.getState();
+      applySavedJoyAndMouse(emu, st.joyPort, st.mouseMode);
+    }
+  }, []);
   const clearMenuJoyInput = useCallback(() => {
     arrowJoyRef.current = { up: false, down: false, left: false, right: false };
     wasdJoyRef.current = { up: false, down: false, left: false, right: false };
@@ -843,6 +861,7 @@ export function Grok64App() {
       digitalJoyPlayer: () => digitalJoyPlayer(useEmu.getState().mouseMode, useEmu.getState().joyPort),
       inputRouting: () => {
         const st = useEmu.getState();
+        const emu = emuRef.current;
         return {
           mouse: st.mouseMode,
           savedPort: st.joyPort,
@@ -850,13 +869,13 @@ export function Grok64App() {
           stickPort: libretroStickJoyPort(st.mouseMode, st.joyPort),
           digitalPlayer: digitalJoyPlayer(st.mouseMode, st.joyPort),
           geosStickOverride: hostMousePortJoystickOverrideActive(),
-          geosRuntimeLive: geosRuntimeActive(emuRef.current),
+          geosStickJoyRef: geosStickJoyRef.current,
+          geosRuntimeLive: geosRuntimeActive(emu),
           geosDeskSession: geosDeskSessionRef.current,
           geosPortStickAllowed: geosDeskSessionRef.current,
-          geosHostStickWanted: geosHostStickOverrideWanted(
-            emuRef.current,
-            useEmu.getState().insertedDiskName,
-          ),
+          geosHostStickWanted: geosHostStickOverrideWanted(emu, st.insertedDiskName),
+          viceJoyport: readViceJoyportVariable(emu),
+          pad: virtualPadDebugSnapshot(),
         };
       },
       geosMousePos: () => {
@@ -2608,6 +2627,11 @@ export function Grok64App() {
           autoloadWarp: autoloadWarpForPlay(playModeRef.current, spec.title),
         });
         applyIecUnit(emu, spec.live.iec, spec.live.unit);
+        {
+          const liveJoy = useEmu.getState();
+          applySavedJoyAndMouse(emu, liveJoy.joyPort, liveJoy.mouseMode);
+          scheduleJoyMouseRestore(emu);
+        }
         if (isIosPhone()) kickIosAfterEmuAction(emu, "settle", gen);
         beginPlayLock(playLockDuration(playModeRef.current, spec.title), `Loading ${spec.title}…`);
       } else {
@@ -3683,6 +3707,11 @@ export function Grok64App() {
               autoloadWarp: autoloadWarpForPlay(playModeRef.current, bootName),
             });
             applyIecUnit(emuRef.current, playIec, playAttachUnit);
+            {
+              const liveJoy = useEmu.getState();
+              applySavedJoyAndMouse(emuRef.current, liveJoy.joyPort, liveJoy.mouseMode);
+              scheduleJoyMouseRestore(emuRef.current);
+            }
             if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, keepLiveCrt || floppyKeep ? "play-recycle" : "hot-swap");
             beginPlayLock(playLockDuration(playModeRef.current, title), `Loading ${title}…`);
           }
@@ -4779,7 +4808,6 @@ export function Grok64App() {
           if (a.down || w.down) sy = 1;
         }
         const stickDrive = touchStick && (Math.abs(sx) > 0.12 || Math.abs(sy) > 0.12);
-        if (geosRuntimeActive(emu)) geosDeskSessionRef.current = true;
         const wantGeosPortStick = stickDrive && geosDeskSessionRef.current;
         if (wantGeosPortStick) {
           if (!geosStickJoyRef.current) {
@@ -4874,6 +4902,30 @@ export function Grok64App() {
       window.removeEventListener("pointerdown", onPointerDown, true);
     };
   }, [releaseGeosPortStickOverride]);
+  useEffect(() => {
+    if (!inputDebugQueryOn()) return;
+    let raf = 0;
+    const tick = () => {
+      raf = requestAnimationFrame(tick);
+      const emu = emuRef.current;
+      const st = useEmu.getState();
+      const route = {
+        mouse: st.mouseMode,
+        savedPort: st.joyPort,
+        mouseDual: hostMouseDualStickActive(),
+        stickPort: libretroStickJoyPort(st.mouseMode, st.joyPort),
+        digitalPlayer: digitalJoyPlayer(st.mouseMode, st.joyPort),
+        geosStickOverride: hostMousePortJoystickOverrideActive(),
+        geosStickJoyRef: geosStickJoyRef.current,
+        geosDeskSession: geosDeskSessionRef.current,
+        viceJoyport: readViceJoyportVariable(emu),
+        pad: virtualPadDebugSnapshot(),
+      };
+      setInputDebugText(JSON.stringify(route, null, 0));
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, []);
   const expansionOpts = useCallback(() => {
     const st = useEmu.getState();
     return buildViceExtras({
@@ -5660,6 +5712,11 @@ export function Grok64App() {
             <div key={l}>{l}</div>
           ))}
         </div>
+      ) : null}
+      {s.powered && inputDebugQueryOn() ? (
+        <pre className="g64-input-debug" aria-live="polite">
+          {inputDebugText}
+        </pre>
       ) : null}
       <div className="g64-stage">
         <div className="g64-bezel">

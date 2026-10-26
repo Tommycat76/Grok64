@@ -76,10 +76,18 @@ const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
 try {
   await boot(page);
 
-  // (a) GEOS desk session → Run Byte Hopper
+  // (a) GEOS desk session → real pointer cancels override → Run Byte Hopper
   await page.evaluate(() => window.__g64.primeGeosDeskSessionForQa?.());
   await holdStickRight(page);
   assertGeosOverrideHeld(await routing(page), "GEOS then hopper (during GEOS)");
+  const screen = page.locator(".g64-screen");
+  await screen.dispatchEvent("pointerdown", { button: 0, clientX: 400, clientY: 300 });
+  await page.waitForTimeout(32);
+  await screen.dispatchEvent("pointermove", { clientX: 408, clientY: 300 });
+  await page.waitForTimeout(48);
+  const afterPointer = await routing(page);
+  assert.equal(afterPointer.geosStickOverride, false, "GEOS then hopper: pointer clears override");
+  assert.equal(afterPointer.mouseDual, true, "GEOS then hopper: dual-stick after pointer");
   await releaseStick(page);
   await loadByteHopper(page);
   await holdStickRight(page);
@@ -99,6 +107,21 @@ try {
   const afterGeos = await routing(page);
   assert.equal(afterGeos.geosStickOverride, false, "hopper then GEOS: override off after release");
   assert.equal(afterGeos.mouseDual, true, "hopper then GEOS: 1351 restored");
+
+  // Override flag stuck without geosStickJoyRef (prod desync after real GEOS)
+  await page.evaluate(() => {
+    window.__g64.primeGeosDeskSessionForQa?.();
+    window.__g64.holdStick?.(true);
+    window.__g64.stick?.(1, 0);
+    window.__g64.releaseGeosPortStickOverride?.();
+    window.__g64.holdStick?.(false);
+    window.__g64.stick?.(0, 0);
+  });
+  await page.waitForTimeout(80);
+  await loadByteHopper(page);
+  await holdStickRight(page);
+  assertHopperDualStick(await routing(page), "GEOS desync then hopper");
+  await releaseStick(page);
 
   console.log("geos-hopper-order-probe: OK");
 } finally {

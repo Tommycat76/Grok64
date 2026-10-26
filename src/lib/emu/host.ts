@@ -1584,6 +1584,36 @@ export function hostMousePortJoystickOverrideActive(): boolean {
   return hostMousePortJoystickOverride;
 }
 
+/** For ?debug=input — virtual pad 0 bits fed to libretro. */
+export function virtualPadDebugSnapshot(): {
+  axes: number[];
+  dpad: { up: boolean; down: boolean; left: boolean; right: boolean; fire: boolean };
+} {
+  const b = padButtons;
+  return {
+    axes: [...padAxes],
+    dpad: {
+      up: Boolean(b[4]?.pressed),
+      down: Boolean(b[5]?.pressed),
+      left: Boolean(b[6]?.pressed),
+      right: Boolean(b[7]?.pressed),
+      fire: Boolean(b[8]?.pressed),
+    },
+  };
+}
+
+export function readViceJoyportVariable(emu: EjsInstance | null): string | null {
+  if (!emu?.gameManager) return runtimeViceOpts().vice_joyport ?? null;
+  try {
+    const gm = emu.gameManager as { getVariable?: (k: string) => string };
+    const live = gm.getVariable?.("vice_joyport");
+    if (live) return live;
+  } catch {
+    /* ignore */
+  }
+  return runtimeViceOpts().vice_joyport ?? null;
+}
+
 export function setJoyVector(
   emu: EjsInstance | null,
   dx: number,

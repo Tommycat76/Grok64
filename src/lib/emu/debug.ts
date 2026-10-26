@@ -36,6 +36,16 @@ export function debugQueryOn(): boolean {
   }
 }
 
+/** Live input-routing overlay (?debug=input). */
+export function inputDebugQueryOn(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return new URLSearchParams(window.location.search).get("debug") === "input";
+  } catch {
+    return false;
+  }
+}
+
 export function debugUiOn(): boolean {
   if (typeof window === "undefined") return false;
   const w = window as unknown as { __g64debug?: boolean };
