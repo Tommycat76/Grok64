@@ -629,6 +629,20 @@ export function patchFetchNoStoreForGrok64Core(): void {
           : input instanceof Request
             ? input.url
             : "";
+    if (init && "cache" in init) {
+      const next = { ...init };
+      delete next.cache;
+      init = next;
+    }
+    if (/cdn\.emulatorjs\.org/i.test(url) && /\/cores\/vice_/i.test(url)) {
+      const next = rewriteGrok64CoreDownloadUrl(url);
+      if (next !== url) {
+        url = next;
+        input = next;
+      }
+      init = stripForbiddenCoreFetchCache(init);
+      return orig(input, init);
+    }
     if (isGrok64CoreCacheRequestUrl(url)) {
       const next = rewriteGrok64CoreDownloadUrl(url);
       if (next !== url) {

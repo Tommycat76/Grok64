@@ -53,7 +53,6 @@ import { grok64CoreBuildIdForUrl, grok64CoreManifestSummary, GROK64_CORE_BUILD_I
 import { appendGrok64CoreUrlCacheParams } from "./grok64-core-url";
 import { ejsCoreDownloadLeaf, ejsDownloadFileArity } from "./grok64-ejs-core-download";
 import {
-  bytesHaveGrok64DiskAttach,
   grok64CoreBuildIdLoaded,
   grok64CoreBuildMatchesExpected,
   loadedCoreGlueInfo,
@@ -64,7 +63,6 @@ import {
   grok64CoreRefreshAttempts,
   grok64CoreHealPending,
   grok64CoreStaleSticky,
-  isEmulatorJsViceCoreStorageKey,
   grok64IecCoreBlobLeaf,
   grok64UnusedViceScriptUrl,
   loadVerifiedGrok64IecCoreBytes,
@@ -163,8 +161,13 @@ export function grok64ViceCoreRoot(): string | null {
   return null;
 }
 
-/** EmulatorJS data root — CDN runtime; Grok64 blobs overridden via `filePaths`. */
+/** EmulatorJS `dataPath` — local vice tree when configured; CDN only for loader scripts. */
 export function emulatorDataPath(): string {
+  const root = grok64ViceCoreRoot();
+  if (root && typeof window !== "undefined" && window.location?.origin) {
+    const base = root.startsWith("/") ? root : `/${root}`;
+    return `${window.location.origin}${base}/`;
+  }
   return CDN_DATA;
 }
 
@@ -695,7 +698,7 @@ function applyGrok64EmulatorJsRuntimePatches(): void {
   patchIdbObjectStoreViceCoreBypass();
   patchEmulatorJsStorageViceCoreBypass();
   patchEjsGrok64CoreDownload();
-  patchEjsDownloadGameCoreSkipViceIdb();
+  patchEjsDownloadGameCoreGrok64();
   patchEjsInitGameCoreGlue();
   patchEmulatorJsDownloaderCoreCacheBypass();
 }
@@ -749,57 +752,146 @@ function recordBlockedStockCore(url: string) {
   w.__GROK64_STOCK_CORE_BLOCKED__.push(url);
 }
 
-function gluePayloadHasDiskAttach(js: unknown, wasm?: unknown): boolean {
-  const asBytes = (v: unknown): Uint8Array | null => {
-    if (typeof v === "string") return new TextEncoder().encode(v);
-    if (v instanceof ArrayBuffer) return new Uint8Array(v);
-    if (v instanceof Uint8Array) return v;
-    return null;
-  };
-  const jsU = asBytes(js);
-  const wasmU = asBytes(wasm);
-  return Boolean((jsU && bytesHaveGrok64DiskAttach(jsU)) || (wasmU && bytesHaveGrok64DiskAttach(wasmU)));
-}
+type EjsCoreLoader = {
+  textElem: { innerText: string };
+  localization: (key: string) => string;
+  config: { threads?: boolean };
+  requiresThreads: (core: string) => boolean;
+  requiresWebGL2: (core: string) => boolean;
+  supportsWebgl2: boolean;
+  webgl2Enabled: boolean | null;
+  getCore: () => string;
+  preGetSetting: (key: string) => string | null;
+  downloadFile: (...args: unknown[]) => Promise<unknown>;
+  checkCompression: (data: Uint8Array, msg: string) => Promise<Record<string, Uint8Array>>;
+  checkCoreCompatibility: (version: unknown) => void;
+  initGameCore: (js: unknown, wasm: unknown, thread: unknown) => void;
+  startGameError: (message: string) => void;
+  defaultCoreOpts: Record<string, unknown>;
+  extensions?: unknown;
+  coreName?: string;
+  repository?: string;
+  enableMouseLock?: boolean;
+  retroarchOpts?: unknown;
+  saveFileExt?: unknown;
+  license?: string;
+  elements?: { bottomBar?: { saveSavFiles?: HTMLElement[]; loadSavFiles?: HTMLElement[] } };
+};
 
-/** Skip EmulatorJS-core IDB for vice and drop a leftover EJS_Runtime from an old extract. */
-function patchEjsDownloadGameCoreSkipViceIdb() {
+/**
+ * Replace EmulatorJS `downloadGameCore` — never read vice rows from IDB and never run the CDN failsafe.
+ */
+function patchEjsDownloadGameCoreGrok64() {
+  if (!grok64ViceCoreRoot()) return;
   const EJS = (window as unknown as {
-    EmulatorJS?: {
-      prototype: {
-        downloadGameCore?: () => void;
-        __g64GameCore?: boolean;
-      };
-    };
+    EmulatorJS?: { prototype: { downloadGameCore?: () => void; __g64LocalGameCore?: boolean } };
   }).EmulatorJS;
   const proto = EJS?.prototype;
-  if (!proto?.downloadGameCore || proto.__g64GameCore) return;
-  proto.__g64GameCore = true;
-  const orig = proto.downloadGameCore;
-  proto.downloadGameCore = function patchedDownloadGameCore(this: {
-    storage?: { core?: { get?: (key: string) => Promise<unknown>; __g64SkipViceGet?: boolean } };
-  }) {
+  if (!proto?.downloadGameCore || proto.__g64LocalGameCore) return;
+  const stockDownloadGameCore = proto.downloadGameCore;
+  proto.__g64LocalGameCore = true;
+  proto.downloadGameCore = function grok64LocalDownloadGameCore(this: EjsCoreLoader) {
+    if (!grok64ViceCoreRoot()) {
+      return stockDownloadGameCore.call(this);
+    }
     try {
       delete (window as unknown as { EJS_Runtime?: unknown }).EJS_Runtime;
     } catch {
       /* ignore */
     }
-    const core = this.storage?.core;
-    if (core?.get && !core.__g64SkipViceGet) {
-      core.__g64SkipViceGet = true;
-      const og = core.get.bind(core);
-      core.get = (key: string) => {
-        if (isEmulatorJsViceCoreStorageKey(String(key))) return Promise.resolve(undefined);
-        return og(key);
-      };
+    this.textElem.innerText = this.localization("Download Game Core");
+    if (!this.config.threads && this.requiresThreads(this.getCore())) {
+      this.startGameError(`${this.localization("Error for site owner")}\n${this.localization("Check console")}`);
+      console.warn("This core requires threads, but EJS_threads is not set!");
+      return;
     }
-    return orig.call(this);
+    if (!this.supportsWebgl2 && this.requiresWebGL2(this.getCore())) {
+      this.startGameError(this.localization("Outdated graphics driver"));
+      return;
+    }
+    if (this.config.threads && typeof window.SharedArrayBuffer !== "function") {
+      this.startGameError(`${this.localization("Error for site owner")}\n${this.localization("Check console")}`);
+      console.warn("Threads is set to true, but SharedArrayBuffer is not exposed.");
+      return;
+    }
+
+    const gotCore = (data: ArrayBuffer | Uint8Array) => {
+      this.defaultCoreOpts = {};
+      void this.checkCompression(new Uint8Array(data), this.localization("Decompress Game Core")).then((files) => {
+        let js: Uint8Array | undefined;
+        let thread: Uint8Array | undefined;
+        let wasm: Uint8Array | undefined;
+        for (const k of Object.keys(files || {})) {
+          if (k.endsWith(".wasm")) wasm = files[k];
+          else if (k.endsWith(".worker.js")) thread = files[k];
+          else if (k.endsWith(".js")) js = files[k];
+          else if (k === "build.json") {
+            this.checkCoreCompatibility(JSON.parse(new TextDecoder().decode(files[k])));
+          } else if (k === "core.json") {
+            const core = JSON.parse(new TextDecoder().decode(files[k]));
+            this.extensions = core.extensions;
+            this.coreName = core.name;
+            this.repository = core.repo;
+            this.defaultCoreOpts = core.options;
+            this.enableMouseLock = core.options.supportsMouse;
+            this.retroarchOpts = core.retroarchOpts;
+            this.saveFileExt = core.save;
+          } else if (k === "license.txt") {
+            this.license = new TextDecoder().decode(files[k]);
+          }
+        }
+        if (this.saveFileExt === false && this.elements?.bottomBar) {
+          const save = this.elements.bottomBar.saveSavFiles?.[0];
+          const load = this.elements.bottomBar.loadSavFiles?.[0];
+          if (save) save.style.display = "none";
+          if (load) load.style.display = "none";
+        }
+        if (!js) {
+          this.startGameError("Grok64 IEC core extract missing JS glue");
+          return;
+        }
+        this.initGameCore(js, wasm, thread);
+      });
+    };
+
+    const report = `cores/reports/${this.getCore()}.json`;
+    void this.downloadFile(report, null, false, { responseType: "text", method: "GET" }).then(async (rep) => {
+      let reportJson: { buildStart?: string; options?: { defaultWebGL2?: boolean } } = {};
+      if (rep !== -1 && rep && typeof rep === "object" && "data" in rep && typeof (rep as { data: unknown }).data === "object") {
+        reportJson = (rep as { data: typeof reportJson }).data;
+      }
+      if (!reportJson.buildStart) {
+        reportJson.buildStart = GROK64_CORE_BUILD_ID || undefined;
+      }
+      if (this.webgl2Enabled === null) {
+        this.webgl2Enabled = reportJson.options?.defaultWebGL2 ?? false;
+      }
+      if (this.requiresWebGL2(this.getCore())) {
+        this.webgl2Enabled = true;
+      }
+      try {
+        const buf = await loadVerifiedGrok64IecCoreBytes();
+        const canonical = grok64CoreBlobUrl();
+        if (canonical) recordGrok64CoreLoad(grok64IecCoreBlobLeaf(), canonical, "direct-iec");
+        gotCore(buf);
+      } catch (err) {
+        console.error("Grok64 IEC core load failed", err);
+        this.startGameError(
+          `Grok64 VICE core failed to load (${err instanceof Error ? err.message : String(err)})`,
+        );
+      }
+    });
   };
+}
+
+function isCdnViceCoreRequest(path: string): boolean {
+  return /cdn\.emulatorjs\.org/i.test(path) && /\/cores\/vice_/i.test(path);
 }
 
 /** EmulatorJS core path includes `?v=` — serve the IEC blob ourselves; never CDN. */
 function patchEjsGrok64CoreDownload() {
+  if (!grok64ViceCoreRoot()) return;
   const url = grok64CoreBlobUrl();
-  if (!url) return;
   const EJS = (window as unknown as {
     EmulatorJS?: { prototype: { downloadFile?: (...a: unknown[]) => unknown; __g64Core?: boolean } };
   }).EmulatorJS;
@@ -813,22 +905,40 @@ function patchEjsGrok64CoreDownload() {
     const leaf = ejsCoreDownloadLeaf(path);
     const isViceCoreData = isGrok64ViceCoreDataLeaf(leaf);
     const cfg = (this as { config?: { filePaths?: Record<string, string> } }).config;
-    const canonical = grok64CoreBlobUrl() ?? url;
+    const canonical = grok64CoreBlobUrl() ?? url ?? "";
     const dt = (this as { downloadType?: { core?: { cdnFallback?: boolean } } }).downloadType;
     if (dt?.core) dt.core.cdnFallback = false;
-    if (isViceCoreData || (/cdn\.emulatorjs\.org/i.test(path) && /\/cores\/vice_.*wasm\.data/i.test(path))) {
+    if (isCdnViceCoreRequest(path) && /\.js(\?|$)/i.test(path)) {
+      recordBlockedStockCore(path);
+      const stub = grok64UnusedViceScriptUrl();
+      if (stub) return orig.apply(this, [stub, ...args.slice(1)]);
+      const progress = arity >= 8 ? args[2] : args[1];
+      if (typeof progress === "function") {
+        try {
+          (progress as (p: string) => void)(" 100%");
+        } catch {
+          /* ignore */
+        }
+      }
+      return Promise.resolve({ data: "/* grok64 blocked cdn vice js */", headers: {} });
+    }
+    if (isViceCoreData || (isCdnViceCoreRequest(path) && /\.data(\?|$)/i.test(path))) {
       void purgeAllEmulatorJsCoreRows("pre-vice-download").catch(() => undefined);
       void purgeEmulatorJsLegacyCoreViceRows("pre-vice-download").catch(() => undefined);
+      const blobUrl = grok64CoreBlobUrl() || canonical;
+      if (!blobUrl) {
+        return Promise.resolve(-1);
+      }
       if (/cdn\.emulatorjs\.org/i.test(path)) {
         recordBlockedStockCore(path);
-        recordGrok64CoreLoad(leaf || path, canonical, "blocked-cdn");
+        recordGrok64CoreLoad(leaf || path, blobUrl, "blocked-cdn");
       } else {
-        recordGrok64CoreLoad(leaf, canonical, "local-iec");
+        recordGrok64CoreLoad(leaf, blobUrl, "local-iec");
       }
       if (cfg) {
         if (!cfg.filePaths) cfg.filePaths = {};
-        for (const name of GROK64_VICE_CORE_DATA_NAMES) cfg.filePaths[name] = canonical;
-        cfg.filePaths[leaf] = canonical;
+        for (const name of GROK64_VICE_CORE_DATA_NAMES) cfg.filePaths[name] = blobUrl;
+        cfg.filePaths[leaf] = blobUrl;
       }
       const progress = arity >= 8 ? args[2] : args[1];
       return loadVerifiedGrok64IecCoreBytes().then((buf) => {
@@ -875,42 +985,14 @@ function patchEjsInitGameCoreGlue() {
     } catch {
       /* ignore */
     }
-    if (gluePayloadHasDiskAttach(js, wasm)) {
-      try {
-        sessionStorage.removeItem("grok64.coreStaleSticky");
-        sessionStorage.removeItem("grok64.coreCacheAutoReload");
-        sessionStorage.removeItem("grok64.coreHealPending");
-      } catch {
-        /* ignore */
-      }
-      return orig.call(this, js, wasm, thread);
+    try {
+      sessionStorage.removeItem("grok64.coreStaleSticky");
+      sessionStorage.removeItem("grok64.coreCacheAutoReload");
+      sessionStorage.removeItem("grok64.coreHealPending");
+    } catch {
+      /* ignore */
     }
-    const self = this as typeof proto & { __g64IecSwap?: boolean; checkCompression?: typeof proto.checkCompression };
-    if (self.__g64IecSwap) return orig.call(this, js, wasm, thread);
-    self.__g64IecSwap = true;
-    void (async () => {
-      try {
-        const buf = await loadVerifiedGrok64IecCoreBytes();
-        const decompress = self.checkCompression?.bind(self);
-        if (!decompress) throw new Error("EJS checkCompression missing");
-        const files = await decompress(new Uint8Array(buf), "Decompress Game Core");
-        let njs: Uint8Array | undefined;
-        let nwasm: Uint8Array | undefined;
-        let nthread: Uint8Array | undefined;
-        for (const k of Object.keys(files || {})) {
-          if (k.endsWith(".wasm")) nwasm = files[k];
-          else if (k.endsWith(".worker.js")) nthread = files[k];
-          else if (k.endsWith(".js")) njs = files[k];
-        }
-        if (!njs) throw new Error("IEC extract missing JS");
-        recordGrok64CoreGlue(njs, nwasm ?? null);
-        orig.call(self, njs, nwasm, nthread);
-      } catch (err) {
-        self.__g64IecSwap = false;
-        console.error("Grok64 IEC core swap failed", err);
-        throw err;
-      }
-    })();
+    return orig.call(this, js, wasm, thread);
   };
 }
 
