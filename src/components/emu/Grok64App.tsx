@@ -99,6 +99,7 @@ import {
   flushHostMouse1351,
   setGrok64JoyMouseRestore,
   scheduleJoyMouseRestore,
+  setHostMousePortJoystickOverride,
   clearHostMouse1351,
   feedVice1351Buttons,
   feedVice1351Plug,
@@ -575,7 +576,7 @@ export function Grok64App() {
         j.y = 0;
         j.fire = false;
         lastJoySentRef.current = { x: 0, y: 0, fire: false };
-        setJoyVector(emu, 0, 0, false, digitalJoyPlayer(useEmu.getState().mouseMode));
+        setJoyVector(emu, 0, 0, false, digitalJoyPlayer(useEmu.getState().mouseMode, useEmu.getState().joyPort));
       }
       return;
     }
@@ -593,8 +594,8 @@ export function Grok64App() {
     const st = useEmu.getState();
     const mouseOn = st.mouseMode;
     const stickActive = Math.abs(x) > 0.05 || Math.abs(y) > 0.05;
-    const geosJoyStick = mouseOn && st.joyPort === 1 && stickActive;
-    const player = geosJoyStick ? 0 : digitalJoyPlayer(mouseOn);
+    const geosJoyStick = mouseOn && stickActive && geosStickJoyRef.current;
+    const player = geosJoyStick ? (st.joyPort === 1 ? 0 : 1) : digitalJoyPlayer(mouseOn, st.joyPort);
     if (mouseOn && !geosJoyStick) {
       x = 0;
       y = 0;
@@ -4629,15 +4630,17 @@ export function Grok64App() {
         if (a.right || w.right) sx = 1;
         if (a.up || w.up) sy = -1;
         if (a.down || w.down) sy = 1;
-        const stickDrive = Math.abs(sx) > 0.32 || Math.abs(sy) > 0.32;
-        if (st.joyPort === 1 && stickDrive) {
+        const stickDrive = Math.abs(sx) > 0.12 || Math.abs(sy) > 0.12;
+        if (stickDrive) {
           if (!geosStickJoyRef.current) {
             geosStickJoyRef.current = true;
-            feedVice1351Plug(emu, 1, false);
+            setHostMousePortJoystickOverride(true);
+            applySavedJoyAndMouse(emu, st.joyPort, true);
           }
         } else if (geosStickJoyRef.current) {
           geosStickJoyRef.current = false;
-          feedVice1351Plug(emu, st.joyPort, true);
+          setHostMousePortJoystickOverride(false);
+          applySavedJoyAndMouse(emu, st.joyPort, true);
         }
         if (!geosStickJoyRef.current && stickDrive) {
           addHostMouseDelta(sx * 4, sy * 4);
@@ -4646,6 +4649,10 @@ export function Grok64App() {
         flushHostMouse1351(emu, frameMsForStandard(resolvedRef.current.standard));
         mouseLiveRef.current = true;
       } else if (mouseLiveRef.current) {
+        if (geosStickJoyRef.current) {
+          geosStickJoyRef.current = false;
+          setHostMousePortJoystickOverride(false);
+        }
         // Only clear on the falling edge. Doing this every frame while the
         // mouse is off released the digital stick before emitJoyVector's
         // unchanged-vector early-out could put the hold back.

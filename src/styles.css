@@ -946,8 +946,11 @@ div[class*="ejs_virtual"] {
 }
 
 .g64-app[data-mouse="true"] .g64-screen,
-.g64-app[data-mouse="true"] .g64-screen canvas {
-  cursor: none;
+.g64-app[data-mouse="true"] .g64-screen canvas,
+.g64-app[data-mouse="true"] .g64-screen .ejs_canvas_parent,
+.g64-app[data-mouse="true"] .g64-screen #grok64-player,
+.g64-app[data-mouse="true"] .g64-screen #grok64-player canvas {
+  cursor: none !important;
 }
 
 .g64-stick {

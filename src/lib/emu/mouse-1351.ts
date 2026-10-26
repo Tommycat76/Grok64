@@ -101,28 +101,13 @@ export function objectFitContainContentBox(
 /**
  * Host CSS-pixel drag → 1351 counts for VICE `mouse_move`.
  *
- * VICE only has relative motion (no get/set pointer). A 1:1 CSS-pixel count
- * overshoots the ~384×272 glass when the host glass is ~2× wider, so the
- * C64 pointer races to the edges. Scale host deltas to CRT coordinates and
- * keep the fractional remainder in the accumulator so small moves still land.
- * The host cursor is hidden over the glass — the user aims with the 1351.
+ * One CSS pixel over the CRT equals one C64 screen pixel in VICE mouse_move.
+ * The host cursor is hidden — users aim with the emulated pointer.
  */
-export function hostDragTo1351(
-  dx: number,
-  dy: number,
-  displayW?: number,
-  displayH?: number,
-  frameW = VICE_ACTIVE_W,
-  frameH = VICE_ACTIVE_H,
-): { dx: number; dy: number } {
+export function hostDragTo1351(dx: number, dy: number, _displayW?: number, _displayH?: number): { dx: number; dy: number } {
   const x = Number.isFinite(dx) ? dx : 0;
   const y = Number.isFinite(dy) ? dy : 0;
-  const w = displayW && displayW > 1 ? displayW : frameW;
-  const h = displayH && displayH > 1 ? displayH : frameH;
-  return {
-    dx: x * (frameW / w),
-    dy: y * (frameH / h),
-  };
+  return { dx: x, dy: y };
 }
 
 /** Integer 1351 counts this flush; leftover fractions stay in the accum. */
@@ -144,11 +129,10 @@ export const MOUSE_1351_STEP_MAX = 63;
 export function hostPointerScreenDrag(
   ev: { movementX?: number; movementY?: number; clientX: number; clientY: number },
   prev: HostPointerPos | null,
-  screenRect: DOMRect,
+  _screenRect: DOMRect,
 ): { dx: number; dy: number; next: HostPointerPos } {
-  const box = objectFitContainContentBox(screenRect.width, screenRect.height);
   const { dx, dy, next } = hostPointerMoveToDelta(ev, prev);
-  const scaled = hostDragTo1351(dx, dy, box.w, box.h);
+  const scaled = hostDragTo1351(dx, dy);
   return { dx: scaled.dx, dy: scaled.dy, next };
 }
 

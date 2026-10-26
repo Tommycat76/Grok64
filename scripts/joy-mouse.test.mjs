@@ -16,8 +16,10 @@ const { useEmu } = await server.ssrLoadModule("/src/lib/emu/store.ts");
 await server.close();
 
 test("1351 on the selected port leaves the digital stick on the other libretro player", () => {
-  assert.equal(digitalJoyPlayer(false), 0);
-  assert.equal(digitalJoyPlayer(true), 1);
+  assert.equal(digitalJoyPlayer(false, 1), 0);
+  assert.equal(digitalJoyPlayer(false, 2), 1);
+  assert.equal(digitalJoyPlayer(true, 1), 1);
+  assert.equal(digitalJoyPlayer(true, 2), 0);
 });
 
 test("1351 host helpers are the VICE mouse_move path, not analog-only", () => {

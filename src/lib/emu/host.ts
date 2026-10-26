@@ -1432,9 +1432,10 @@ export function vicePortDeviceOptions(port: JoyPort, mouse: boolean): Record<str
 
 export function applySavedJoyAndMouse(emu: EjsInstance | null, port: JoyPort, mouse: boolean) {
   const p = port === 1 ? 1 : 2;
-  applyRuntimeOptions(emu, vicePortDeviceOptions(p, mouse));
+  const plug1351 = mouse && !hostMousePortJoystickOverride;
+  applyRuntimeOptions(emu, vicePortDeviceOptions(p, plug1351));
   plugJoysticks(emu, p);
-  feedVice1351Plug(emu, p, mouse);
+  feedVice1351Plug(emu, p, plug1351);
 }
 
 function padMap(): PadMap {
@@ -1526,9 +1527,21 @@ export function joyInput(emu: EjsInstance | null, index: number, down: boolean, 
   rawSim(emu, player, index, value);
 }
 
-/** When a 1351 is on the selected port, digital stick goes to libretro player 1 (the other C64 port). */
-export function digitalJoyPlayer(mouseMode: boolean): 0 | 1 {
-  return mouseMode ? 1 : 0;
+/** Libretro player for the digital stick — opposite port when a 1351 uses the other port. */
+export function digitalJoyPlayer(mouseMode: boolean, joyPort: JoyPort = 2): 0 | 1 {
+  if (!mouseMode) return joyPort === 2 ? 1 : 0;
+  return joyPort === 1 ? 1 : 0;
+}
+
+/** GEOS joystick driver on the mouse port: unplug 1351 until cleared. */
+let hostMousePortJoystickOverride = false;
+
+export function setHostMousePortJoystickOverride(on: boolean): void {
+  hostMousePortJoystickOverride = on;
+}
+
+export function hostMousePortJoystickOverrideActive(): boolean {
+  return hostMousePortJoystickOverride;
 }
 
 export function setJoyVector(emu: EjsInstance | null, dx: number, dy: number, fire: boolean, player = 0) {
