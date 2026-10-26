@@ -74,8 +74,10 @@ export function viceExpandOptions(opts: {
     o.vice_drive_true_emulation = "enabled";
   }
   if (opts.mouse) {
-    o.vice_joyport = opts.joyPort === 1 ? "1" : "2";
-    o.vice_joyport_type = "3";
+    const mousePort = opts.joyPort === 1 ? 1 : 2;
+    const stickPort = mousePort === 1 ? 2 : 1;
+    o.vice_joyport = stickPort === 1 ? "1" : "2";
+    o.vice_joyport_type = "1";
     o.vice_analogmouse = "left";
     o.vice_mouse_speed = "100";
     o.vice_analogmouse_speed = "1.0";

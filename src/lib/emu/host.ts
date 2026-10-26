@@ -470,6 +470,24 @@ let keyboardArmed = false;
 let restartArmed = false;
 let webglPatched = false;
 let userJoyPort: JoyPort = 2;
+/** 1351 on one CIA port — digital stick/FIRE use simulateInput on the other port, not virtual pad 0. */
+let hostMouseDualStick = false;
+
+export function hostMouseDualStickActive(): boolean {
+  return hostMouseDualStick;
+}
+
+/** CIA port that receives libretro digital pad 0 (opposite port when 1351 is plugged). */
+export function libretroStickJoyPort(mouse: boolean, savedPort: JoyPort): JoyPort {
+  const mousePort: JoyPort = savedPort === 1 ? 1 : 2;
+  if (!mouse || hostMousePortJoystickOverrideActive()) return mousePort;
+  return mousePort === 1 ? 2 : 1;
+}
+
+/** Whether setJoyVector should touch virtual gamepad 0 (always when vice_joyport targets the stick port). */
+export function joyVectorUsesVirtualPad0(_geosMousePortStick = false): boolean {
+  return true;
+}
 
 /**
  * CriOS WebGL — restored #14 / #18 / #39 host wiring.
@@ -1417,11 +1435,17 @@ export function viceJoyOptions(port: JoyPort): Record<string, string> {
 
 /** Joystick or 1351 on the user's saved port — never a title-based default. */
 export function vicePortDeviceOptions(port: JoyPort, mouse: boolean): Record<string, string> {
-  const base = viceJoyOptions(port === 1 ? 1 : 2);
-  if (!mouse) return base;
+  const mousePort: JoyPort = port === 1 ? 1 : 2;
+  if (!mouse) return viceJoyOptions(mousePort);
+  if (hostMousePortJoystickOverrideActive()) {
+    return {
+      ...viceJoyOptions(mousePort),
+      vice_analogmouse: "disabled",
+    };
+  }
+  const stickPort: JoyPort = mousePort === 1 ? 2 : 1;
   return {
-    ...base,
-    vice_joyport_type: "3",
+    ...viceJoyOptions(stickPort),
     vice_analogmouse: "left",
     vice_mouse_speed: "100",
     vice_analogmouse_speed: "1.0",
@@ -1433,6 +1457,7 @@ export function vicePortDeviceOptions(port: JoyPort, mouse: boolean): Record<str
 export function applySavedJoyAndMouse(emu: EjsInstance | null, port: JoyPort, mouse: boolean) {
   const p = port === 1 ? 1 : 2;
   const plug1351 = mouse && !hostMousePortJoystickOverride;
+  hostMouseDualStick = plug1351;
   if (emu) {
     // Libretro joyport_type + grok64_mouse_plug race → “1351 already on port N”.
     feedVice1351Plug(emu, 1, false);
@@ -1490,8 +1515,10 @@ export function plugJoysticks(emu: EjsInstance | null, _port: JoyPort = 2) {
   window.setTimeout(() => ensureValue2(emu), 250);
   window.setTimeout(() => ensureValue2(emu), 1200);
   for (let i = 0; i < 16; i++) joyInput(emu, i, false);
+  const libretroJoyPort =
+    hostMouseDualStick && !hostMousePortJoystickOverrideActive() ? (_port === 1 ? 2 : 1) : _port;
   try {
-    emu.gameManager?.setVariable?.("vice_joyport", _port === 1 ? "1" : "2");
+    emu.gameManager?.setVariable?.("vice_joyport", libretroJoyPort === 1 ? "1" : "2");
   } catch {
     /* ignore */
   }
@@ -1532,10 +1559,10 @@ export function joyInput(emu: EjsInstance | null, index: number, down: boolean, 
   rawSim(emu, player, index, value);
 }
 
-/** Libretro player for the digital stick — opposite port when a 1351 uses the other port. */
+/** Libretro player index for simulateInput — player 0; vice_joyport selects the CIA port. */
 export function digitalJoyPlayer(mouseMode: boolean, joyPort: JoyPort = 2): 0 | 1 {
-  if (!mouseMode) return joyPort === 2 ? 1 : 0;
-  return joyPort === 1 ? 1 : 0;
+  if (mouseMode) return 0;
+  return joyPort === 2 ? 1 : 0;
 }
 
 /** GEOS joystick driver on the mouse port: unplug 1351 until cleared. */
@@ -1549,8 +1576,15 @@ export function hostMousePortJoystickOverrideActive(): boolean {
   return hostMousePortJoystickOverride;
 }
 
-export function setJoyVector(emu: EjsInstance | null, dx: number, dy: number, fire: boolean, player = 0) {
-  setVirtualPad(dx, dy, fire);
+export function setJoyVector(
+  emu: EjsInstance | null,
+  dx: number,
+  dy: number,
+  fire: boolean,
+  player = 0,
+  geosMousePortStick = false,
+) {
+  if (joyVectorUsesVirtualPad0(geosMousePortStick)) setVirtualPad(dx, dy, fire);
   const dead = 0.32;
   const left = dx < -dead;
   const right = dx > dead;

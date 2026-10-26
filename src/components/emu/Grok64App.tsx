@@ -87,6 +87,9 @@ import {
   restoreState,
   resetEmu,
   digitalJoyPlayer,
+  hostMouseDualStickActive,
+  hostMousePortJoystickOverrideActive,
+  libretroStickJoyPort,
   setJoyVector,
   setPaused,
   setWarp,
@@ -608,7 +611,7 @@ export function Grok64App() {
     const last = lastJoySentRef.current;
     if (x === last.x && y === last.y && fire === last.fire) return;
     lastJoySentRef.current = { x, y, fire };
-    setJoyVector(emu, x, y, fire, player);
+    setJoyVector(emu, x, y, fire, player, geosJoyStick);
   }, [isMenuJoyMode]);
   const emitJoyRef = useRef(() => {});
   emitJoyRef.current = emitJoyVector;
@@ -813,6 +816,19 @@ export function Grok64App() {
         if (playLockRef.current || useEmu.getState().booting) return;
         joyRef.current.fire = down;
         emitJoyRef.current(down);
+      },
+      peek: (addr: number) => readC64Byte(emuRef.current, addr),
+      digitalJoyPlayer: () => digitalJoyPlayer(useEmu.getState().mouseMode, useEmu.getState().joyPort),
+      inputRouting: () => {
+        const st = useEmu.getState();
+        return {
+          mouse: st.mouseMode,
+          savedPort: st.joyPort,
+          mouseDual: hostMouseDualStickActive(),
+          stickPort: libretroStickJoyPort(st.mouseMode, st.joyPort),
+          digitalPlayer: digitalJoyPlayer(st.mouseMode, st.joyPort),
+          geosStickOverride: hostMousePortJoystickOverrideActive(),
+        };
       },
       stickDown: () => stickDownRef.current,
       stick: (x, y) => {
@@ -4627,13 +4643,16 @@ export function Grok64App() {
         const j = joyRef.current;
         const a = arrowJoyRef.current;
         const w = wasdJoyRef.current;
-        let sx = j.x;
-        let sy = j.y;
-        if (a.left || w.left) sx = -1;
-        if (a.right || w.right) sx = 1;
-        if (a.up || w.up) sy = -1;
-        if (a.down || w.down) sy = 1;
-        const stickDrive = Math.abs(sx) > 0.12 || Math.abs(sy) > 0.12;
+        const touchStick = stickDownRef.current;
+        let sx = touchStick ? j.x : 0;
+        let sy = touchStick ? j.y : 0;
+        if (touchStick) {
+          if (a.left || w.left) sx = -1;
+          if (a.right || w.right) sx = 1;
+          if (a.up || w.up) sy = -1;
+          if (a.down || w.down) sy = 1;
+        }
+        const stickDrive = touchStick && (Math.abs(sx) > 0.12 || Math.abs(sy) > 0.12);
         if (stickDrive) {
           if (!geosStickJoyRef.current) {
             geosStickJoyRef.current = true;
