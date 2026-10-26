@@ -138,6 +138,18 @@ export function hostPointerScreenDrag(
 
 export type HostPointerPos = { x: number; y: number };
 
+/** True when client coordinates lie inside the CRT glass (ignores event.target — canvas uses pointer-events:none). */
+export function hostPointerOverScreen(clientX: number, clientY: number, screenRect: DOMRect): boolean {
+  if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return false;
+  if (screenRect.width < 2 || screenRect.height < 2) return false;
+  return (
+    clientX >= screenRect.left &&
+    clientX <= screenRect.right &&
+    clientY >= screenRect.top &&
+    clientY <= screenRect.bottom
+  );
+}
+
 /**
  * Real pointer/mouse event → 1351 counts.
  * Prefer movementX/Y (hover and pointer-lock). Fall back to clientX/Y vs the last sample.
@@ -149,6 +161,7 @@ export function hostPointerMoveToDelta(
   const next = { x: ev.clientX, y: ev.clientY };
   const mx = Number(ev.movementX);
   const my = Number(ev.movementY);
+  // movementX/Y are often 0 in production (coalesced / passive listeners) — only trust non-zero.
   if (Number.isFinite(mx) && Number.isFinite(my) && (mx !== 0 || my !== 0)) {
     return { dx: mx, dy: my, next };
   }

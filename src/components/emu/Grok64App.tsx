@@ -119,6 +119,7 @@ import {
   ensureIecBusReconcile,
   bmc64FlushSessionDisk,
   finishFloppyInsertIec,
+  reconcileInsertedFloppyGcr,
   hardResetAndFlushSessionDisk,
   flushSessionDiskAfterPowerOn,
   resyncSessionDiskToVice,
@@ -290,6 +291,7 @@ import { detectSoftwareStandard } from "@/lib/emu/region";
 import {
   hostDragTo1351,
   hostPointerMoveToDelta,
+  hostPointerOverScreen,
   hostPointerScreenDrag,
   noteRealPointerFeed,
   readRealPointerFeed,
@@ -4008,6 +4010,7 @@ export function Grok64App() {
       if (busRc < 0) {
         throw new Error(`IEC bus reconcile failed (rc=${busRc}) ${viceDiskLastAttachDiag(emuRef.current) ?? ""}`);
       }
+      await reconcileInsertedFloppyGcr(emuRef.current, unit, kind);
       await flushEmuFs(emuRef.current, 600);
       await waitDriveFirmwareReady(emuRef.current, unit);
     } catch (err) {
@@ -4674,25 +4677,37 @@ export function Grok64App() {
     return () => setGrok64JoyMouseRestore(null);
   }, []);
   useEffect(() => {
+    const feedPointerSample = (
+      ev: PointerEvent | MouseEvent,
+      screen: HTMLElement,
+      rect: DOMRect,
+      locked: boolean,
+    ) => {
+      const { dx, dy, next } = hostPointerScreenDrag(ev, mousePtrRef.current, rect);
+      mousePtrRef.current = next;
+      if (!dx && !dy) return;
+      const buttons = "buttons" in ev ? Number(ev.buttons) || 0 : 0;
+      noteRealPointerFeed(dx, dy, buttons, locked);
+      addHostMouseDelta(dx, dy);
+    };
     const onPointer = (e: PointerEvent | MouseEvent) => {
       const st = useEmu.getState();
       if (!st.mouseMode || playLockRef.current || !st.running || st.booting) return;
       const screen = document.querySelector(".g64-screen") as HTMLElement | null;
+      if (!screen) return;
       const locked = typeof document !== "undefined" && Boolean(document.pointerLockElement);
-      const target = e.target as Node | null;
-      const over = Boolean(screen && target && (screen === target || screen.contains(target)));
-      if (!over && !locked) {
+      const rect = screen.getBoundingClientRect();
+      const over = locked || hostPointerOverScreen(e.clientX, e.clientY, rect);
+      if (!over) {
         mousePtrRef.current = null;
         return;
       }
-      const rect = (screen ?? (target as HTMLElement))?.getBoundingClientRect?.();
-      if (!rect || rect.width < 2) return;
-      const { dx, dy, next } = hostPointerScreenDrag(e, mousePtrRef.current, rect);
-      mousePtrRef.current = next;
-      if (!dx && !dy) return;
-      const buttons = "buttons" in e ? Number(e.buttons) || 0 : 0;
-      noteRealPointerFeed(dx, dy, buttons, locked);
-      addHostMouseDelta(dx, dy);
+      if (rect.width < 2) return;
+      const coalesced =
+        e instanceof PointerEvent && typeof e.getCoalescedEvents === "function"
+          ? e.getCoalescedEvents()
+          : [e];
+      for (const ev of coalesced) feedPointerSample(ev, screen, rect, locked);
     };
     window.addEventListener("pointermove", onPointer, { capture: true, passive: true });
     return () => {

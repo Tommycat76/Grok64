@@ -1433,9 +1433,14 @@ export function vicePortDeviceOptions(port: JoyPort, mouse: boolean): Record<str
 export function applySavedJoyAndMouse(emu: EjsInstance | null, port: JoyPort, mouse: boolean) {
   const p = port === 1 ? 1 : 2;
   const plug1351 = mouse && !hostMousePortJoystickOverride;
+  if (emu) {
+    // Libretro joyport_type + grok64_mouse_plug race → “1351 already on port N”.
+    feedVice1351Plug(emu, 1, false);
+    feedVice1351Plug(emu, 2, false);
+  }
   applyRuntimeOptions(emu, vicePortDeviceOptions(p, plug1351));
   plugJoysticks(emu, p);
-  feedVice1351Plug(emu, p, plug1351);
+  if (plug1351) feedVice1351Plug(emu, p, true);
 }
 
 function padMap(): PadMap {
@@ -2316,6 +2321,34 @@ async function finishMfmFloppyInsertIec(emu: EjsInstance, unit: IecUnit, iecMap?
   return 0;
 }
 
+/** After Software Insert: resync bytes + TDE when libretro still shows an empty work disk. */
+export async function reconcileInsertedFloppyGcr(
+  emu: EjsInstance | null,
+  unit: IecUnit,
+  diskKind: ReturnType<typeof kindOf> | null,
+): Promise<void> {
+  if (!emu || !diskKind) return;
+  if (diskKind === "d81") {
+    const bus = viceDriveBusProbe(emu, unit);
+    if (bus.serialDeviceLabel !== "real" || !viceUnitIsMfmDrive(emu, unit)) {
+      await ensureIecBusReconcile(emu, unit, undefined, { lightVicerc: true, skipReload: true });
+    }
+    return;
+  }
+  if (!isGcrDiskKind(diskKind) && diskKind !== "d64" && diskKind !== "d71") return;
+  let bus = viceDriveBusProbe(emu, unit);
+  const tdeOk = (bus.wasmTdeImageBytes ?? 0) > 174_000 && bus.wasmGcrLoaded === 1;
+  if (tdeOk && bus.serialDeviceLabel === "real") return;
+  resyncSessionDiskToVice(emu, unit);
+  const mod = grok64DiskModule(emu);
+  if (mod) bindGrok64DiskExports(mod, emu);
+  grok64DiskApi(mod)?.driveSyncTdeImage?.(unit, 0);
+  await flushEmuFs(emu, 400);
+  const rc = await ensureViceSessionDiskAttached(emu, unit, diskKind);
+  bus = viceDriveBusProbe(emu, unit);
+  glog("reconcile-inserted-gcr", { unit, diskKind, rc, bus });
+}
+
 /** Hard reset then re-attach unit 8 session disk when one is mounted (BMC64 flush pattern). */
 export async function hardResetAndFlushSessionDisk(emu: EjsInstance | null, iecMap?: IecMap): Promise<number> {
   if (!emu) return -1;
@@ -2328,8 +2361,14 @@ export async function hardResetAndFlushSessionDisk(emu: EjsInstance | null, iecM
 
 /** After C64 power-on when a session floppy is already mounted on unit 8. */
 export async function flushSessionDiskAfterPowerOn(emu: EjsInstance | null, iecMap?: IecMap): Promise<number> {
-  if (!emu || !sessionDiskOnUnit(8)?.name || iecMapUnitIsSd2iec(iecMap, 8)) return 0;
-  return bmc64FlushSessionDisk(emu, 8, iecMap);
+  if (!emu) return -1;
+  let last = 0;
+  for (const unit of [8, 9, 10, 11] as IecUnit[]) {
+    if (!sessionDiskOnUnit(unit)?.name || iecMapUnitIsSd2iec(iecMap, unit)) continue;
+    const rc = await bmc64FlushSessionDisk(emu, unit, iecMap);
+    if (rc < 0) last = rc;
+  }
+  return last;
 }
 
 /**
@@ -3286,7 +3325,8 @@ export async function ensureViceSessionDiskAttached(
 ): Promise<number> {
   if (!emu) return -1;
   detachGrok64Sd2iec(emu, unit);
-  applyIecUnitFloppy(emu, "1541", unit, diskKind);
+  const iec = diskKind === "d81" ? "1581" : "1541";
+  applyIecUnitFloppy(emu, iec, unit, diskKind);
   if (diskKind && !isGcrDiskKind(diskKind)) {
     await detachLibretroWorkDiskManager(emu, unit);
     const slot = sessionDiskOnUnit(unit);
