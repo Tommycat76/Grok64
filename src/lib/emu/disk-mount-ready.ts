@@ -9,6 +9,7 @@ import {
   hardReset,
   resyncSessionDiskToVice,
   ensureViceSessionDiskAttached,
+  scheduleJoyMouseRestore,
 } from "./host";
 import { sessionDiskOnUnit } from "./session-media";
 import { isGcrDiskKind, kindOf } from "./formats";
@@ -125,6 +126,7 @@ export async function presentFloppyMountReady(
     ensureViceLastAttachRecorded(emu, live.unit);
     await runMountStage("drive-firmware-ready", () => waitDriveFirmwareReady(emu, live.unit));
     bumpCrtPaint(emu);
+    scheduleJoyMouseRestore(emu);
     return;
   }
   glog("floppy-mount-ready", { afterDriveRefresh: false, kind: diskKind, unit: live.unit });
@@ -151,4 +153,5 @@ export async function presentFloppyMountReady(
   ensureViceLastAttachRecorded(emu, live.unit);
   await runMountStage("drive-firmware-ready", () => waitDriveFirmwareReady(emu, live.unit));
   bumpCrtPaint(emu);
+  scheduleJoyMouseRestore(emu);
 }

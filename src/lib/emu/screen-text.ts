@@ -1,6 +1,16 @@
 /** Read C64 screen RAM as plain text (40×25, PETSCII screen codes). */
 
-const ROW = Array.from({ length: 25 }, (_, row) => 0x0400 + row * 40);
+/** VIC-II $D018 screen matrix base (standard $0400 when $D018=$14). */
+export function c64ScreenMatrixBase(emu: RamEmu | null): number {
+  const d018 = readC64Byte(emu, 0xd018);
+  if (d018 === null || d018 === 0) return 0x0400;
+  const base = ((d018 & 0xf0) << 6) & 0xffff;
+  return base || 0x0400;
+}
+
+function rowAddr(emu: RamEmu | null, row: number): number {
+  return c64ScreenMatrixBase(emu) + row * 40;
+}
 
 /** PETSCII screencode (0x01–0xFF) → display char for directory / BASIC listings. */
 function petToChar(code: number): string {
@@ -44,12 +54,13 @@ function petToChar(code: number): string {
 import { c64RamView, readC64Byte, writeC64Byte, type RamEmu } from "./c64-memory";
 
 function readScreenTextWith(
+  emu: RamEmu | null,
   read: (addr: number) => number | null,
 ): string {
   const lines: string[] = [];
   for (let row = 0; row < 25; row++) {
     let line = "";
-    const base = ROW[row] ?? 0x0400 + row * 40;
+    const base = rowAddr(emu, row);
     for (let col = 0; col < 40; col++) {
       const addr = base + col;
       const b = read(addr);
@@ -92,7 +103,7 @@ function asciiToScreenCode(ch: string): number {
 export function paintScreenLines(emu: RamEmu | null, lines: string[], startRow = 0): void {
   if (!emu) return;
   for (let row = 0; row < lines.length && startRow + row < 25; row++) {
-    const base = ROW[startRow + row] ?? 0x0400 + (startRow + row) * 40;
+    const base = rowAddr(emu, startRow + row);
     const line = lines[row].padEnd(40, " ").slice(0, 40);
     for (let col = 0; col < 40; col++) {
       writeC64Byte(emu, base + col, asciiToScreenCode(line[col] ?? " "));
@@ -105,7 +116,7 @@ export function screenRamShowsGeosCatalog(emu: RamEmu | null): boolean {
   if (!emu) return false;
   const codes: number[] = [];
   for (let row = 0; row < 25; row++) {
-    const base = ROW[row] ?? 0x0400 + row * 40;
+    const base = rowAddr(emu, row);
     for (let col = 0; col < 40; col++) {
       const b = readC64Byte(emu, base + col);
       if (b !== null) codes.push(b & 0xff);
@@ -120,14 +131,14 @@ export function screenRamShowsGeosCatalog(emu: RamEmu | null): boolean {
     if (a === 7 && b === 5 && c === 15 && d === 19) return true;
     if (a === 0x47 && b === 0x45 && c === 0x4f && d === 0x53) return true;
   }
-  return /GEOS/i.test(readScreenTextWith((addr) => readC64Byte(emu, addr)));
+  return /GEOS/i.test(readScreenTextWith(emu, (addr) => readC64Byte(emu, addr)));
 }
 
 export function readScreenText(emu: RamEmu | null): string {
   if (!emu) return "";
-  const viaExport = readScreenTextWith((addr) => readC64Byte(emu, addr));
+  const viaExport = readScreenTextWith(emu, (addr) => readC64Byte(emu, addr));
   if (viaExport.replace(/\s/g, "").length > 0) return viaExport;
   const ram = c64RamView(emu);
   if (!ram) return viaExport;
-  return readScreenTextWith((addr) => (addr >= 0 && addr < ram.length ? ram[addr] : null));
+  return readScreenTextWith(emu, (addr) => (addr >= 0 && addr < ram.length ? ram[addr] : null));
 }

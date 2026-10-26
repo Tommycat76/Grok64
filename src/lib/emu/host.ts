@@ -1679,11 +1679,19 @@ export function setHostMouseButtons(left: boolean, right: boolean) {
 }
 
 /** Direct mouse_move when the core has it; else analog leftover for one VICE poll. */
+/** Drain pending 1351 motion immediately (pointer sync — do not wait for rAF). */
+export function flushHostMouse1351Now(emu: EjsInstance | null) {
+  flushHostMouse1351(emu, 0);
+}
+
 export function flushHostMouse1351(emu: EjsInstance | null, periodMs = 20) {
   const buttons = takeMouse1351Buttons(hostMouseBtnLatch, hostMouseBtn);
   if (vice1351Direct(emu)) {
-    const { dx, dy } = takeMouse1351Counts(hostMouse1351);
-    feedVice1351Move(emu, dx, dy);
+    const dx = Math.round(hostMouse1351.x);
+    const dy = Math.round(hostMouse1351.y);
+    hostMouse1351.x -= dx;
+    hostMouse1351.y -= dy;
+    if (dx !== 0 || dy !== 0) feedVice1351Move(emu, dx, dy);
     const buttonsOk = feedVice1351Buttons(emu, buttons.left, buttons.right);
     if (!buttonsOk) setMouseAnalog(emu, 0, 0, buttons.left, buttons.right);
     return;
@@ -1708,6 +1716,30 @@ export function clearHostMouse1351(emu: EjsInstance | null) {
   clearMouseAnalog(emu);
 }
 
+export type Grok64JoyMouseRestoreFn = (emu: EjsInstance | null) => void;
+
+let grok64JoyMouseRestore: Grok64JoyMouseRestoreFn | null = null;
+
+/** Grok64App registers this so every core restart re-plugs 1351 / joystick after disk GEOS resets. */
+export function setGrok64JoyMouseRestore(fn: Grok64JoyMouseRestoreFn | null): void {
+  grok64JoyMouseRestore = fn;
+}
+
+export function scheduleJoyMouseRestore(emu: EjsInstance | null) {
+  if (!grok64JoyMouseRestore || !emu) return;
+  const run = () => {
+    try {
+      grok64JoyMouseRestore?.(emu);
+    } catch {
+      /* ignore */
+    }
+  };
+  run();
+  window.setTimeout(run, 0);
+  window.setTimeout(run, 120);
+  window.setTimeout(run, 400);
+}
+
 export function resetEmu(emu: EjsInstance | null) {
   guardCore(emu);
   restartArmed = true;
@@ -1717,6 +1749,7 @@ export function resetEmu(emu: EjsInstance | null) {
     /* ignore */
   }
   restartArmed = false;
+  scheduleJoyMouseRestore(emu);
 }
 
 export function autostartReset(emu: EjsInstance | null, trueDrive = false) {
@@ -3559,7 +3592,9 @@ export async function bootGeosFloppy(
     [`vice_drive${unit}_type`]: "1541",
     vice_work_disk: `${unit}_d64`,
   });
-  return await waitForC64Ready(emu, 45_000);
+  const ready = await waitForC64Ready(emu, 45_000);
+  scheduleJoyMouseRestore(emu);
+  return ready;
 }
 
 /** VICE autostart LOAD"*",8,1 — fallback when typed LOAD"GEOS" returns to BASIC. */

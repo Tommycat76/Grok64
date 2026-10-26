@@ -10,6 +10,8 @@ const {
   createMouse1351Accum,
   CRT_FRAME_H,
   CRT_FRAME_W,
+  VICE_ACTIVE_W,
+  VICE_ACTIVE_H,
   dpadForAxes,
   hostDragTo1351,
   objectFitContainContentBox,
@@ -70,19 +72,19 @@ test("object-fit contain uses inner drawable size not the outer box", () => {
   assert.ok(inner.offsetX > 0);
 });
 
-test("host drag scales CSS pixels to the 384×272 CRT glass", () => {
-  const native = hostDragTo1351(12, -12, CRT_FRAME_W, CRT_FRAME_H);
+test("host drag scales CSS pixels to the 320×200 active display", () => {
+  const native = hostDragTo1351(12, -12, VICE_ACTIVE_W, VICE_ACTIVE_H);
   assert.equal(native.dx, 12);
   assert.equal(native.dy, -12);
   const wide = hostDragTo1351(20, 20, 768, 544);
-  assert.equal(wide.dx, 10);
-  assert.equal(wide.dy, 10);
+  assert.equal(Math.round(wide.dx * 10) / 10, 8.3);
+  assert.equal(Math.round(wide.dy * 10) / 10, 7.4);
 });
 
 test("a taller-than-native box shrinks only the vertical 1351 counts", () => {
   const { dx, dy } = hostDragTo1351(10, 10, 384, 400);
   assert.equal(dx, 10);
-  assert.ok(Math.abs(dy - 10 * (CRT_FRAME_H / 400)) < 1e-9);
+  assert.ok(Math.abs(dy - 10 * (VICE_ACTIVE_H / 400)) < 1e-9);
 });
 
 test("fractional CRT-scale leftovers stay in the accumulator", () => {
@@ -139,8 +141,8 @@ test("absolute host pointer sync maps into CRT deltas", () => {
   const rect = { left: 0, top: 0, width: 384, height: 272, right: 384, bottom: 272, x: 0, y: 0, toJSON: () => ({}) };
   syncHostPointerTo1351(acc, sync, 192, 136, rect);
   const moved = syncHostPointerTo1351(acc, sync, 212, 156, rect);
-  assert.equal(moved.dx, 20);
-  assert.equal(moved.dy, 20);
-  assert.equal(acc.x, 20);
-  assert.equal(acc.y, 20);
+  assert.ok(Math.abs(moved.dx - 20 * (VICE_ACTIVE_W / 384)) < 0.01);
+  assert.ok(Math.abs(moved.dy - 20 * (VICE_ACTIVE_H / 272)) < 0.01);
+  assert.ok(Math.abs(acc.x - moved.dx) < 0.01);
+  assert.ok(Math.abs(acc.y - moved.dy) < 0.01);
 });

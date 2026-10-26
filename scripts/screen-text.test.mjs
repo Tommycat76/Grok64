@@ -7,7 +7,9 @@ const server = await createServer({
   appType: "custom",
   logLevel: "error",
 });
-const { readScreenText, paintScreenLines } = await server.ssrLoadModule("/src/lib/emu/screen-text.ts");
+const { readScreenText, paintScreenLines, c64ScreenMatrixBase } = await server.ssrLoadModule(
+  "/src/lib/emu/screen-text.ts",
+);
 await server.close();
 
 function fakeEmu() {
@@ -32,6 +34,13 @@ test("every screen row reads from its own 40 bytes of screen RAM", () => {
   assert.equal(lines[9], "READY.");
   assert.equal(lines[8], "ROW08");
   assert.equal(lines[24], "ROW24");
+});
+
+test("screen matrix base follows VIC $D018", () => {
+  const emu = fakeEmu();
+  assert.equal(c64ScreenMatrixBase(emu), 0x0400);
+  emu.ram[0xd018] = 0x68;
+  assert.equal(c64ScreenMatrixBase(emu), 0x1800);
 });
 
 test("painted lines land at column 0 of their rows", () => {

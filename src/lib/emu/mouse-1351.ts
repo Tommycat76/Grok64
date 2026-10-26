@@ -79,6 +79,10 @@ export function resetMouse1351Accum(acc: Mouse1351Accum): void {
 export const CRT_FRAME_W = 384;
 export const CRT_FRAME_H = 272;
 
+/** Active C64 picture inside the border (GEOS / GUI64 use 320×200 logical coords). */
+export const VICE_ACTIVE_W = 320;
+export const VICE_ACTIVE_H = 200;
+
 /** Drawable area when content uses CSS object-fit: contain inside a box. */
 export function objectFitContainContentBox(
   containerW: number,
@@ -108,8 +112,8 @@ export function hostDragTo1351(
   dy: number,
   displayW?: number,
   displayH?: number,
-  frameW = CRT_FRAME_W,
-  frameH = CRT_FRAME_H,
+  frameW = VICE_ACTIVE_W,
+  frameH = VICE_ACTIVE_H,
 ): { dx: number; dy: number } {
   const x = Number.isFinite(dx) ? dx : 0;
   const y = Number.isFinite(dy) ? dy : 0;
@@ -245,7 +249,7 @@ export function crtDisplayBox(root?: ParentNode | Document | null): CrtDisplayBo
   return { w: CRT_FRAME_W, h: CRT_FRAME_H, offsetX: 0, offsetY: 0 };
 }
 
-/** Map a host pointer position into CRT framebuffer coordinates (384×272). */
+/** Map a host pointer position into the active 320×200 display (letterboxed in the glass). */
 export function hostClientToCrt(
   clientX: number,
   clientY: number,
@@ -255,20 +259,20 @@ export function hostClientToCrt(
   const lx = clientX - screenRect.left - box.offsetX;
   const ly = clientY - screenRect.top - box.offsetY;
   return {
-    x: (lx / box.w) * CRT_FRAME_W,
-    y: (ly / box.h) * CRT_FRAME_H,
+    x: (lx / box.w) * VICE_ACTIVE_W,
+    y: (ly / box.h) * VICE_ACTIVE_H,
   };
 }
 
 export type Mouse1351CursorSync = { estX: number; estY: number; active: boolean };
 
 export function createMouse1351CursorSync(): Mouse1351CursorSync {
-  return { estX: CRT_FRAME_W / 2, estY: CRT_FRAME_H / 2, active: false };
+  return { estX: VICE_ACTIVE_W / 2, estY: VICE_ACTIVE_H / 2, active: false };
 }
 
 export function resetMouse1351CursorSync(sync: Mouse1351CursorSync): void {
-  sync.estX = CRT_FRAME_W / 2;
-  sync.estY = CRT_FRAME_H / 2;
+  sync.estX = VICE_ACTIVE_W / 2;
+  sync.estY = VICE_ACTIVE_H / 2;
   sync.active = false;
 }
 
@@ -286,8 +290,8 @@ export function syncHostPointerTo1351(
 ): { dx: number; dy: number } {
   const b = box ?? objectFitContainContentBox(screenRect.width, screenRect.height);
   const { x, y } = hostClientToCrt(clientX, clientY, screenRect, b);
-  const tx = Math.max(0, Math.min(CRT_FRAME_W - 1, x));
-  const ty = Math.max(0, Math.min(CRT_FRAME_H - 1, y));
+  const tx = Math.max(0, Math.min(VICE_ACTIVE_W - 1, x));
+  const ty = Math.max(0, Math.min(VICE_ACTIVE_H - 1, y));
   if (!sync.active) {
     sync.estX = tx;
     sync.estY = ty;

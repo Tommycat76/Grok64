@@ -205,7 +205,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
       layoutEdit: false,
       controlLayout: { ...DEFAULT_CONTROL_LAYOUT },
       scpuSimm: "16",
-      scpuTurbo: true,
+      scpuTurbo: false,
       jiffyDos: false,
       sd2iecWriteEnabled: false,
       debugLog: false,
@@ -472,7 +472,7 @@ export const useEmu = create<SettingsSlice & SessionSlice>()(
           if (typeof p.mouseMode !== "boolean") p.mouseMode = false;
           if (p.padSide !== "right") p.padSide = "left";
           if (!["0", "1", "2", "4", "8", "16"].includes(p.scpuSimm as string)) p.scpuSimm = "16";
-          if (typeof p.scpuTurbo !== "boolean") p.scpuTurbo = true;
+          if (typeof p.scpuTurbo !== "boolean") p.scpuTurbo = false;
           if (typeof p.jiffyDos !== "boolean") p.jiffyDos = false;
           if (typeof p.sd2iecWriteEnabled !== "boolean") p.sd2iecWriteEnabled = false;
         }

@@ -97,6 +97,9 @@ import {
   applySavedJoyAndMouse,
   setHostMouseButtons,
   flushHostMouse1351,
+  flushHostMouse1351Now,
+  setGrok64JoyMouseRestore,
+  scheduleJoyMouseRestore,
   clearHostMouse1351,
   feedVice1351Buttons,
   feedVice1351Plug,
@@ -575,12 +578,20 @@ export function Grok64App() {
     let y = j.y;
     const a = arrowJoyRef.current;
     const w = wasdJoyRef.current;
-    if (a.left || w.left) x = -1;
-    if (a.right || w.right) x = 1;
-    if (a.up || w.up) y = -1;
-    if (a.down || w.down) y = 1;
-    if (jumpHeldRef.current) y = -1;
-    const player = digitalJoyPlayer(useEmu.getState().mouseMode);
+    const mouseOn = useEmu.getState().mouseMode;
+    if (!mouseOn) {
+      if (a.left || w.left) x = -1;
+      if (a.right || w.right) x = 1;
+      if (a.up || w.up) y = -1;
+      if (a.down || w.down) y = 1;
+    }
+    if (jumpHeldRef.current && !mouseOn) y = -1;
+    const player = digitalJoyPlayer(mouseOn);
+    if (mouseOn) {
+      x = 0;
+      y = 0;
+      fire = false;
+    }
     resetMenuJoyGate(menuJoyGateRef.current);
     stickPrecisionRef.current.precision = false;
     const last = lastJoySentRef.current;
@@ -1916,6 +1927,10 @@ export function Grok64App() {
     clearMenuJoyInput();
     setC64KeyboardDefer(false);
     flushDeferredC64Keyboard(emuRef.current);
+    const live = useEmu.getState();
+    applySavedJoyAndMouse(emuRef.current, live.joyPort, live.mouseMode);
+    if (live.mouseMode) resetHostScreenPointer1351Sync();
+    scheduleJoyMouseRestore(emuRef.current);
   }, [s, clearMenuJoyInput]);
   const logFloppyAttach = useCallback(
     async (tag: string, source: { name: string; bytes: Uint8Array; libraryId?: string | null }) => {
@@ -4624,6 +4639,15 @@ export function Grok64App() {
     return () => cancelAnimationFrame(raf);
   }, [emitJoyVector]);
   useEffect(() => {
+    setGrok64JoyMouseRestore((emu) => {
+      const st = useEmu.getState();
+      if (!emu) return;
+      applySavedJoyAndMouse(emu, st.joyPort, st.mouseMode);
+      if (st.mouseMode) resetHostScreenPointer1351Sync();
+    });
+    return () => setGrok64JoyMouseRestore(null);
+  }, []);
+  useEffect(() => {
     const onPointer = (e: PointerEvent | MouseEvent) => {
       const st = useEmu.getState();
       if (!st.mouseMode || playLockRef.current || !st.running || st.booting) return;
@@ -4639,9 +4663,9 @@ export function Grok64App() {
       if (screen) {
         const rect = screen.getBoundingClientRect();
         const { dx, dy } = syncHostScreenPointer1351(e.clientX, e.clientY, rect);
-        if (!dx && !dy) return;
         const buttons = "buttons" in e ? Number(e.buttons) || 0 : 0;
-        noteRealPointerFeed(dx, dy, buttons, locked);
+        if (dx || dy) noteRealPointerFeed(dx, dy, buttons, locked);
+        flushHostMouse1351Now(emuRef.current);
         return;
       }
       const { dx, dy, next } = hostPointerMoveToDelta(e, mousePtrRef.current);
