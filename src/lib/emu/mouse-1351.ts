@@ -259,3 +259,46 @@ export function hostClientToCrt(
     y: (ly / box.h) * CRT_FRAME_H,
   };
 }
+
+export type Mouse1351CursorSync = { estX: number; estY: number; active: boolean };
+
+export function createMouse1351CursorSync(): Mouse1351CursorSync {
+  return { estX: CRT_FRAME_W / 2, estY: CRT_FRAME_H / 2, active: false };
+}
+
+export function resetMouse1351CursorSync(sync: Mouse1351CursorSync): void {
+  sync.estX = CRT_FRAME_W / 2;
+  sync.estY = CRT_FRAME_H / 2;
+  sync.active = false;
+}
+
+/**
+ * Absolute host pointer → CRT framebuffer → 1351 relative counts.
+ * Tracks the hidden host cursor 1:1 inside the letterboxed drawable (no edge clamp lag).
+ */
+export function syncHostPointerTo1351(
+  acc: Mouse1351Accum,
+  sync: Mouse1351CursorSync,
+  clientX: number,
+  clientY: number,
+  screenRect: DOMRect,
+  box?: CrtDisplayBox,
+): { dx: number; dy: number } {
+  const b = box ?? objectFitContainContentBox(screenRect.width, screenRect.height);
+  const { x, y } = hostClientToCrt(clientX, clientY, screenRect, b);
+  const tx = Math.max(0, Math.min(CRT_FRAME_W - 1, x));
+  const ty = Math.max(0, Math.min(CRT_FRAME_H - 1, y));
+  if (!sync.active) {
+    sync.estX = tx;
+    sync.estY = ty;
+    sync.active = true;
+    return { dx: 0, dy: 0 };
+  }
+  const dx = tx - sync.estX;
+  const dy = ty - sync.estY;
+  if (dx === 0 && dy === 0) return { dx: 0, dy: 0 };
+  sync.estX = tx;
+  sync.estY = ty;
+  addMouse1351Delta(acc, dx, dy);
+  return { dx, dy };
+}

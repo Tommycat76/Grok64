@@ -24,6 +24,8 @@ const {
   noteMouse1351ButtonPress,
   takeMouse1351Buttons,
   MOUSE_1351_BUTTON_HOLD_FRAMES,
+  createMouse1351CursorSync,
+  syncHostPointerTo1351,
 } = await server.ssrLoadModule("/src/lib/emu/mouse-1351.ts");
 await server.close();
 
@@ -129,4 +131,16 @@ test("a click that is released immediately still holds the 1351 left button for 
     seen++;
   }
   assert.equal(seen, MOUSE_1351_BUTTON_HOLD_FRAMES);
+});
+
+test("absolute host pointer sync maps into CRT deltas", () => {
+  const acc = createMouse1351Accum();
+  const sync = createMouse1351CursorSync();
+  const rect = { left: 0, top: 0, width: 384, height: 272, right: 384, bottom: 272, x: 0, y: 0, toJSON: () => ({}) };
+  syncHostPointerTo1351(acc, sync, 192, 136, rect);
+  const moved = syncHostPointerTo1351(acc, sync, 212, 156, rect);
+  assert.equal(moved.dx, 20);
+  assert.equal(moved.dy, 20);
+  assert.equal(acc.x, 20);
+  assert.equal(acc.y, 20);
 });

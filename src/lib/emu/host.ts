@@ -136,18 +136,68 @@ import {
   addMouse1351Delta,
   createMouse1351Accum,
   createMouse1351ButtonLatch,
+  createMouse1351CursorSync,
   crtDisplayBox,
   dpadForAxes,
   hostDragTo1351,
   noteMouse1351ButtonPress,
   resetMouse1351ButtonLatch,
+  resetMouse1351CursorSync,
   takeMouse1351Buttons,
   resetMouse1351Accum,
   takeMouse1351Counts,
   takeMouse1351Frame,
+  syncHostPointerTo1351,
+  objectFitContainContentBox,
 } from "./mouse-1351";
+import {
+  grok64EmulatorJsDataUrl,
+  grok64EjsBundle,
+  grok64EjsCacheQuery,
+  grok64EjsScriptUrl,
+  setGrok64EjsBundle,
+  type Grok64EjsBundle,
+  type Grok64EjsLoaderDiag,
+} from "./grok64-ejs-bundle";
 
 const CDN_DATA = "https://cdn.emulatorjs.org/stable/data/";
+
+function emulatorJsDataPath(): string {
+  return grok64EmulatorJsDataUrl() ?? CDN_DATA;
+}
+
+function recordEjsScriptSource(url: string) {
+  if (typeof window === "undefined") return;
+  const w = window as unknown as { __GROK64_EJS_SCRIPT_SOURCES__?: string[] };
+  if (!w.__GROK64_EJS_SCRIPT_SOURCES__) w.__GROK64_EJS_SCRIPT_SOURCES__ = [];
+  w.__GROK64_EJS_SCRIPT_SOURCES__.push(url);
+}
+
+async function loadGrok64EjsBundleManifest(): Promise<void> {
+  const url = grok64EjsScriptUrl("grok64-ejs-bundle.json");
+  if (!url) return;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const json = (await res.json()) as Grok64EjsBundle;
+    setGrok64EjsBundle(json);
+  } catch {
+    /* optional */
+  }
+}
+
+export function grok64EjsLoaderDiag(): Grok64EjsLoaderDiag {
+  const bundle = grok64EjsBundle();
+  const w = typeof window !== "undefined" ? (window as unknown as Record<string, unknown>) : {};
+  return {
+    dataPath: grok64EmulatorJsDataUrl(),
+    bundleVersion: bundle?.version ?? null,
+    bundleCoreBuildId: bundle?.coreBuildId ?? null,
+    scriptSources: (w.__GROK64_EJS_SCRIPT_SOURCES__ as string[]) ?? [],
+    emulatorJsUrl: grok64EjsScriptUrl("src/emulator.js"),
+    coreBlobUrl: grok64CoreBlobUrl(),
+  };
+}
 
 /** Local Grok64 VICE core tree (usually only `cores/vice_x64sc-wasm.data`). */
 export function grok64ViceCoreRoot(): string | null {
@@ -261,6 +311,8 @@ export type Grok64CoreStatus = {
   coreStaleSticky: boolean;
   coreHealPending: boolean;
   mouseButtons: boolean;
+  ejsLoader: Grok64EjsLoaderDiag;
+  ejsVersion: string | null;
 };
 
 export function grok64CoreStatus(emu: EjsInstance | null): Grok64CoreStatus {
@@ -299,10 +351,15 @@ export function grok64CoreStatus(emu: EjsInstance | null): Grok64CoreStatus {
     coreStaleSticky: grok64CoreStaleSticky(),
     coreHealPending: grok64CoreHealPending(),
     mouseButtons: typeof grok64MouseApi(emu)?.mouseButtons === "function",
+    ejsLoader: grok64EjsLoaderDiag(),
+    ejsVersion:
+      (typeof window !== "undefined"
+        ? (window as unknown as { __ejs?: { ejs_version?: string } }).__ejs?.ejs_version
+        : null) ??
+      grok64EjsBundle()?.version ??
+      null,
   };
 }
-
-const DATA = CDN_DATA;
 
 const SCRIPTS = [
   "nipplejs.js",
@@ -664,7 +721,10 @@ function loadScript(src: string) {
     const s = document.createElement("script");
     s.src = src;
     s.async = false;
-    s.onload = () => resolve();
+    s.onload = () => {
+      recordEjsScriptSource(src);
+      resolve();
+    };
     s.onerror = () => reject(new Error(`Failed to load ${src}`));
     document.head.appendChild(s);
   });
@@ -724,9 +784,12 @@ export function ensureRuntime(): Promise<void> {
     patchFetchNoStoreForGrok64Core();
     patchXhrNoStoreForGrok64Core();
     await syncEmulatorJsCoreCacheWithManifest().catch(() => undefined);
-    await loadCss(`${DATA}emulator.css`);
+    await loadGrok64EjsBundleManifest();
+    const dataPath = emulatorJsDataPath();
+    const q = grok64ViceCoreRoot() ? grok64EjsCacheQuery() : "";
+    await loadCss(`${dataPath}emulator.css${q}`);
     for (const file of SCRIPTS) {
-      await loadScript(`${DATA}src/${file}`);
+      await loadScript(`${dataPath}src/${file}${q}`);
     }
     if (!window.EmulatorJS) throw new Error("EmulatorJS failed to initialize");
     patchEjsInput();
@@ -1537,6 +1600,7 @@ export function clearMouseAnalog(emu: EjsInstance | null) {
 }
 
 const hostMouse1351 = createMouse1351Accum();
+const hostMouse1351Sync = createMouse1351CursorSync();
 const hostMouseBtn = { left: false, right: false };
 const hostMouseBtnLatch = createMouse1351ButtonLatch();
 let hostMouseHeld = { ax: 0, ay: 0 };
@@ -1597,6 +1661,16 @@ export function addHostDrag1351(dx: number, dy: number, display?: { w: number; h
   addMouse1351Delta(hostMouse1351, scaled.dx, scaled.dy);
 }
 
+/** Screen hover/drag: map host pointer into CRT space (GUI64 / GEOS menu hits). */
+export function syncHostScreenPointer1351(clientX: number, clientY: number, screenRect: DOMRect) {
+  const box = objectFitContainContentBox(screenRect.width, screenRect.height);
+  return syncHostPointerTo1351(hostMouse1351, hostMouse1351Sync, clientX, clientY, screenRect, box);
+}
+
+export function resetHostScreenPointer1351Sync() {
+  resetMouse1351CursorSync(hostMouse1351Sync);
+}
+
 export function setHostMouseButtons(left: boolean, right: boolean) {
   if (left && !hostMouseBtn.left) noteMouse1351ButtonPress(hostMouseBtnLatch, true, false);
   if (right && !hostMouseBtn.right) noteMouse1351ButtonPress(hostMouseBtnLatch, false, true);
@@ -1624,6 +1698,7 @@ export function flushHostMouse1351(emu: EjsInstance | null, periodMs = 20) {
 
 export function clearHostMouse1351(emu: EjsInstance | null) {
   resetMouse1351Accum(hostMouse1351);
+  resetMouse1351CursorSync(hostMouse1351Sync);
   resetMouse1351ButtonLatch(hostMouseBtnLatch);
   hostMouseBtn.left = false;
   hostMouseBtn.right = false;
@@ -2643,13 +2718,22 @@ export function injectSdWork(
 }
 
 export async function probeCore(core: string): Promise<boolean> {
-  const bases = ["https://cdn.emulatorjs.org/stable/data/", "https://cdn.emulatorjs.org/latest/data/"];
-  for (const base of bases) {
+  const local = grok64CoreBlobUrl();
+  if (local) {
+    try {
+      const res = await fetch(local, { method: "HEAD" });
+      if (res.ok) return true;
+    } catch {
+      /* fall through */
+    }
+  }
+  const base = grok64EmulatorJsDataUrl();
+  if (base) {
     try {
       const res = await fetch(`${base}cores/${core}-wasm.data`, { method: "HEAD" });
       if (res.ok) return true;
     } catch {
-      /* next */
+      /* ignore */
     }
   }
   return false;

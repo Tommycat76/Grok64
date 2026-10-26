@@ -92,6 +92,8 @@ import {
   setWarp,
   addHostMouseDelta,
   addHostDrag1351,
+  syncHostScreenPointer1351,
+  resetHostScreenPointer1351Sync,
   applySavedJoyAndMouse,
   setHostMouseButtons,
   flushHostMouse1351,
@@ -4631,6 +4633,15 @@ export function Grok64App() {
       const over = Boolean(screen && target && (screen === target || screen.contains(target)));
       if (!over && !locked) {
         mousePtrRef.current = null;
+        resetHostScreenPointer1351Sync();
+        return;
+      }
+      if (screen) {
+        const rect = screen.getBoundingClientRect();
+        const { dx, dy } = syncHostScreenPointer1351(e.clientX, e.clientY, rect);
+        if (!dx && !dy) return;
+        const buttons = "buttons" in e ? Number(e.buttons) || 0 : 0;
+        noteRealPointerFeed(dx, dy, buttons, locked);
         return;
       }
       const { dx, dy, next } = hostPointerMoveToDelta(e, mousePtrRef.current);
@@ -5197,6 +5208,7 @@ export function Grok64App() {
             onClick={() => {
               const next = !s.mouseMode;
               s.setMouseMode(next);
+              if (next) resetHostScreenPointer1351Sync();
               applySavedJoyAndMouse(emuRef.current, s.joyPort, next);
               toast.message(next ? `1351 mouse on port ${s.joyPort} — tap P1/P2 to swap` : "Joystick");
             }}
@@ -5452,6 +5464,9 @@ export function Grok64App() {
               e.preventDefault();
               if (s.mouseMode) {
                 mousePtrRef.current = { x: e.clientX, y: e.clientY };
+                const screenEl = e.currentTarget;
+                const rect = screenEl.getBoundingClientRect();
+                syncHostScreenPointer1351(e.clientX, e.clientY, rect);
                 if (e.button === 2) mouseBtnRef.current.right = true;
                 else mouseBtnRef.current.left = true;
                 try {

@@ -95,6 +95,7 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               WASD or the on-screen stick. After geos → select input → COMM 1351(a), put the mouse
               on that port. The port you pick stays across carts, disks, and power.
             </p>
+            <EjsLoaderDiagPanel active={s.settingsOpen || s.aboutOpen} powered={s.powered} />
             {s.mouseMode ? (
               <div className="g64-field">
                 <label>Touchpad side</label>
@@ -626,6 +627,68 @@ function LibraryCartScanPanel() {
           {JSON.stringify(rows, null, 2)}
         </pre>
       )}
+    </div>
+  );
+}
+
+function EjsLoaderDiagPanel({ active, powered }: { active: boolean; powered: boolean }) {
+  const [core, setCore] = useState<Record<string, unknown> | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    const tick = () => {
+      const g = (window as unknown as { __g64?: { grok64CoreStatus?: () => Record<string, unknown> } }).__g64;
+      setCore(g?.grok64CoreStatus?.() ?? null);
+    };
+    tick();
+    const id = window.setInterval(tick, 1500);
+    return () => window.clearInterval(id);
+  }, [active, powered]);
+  const loader = (core?.ejsLoader as Record<string, unknown> | undefined) ?? {};
+  const scripts = (loader.scriptSources as string[] | undefined) ?? [];
+  const cdnScript = scripts.some((u) => /cdn\.emulatorjs\.org/i.test(u));
+  const exportsOk = core?.diskExportsPresent === true;
+  return (
+    <div className="mb-4 rounded-lg border border-border/60 bg-bg/40 p-3">
+      <h3 className="mb-2 text-sm font-medium text-fg">EmulatorJS loader</h3>
+      <p className="mb-2 text-xs leading-5 text-fg-muted">
+        Same-origin EmulatorJS + Grok64 IEC core. Loader scripts must not come from{" "}
+        <code className="text-fg">cdn.emulatorjs.org</code>.
+      </p>
+      <dl className="space-y-1 font-mono text-[11px] text-fg-muted">
+        <div>
+          <dt className="text-fg">EJS version</dt>
+          <dd className="break-all">{String(core?.ejsVersion ?? "—")}</dd>
+        </div>
+        <div>
+          <dt className="text-fg">Data path</dt>
+          <dd className="break-all">{String(loader.dataPath ?? "—")}</dd>
+        </div>
+        <div>
+          <dt className="text-fg">emulator.js</dt>
+          <dd className="break-all">{String(loader.emulatorJsUrl ?? scripts[scripts.length - 1] ?? "—")}</dd>
+        </div>
+        <div>
+          <dt className="text-fg">IEC core .data</dt>
+          <dd className="break-all">{String(loader.coreBlobUrl ?? "—")}</dd>
+        </div>
+        <div>
+          <dt className="text-fg">Disk WASM exports</dt>
+          <dd className={exportsOk ? "text-emerald-300" : "text-amber-200"}>
+            {exportsOk ? "present" : powered ? "missing — stale core" : "power on to check"}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-fg">Core build</dt>
+          <dd className="break-all">
+            {String(core?.coreBuildIdLoaded ?? "—")} / expected {String(core?.coreBuildIdExpected ?? "—")}
+          </dd>
+        </div>
+      </dl>
+      {cdnScript ? (
+        <p className="mt-2 rounded border border-red-500/50 bg-red-500/10 px-2 py-1 text-xs text-red-100">
+          CDN EmulatorJS script detected in this session — disk attach may fail. Hard reload after deploy.
+        </p>
+      ) : null}
     </div>
   );
 }

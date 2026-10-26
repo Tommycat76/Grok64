@@ -28,6 +28,7 @@
     "test:desktop-idb-stale-core-seed": "node scripts/desktop-idb-stale-core-seed-proof.mjs",
     "test:desktop-emulatorjs-legacy-core": "node scripts/desktop-emulatorjs-legacy-core-seed-proof.mjs",
     "test:desktop-stale-core-selfheal": "node scripts/desktop-stale-core-selfheal-proof.mjs",
+    "test:desktop-headed-vite-main-profile": "node scripts/desktop-headed-vite-main-profile-proof.mjs",
     "test:desktop-geos-insert-list": "node scripts/desktop-geos-insert-list-proof.mjs",
     "test:desktop-geos-insert-ui-jiffy": "GROK64_USER_DIRTY_JIFFY=1 node scripts/desktop-geos-insert-user-dirty-proof.mjs",
     "test:desktop-geos-insert-user-dirty": "node scripts/desktop-geos-insert-user-dirty-proof.mjs",

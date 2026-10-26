@@ -69,8 +69,10 @@ export function isCdnViceCoreUrl(url) {
 export function installGrok64CoreNetworkMonitor(page) {
   const requests = [];
   const responses = [];
+  const cdnAll = [];
   page.on("request", (req) => {
     const u = req.url();
+    if (/cdn\.emulatorjs\.org/i.test(u)) cdnAll.push(u);
     if (!/\/cores\/vice_/i.test(u) && !/grok64-iec-wasm\.data/i.test(u)) return;
     requests.push({
       url: u,
@@ -90,6 +92,7 @@ export function installGrok64CoreNetworkMonitor(page) {
     reset() {
       requests.length = 0;
       responses.length = 0;
+      cdnAll.length = 0;
     },
     snapshot() {
       const forbiddenHeaders = requests
@@ -103,6 +106,7 @@ export function installGrok64CoreNetworkMonitor(page) {
       return {
         requestUrls: requests.map((r) => r.url),
         responseStatus: responses.map((r) => ({ url: r.url, status: r.status })),
+        cdnAll: [...cdnAll],
         cdnVice: requests.filter((r) => isCdnViceCoreUrl(r.url)).map((r) => r.url),
         forbiddenHeaders,
         iec200: responses.some(

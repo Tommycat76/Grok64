@@ -147,7 +147,7 @@ try {
   const readyOk = /READY/i.test(ready) && !trace.stillLoading;
   const listOk = /"?\w|BLOCKS FREE|PRG|SEQ|GEOS/i.test(listScreen);
   const toastOk = !toasts.some((t) => /old VICE core without disk attach|rc=-99|js-exports-missing/i.test(t));
-  const noCdn = (netSnap.cdnVice ?? []).length === 0;
+  const noCdn = (netSnap.cdnAll ?? netSnap.cdnVice ?? []).length === 0;
   const noHeaders = (netSnap.forbiddenHeaders ?? []).length === 0;
   const iec200 = netSnap.iec200 === true;
   const pass = powered && glueOk && exportsOk && readyOk && listOk && toastOk && noCdn && noHeaders && iec200;

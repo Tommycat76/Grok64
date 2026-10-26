@@ -64,6 +64,17 @@ writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`);
 const publicManifest = join(root, "public/system/vice/emulatorjs/data/cores/grok64-core-manifest.json");
 writeFileSync(publicManifest, `${JSON.stringify(manifest, null, 2)}\n`);
 
+const ejsBundlePath = join(root, "public/system/vice/emulatorjs/data/grok64-ejs-bundle.json");
+if (existsSync(ejsBundlePath)) {
+  try {
+    const ejs = JSON.parse(readFileSync(ejsBundlePath, "utf8"));
+    ejs.coreBuildId = buildId;
+    writeFileSync(ejsBundlePath, `${JSON.stringify(ejs, null, 2)}\n`);
+  } catch {
+    /* ignore */
+  }
+}
+
 const genTs = join(root, "src/lib/emu/grok64-core-build.generated.ts");
 mkdirSync(dirname(genTs), { recursive: true });
 writeFileSync(
