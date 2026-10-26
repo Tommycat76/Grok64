@@ -9,7 +9,6 @@ const {
   feedVice1351Buttons,
   feedVice1351Plug,
   hostMouseDualStickActive,
-  joyVectorUsesVirtualPad0,
   vice1351Direct,
   vicePortDeviceOptions,
   applySavedJoyAndMouse,
@@ -90,3 +89,4 @@ test("opposite-port stick uses dual-stick routing while 1351 stays on the mouse 
   applySavedJoyAndMouse(null, 2, false);
   assert.equal(hostMouseDualStickActive(), false);
 });
+

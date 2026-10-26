@@ -487,7 +487,7 @@ export function libretroStickJoyPort(mouse: boolean, savedPort: JoyPort): JoyPor
   return mousePort === 1 ? 2 : 1;
 }
 
-/** Whether setJoyVector should touch virtual gamepad 0 (always when vice_joyport targets the stick port). */
+/** Libretro gamepad 0 is wired to vice_joyport (opposite CIA port when 1351 dual-stick). */
 export function joyVectorUsesVirtualPad0(_geosMousePortStick = false): boolean {
   return true;
 }

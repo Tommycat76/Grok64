@@ -834,6 +834,10 @@ export function Grok64App() {
         };
       },
       stickDown: () => stickDownRef.current,
+      /** QA: simulate on-screen stick finger-down (drives GEOS vs dual-stick routing). */
+      holdStick: (down) => {
+        stickDownRef.current = !!down;
+      },
       stick: (x, y) => {
         joyRef.current.x = x;
         joyRef.current.y = y;
@@ -4724,13 +4728,18 @@ export function Grok64App() {
           if (a.down || w.down) sy = 1;
         }
         const stickDrive = touchStick && (Math.abs(sx) > 0.12 || Math.abs(sy) > 0.12);
-        if (stickDrive) {
+        const dualStick = hostMouseDualStickActive();
+        if (dualStick && geosStickJoyRef.current) {
+          geosStickJoyRef.current = false;
+          setHostMousePortJoystickOverride(false);
+          applySavedJoyAndMouse(emu, st.joyPort, true);
+        } else if (!dualStick && stickDrive) {
           if (!geosStickJoyRef.current) {
             geosStickJoyRef.current = true;
             setHostMousePortJoystickOverride(true);
             applySavedJoyAndMouse(emu, st.joyPort, true);
           }
-        } else if (geosStickJoyRef.current) {
+        } else if (!dualStick && geosStickJoyRef.current) {
           geosStickJoyRef.current = false;
           setHostMousePortJoystickOverride(false);
           applySavedJoyAndMouse(emu, st.joyPort, true);
