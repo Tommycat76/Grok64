@@ -151,12 +151,10 @@ export async function hasJiffyPair(): Promise<boolean> {
   return Boolean(c64 && d1541);
 }
 
+/** Only C64 + 1541 may be bundled; 1571/1581/CMD HD are user uploads (no host 404 probe). */
 const HOST_ROMS: { id: RomSlotId; urls: string[] }[] = [
   { id: "jiffy-c64", urls: ["/system/vice/JiffyDOS_C64.bin", "/system/vice/JiffyDOS_C64_6.01.bin"] },
   { id: "jiffy-1541", urls: ["/system/vice/JiffyDOS_1541-II.bin"] },
-  { id: "jiffy-1571", urls: ["/system/vice/JiffyDOS_1571.bin", "/system/vice/JiffyDOS_1571_repl310654.bin"] },
-  { id: "jiffy-1581", urls: ["/system/vice/JiffyDOS_1581.bin"] },
-  { id: "cmdhd", urls: ["/system/vice/dosCMDHD.bin", "/system/vice/cmdhd.bin"] },
 ];
 
 export async function seedRomsFromHost(): Promise<RomSlotId[]> {

@@ -298,22 +298,102 @@ html, body, #app {
   gap: 5px;
 }
 
+.g64-iconbtn-label {
+  display: none;
+}
+.g64-iconbtn-icon {
+  flex-shrink: 0;
+}
+
 .g64-iconbtn {
   width: 44px;
   height: 44px;
   flex: 0 0 44px;
   border-radius: var(--radius-sm);
-  border: 0;
+  border: 1px solid transparent;
   background: transparent;
-  color: var(--color-fg-muted);
+  color: var(--color-fg);
   display: grid;
   place-items: center;
-  transition: color 150ms var(--ease-out), background 150ms var(--ease-out);
+  transition:
+    color 150ms var(--ease-out),
+    background 150ms var(--ease-out),
+    border-color 150ms var(--ease-out);
 }
 .g64-iconbtn:hover,
 .g64-iconbtn[data-on="true"] {
   color: var(--color-fg);
   background: var(--color-bg-subtle);
+  border-color: color-mix(in oklab, var(--color-fg) 10%, transparent);
+}
+
+/* Desktop toolbar: solid retro keys, label-forward contrast (WCAG AA). */
+.g64-app[data-device="desktop"] .g64-top {
+  --g64-toolbar-fill: #24242c;
+  --g64-toolbar-fill-hover: #30303a;
+  --g64-toolbar-label: #f4f4f6;
+  --g64-toolbar-border: color-mix(in oklab, var(--color-fg) 12%, #24242c);
+}
+.g64-app[data-device="desktop"] .g64-top-pin,
+.g64-app[data-device="desktop"] .g64-top-icons {
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.g64-app[data-device="phone"] .g64-power-pin,
+.g64-app[data-device="tablet"] .g64-power-pin {
+  display: none;
+}
+.g64-app[data-device="desktop"] .g64-power-pin {
+  color: color-mix(in oklab, var(--color-phosphor) 88%, var(--g64-toolbar-label));
+}
+.g64-app[data-device="desktop"] .g64-top .g64-iconbtn:not(.g64-rail-more) {
+  width: auto;
+  min-width: 0;
+  height: auto;
+  min-height: 34px;
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--g64-toolbar-fill);
+  color: var(--g64-toolbar-label);
+  border: 1px solid var(--g64-toolbar-border);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.07),
+    0 1px 0 rgb(0 0 0 / 0.35);
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.g64-app[data-device="desktop"] .g64-top .g64-iconbtn:not(.g64-rail-more) .g64-iconbtn-icon {
+  width: 17px;
+  height: 17px;
+  opacity: 0.95;
+}
+.g64-app[data-device="desktop"] .g64-top .g64-iconbtn-label {
+  display: inline;
+  line-height: 1.1;
+  color: inherit;
+}
+.g64-app[data-device="desktop"] .g64-top .g64-iconbtn:not(.g64-rail-more):hover {
+  background: var(--g64-toolbar-fill-hover);
+  color: #ffffff;
+  border-color: color-mix(in oklab, var(--color-fg) 16%, var(--g64-toolbar-fill-hover));
+}
+.g64-app[data-device="desktop"] .g64-top .g64-iconbtn:not(.g64-rail-more)[data-on="true"] {
+  background: color-mix(in oklab, var(--color-phosphor) 24%, var(--g64-toolbar-fill));
+  color: #f0fffc;
+  border-color: color-mix(in oklab, var(--color-phosphor) 38%, var(--g64-toolbar-fill));
+}
+.g64-app[data-device="desktop"] .g64-top-rail .g64-chip {
+  font-size: 15px;
+  font-weight: 700;
+  color: #f0f0f4;
+  padding: 6px 11px;
 }
 .g64-iconbtn.extra {
   display: none;
@@ -322,6 +402,9 @@ html, body, #app {
 .g64-app[data-device="tablet"] .g64-iconbtn.extra,
 .g64-app[data-device="desktop"] .g64-iconbtn.extra {
   display: grid;
+}
+.g64-app[data-device="desktop"] .g64-top-icons .g64-iconbtn.extra.g64-power-toggle {
+  display: none;
 }
 /* Phone: pin Software/disk; chips on a second row; lesser icons in More. */
 .g64-app[data-device="phone"] .g64-top {
@@ -532,6 +615,8 @@ html, body, #app {
   display: flex;
   align-items: center;
   justify-content: center;
+  /* Bezel chrome must not steal toolbar / Software clicks above the CRT. */
+  pointer-events: none;
 }
 .g64-screen {
   width: 100%;
@@ -546,6 +631,7 @@ html, body, #app {
   overflow: hidden;
   position: relative;
   touch-action: none;
+  pointer-events: auto;
 }
 .g64-screen:not(.is-on) {
   pointer-events: none;
@@ -703,6 +789,7 @@ div[class*="ejs_virtual"] {
   align-items: center;
   justify-self: start;
   pointer-events: auto;
+  touch-action: none;
 }
 
 .g64-controls[data-layout-edit="true"] {
@@ -766,6 +853,10 @@ div[class*="ejs_virtual"] {
   align-items: end;
   min-height: 0;
   overflow: visible;
+}
+
+.g64-controls-mouse[data-stick="true"] {
+  grid-template-columns: auto 1fr auto;
 }
 
 .g64-controls-mouse[data-layout-edit="true"] {
@@ -854,8 +945,12 @@ div[class*="ejs_virtual"] {
   letter-spacing: 0.12em;
 }
 
-.g64-app[data-mouse="true"] .g64-screen {
-  cursor: crosshair;
+.g64-app[data-mouse="true"] .g64-screen,
+.g64-app[data-mouse="true"] .g64-screen canvas,
+.g64-app[data-mouse="true"] .g64-screen .ejs_canvas_parent,
+.g64-app[data-mouse="true"] .g64-screen #grok64-player,
+.g64-app[data-mouse="true"] .g64-screen #grok64-player canvas {
+  cursor: none !important;
 }
 
 .g64-stick {
@@ -872,6 +967,12 @@ div[class*="ejs_virtual"] {
   touch-action: none;
   justify-self: start;
   pointer-events: auto;
+}
+.g64-stick::before {
+  content: "";
+  position: absolute;
+  inset: -22px;
+  border-radius: inherit;
 }
 .g64-stick-tick {
   position: absolute;
@@ -981,6 +1082,13 @@ div[class*="ejs_virtual"] {
   -webkit-user-select: none;
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
+  position: relative;
+}
+.g64-fire::before {
+  content: "";
+  position: absolute;
+  inset: -12px;
+  border-radius: inherit;
 }
 .g64-fire[data-down="true"] {
   background: var(--color-accent);
@@ -1024,11 +1132,49 @@ div[class*="ejs_virtual"] {
   -webkit-backdrop-filter: blur(16px) saturate(1.15);
   flex: 0 0 auto;
 }
+.g64-dock {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+  padding: 6px max(10px, env(safe-area-inset-right, 0px)) 4px max(10px, env(safe-area-inset-left, 0px));
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  background: color-mix(in oklab, var(--color-chassis) 90%, transparent);
+  border-bottom: 1px solid color-mix(in oklab, var(--color-fg) 8%, transparent);
+}
+.g64-dock-btn {
+  flex: 0 0 auto;
+  min-width: 44px;
+  min-height: 44px;
+  border: 0;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--color-key) 70%, transparent);
+  color: var(--color-key-fg);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  touch-action: manipulation;
+}
+.g64-dock-btn[data-on="true"] {
+  background: color-mix(in oklab, var(--color-accent) 55%, var(--color-key));
+  color: var(--color-accent-fg);
+}
+.g64-app[data-kb="true"] .g64-dock {
+  display: none;
+}
 .g64-kb-row {
   display: flex;
   justify-content: center;
   gap: 5px;
   margin-bottom: 6px;
+}
+.g64-kb-fn .g64-key.fn {
+  flex: 1 1 0;
+  min-height: 40px;
+  height: 40px;
+  font-size: 11px;
 }
 .g64-kb-row[data-pad="true"] {
   padding: 0 12px;
@@ -1043,54 +1189,77 @@ div[class*="ejs_virtual"] {
   background: color-mix(in oklab, var(--color-key) 78%, transparent);
   color: var(--color-key-fg);
   font-family: var(--font-display);
-  font-size: 16px;
-  font-weight: 600;
   letter-spacing: 0.01em;
   display: flex;
-  flex-direction: column;
-  align-items: center;
+  align-items: stretch;
   justify-content: center;
   line-height: 1;
   touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
   position: relative;
-  padding: 4px 2px 3px;
+  padding: 3px;
 }
 .g64-app[data-device="phone"] .g64-key,
 .g64-app[data-device="tablet"] .g64-key {
   overflow: hidden;
 }
-.g64-key-petscii {
-  position: absolute;
-  top: 3px;
-  left: 0;
-  right: 0;
+.g64-key-cap {
+  position: relative;
+  flex: 1 1 auto;
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  padding: 0 2px;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 100%;
   pointer-events: none;
+}
+.g64-key-primary {
+  font-size: 17px;
+  font-weight: 800;
   line-height: 1;
-  opacity: 1;
-  color: var(--color-phosphor);
-  -webkit-text-size-adjust: none;
-  text-size-adjust: none;
+  text-align: center;
+  color: var(--color-key-fg);
+  z-index: 2;
 }
-.g64-key-petscii em {
-  font-style: normal;
-  font-size: 8px;
+.g64-key-secondary {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  font-size: 9px;
   font-weight: 700;
-  color: var(--color-phosphor);
-  opacity: 1;
+  line-height: 1;
+  color: color-mix(in oklab, var(--color-key-fg) 55%, var(--color-fg-muted));
+  opacity: 0.72;
+  z-index: 1;
+}
+.g64-key-corner {
+  position: absolute;
   display: flex;
-  min-width: 14px;
-  min-height: 14px;
+  align-items: center;
+  justify-content: center;
+  line-height: 0;
+  color: color-mix(in oklab, var(--color-phosphor) 38%, var(--color-fg-muted));
+  opacity: 0.42;
+  pointer-events: none;
+  z-index: 1;
 }
-.g64-key-petscii em[data-side="sh"] {
-  font-size: 8px;
-  font-weight: 700;
-  color: color-mix(in oklab, var(--color-phosphor) 88%, #fff);
+.g64-key-corner[data-active="true"] {
+  opacity: 0.78;
+  color: color-mix(in oklab, var(--color-phosphor) 62%, var(--color-key-fg));
+}
+.g64-key-corner--tr {
+  top: 2px;
+  right: 3px;
+}
+.g64-key-corner--bl {
+  bottom: 2px;
+  left: 3px;
+}
+.g64-key-corner .g64-petg {
+  width: 10px;
+  height: 10px;
+  filter: none;
 }
 .g64-petg {
   display: block;
@@ -1098,41 +1267,33 @@ div[class*="ejs_virtual"] {
   fill: currentColor;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
-  filter: drop-shadow(0 0 2px color-mix(in oklab, var(--color-phosphor) 55%, transparent));
 }
-.g64-key-main-pet {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-.g64-key-main-pet .g64-petg {
-  width: 18px;
-  height: 18px;
-}
-.g64-key-main {
-  margin-top: auto;
-  font-size: inherit;
-  line-height: 1;
-  z-index: 1;
-}
-.g64-key[data-petscii="true"] .g64-key-main {
-  margin-top: 10px;
+.g64-key.mod .g64-key-primary {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  color: var(--color-fg-muted);
 }
 .g64-key.mod {
   flex: 1.15 1 0;
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  color: var(--color-fg-muted);
+}
+.g64-key.wide .g64-key-primary {
+  font-size: 11px;
+  letter-spacing: 0.06em;
 }
 .g64-key.wide {
   flex: 1.6 1 0;
-  font-size: 12px;
-  letter-spacing: 0.06em;
+}
+.g64-key.space .g64-key-primary {
+  font-size: 11px;
+  letter-spacing: 0.18em;
 }
 .g64-key.space {
   flex: 4.2 1 0;
-  font-size: 12px;
-  letter-spacing: 0.18em;
+}
+.g64-kb-fn .g64-key.fn .g64-key-primary {
+  font-size: 11px;
+  font-weight: 800;
 }
 .g64-key[data-mod="true"],
 .g64-key[data-down="true"] {
@@ -1171,14 +1332,32 @@ div[class*="ejs_virtual"] {
   min-height: 148px;
 }
 .g64-app[data-kb="true"] .g64-stage {
-  flex: 1 1 0;
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: min(38vh, 320px);
   overflow: hidden;
+}
+.g64-app[data-kb="true"] .g64-bezel {
+  flex: 1 1 auto;
+  min-height: 200px;
+  display: flex;
+  flex-direction: column;
+}
+.g64-app[data-kb="true"] .g64-screen.is-on,
+.g64-app[data-kb="true"] .g64-screen {
+  flex: 1 1 auto;
+  min-height: 180px;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
 }
 .g64-app[data-kb="true"] .g64-bezel,
 .g64-app[data-kb="true"] .g64-screen {
-  min-height: 0;
   min-width: 0;
+}
+.g64-app[data-kb="true"] .g64-screen canvas:not(.g64-ios-present) {
+  min-height: 120px;
+  min-width: 200px;
+  flex: 1 1 auto;
 }
 .g64-app[data-kb="true"] .g64-kb {
   position: relative;
@@ -1198,6 +1377,40 @@ div[class*="ejs_virtual"] {
 }
 .g64-app[data-device="phone"]:not([data-kb="true"]) .g64-stage {
   max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 168px);
+}
+/* Phone 1351 dock: stick + L/R on one row, touchpad above — 3 columns do not fit 390px. */
+.g64-app[data-device="phone"] .g64-controls-mouse[data-stick="true"]:not([data-layout-edit="true"]) {
+  display: grid;
+  grid-template-columns: auto auto;
+  grid-template-rows: auto auto;
+  justify-content: space-between;
+  align-items: end;
+  gap: 8px 12px;
+}
+.g64-app[data-device="phone"] .g64-controls-mouse[data-stick="true"]:not([data-layout-edit="true"]) .g64-touchpad-wrap {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  justify-self: stretch;
+}
+.g64-app[data-device="phone"] .g64-controls-mouse[data-stick="true"]:not([data-layout-edit="true"]) .g64-stick-col {
+  grid-column: 1;
+  grid-row: 2;
+}
+.g64-app[data-device="phone"] .g64-controls-mouse[data-stick="true"]:not([data-layout-edit="true"]) .g64-mouse-col {
+  grid-column: 2;
+  grid-row: 2;
+}
+.g64-app[data-device="phone"] .g64-touchpad {
+  width: 100%;
+  height: 72px;
+}
+.g64-app[data-device="phone"] .g64-mouse-btn {
+  width: 64px;
+  height: 64px;
+}
+.g64-app[data-device="phone"]:not([data-kb="true"]) .g64-stick {
+  width: 136px;
+  height: 136px;
 }
 .g64-app[data-device="tablet"]:not([data-kb="true"]) .g64-stage {
   max-height: calc(100dvh - env(safe-area-inset-top, 0px) - 188px);
@@ -1684,7 +1897,7 @@ div[class*="ejs_virtual"] {
   .g64-app[data-orient="landscape"]:not([data-kb="true"]) .g64-controls {
     left: 8px;
     right: 8px;
-    bottom: 12px;
+    bottom: calc(60px + env(safe-area-inset-bottom, 0px));
     width: auto;
     grid-template-columns: 1fr auto;
     min-height: 0;
@@ -1694,6 +1907,23 @@ div[class*="ejs_virtual"] {
     width: 108px;
     height: 108px;
     justify-self: start;
+  }
+  .g64-app[data-device="phone"][data-orient="landscape"] .g64-controls-mouse[data-stick="true"]:not([data-layout-edit="true"]) {
+    grid-template-columns: auto 1fr auto;
+    grid-template-rows: auto;
+  }
+  .g64-app[data-device="phone"][data-orient="landscape"] .g64-controls-mouse[data-stick="true"]:not([data-layout-edit="true"]) .g64-touchpad-wrap {
+    grid-column: auto;
+    grid-row: auto;
+  }
+  .g64-app[data-device="phone"][data-orient="landscape"] .g64-controls-mouse[data-stick="true"]:not([data-layout-edit="true"]) .g64-stick-col,
+  .g64-app[data-device="phone"][data-orient="landscape"] .g64-controls-mouse[data-stick="true"]:not([data-layout-edit="true"]) .g64-mouse-col {
+    grid-column: auto;
+    grid-row: auto;
+  }
+  .g64-app[data-device="phone"][data-orient="landscape"] .g64-touchpad {
+    width: min(30vw, 160px);
+    height: 72px;
   }
   .g64-app[data-orient="landscape"] .g64-fire-col {
     justify-self: end;
@@ -1860,27 +2090,19 @@ div[class*="ejs_virtual"] {
   font-size: 17px;
   border-radius: 10px;
 }
-/* Touch keyboard PETSCII — real C64 8×8 glyphs on phone + tablet */
-.g64-app[data-device="phone"] .g64-key-petscii,
-.g64-app[data-device="tablet"] .g64-key-petscii {
-  top: 2px;
+/* Touch keyboard — corner PETSCII stays small; primary legend stays dominant */
+.g64-app[data-device="phone"] .g64-key-primary,
+.g64-app[data-device="tablet"] .g64-key-primary {
+  font-size: 18px;
 }
-.g64-app[data-device="phone"] .g64-key-petscii em,
-.g64-app[data-device="tablet"] .g64-key-petscii em {
-  color: var(--color-phosphor);
-  opacity: 1;
-}
-.g64-app[data-device="phone"] .g64-key-petscii .g64-petg {
+.g64-app[data-device="phone"] .g64-key-corner .g64-petg,
+.g64-app[data-device="tablet"] .g64-key-corner .g64-petg {
   width: 11px;
   height: 11px;
 }
-.g64-app[data-device="tablet"] .g64-key-petscii .g64-petg {
-  width: 16px;
-  height: 16px;
-}
-.g64-app[data-device="phone"] .g64-key[data-petscii="true"] .g64-key-main,
-.g64-app[data-device="tablet"] .g64-key[data-petscii="true"] .g64-key-main {
-  margin-top: 13px;
+.g64-app[data-device="phone"] .g64-key-secondary,
+.g64-app[data-device="tablet"] .g64-key-secondary {
+  font-size: 10px;
 }
 .g64-app[data-device="phone"] .g64-kb[data-layer="abc"] .g64-key,
 .g64-app[data-device="phone"] .g64-kb[data-layer="sym"] .g64-key {
@@ -1900,9 +2122,15 @@ div[class*="ejs_virtual"] {
   color: var(--color-key-fg);
   font-weight: 700;
 }
-.g64-app[data-device="phone"] .g64-key-main,
-.g64-app[data-device="tablet"] .g64-key-main {
+.g64-app[data-device="phone"] .g64-key-primary,
+.g64-app[data-device="tablet"] .g64-key-primary {
   color: #ffffff;
+}
+.g64-app[data-device="desktop"] .g64-key-primary {
+  font-size: 16px;
+}
+.g64-app[data-device="desktop"][data-kb="true"] .g64-key-primary {
+  font-size: 17px;
 }
 .g64-app[data-device="tablet"] .g64-kb-bar .g64-key {
   min-height: 56px;
@@ -1953,7 +2181,7 @@ div[class*="ejs_virtual"] {
   position: absolute;
   left: 16px;
   right: 16px;
-  bottom: 20px;
+  bottom: max(56px, calc(env(safe-area-inset-bottom, 0px) + 48px));
   width: auto;
   flex: none;
   background: transparent;
@@ -2012,14 +2240,32 @@ div[class*="ejs_virtual"] {
   margin: auto;
 }
 .g64-app[data-orient="landscape"][data-kb="true"]:not([data-device="tablet"]) .g64-screen {
-  min-height: 0;
   min-width: 0;
   max-width: 100%;
   max-height: 100%;
   width: auto;
   height: auto;
   aspect-ratio: 4 / 3;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
+  min-height: min(42vh, 300px);
+}
+.g64-app[data-device="desktop"][data-kb="true"] .g64-stage {
+  flex: 1 1 auto;
+  min-height: min(45vh, 360px);
+  overflow: hidden;
+}
+.g64-app[data-device="desktop"][data-kb="true"] .g64-bezel {
+  flex: 1 1 auto;
+  min-height: 220px;
+}
+.g64-app[data-device="desktop"][data-kb="true"] .g64-screen {
+  min-height: 200px;
+  flex: 1 1 auto;
+}
+.g64-app[data-device="desktop"][data-kb="true"] .g64-screen canvas:not(.g64-ios-present) {
+  min-height: 160px;
+  opacity: 1;
+  visibility: visible;
 }
 .g64-app[data-orient="landscape"][data-kb="true"][data-device="tablet"] .g64-screen {
   position: relative;
@@ -2077,12 +2323,29 @@ div[class*="ejs_virtual"] {
   position: absolute;
   left: 16px;
   right: 16px;
-  bottom: 20px;
+  bottom: max(56px, calc(env(safe-area-inset-bottom, 0px) + 48px));
   width: auto;
   flex: none;
   background: transparent;
   border-top: 0;
   padding: 0;
+}
+
+/* Phone/tablet: pin the Quick Dock to the bottom and keep the stick above it. */
+.g64-app[data-device="phone"]:not([data-kb="true"]) .g64-dock,
+.g64-app[data-device="tablet"]:not([data-kb="true"]) .g64-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 35;
+}
+.g64-app[data-device="phone"]:not([data-kb="true"]) .g64-controls,
+.g64-app[data-device="tablet"]:not([data-kb="true"]) .g64-controls,
+.g64-app[data-orient="landscape"][data-device="phone"]:not([data-kb="true"]) .g64-controls,
+.g64-app[data-orient="landscape"][data-device="tablet"]:not([data-kb="true"]) .g64-controls {
+  bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+  z-index: 40;
 }
 
 .g64-app[data-device="desktop"] .g64-controls {
@@ -2246,6 +2509,14 @@ html[data-g64os="ios"] .g64-scan {
   color: var(--color-fg);
 }
 
+.g64-toaster[data-sonner-toaster] {
+  top: auto !important;
+  bottom: 76px !important;
+  pointer-events: none;
+}
+.g64-toaster[data-sonner-toaster] [data-sonner-toast] {
+  pointer-events: auto;
+}
 [data-sonner-toaster] [data-sonner-toast] {
   background: #101014 !important;
   border: 2px solid color-mix(in oklab, var(--color-fg) 45%, transparent) !important;
@@ -2253,6 +2524,17 @@ html[data-g64os="ios"] .g64-scan {
   font-weight: 600 !important;
   font-size: 14px !important;
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55) !important;
+}
+.g64-restore-banner {
+  margin: 0 12px 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--color-phosphor) 18%, #1a1a22);
+  border: 1px solid color-mix(in oklab, var(--color-phosphor) 35%, transparent);
+  color: #f4f4f6;
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
 }
 [data-sonner-toaster] [data-sonner-toast] [data-description] {
   color: #e4e4e7 !important;

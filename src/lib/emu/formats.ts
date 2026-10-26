@@ -1,7 +1,7 @@
 import type { IecDrive, IecUnit, MediaKind } from "./types";
 
 export const ACCEPT_EXT =
-  ".prg,.p00,.d64,.d71,.d81,.g64,.g71,.t64,.tap,.crt,.bin,.zip,.vsf,.sav,.m3u,.sid,.n64";
+  ".prg,.p00,.d64,.d71,.d81,.g64,.g71,.t64,.tap,.crt,.bin,.zip,.vsf,.sav,.m3u,.sid,.n64,.reu,.nuv,.cfg";
 
 /** ROM upload — extensions plus MIME types so iOS Files enables .bin picks. */
 export const ROM_ACCEPT =
@@ -35,6 +35,21 @@ export function extOf(name: string): string {
   return i >= 0 ? name.slice(i + 1).toLowerCase() : "";
 }
 
+/** PRG load address $0801 — needs RUN after LOAD, not RUN/STOP. */
+export function isBasicPrg(data: Uint8Array): boolean {
+  return data.byteLength >= 2 && data[0] === 0x01 && data[1] === 0x08;
+}
+
+/** True when bytes/name are a C64 cartridge (CRT header or cart slot extension). */
+export function isCartridgePayload(data: Uint8Array, name?: string | null): boolean {
+  if (name && /\.(crt|bin)$/i.test(name)) return true;
+  if (data.byteLength >= 16) {
+    const head = new TextDecoder("ascii", { fatal: false }).decode(data.subarray(0, 16));
+    if (/^C64 CARTRIDGE/.test(head) || /^C128 CARTRIDGE/.test(head)) return true;
+  }
+  return false;
+}
+
 export function kindOf(name: string): MediaKind {
   const e = extOf(name);
   const map: Record<string, MediaKind> = {
@@ -58,6 +73,21 @@ export function kindOf(name: string): MediaKind {
   return map[e] ?? "unknown";
 }
 
+/**
+ * Software-list kind: trust the filename when it is a known extension so a
+ * stale IndexedDB `kind` (e.g. d81 on GEOS Boot Disk.d64) cannot flash 1581.
+ */
+export function displayKindOf(name: string, stored?: MediaKind | null): MediaKind {
+  const fromName = kindOf(name);
+  if (fromName !== "unknown") return fromName;
+  if (stored && stored in KIND_LABEL) return stored;
+  return "unknown";
+}
+
+export function kindLabelFor(name: string, stored?: MediaKind | null): string {
+  return KIND_LABEL[displayKindOf(name, stored)];
+}
+
 export function bootFileName(name: string, kind?: MediaKind): string {
   const cleaned = name.replace(/[#<$+%>!`&*'|{}/\\?"=@:^\r\n]/g, "").trim() || "software";
   if (kindOf(cleaned) !== "unknown") return cleaned;
@@ -65,20 +95,122 @@ export function bootFileName(name: string, kind?: MediaKind): string {
   return `${cleaned}.${ext}`;
 }
 
-const D64_BAM = 17 * 21 * 256;
+/**
+ * VICE boot file must match payload kind. CRT bytes with a .d64 boot name
+ * still get floppy autostart (LOAD"*") — the On this device path must not
+ * default unknown names to .d64 when the header is C64 CARTRIDGE.
+ */
+export function resolvePlayBootName(
+  mediaName: string,
+  data: Uint8Array,
+  explicitBoot?: string | null,
+): string {
+  const hinted = explicitBoot?.trim();
+  if (hinted) {
+    if (isCartridgePayload(data, hinted)) {
+      if (/\.(crt|bin)$/i.test(hinted)) return hinted;
+      const base = hinted.replace(/\.[^.]+$/, "").trim() || "cartridge";
+      return `${base}.crt`;
+    }
+    return hinted;
+  }
+  if (isCartridgePayload(data, mediaName)) {
+    if (/\.(crt|bin)$/i.test(mediaName)) return bootFileName(mediaName, "crt");
+    const base = mediaName.replace(/\.[^.]+$/, "").trim() || "cartridge";
+    return bootFileName(`${base}.crt`, "crt");
+  }
+  return bootFileName(mediaName, kindOf(mediaName));
+}
 
-export function d64DiskName(data: Uint8Array): string | null {
-  if (data.byteLength < D64_BAM + 0xa0) return null;
-  const raw = data.subarray(D64_BAM + 0x90, D64_BAM + 0xa0);
+/** Standard 35-track C64 .d64 size (also bundled blank.d64 / WORK DISK). */
+export const D64_STANDARD_SIZE = 174848;
+/** 35-track D64 + error-channel sector (683 bytes). */
+export const D64_SIZE_35_WITH_ERROR = 175531;
+/** 40-track D64. */
+export const D64_SIZE_40 = 196608;
+/** 40-track D64 + error sector. */
+export const D64_SIZE_40_WITH_ERROR = 197376;
+
+const ACCEPTED_D64_SIZES = new Set([
+  D64_STANDARD_SIZE,
+  D64_SIZE_35_WITH_ERROR,
+  D64_SIZE_40,
+  D64_SIZE_40_WITH_ERROR,
+]);
+
+export function isAcceptedD64ByteLength(byteLength: number): boolean {
+  return ACCEPTED_D64_SIZES.has(byteLength);
+}
+
+export function isGcrDiskKind(kind: MediaKind): boolean {
+  return kind === "g64" || kind === "g71";
+}
+
+/** Drive mechanism a floppy image is for: 5.25″ single-sided (1541), double-sided (1571), 3.5″ (1581). */
+export type FloppyMechanism = "1541" | "1571" | "1581";
+
+export function floppyMechanismFor(kind: MediaKind): FloppyMechanism | null {
+  if (kind === "d64" || kind === "g64") return "1541";
+  if (kind === "d71" || kind === "g71") return "1571";
+  if (kind === "d81") return "1581";
+  return null;
+}
+
+/** 80 tracks × 40 sectors; +3200 bytes when the image carries an error-info table. */
+export const D81_STANDARD_SIZE = 819200;
+const D81_SIZE_WITH_ERROR = D81_STANDARD_SIZE + 3200;
+
+export function isAcceptedD81ByteLength(byteLength: number): boolean {
+  return byteLength === D81_STANDARD_SIZE || byteLength === D81_SIZE_WITH_ERROR;
+}
+
+const D64_BAM = 17 * 21 * 256;
+/** 1581 header sector, track 40 sector 0. */
+const D81_HEADER = 39 * 40 * 256;
+
+function petsciiDiskName(raw: Uint8Array): string | null {
   let s = "";
   for (const b of raw) s += String.fromCharCode(b === 0xa0 ? 32 : b & 0x7f);
   const name = s.replace(/\0/g, " ").trim();
   return name || null;
 }
 
+export function d64DiskName(data: Uint8Array): string | null {
+  if (data.byteLength < D64_BAM + 0xa0) return null;
+  return petsciiDiskName(data.subarray(D64_BAM + 0x90, D64_BAM + 0xa0));
+}
+
+/** The 1581 keeps the disk name at $04 of its header sector, not at the 1541 BAM's $90. */
+export function d81DiskName(data: Uint8Array): string | null {
+  if (data.byteLength < D81_HEADER + 0x14) return null;
+  return petsciiDiskName(data.subarray(D81_HEADER + 0x04, D81_HEADER + 0x14));
+}
+
+export function floppyDiskName(data: Uint8Array): string | null {
+  return isAcceptedD81ByteLength(data.byteLength) ? d81DiskName(data) : d64DiskName(data);
+}
+
 export function isWorkDiskImage(data: ArrayBuffer | Uint8Array): boolean {
   const u8 = data instanceof Uint8Array ? data : new Uint8Array(data);
   return d64DiskName(u8)?.toUpperCase() === "WORK DISK";
+}
+
+/** True when bytes look like an empty bundled blank.d64 (not a CRT and not a named WORK DISK). */
+export function isLikelyBlankD64Payload(data: Uint8Array): boolean {
+  if (data.byteLength !== D64_STANDARD_SIZE) return false;
+  if (parseCrtHeaderQuick(data)) return false;
+  if (isWorkDiskImage(data)) return false;
+  const sample = Math.min(4096, data.byteLength);
+  for (let i = 0; i < sample; i++) {
+    if (data[i] !== 0) return false;
+  }
+  return true;
+}
+
+function parseCrtHeaderQuick(data: Uint8Array): boolean {
+  if (data.byteLength < 16) return false;
+  const head = new TextDecoder("ascii", { fatal: false }).decode(data.subarray(0, 16));
+  return /^C64 CARTRIDGE/.test(head) || /^C128 CARTRIDGE/.test(head);
 }
 
 export function slotFor(kind: MediaKind): "disk" | "tape" | "cart" | "prg" | "state" {

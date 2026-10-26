@@ -9,7 +9,7 @@ const {
   jiffyPairLanded,
   VICE_SYSTEM_ROOTS,
 } = await server.ssrLoadModule("/src/lib/emu/host.ts");
-const { romsHaveJiffyPair } = await server.ssrLoadModule("/src/lib/emu/roms.ts");
+const { jiffyPairBootSafe, romsHaveJiffyPair } = await server.ssrLoadModule("/src/lib/emu/roms.ts");
 await server.close();
 
 function mockFs(files = new Map()) {
@@ -46,10 +46,24 @@ function mockEmu(files = new Map(), vars = new Map()) {
   };
 }
 
-const pair = {
-  "JiffyDOS_C64.bin": new Uint8Array(8192).fill(0x4a),
-  "JiffyDOS_1541-II.bin": new Uint8Array(16384).fill(0x44),
-};
+function synthJiffyPair() {
+  const c64 = new Uint8Array(8192);
+  const d41 = new Uint8Array(8192);
+  for (let i = 0; i < c64.length; i++) c64[i] = (i * 17 + 0x4a) & 0xff;
+  for (let i = 0; i < d41.length; i++) d41[i] = (i * 13 + 0x41) & 0xff;
+  return { "JiffyDOS_C64.bin": c64, "JiffyDOS_1541-II.bin": d41 };
+}
+const pair = synthJiffyPair();
+
+test("jiffyPairBootSafe rejects uniform placeholder ROMs", () => {
+  const flat = {
+    "JiffyDOS_C64.bin": new Uint8Array(8192).fill(0x4a),
+    "JiffyDOS_1541-II.bin": new Uint8Array(8192).fill(0x41),
+  };
+  assert.equal(romsHaveJiffyPair(flat), true);
+  assert.equal(jiffyPairBootSafe(flat), false);
+  assert.equal(jiffyPairBootSafe(pair), true);
+});
 
 test("romsHaveJiffyPair requires both C64 and 1541 images", () => {
   assert.equal(romsHaveJiffyPair({}), false);
@@ -64,7 +78,7 @@ test("injectRoms writes the non-userdata system/vice path (CriOS lookup)", () =>
   assert.ok(VICE_SYSTEM_ROOTS.includes("/home/web_user/retroarch/system/vice"));
   assert.ok(VICE_SYSTEM_ROOTS.includes("/home/web_user/retroarch/userdata/system/vice"));
   const alt = "home/web_user/retroarch/system/vice/JiffyDOS_C64.bin";
-  assert.equal(emu.__files.get(alt)?.[0], 0x4a);
+  assert.equal(emu.__files.get(alt)?.[0], pair["JiffyDOS_C64.bin"][0]);
   assert.equal(jiffyPairLanded(emu), true);
 });
 

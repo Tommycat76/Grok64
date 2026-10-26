@@ -1,4 +1,5 @@
 import type { MediaKind } from "./types";
+import { isAcceptedD64ByteLength } from "./formats";
 
 const D64_SIZE = 174848;
 const SECTORS = [0, ...Array(17).fill(21), ...Array(7).fill(19), ...Array(6).fill(18), ...Array(5).fill(17)];
@@ -101,11 +102,14 @@ function range(from: number, to: number): number[] {
   return out;
 }
 
-export function prgToD64(prg: Uint8Array, fileName = "PROGRAM"): Uint8Array {
-  if (prg.byteLength < 2) throw new Error("Program is empty");
-  const image = emptyD64(fileName);
+function appendPrgToD64(image: Uint8Array, prg: Uint8Array, fileName: string): void {
+  if (prg.byteLength < 2) return;
   const bamOff = lba(18, 0) * 256;
   const bam = image.subarray(bamOff, bamOff + 256);
+  const dirOff = lba(18, 1) * 256;
+  let slot = 0;
+  while (slot < 8 && image[dirOff + slot * 32 + 2] !== 0) slot += 1;
+  if (slot >= 8) throw new Error("Disk directory full");
   const chunks: Uint8Array[] = [];
   for (let i = 0; i < prg.length; i += 254) chunks.push(prg.subarray(i, i + 254));
   if (!chunks.length) chunks.push(new Uint8Array(0));
@@ -124,8 +128,7 @@ export function prgToD64(prg: Uint8Array, fileName = "PROGRAM"): Uint8Array {
     sec.set(chunk, 2);
     image.set(sec, lba(t, s) * 256);
   }
-  const dirOff = lba(18, 1) * 256;
-  const dir = image.subarray(dirOff, dirOff + 256);
+  const dir = image.subarray(dirOff + slot * 32, dirOff + slot * 32 + 32);
   dir[0] = 0;
   dir[1] = 255;
   dir[2] = 0x82;
@@ -134,6 +137,26 @@ export function prgToD64(prg: Uint8Array, fileName = "PROGRAM"): Uint8Array {
   dir.set(petName(fileName), 5);
   dir[30] = chunks.length & 0xff;
   dir[31] = (chunks.length >> 8) & 0xff;
+}
+
+export function prgToD64(prg: Uint8Array, fileName = "PROGRAM"): Uint8Array {
+  if (prg.byteLength < 2) throw new Error("Program is empty");
+  const image = emptyD64(fileName);
+  appendPrgToD64(image, prg, fileName);
+  return image;
+}
+
+/** Pack many card files into one 1541 disk (PRG/P00). */
+export function packPrgsToD64(files: { name: string; data: Uint8Array }[], diskName = "SD2IEC"): Uint8Array {
+  const image = emptyD64(diskName);
+  for (const f of files) {
+    let raw = f.data;
+    const p00 = stripP00(raw);
+    if (p00) raw = p00;
+    if (raw.byteLength < 2) continue;
+    const base = f.name.replace(/\\/g, "/").split("/").pop() || "FILE";
+    appendPrgToD64(image, raw, base.replace(/\.(prg|p00)$/i, "") || "FILE");
+  }
   return image;
 }
 
@@ -189,6 +212,37 @@ function petToAscii(raw: Uint8Array): string {
     s += String.fromCharCode(b & 0x7f);
   }
   return s.replace(/\s+/g, " ").trim();
+}
+
+/** Load one closed PRG from a 1541 D64 image (for SD2IEC CD-into-disk). */
+export function readD64Prg(image: Uint8Array, filePattern: string): Uint8Array | null {
+  if (image.byteLength < D64_SIZE) return null;
+  const upper = filePattern.replace(/^:/, "").toUpperCase();
+  const want = upper.replace(/\.PRG$/i, "");
+  const entry = listD64Directory(image).find((e) => {
+    if (!e.prg) return false;
+    const n = e.name.toUpperCase();
+    return n === want || n === upper || `${n}.PRG` === upper;
+  });
+  if (!entry) return null;
+  // The file as the DOS sends it: its own load address first, then the rest of the sector chain.
+  const out: number[] = [];
+  const seen = new Set<number>();
+  let t = image[entry.slot + 3]!;
+  let s = image[entry.slot + 4]!;
+  while (t >= 1 && t <= 35) {
+    const off = lba(t, s) * 256;
+    if (off + 256 > image.byteLength || seen.has(off)) break;
+    seen.add(off);
+    const linkT = image[off]!;
+    const linkS = image[off + 1]!;
+    const len = linkT ? 254 : Math.max(0, linkS - 1);
+    for (let i = 0; i < len; i++) out.push(image[off + 2 + i]!);
+    if (!linkT) break;
+    t = linkT;
+    s = linkS;
+  }
+  return Uint8Array.from(out);
 }
 
 export function listD64Directory(data: Uint8Array): D64DirEntry[] {
@@ -283,14 +337,24 @@ export function prepareAutostartDisk(data: Uint8Array, filename: string, title?:
   return promoteD64Entry(data, pick.slot, first.slot);
 }
 
-export function wantsCracktroNudge(title: string): boolean {
-  return /paradroid/i.test(title);
+/** Cracktro / loader screens that wait for Space or fire — not tied to a game title. */
+export function screenInvitesCracktroInput(screen: string): boolean {
+  const s = screen.replace(/\s+/g, " ").toLowerCase();
+  return (
+    /press\s+(space|fire|button|key|any\s+key)/.test(s) ||
+    /hit\s+space/.test(s) ||
+    /space\s+to\s+(continue|start|play|run)/.test(s) ||
+    /press\s+play/.test(s)
+  );
 }
 
 export function wrapForDiskSwap(kind: MediaKind, data: Uint8Array, name: string): Uint8Array | null {
   if (kind === "d64") {
-    if (data.byteLength < 174848) return null;
+    if (!isAcceptedD64ByteLength(data.byteLength)) return null;
     return data;
+  }
+  if (kind === "g64" || kind === "g71") {
+    return data.byteLength >= 4 ? data : null;
   }
   try {
     if (kind === "prg" || kind === "sid") return prgToD64(data, name);

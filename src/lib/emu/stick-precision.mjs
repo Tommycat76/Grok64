@@ -70,10 +70,11 @@ export function createStickPrecision(periodMs = 20) {
 }
 
 /**
- * Cardinals: ring tap = one short pulse + brief rest (Paradroid step). Center
- * drag with finger down latches solid after the rest gap (platformer walk).
+ * Digital CIA stick: while the knob is off-center the lines stay latched.
+ * 4-way snap lives in snapStick — this only holds or releases.
+ * `centerHold` is kept for callers; a held stick is always solid.
  */
-export function applyStickPrecision(state, raw, now = performance.now(), centerHold = false) {
+export function applyStickPrecision(state, raw, now = performance.now(), _centerHold = false) {
   state.pending = { x: raw.x, y: raw.y };
   if (raw.x === 0 && raw.y === 0) {
     state.latched = { x: 0, y: 0 };
@@ -81,35 +82,9 @@ export function applyStickPrecision(state, raw, now = performance.now(), centerH
     state.holdStart = -1;
     return state.latched;
   }
-  if (!state.precision) {
-    if (state.latched.x === 0 && state.latched.y === 0) {
-      state.latched = { x: raw.x, y: raw.y };
-      state.lastTick = now;
-      return state.latched;
-    }
-    if (raw.x !== state.latched.x || raw.y !== state.latched.y || now - state.lastTick >= state.periodMs) {
-      state.latched = { x: raw.x, y: raw.y };
-      state.lastTick = now;
-    }
-    return state.latched;
-  }
   if (state.holdStart < 0) state.holdStart = now;
-  const heldMs = now - state.holdStart;
-  const r = state.periodMs;
-  const first = r * PRECISION_FIRST_MULT;
-  if (heldMs < first) {
-    state.latched = { x: raw.x, y: raw.y };
-    return state.latched;
-  }
-  if (heldMs < PRECISION_REST_MS) {
-    state.latched = { x: 0, y: 0 };
-    return state.latched;
-  }
-  if (!centerHold) {
-    state.latched = { x: 0, y: 0 };
-    return state.latched;
-  }
   state.latched = { x: raw.x, y: raw.y };
+  state.lastTick = now;
   return state.latched;
 }
 
@@ -118,4 +93,22 @@ export function resetStickPrecision(state) {
   state.pending = { x: 0, y: 0 };
   state.lastTick = 0;
   state.holdStart = -1;
+}
+
+function digitalAxis(v) {
+  if (!v) return 0;
+  return v < 0 ? -1 : 1;
+}
+
+/**
+ * Merge a physical pad with the on-screen stick.
+ * A pad at rest must not zero a live thumb hold — that is the phone-killer
+ * when Android enumerates a ghost controller.
+ */
+export function mergePadStick(padX, padY, current = { x: 0, y: 0 }, stickDown = false, wasDriving = false) {
+  const x = digitalAxis(padX);
+  const y = digitalAxis(padY);
+  if (x !== 0 || y !== 0) return { x, y, driving: true };
+  if (wasDriving && !stickDown) return { x: 0, y: 0, driving: false };
+  return { x: current.x || 0, y: current.y || 0, driving: false };
 }

@@ -1,0 +1,1 @@
+/* Grok64: the VICE core is vice_x64sc-grok64-iec-wasm.data. This file is only a same-origin stand-in so stray vice_*.js requests never hit the CDN. */

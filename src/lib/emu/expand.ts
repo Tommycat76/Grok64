@@ -39,7 +39,7 @@ export function needsScpu(name: string): boolean {
 
 function workDiskFor(iec: IecDrive, unit: IecUnit = 8): string {
   if (iec === "cmdhd") return "disabled";
-  if (iec === "sd2iec") return `${unit}_fs`;
+  if (iec === "sd2iec") return `${unit}_d64`;
   if (iec === "1581") return `${unit}_d81`;
   if (iec === "1541") return `${unit}_d64`;
   return "disabled";
@@ -74,17 +74,16 @@ export function viceExpandOptions(opts: {
     o.vice_drive_true_emulation = "enabled";
   }
   if (opts.mouse) {
-    const p1 = opts.joyPort === 1;
-    o.vice_joyport = p1 ? "1" : "2";
-    o.vice_joyport_type = p1 ? "3" : "1";
-    o.vice_joyport2_type = p1 ? "1" : "3";
+    o.vice_joyport = opts.joyPort === 1 ? "1" : "2";
+    o.vice_joyport_type = "3";
     o.vice_analogmouse = "left";
-    o.vice_mouse_speed = "120";
+    o.vice_mouse_speed = "100";
     o.vice_analogmouse_speed = "1.0";
+    o.vice_analogmouse_deadzone = "0";
+    o.vice_dpadmouse_speed = "6";
   } else {
     o.vice_joyport = opts.joyPort === 1 ? "1" : "2";
     o.vice_joyport_type = "1";
-    o.vice_joyport2_type = "1";
     o.vice_analogmouse = "disabled";
   }
   if (opts.scpu) {

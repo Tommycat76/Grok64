@@ -1,0 +1,1005 @@
+/**
+ * Direct VICE file_system_* disk attach (Grok64 WASM exports).
+ * Option flips + MEMFS writes do not replace an image already open on unit 8.
+ */
+import { glog } from "./debug";
+import type { IecUnit } from "./types";
+import { floppyDiskName, isGcrDiskKind, kindOf } from "./formats";
+import { diskAttachFingerprint, type DiskAttachFingerprint } from "./disk-attach-diag";
+import {
+  grok64DiskApi,
+  grok64WorkDiskRefreshExportReady,
+  type Grok64ModuleBag,
+} from "./grok64-api";
+import {
+  bindGrok64DiskApiDirect,
+  emuWasmModuleBags,
+  grok64DiskAttachCallable,
+  grok64DiskAttachCallableEmu,
+  grok64DiskAttachInvocable,
+  grok64DiskAttachInvocableEmu,
+  lastGrok64DiskAttachJsReason,
+} from "./grok64-wasm-direct";
+import { isGrok64DiskExportsBound, markGrok64DiskExportsBound } from "./grok64-wasm-bind";
+import { sessionDiskOnUnit } from "./session-media";
+
+type EmuFs = { stat?: (p: string) => unknown };
+
+function fsOf(emu: ViceDiskEmu | null): EmuFs | null {
+  const e = emu as { Module?: { FS?: EmuFs }; gameManager?: { FS?: EmuFs } } | null;
+  return e?.Module?.FS ?? e?.gameManager?.FS ?? null;
+}
+
+function pathVisibleToWasm(emu: ViceDiskEmu | null, path: string): boolean {
+  const n = viceWasmFsStatBytes(emu, path);
+  return n != null && n > 0;
+}
+
+export function grok64DiskModule(emu: ViceDiskEmu | null): Grok64ModuleBag | null {
+  return diskMod(emu);
+}
+
+function diskMod(emu: ViceDiskEmu | null): Grok64ModuleBag | null {
+  const bags = emuWasmModuleBags(emu);
+  const e = emu as { Module?: Grok64ModuleBag & { UTF8ToString?: (ptr: number) => string } } | null;
+  const mod =
+    bags.find((m) => grok64DiskAttachCallable(m)) ??
+    bags.find((m) => grok64DiskAttachInvocable(m)) ??
+    bags[0] ??
+    e?.Module ??
+    null;
+  if (mod && !mod.UTF8ToString) {
+    const m = mod as Grok64ModuleBag & { UTF8ToString?: (ptr: number) => string };
+    m.UTF8ToString =
+      m.UTF8ToString ??
+      ((mod as { UTF8ToString?: (ptr: number) => string }).UTF8ToString ??
+        (globalThis as { UTF8ToString?: (ptr: number) => string }).UTF8ToString);
+  }
+  return mod;
+}
+
+/** Loosely typed emu handle — avoids a host.ts import cycle. */
+export type ViceDiskEmu = unknown;
+
+const WORK_DISK_PATHS = [
+  "/data/saves/vice_work.d64",
+  "/home/web_user/retroarch/userdata/saves/vice_work.d64",
+];
+
+/** Flat MEMFS path for grok64_disk_attach (avoids spaced save dir + stale same-path refresh). */
+export function grok64IecAttachD64Path(unit: IecUnit): string {
+  return `/data/saves/grok64_iec${unit}.d64`;
+}
+
+export function grok64IecAttachD81Path(unit: IecUnit): string {
+  return `/data/saves/grok64_iec${unit}.d81`;
+}
+
+/** grok64_disk_attach rc when the unit's true drive cannot read the image type (core GROK64_ATTACH_WRONG_DRIVE). */
+export const VICE_ATTACH_WRONG_DRIVE = -97;
+
+/** VICE DriveNType values: 1581 and CMD FD-2000/4000 read MFM (.d81); the rest of the IEC family GCR. */
+const MFM_DRIVE_TYPES = new Set([1581, 2000, 4000]);
+const GCR_FLOPPY_DRIVE_TYPES = new Set([1540, 1541, 1542, 1570, 1571]);
+
+/**
+ * Drive type to set on a unit before attaching an image of `kind`, or null to keep the live one.
+ * A .d81 needs a 1581-class drive; a .d64/.g64 left on a 1581 (or a stale CMD HD) gets a 1541.
+ * Type 0 (no drive) is left to the core, which makes it a 1541 on attach.
+ */
+export function driveTypeForAttach(kind: ReturnType<typeof kindOf>, liveType: number | null): number | null {
+  if (liveType == null) return null;
+  if (kind === "d81") return MFM_DRIVE_TYPES.has(liveType) ? null : 1581;
+  if (kind === "d64" || kind === "g64") {
+    return liveType === 0 || GCR_FLOPPY_DRIVE_TYPES.has(liveType) ? null : 1541;
+  }
+  return null;
+}
+
+/** True when the live drive on `unit` reads MFM (.d81) disks. */
+export function viceUnitIsMfmDrive(emu: ViceDiskEmu | null, unit: IecUnit): boolean {
+  const mod = diskMod(emu);
+  if (mod) bindGrok64DiskExports(mod, emu);
+  const type = grok64DiskApi(mod)?.driveUnitType?.(unit);
+  return typeof type === "number" && MFM_DRIVE_TYPES.has(type);
+}
+
+/**
+ * Writing DriveNType detaches the unit's disks and resets its drive CPU, so the type the image
+ * needs is set before the attach, never after. Returns 0, or the core's negative rc.
+ */
+export function prepareDriveForAttach(emu: ViceDiskEmu | null, unit: IecUnit, path: string): number {
+  const mod = diskMod(emu);
+  if (!mod) return 0;
+  bindGrok64DiskExports(mod, emu);
+  const api = grok64DiskApi(mod);
+  let setType = api?.driveSetType;
+  if (!setType) {
+    for (const bag of emuWasmModuleBags(emu)) {
+      bindGrok64DiskExports(bag, emu);
+      setType = grok64DiskApi(bag)?.driveSetType;
+      if (setType) break;
+    }
+  }
+  const live = (setType ? grok64DiskApi(diskMod(emu)) : api)?.driveUnitType?.(unit) ?? api?.driveUnitType?.(unit) ?? null;
+  const want = driveTypeForAttach(kindOf(path), live);
+  if (want == null) return 0;
+  if (!setType) {
+    // Do not invent rc=-99. C attach already coerces NONE/1541II; a missing
+    // helper must not abort Insert after the work-disk path already mounted.
+    glog("vice-drive-set-type-missing", { unit, live, want, path, proceed: true });
+    return 0;
+  }
+  const rc = setType(unit, want);
+  if (rc === -99) {
+    // JS wrapper only — C grok64_drive_set_type never returns -99.
+    glog("vice-drive-set-type-missing", { unit, live, want, path, proceed: true, wrapperRc: rc });
+    return 0;
+  }
+  glog("vice-drive-set-type", { unit, live, want, rc, after: api?.driveUnitType?.(unit) ?? null, path });
+  return rc < 0 ? rc : 0;
+}
+
+export type ViceDiskAttachRecord = {
+  path: string;
+  rc: number;
+  before: string | null;
+  after: string | null;
+  at: number;
+  stage?: string;
+  viceDiag?: string | null;
+  jsReason?: string;
+  wasmFsStat?: number | null;
+  driveType?: number | null;
+  cReached?: boolean;
+  attachRc?: number | null;
+};
+
+const ATTACH_STORE = "__g64LastViceDiskAttachByUnit";
+
+function attachStore(): Map<number, ViceDiskAttachRecord> {
+  const g = globalThis as typeof globalThis & { [ATTACH_STORE]?: Map<number, ViceDiskAttachRecord> };
+  if (!g[ATTACH_STORE]) g[ATTACH_STORE] = new Map();
+  return g[ATTACH_STORE];
+}
+
+export function lastViceDiskAttach(unit: IecUnit = 8): ViceDiskAttachRecord | null {
+  return attachStore().get(unit) ?? null;
+}
+
+export function recordViceLastAttach(unit: IecUnit, record: ViceDiskAttachRecord): void {
+  attachStore().set(unit, record);
+}
+
+/** QA / About: when VICE already has an image but attach skipped recording (work-disk refresh path). */
+export function ensureViceLastAttachRecorded(emu: ViceDiskEmu | null, unit: IecUnit = 8): void {
+  const path = viceAttachedImage(emu, unit);
+  if (!path?.trim()) return;
+  const last = attachStore().get(unit);
+  if (last?.rc === 0 && last.after) return;
+  recordViceLastAttach(unit, {
+    path,
+    rc: 0,
+    before: last?.after ?? null,
+    after: path,
+    at: Date.now(),
+  });
+}
+
+export function bindGrok64DiskExports(mod: Grok64ModuleBag, emu?: ViceDiskEmu | null): void {
+  if (isGrok64DiskExportsBound(mod)) {
+    if (emu != null) bindGrok64DiskApiDirect(mod, emu);
+    return;
+  }
+  if (bindGrok64DiskApiDirect(mod, emu)) markGrok64DiskExportsBound(mod);
+}
+
+export function grok64DiskExportsReady(emu: ViceDiskEmu | null): boolean {
+  for (const mod of emuWasmModuleBags(emu)) {
+    bindGrok64DiskExports(mod, emu);
+  }
+  return grok64DiskAttachCallableEmu(emu) || grok64DiskAttachInvocableEmu(emu);
+}
+
+let diskAttachChain: Promise<void> = Promise.resolve();
+
+/** One grok64_disk_attach / work_disk_refresh at a time (avoids racing hot insert). */
+export function runSerializedDiskAttach<T>(fn: () => T | Promise<T>): Promise<T> {
+  const run = diskAttachChain.then(() => fn());
+  diskAttachChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+export { grok64WorkDiskRefreshExportReady };
+
+function diskNameFromModule(
+  mod: Grok64ModuleBag & { UTF8ToString?: (ptr: number) => string },
+  unit: number,
+  drive: number,
+): string | null {
+  const api = grok64DiskApi(mod);
+  if (!api?.diskGetName) return null;
+  try {
+    const ptr = api.diskGetName(unit, drive);
+    if (!ptr) return null;
+    const raw = mod.UTF8ToString ? mod.UTF8ToString(ptr) : "";
+    const name = raw.trim();
+    return name || null;
+  } catch {
+    return null;
+  }
+}
+
+/** VICE's view of the image path on IEC unit N (file_system_get_disk_name). */
+export function viceAttachedImage(emu: ViceDiskEmu | null, unit: IecUnit = 8, drive = 0): string | null {
+  const mod = diskMod(emu);
+  if (!mod || !grok64DiskApi(mod)?.diskGetName) return null;
+  return diskNameFromModule(mod, unit, drive);
+}
+
+function pathExistsOnFs(emu: ViceDiskEmu | null, path: string): boolean {
+  const FS = fsOf(emu);
+  if (!FS?.stat) return false;
+  try {
+    FS.stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** WASM attach rc &lt; 0 is -errno from grok64_fs_stat_bytes / attach (29≈ESPIPE, 44≈ENOENT in Emscripten). */
+export function viceAttachRcLabel(rc: number): string {
+  if (rc >= 0) return String(rc);
+  const e = Math.abs(rc);
+  const names: Record<number, string> = {
+    2: "ENOENT",
+    22: "EINVAL",
+    28: "EINVAL",
+    29: "ESPIPE",
+    44: "ENOENT",
+  };
+  return `${rc} (${names[e] ?? `errno${e}`})`;
+}
+
+export function pathHasAttachableBytes(emu: ViceDiskEmu | null, path: string): boolean {
+  const wasm = viceWasmFsStatBytes(emu, path);
+  if (wasm != null && wasm > 0) return true;
+  const js = pathByteLength(emu, path);
+  return js != null && js > 0;
+}
+
+function pathByteLength(emu: ViceDiskEmu | null, path: string): number | null {
+  const FS = fsOf(emu) as { readFile?: (p: string) => Uint8Array | string } | null;
+  if (!FS?.readFile) return null;
+  try {
+    const raw = FS.readFile(path);
+    if (raw instanceof Uint8Array) return raw.byteLength;
+    if (typeof raw === "string") return raw.length;
+  } catch {
+    /* */
+  }
+  return null;
+}
+
+export function viceDiskLastAttachDiag(emu: ViceDiskEmu | null): string | null {
+  const mod = diskMod(emu);
+  if (!mod) return null;
+  if (!grok64DiskApi(mod)?.diskLastAttachDiag) bindGrok64DiskExports(mod);
+  const diag = grok64DiskApi(mod)?.diskLastAttachDiag;
+  if (!diag) return null;
+  try {
+    const ptr = diag();
+    if (!ptr) return null;
+    const raw = mod.UTF8ToString ? mod.UTF8ToString(ptr) : "";
+    return raw.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+/** WASM-side stat of MEMFS path (bytes, or negative errno). */
+export function viceWasmFsStatBytes(emu: ViceDiskEmu | null, path: string): number | null {
+  const mod = diskMod(emu);
+  if (!mod || !path?.trim()) return null;
+  if (!grok64DiskApi(mod)?.fsStatBytes) bindGrok64DiskExports(mod, emu);
+  const stat = grok64DiskApi(mod)?.fsStatBytes;
+  if (!stat) return null;
+  try {
+    return stat(path);
+  } catch {
+    return null;
+  }
+}
+
+export type ViceWasmWorkDiskRow = {
+  path: string;
+  wasmFsStat: number | null;
+  moduleFsBytes: number | null;
+  moduleSha1: string | null;
+  matchesSession: boolean;
+};
+
+export async function viceWasmWorkDiskDiag(
+  emu: ViceDiskEmu | null,
+  unit: IecUnit,
+  session?: DiskAttachFingerprint | null,
+): Promise<ViceWasmWorkDiskRow[]> {
+  const modFs = (emu as { Module?: { FS?: { readFile?: (p: string) => Uint8Array | string } } } | null)?.Module?.FS;
+  const saveDir = viceRetroSaveDirectory(emu);
+  const paths = [
+    grok64IecAttachD64Path(unit),
+    "/data/saves/vice_work.d64",
+    ...(saveDir ? [`${saveDir}/vice_work.d64`] : []),
+  ];
+  const rows: ViceWasmWorkDiskRow[] = [];
+  for (const path of paths) {
+    let moduleFsBytes: number | null = null;
+    let moduleSha1: string | null = null;
+    try {
+      const raw = modFs?.readFile?.(path);
+      if (raw instanceof Uint8Array && raw.byteLength) {
+        moduleFsBytes = raw.byteLength;
+        moduleSha1 = (await diskAttachFingerprint(raw, path)).sha1;
+      }
+    } catch {
+      /* ignore */
+    }
+    rows.push({
+      path,
+      wasmFsStat: viceWasmFsStatBytes(emu, path),
+      moduleFsBytes,
+      moduleSha1,
+      matchesSession: Boolean(session?.sha1 && moduleSha1 === session.sha1),
+    });
+  }
+  return rows;
+}
+
+export function viceRetroSaveDirectory(emu: ViceDiskEmu | null): string | null {
+  const mod = diskMod(emu);
+  if (!mod) return null;
+  if (!grok64DiskApi(mod)?.retroSaveDirectory) bindGrok64DiskExports(mod);
+  const dirFn = grok64DiskApi(mod)?.retroSaveDirectory;
+  if (!dirFn) return null;
+  try {
+    const ptr = dirFn();
+    const raw = mod.UTF8ToString && ptr ? mod.UTF8ToString(ptr) : "";
+    const dir = raw.trim().replace(/\/$/, "");
+    return dir || null;
+  } catch {
+    return null;
+  }
+}
+
+function attachPathProbeRows(
+  emu: ViceDiskEmu | null,
+  paths: string[],
+): { path: string; jsFsBytes: number | null; wasmFsStat: number | null }[] {
+  return paths.map((path) => ({
+    path,
+    jsFsBytes: pathByteLength(emu, path),
+    wasmFsStat: viceWasmFsStatBytes(emu, path),
+  }));
+}
+
+export function viceDiskAttachPathUniverse(
+  emu: ViceDiskEmu | null,
+  unit: IecUnit,
+  fileName: string,
+): string[] {
+  const base = fileName.replace(/^\//, "");
+  const kind = kindOf(base);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (p: string) => {
+    const norm = p.startsWith("/") ? p : `/${p}`;
+    if (!seen.has(norm)) {
+      seen.add(norm);
+      out.push(norm);
+    }
+  };
+  const saveDir = viceRetroSaveDirectory(emu);
+  if (kind === "d81") push(grok64IecAttachD81Path(unit));
+  if (attachesOwnImageOnly(kind)) {
+    push(`/${base}`);
+    push(base);
+  } else {
+    push(grok64IecAttachD64Path(unit));
+    push(`/${base}`);
+    push(base);
+    if (saveDir) push(`${saveDir}/vice_work.d64`);
+    for (const p of WORK_DISK_PATHS) push(p);
+    push("/data/saves/vice_work.d64");
+  }
+  return out;
+}
+
+/** The .d64 mirrors hold the last D64 put on the unit, so a .d81/.d71/.g64/.g71 never falls back to them. */
+export function attachesOwnImageOnly(kind: ReturnType<typeof kindOf>): boolean {
+  return kind === "d81" || kind === "d71" || isGcrDiskKind(kind);
+}
+
+/** About: all candidate paths + JS/WASM byte probes (not filtered). */
+export function probeViceAttachPaths(
+  emu: ViceDiskEmu | null,
+  unit: IecUnit,
+  fileName: string,
+): { path: string; jsFsBytes: number | null; wasmFsStat: number | null }[] {
+  return attachPathProbeRows(emu, viceDiskAttachPathUniverse(emu, unit, fileName));
+}
+
+export function viceDiskAttachCandidates(
+  emu: ViceDiskEmu | null,
+  unit: IecUnit,
+  fileName: string,
+): string[] {
+  const base = fileName.replace(/^\//, "");
+  const kind = kindOf(base);
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (p: string) => {
+    const norm = p.startsWith("/") ? p : `/${p}`;
+    if (!seen.has(norm)) {
+      seen.add(norm);
+      out.push(norm);
+    }
+  };
+
+  const saveDir = viceRetroSaveDirectory(emu);
+
+  if (kind === "d81") push(grok64IecAttachD81Path(unit));
+  if (attachesOwnImageOnly(kind)) {
+    push(`/${base}`);
+    push(base);
+  } else {
+    push(grok64IecAttachD64Path(unit));
+    push(`/data/saves/grok64_iec${unit}.d64`);
+    push(`/${base}`);
+    push(base);
+    if (saveDir) push(`${saveDir}/vice_work.d64`);
+    for (const p of WORK_DISK_PATHS) push(p);
+    push("/data/saves/vice_work.d64");
+  }
+
+  const withBytes = out.filter((p) => pathHasAttachableBytes(emu, p));
+  if (withBytes.length) return withBytes;
+  const filtered = out.filter((p) => pathVisibleToWasm(emu, p) && pathHasAttachableBytes(emu, p));
+  if (filtered.length) return filtered;
+  const iecPath = grok64IecAttachD64Path(unit);
+  if (!attachesOwnImageOnly(kind) && pathHasAttachableBytes(emu, iecPath)) return [iecPath];
+  return [];
+}
+
+/** Preferred MEMFS path for the current session floppy on `unit`. */
+export function resolveViceDiskAttachPath(
+  emu: ViceDiskEmu | null,
+  unit: IecUnit,
+  fileName: string,
+): string | null {
+  const candidates = viceDiskAttachCandidates(emu, unit, fileName);
+  return candidates[0] ?? null;
+}
+
+/**
+ * Detach + attach on VICE unit 8 (drive 0). Returns attach rc (&lt;0 fail) or 0 ok; -99 if exports missing.
+ */
+/** Re-attach `vice_work.d64` under retro_save_directory (custom core export). */
+export function refreshViceWorkDiskAttached(emu: ViceDiskEmu | null, unit: IecUnit = 8): number {
+  if (!grok64DiskExportsReady(emu)) return -99;
+  const mod = diskMod(emu)!;
+  const api = grok64DiskApi(mod);
+  if (!api?.workDiskRefresh) return -99;
+  try {
+    const rc = api.workDiskRefresh(unit);
+    const attachRc = api.diskLastAttachRc?.();
+    const out = rc >= 0 ? rc : typeof attachRc === "number" && attachRc >= 0 ? attachRc : rc;
+    const after =
+      out === 0
+        ? diskNameFromModule(mod, unit, 0)
+        : null;
+    recordViceLastAttach(unit, {
+      path: `${viceRetroSaveDirectory(emu) ?? "/data/saves"}/vice_work.d64`,
+      rc: out,
+      before: null,
+      after,
+      at: Date.now(),
+      stage: "work-disk-refresh",
+      viceDiag: viceDiskLastAttachDiag(emu),
+    });
+    glog("vice-work-disk-refresh", { unit, rc: out, after });
+    return out;
+  } catch (e) {
+    glog("vice-work-disk-refresh-err", { unit, err: String(e) });
+    return -1;
+  }
+}
+
+/** Synchronous attach (prefer {@link viceReattachDiskAsync} on the emu thread). */
+export function viceReattachDisk(
+  emu: ViceDiskEmu | null,
+  unit: IecUnit,
+  path: string,
+  drive = 0,
+): number {
+  return viceReattachDiskSync(emu, unit, path, drive);
+}
+
+export function reloadViceDriveImage(emu: ViceDiskEmu | null, unit: IecUnit, drive = 0): number {
+  const mod = diskMod(emu);
+  if (!mod) return -99;
+  bindGrok64DiskExports(mod, emu);
+  const reload = grok64DiskApi(mod)?.driveReloadImage;
+  if (!reload) return -99;
+  return reload(unit, drive);
+}
+
+function viceReattachDiskSync(
+  emu: ViceDiskEmu | null,
+  unit: IecUnit,
+  path: string,
+  drive = 0,
+): number {
+  if (!path?.trim()) return -1;
+  const note = (record: ViceDiskAttachRecord) => {
+    recordViceLastAttach(unit, record);
+    glog("vice-disk-reattach", {
+      unit,
+      path: record.path,
+      rc: record.rc,
+      after: record.after,
+      stage: record.stage,
+      viceDiag: record.viceDiag,
+      jsReason: record.jsReason,
+      wasmFsStat: record.wasmFsStat,
+      driveType: record.driveType,
+      cReached: record.cReached,
+    });
+  };
+  if (!grok64DiskExportsReady(emu)) {
+    note({
+      path,
+      rc: -99,
+      before: viceAttachedImage(emu, unit, drive),
+      after: null,
+      at: Date.now(),
+      stage: "exports-missing",
+      jsReason: "js-exports-missing",
+      viceDiag: viceDiskLastAttachDiag(emu),
+      wasmFsStat: viceWasmFsStatBytes(emu, path),
+      cReached: false,
+    });
+    return -99;
+  }
+  const mod = diskMod(emu)!;
+  bindGrok64DiskExports(mod, emu);
+  const api = grok64DiskApi(mod);
+  if (!api?.diskAttach) {
+    note({
+      path,
+      rc: -99,
+      before: viceAttachedImage(emu, unit, drive),
+      after: null,
+      at: Date.now(),
+      stage: "exports-missing",
+      jsReason: "js-exports-missing",
+      viceDiag: viceDiskLastAttachDiag(emu),
+      wasmFsStat: viceWasmFsStatBytes(emu, path),
+      cReached: false,
+    });
+    return -99;
+  }
+  try {
+    const before = viceAttachedImage(emu, unit, drive);
+    const rcBefore = typeof api.diskLastAttachRc === "function" ? api.diskLastAttachRc() : null;
+    const diagBefore = viceDiskLastAttachDiag(emu);
+    const driveType = api.driveUnitType?.(unit) ?? null;
+    const wasmFsStat = viceWasmFsStatBytes(emu, path);
+    const typeRc = prepareDriveForAttach(emu, unit, path);
+    if (typeRc < 0) {
+      note({
+        path,
+        rc: typeRc,
+        before,
+        after: null,
+        at: Date.now(),
+        stage: "set-type",
+        viceDiag: viceDiskLastAttachDiag(emu),
+        wasmFsStat,
+        driveType,
+        cReached: false,
+      });
+      return typeRc;
+    }
+    // C grok64_disk_attach already detaches. A JS detach-then-stub-attach
+    // empties unit 8 and lets the work-disk manager remount WORK DISK.
+    let rc = api.diskAttach(unit, drive, path) ?? -1;
+    const attachRc = api.diskLastAttachRc?.();
+    const viceDiag = viceDiskLastAttachDiag(emu);
+    const jsReason = lastGrok64DiskAttachJsReason();
+    const cReached =
+      (typeof attachRc === "number" && attachRc !== rcBefore) ||
+      (viceDiag != null && viceDiag !== diagBefore);
+    if (cReached && typeof attachRc === "number") rc = attachRc;
+    if (rc < 0 && cReached && before && before !== path && pathHasAttachableBytes(emu, before)) {
+      api.diskAttach(unit, drive, before);
+    }
+    const after = rc === 0 ? diskNameFromModule(mod, unit, drive) : viceAttachedImage(emu, unit, drive);
+    note({
+      path,
+      rc,
+      before,
+      after,
+      at: Date.now(),
+      stage: cReached ? "disk-attach" : jsReason || "js-never-reached-c",
+      viceDiag,
+      jsReason,
+      wasmFsStat,
+      driveType,
+      cReached,
+      attachRc: typeof attachRc === "number" ? attachRc : null,
+    });
+    return rc;
+  } catch (e) {
+    const stack =
+      e instanceof Error && e.stack
+        ? e.stack.split("\n").slice(0, 40).join("\n")
+        : undefined;
+    glog("vice-disk-reattach-err", { unit, path, err: String(e), stack });
+    if (e instanceof RangeError || (e instanceof Error && /call stack/i.test(e.message))) {
+      throw e;
+    }
+    note({
+      path,
+      rc: -1,
+      before: viceAttachedImage(emu, unit, drive),
+      after: null,
+      at: Date.now(),
+      stage: "js-exception",
+      jsReason: String(e),
+      viceDiag: viceDiskLastAttachDiag(emu),
+    });
+    return -1;
+  }
+}
+
+/** Async attach — waits for serialized queue (use from mount / emu thread). */
+/** Bus-side diagnostics (TDE CPU clock, IEC lines, resource routing). */
+export type ViceDriveBusProbe = {
+  wasmFilesystemDevice: number | null;
+  wasmIecDevice: number | null;
+  wasmVirtualDevice: number | null;
+  wasmSerialDeviceType: number | null;
+  wasmUnitTrueEmulation: number | null;
+  wasmUnitEnabled: number | null;
+  wasmCpuClock: number | null;
+  wasmCpuClockAfterFrames: number | null;
+  wasmCpuClockAdvancing: boolean | null;
+  wasmIecBusLines: number | null;
+  wasmIecBusDrvData: number | null;
+  wasmIecBusCpuBus: number | null;
+  /** @deprecated Misread ATN from DATA-IN bit — use wasmIecBusAtnOutReleased */
+  wasmIecBusAtn: boolean | null;
+  /** C64 IEC port ATN out (VICE iecbus.cpu_bus bit 0x10): true = released at idle. */
+  wasmIecBusAtnOutReleased: boolean | null;
+  /** IEC ATN read line (cpu_bus bit 0x80); open-collector, not “stuck assert”. */
+  wasmIecBusAtnReadLine: boolean | null;
+  wasmVdriveErrorChannel: string | null;
+  wasmTdeImageBytes: number | null;
+  wasmGcrLoaded: number | null;
+  serialDeviceLabel: string | null;
+};
+
+const SERIAL_DEVICE_LABEL: Record<number, string> = {
+  0: "none",
+  1: "fs",
+  2: "real",
+  3: "raw",
+  4: "virt",
+};
+
+/** TDE floppy insert: KERNAL must not route IEC traps through SERIAL_DEVICE_VIRT. */
+export function viceBusSerialRoutingOk(bus: ViceDriveBusProbe): boolean {
+  return bus.serialDeviceLabel != null && bus.serialDeviceLabel !== "virt";
+}
+
+export type ViceLoadDollarDiag = {
+  unit?: number;
+  c64Input0200Hex?: string;
+  kernalIecNameC3Hex?: string;
+  vdriveLastCode?: number;
+  vdriveErrorChHex?: string;
+  serialDeviceType?: number;
+  iecBusLines?: number;
+  tdeHalfTrack?: number;
+  tdeGcrLoaded?: number;
+  tdeImageBytes?: number;
+  vdriveImageSameAsTde?: number;
+  imgBamDiskName?: string;
+  imgTrack18Sector0Hex?: string;
+  imgTrack18Sector1Hex?: string;
+  c64FnamLen?: number;
+  c64FnambHex?: string;
+  /** D64 error-info table as VICE holds it; `flagged` lists [track, sector, code] for codes above 1. */
+  errorInfo?: {
+    present: boolean;
+    entries?: number;
+    codes?: Record<string, number>;
+    track18?: string;
+    flagged?: [number, number, number][];
+    flaggedCount?: number;
+  };
+  imgBamIdHex?: string;
+  /** True-drive 1541 RAM: job queue, master disk ID, last header, received name, error channel. */
+  dos1541?: {
+    jobsHex: string;
+    jobTsHex: string;
+    diskIdHex: string;
+    lastHeaderHex: string;
+    cmdHex: string;
+    errorChannel: string;
+  } | null;
+};
+
+export type ViceLoadDollarDiagReport = ViceLoadDollarDiag & {
+  capturedAt?: string;
+  captureSource?: "live" | "cached" | "unavailable";
+  captureError?: string;
+};
+
+let lastViceLoadDollarDiag: ViceLoadDollarDiagReport | null = null;
+
+/** The 1541 error buffer is not terminated: bytes of an earlier, longer message follow "nn,TEXT,tt,ss". */
+function dos1541CurrentMessage(text: string): string {
+  return /^\d\d,[^,]*,\d\d,\d\d/.exec(text)?.[0] ?? text;
+}
+
+export function getLastViceLoadDollarDiag(): ViceLoadDollarDiagReport | null {
+  return lastViceLoadDollarDiag;
+}
+
+/** Always returns a JSON object for About — never null. */
+export function viceLoadDollarDiagCapture(
+  emu: ViceDiskEmu | null,
+  unit: IecUnit = 8,
+  opts?: { source?: ViceLoadDollarDiagReport["captureSource"]; allowCached?: boolean },
+): ViceLoadDollarDiagReport {
+  const source = opts?.source ?? "live";
+  const mod = diskMod(emu);
+  if (!mod) {
+    const report: ViceLoadDollarDiagReport = {
+      unit,
+      captureSource: "unavailable",
+      captureError: "emulator module not ready",
+      capturedAt: new Date().toISOString(),
+    };
+    lastViceLoadDollarDiag = report;
+    return report;
+  }
+  bindGrok64DiskExports(mod, emu);
+  const fn = grok64DiskApi(mod)?.loadDollarDiagCapture;
+  if (!fn) {
+    const report: ViceLoadDollarDiagReport = {
+      unit,
+      captureSource: "unavailable",
+      captureError: "wasm export grok64_load_dollar_diag_capture missing — hard-refresh core",
+      capturedAt: new Date().toISOString(),
+    };
+    lastViceLoadDollarDiag = report;
+    return report;
+  }
+  const raw = fn(unit);
+  if (!raw || typeof raw !== "object") {
+    const report: ViceLoadDollarDiagReport = {
+      unit,
+      captureSource: "unavailable",
+      captureError: "wasm load_dollar_diag returned empty",
+      capturedAt: new Date().toISOString(),
+    };
+    lastViceLoadDollarDiag = report;
+    return report;
+  }
+  const diag = raw as ViceLoadDollarDiag;
+  const report: ViceLoadDollarDiagReport = {
+    ...diag,
+    ...(diag.dos1541
+      ? { dos1541: { ...diag.dos1541, errorChannel: dos1541CurrentMessage(diag.dos1541.errorChannel) } }
+      : {}),
+    capturedAt: new Date().toISOString(),
+    captureSource: source,
+  };
+  lastViceLoadDollarDiag = report;
+  return report;
+}
+
+export function viceLoadDollarDiagForAbout(
+  emu: ViceDiskEmu | null,
+  unit: IecUnit = 8,
+): ViceLoadDollarDiagReport {
+  const live = viceLoadDollarDiagCapture(emu, unit, { source: "live" });
+  if (live.captureError && lastViceLoadDollarDiag && !lastViceLoadDollarDiag.captureError) {
+    return { ...lastViceLoadDollarDiag, captureSource: "cached" };
+  }
+  return live;
+}
+
+export function viceDriveBusProbe(emu: ViceDiskEmu | null, unit: IecUnit = 8, drive = 0): ViceDriveBusProbe {
+  const mod = diskMod(emu);
+  if (mod) bindGrok64DiskExports(mod, emu);
+  const api = grok64DiskApi(mod);
+  const clk0 = api?.driveCpuClock?.(unit) ?? null;
+  const clk1: number | null = null;
+  const lines = api?.driveIecBusLines?.(unit) ?? null;
+  const serial = api?.driveSerialDeviceType?.(unit) ?? null;
+  return {
+    wasmFilesystemDevice: api?.driveFilesystemDevice?.(unit) ?? null,
+    wasmIecDevice: api?.driveIecDevice?.(unit) ?? null,
+    wasmVirtualDevice: api?.driveVirtualDevice?.(unit) ?? null,
+    wasmSerialDeviceType: serial,
+    wasmUnitTrueEmulation: api?.driveUnitTrueEmulation?.(unit) ?? null,
+    wasmUnitEnabled: api?.driveUnitEnabled?.(unit) ?? null,
+    wasmCpuClock: clk0,
+    wasmCpuClockAfterFrames: clk1,
+    wasmCpuClockAdvancing:
+      clk0 != null && clk1 != null && clk0 >= 0 && clk1 >= 0 ? clk1 > clk0 : null,
+    wasmIecBusLines: lines,
+    wasmIecBusDrvData: lines != null ? lines & 0xff : null,
+    wasmIecBusCpuBus: lines != null ? (lines >> 8) & 0xff : null,
+    /** True when C64 ATN out is actively asserted (VICE cpu_bus bit 0x10 clear). Idle READY should be false. */
+    wasmIecBusAtn: lines != null ? !Boolean((lines >> 8) & 0x10) : null,
+    wasmIecBusAtnOutReleased: lines != null ? Boolean((lines >> 8) & 0x10) : null,
+    wasmIecBusAtnReadLine: lines != null ? Boolean((lines >> 8) & 0x80) : null,
+    wasmVdriveErrorChannel: api?.driveErrorChannel?.(unit) ?? "",
+    wasmTdeImageBytes: api?.driveTdeImageBytes?.(unit, drive) ?? null,
+    wasmGcrLoaded: api?.driveGcrLoaded?.(unit, drive) ?? null,
+    serialDeviceLabel: serial != null ? (SERIAL_DEVICE_LABEL[serial] ?? String(serial)) : null,
+  };
+}
+
+/** VICE DriveNType values whose DOS runs the 1541 power-on routine (1540, 1541, 1541-II). */
+const DRIVE_1541_FAMILY = new Set([1540, 1541, 1542]);
+/**
+ * Drive cycles from a drive CPU reset until 1541 DOS has finished its RAM/ROM test and armed the
+ * ATN interrupt (measured ~1.02M, idle bus lines from then on), plus margin for JiffyDOS ROMs.
+ */
+const DRIVE_1541_BOOT_CYCLES = 1_200_000;
+
+export type DriveFirmwareWait = {
+  unit: IecUnit;
+  type: number | null;
+  clkStart: number | null;
+  clkEnd: number | null;
+  waitedMs: number;
+  timedOut: boolean;
+};
+
+function nextFrame(): Promise<void> {
+  if (typeof requestAnimationFrame !== "function") return new Promise((r) => setTimeout(r, 16));
+  return new Promise((r) => requestAnimationFrame(() => r()));
+}
+
+/**
+ * Hold a floppy mount until the drive DOS can answer the bus. Any drive CPU reset (drive type
+ * write, power-on) restarts the drive clock at 0; an ATN edge sent while 1541 DOS is still in its
+ * power-on test is never seen, so a LOAD typed then hangs at SEARCHING with DATA held low.
+ * A 1581 latches ATN on its CIA FLAG input and answers once its DOS is up, so it needs no wait.
+ */
+export async function waitDriveFirmwareReady(
+  emu: ViceDiskEmu | null,
+  unit: IecUnit = 8,
+  timeoutMs = 3000,
+): Promise<DriveFirmwareWait> {
+  const mod = diskMod(emu);
+  if (mod) bindGrok64DiskExports(mod, emu);
+  const api = grok64DiskApi(mod);
+  const type = api?.driveUnitType?.(unit) ?? null;
+  const readClk = () => {
+    const c = api?.driveCpuClock?.(unit);
+    return typeof c === "number" && c >= 0 ? c : null;
+  };
+  const clkStart = readClk();
+  const t0 = performance.now();
+  let clk = clkStart;
+  let timedOut = false;
+  if (type != null && DRIVE_1541_FAMILY.has(type)) {
+    while (clk != null && clk < DRIVE_1541_BOOT_CYCLES) {
+      if (performance.now() - t0 >= timeoutMs) {
+        timedOut = true;
+        break;
+      }
+      await nextFrame();
+      clk = readClk();
+    }
+  }
+  const out: DriveFirmwareWait = {
+    unit,
+    type,
+    clkStart,
+    clkEnd: clk,
+    waitedMs: Math.round(performance.now() - t0),
+    timedOut,
+  };
+  if (out.waitedMs > 0 || timedOut) glog("drive-firmware-wait", out);
+  return out;
+}
+
+export type ViceDriveLiveProbe = {
+  attachPath: string | null;
+  fsPathLabel: string | null;
+  fsPathBytes: number | null;
+  wasmImageBytes: number | null;
+  wasmBamLabel: string | null;
+  wasmErrorCode: number | null;
+  wasmErrorChannel: string | null;
+  wasmIecDevice: number | null;
+  wasmVirtualDevice: number | null;
+  wasmUnitTrueEmulation: number | null;
+  wasmDriveUnitType: number | null;
+  wasmDriveUnitEnabled: number | null;
+  wasmVdriveErrorChannel: string | null;
+  wasmRomLoaded: number | null;
+  wasmSerialDeviceType: number | null;
+  wasmVdriveErrorIsVirtual: number | null;
+  wasmTdeImageBytes: number | null;
+  wasmGcrLoaded: number | null;
+  wasmVdriveImageSame: number | null;
+  sessionLabel: string | null;
+};
+
+/** What VICE's vdrive actually has vs MEMFS path (IEC FILE NOT FOUND debug). */
+export function viceDriveLiveProbe(emu: ViceDiskEmu | null, unit: IecUnit = 8, drive = 0): ViceDriveLiveProbe {
+  const mod = diskMod(emu);
+  if (mod) bindGrok64DiskExports(mod, emu);
+  const api = grok64DiskApi(mod);
+  const attachPath = viceAttachedImage(emu, unit, drive);
+  let fsPathLabel: string | null = null;
+  let fsPathBytes: number | null = null;
+  if (attachPath) {
+    fsPathBytes = pathByteLength(emu, attachPath);
+    const FS = fsOf(emu) as { readFile?: (p: string) => Uint8Array } | null;
+    try {
+      const raw = FS?.readFile?.(attachPath);
+      if (raw instanceof Uint8Array && raw.byteLength >= 174848) {
+        fsPathLabel = floppyDiskName(raw);
+      }
+    } catch {
+      /* */
+    }
+  }
+  const ses = sessionDiskOnUnit(unit);
+  const sessionLabel = ses?.bytes ? floppyDiskName(ses.bytes) : null;
+  return {
+    attachPath,
+    fsPathLabel,
+    fsPathBytes,
+    wasmImageBytes: api?.driveImageBytes?.(unit, drive) ?? null,
+    wasmBamLabel: api?.driveBamDiskName?.(unit, drive) ?? null,
+    wasmErrorCode: api?.driveLastErrorCode?.(unit) ?? null,
+    wasmErrorChannel: api?.driveErrorChannel?.(unit) ?? "",
+    wasmIecDevice: api?.driveIecDevice?.(unit) ?? null,
+    wasmVirtualDevice: api?.driveVirtualDevice?.(unit) ?? null,
+    wasmUnitTrueEmulation: api?.driveUnitTrueEmulation?.(unit) ?? null,
+    wasmDriveUnitType: api?.driveUnitType?.(unit) ?? null,
+    wasmDriveUnitEnabled: api?.driveUnitEnabled?.(unit) ?? null,
+    wasmVdriveErrorChannel: api?.driveErrorChannel?.(unit) ?? "",
+    wasmRomLoaded: api?.romLoaded?.() ?? null,
+    wasmSerialDeviceType: api?.driveSerialDeviceType?.(unit) ?? null,
+    wasmVdriveErrorIsVirtual: api?.driveVdriveErrorIsVirtual?.(unit) ?? null,
+    wasmTdeImageBytes: api?.driveTdeImageBytes?.(unit, drive) ?? null,
+    wasmGcrLoaded: api?.driveGcrLoaded?.(unit, drive) ?? null,
+    wasmVdriveImageSame: api?.driveVdriveImageSame?.(unit, drive) ?? null,
+    sessionLabel,
+  };
+}
+
+export async function viceReattachDiskAsync(
+  emu: ViceDiskEmu | null,
+  unit: IecUnit,
+  path: string,
+  drive = 0,
+): Promise<number> {
+  return runSerializedDiskAttach(() => viceReattachDiskSync(emu, unit, path, drive));
+}

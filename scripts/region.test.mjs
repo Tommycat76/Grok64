@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { createServer } from "vite";
 
@@ -7,7 +10,7 @@ const server = await createServer({
   appType: "custom",
   logLevel: "error",
 });
-const { detectSoftwareStandard, resolveSoftwareVideo, detectJoyPort, regionBadge } = await server.ssrLoadModule("/src/lib/emu/region.ts");
+const { detectSoftwareStandard, resolveSoftwareVideo, detectJoyPort, regionBadge, sessionJoyPort } = await server.ssrLoadModule("/src/lib/emu/region.ts");
 const { isWorkDiskImage, d64DiskName, bootFileName } = await server.ssrLoadModule("/src/lib/emu/formats.ts");
 const { pickBootFile, isJunkRelease } = await server.ssrLoadModule("/src/lib/emu/archive.ts");
 await server.close();
@@ -41,6 +44,9 @@ test("filename PAL/NTSC tags beat locale-less defaults", () => {
   assert.equal(detectSoftwareStandard("Summer Games (NTSC).d64"), "ntsc");
   assert.equal(detectSoftwareStandard("Boulder Dash [PAL].crt"), "pal");
   assert.equal(detectSoftwareStandard("Impossible Mission_ntsc.prg"), "ntsc");
+  assert.equal(detectSoftwareStandard("GUI64 [NTSC].crt"), "ntsc");
+  assert.equal(detectSoftwareStandard("GUI64 [PAL].crt"), "pal");
+  assert.equal(detectSoftwareStandard("GUI64 (NTSC).crt"), "ntsc");
 });
 
 test("TOSEC country tags", () => {
@@ -57,17 +63,12 @@ test("explicit token wins over known-title map", () => {
   assert.equal(detectSoftwareStandard("Boulder Dash (PAL).d64"), "pal");
 });
 
-test("known originals when the dump is untagged", () => {
-  assert.equal(detectSoftwareStandard("M.U.L.E.d64"), "ntsc");
-  assert.equal(detectSoftwareStandard("Archon.d64"), "ntsc");
-  assert.equal(detectSoftwareStandard("The Last Ninja.d64"), "pal");
-  assert.equal(detectSoftwareStandard("Turrican II.d64"), "pal");
-  assert.equal(detectSoftwareStandard("Paradroid.d64"), "pal");
-  assert.equal(detectSoftwareStandard("California Games.d64"), "ntsc");
-  assert.equal(detectSoftwareStandard("Mayhem in Monsterland.d64"), "pal");
-  assert.equal(detectSoftwareStandard("boulderdash-awally.d64"), "ntsc");
-  assert.equal(detectSoftwareStandard("paradroidalldrives.d64"), "pal");
-  assert.equal(detectSoftwareStandard("ghostbusters-c64.d64"), "ntsc");
+test("untagged filenames do not guess NTSC/PAL from title lists", () => {
+  assert.equal(detectSoftwareStandard("M.U.L.E.d64"), null);
+  assert.equal(detectSoftwareStandard("Archon.d64"), null);
+  assert.equal(detectSoftwareStandard("The Last Ninja.d64"), null);
+  assert.equal(detectSoftwareStandard("Epyx_FastLoad_1984_v1.crt"), null);
+  assert.equal(detectSoftwareStandard("epyx fast load.crt"), null);
 });
 
 test("SID header flags", () => {
@@ -103,7 +104,9 @@ test("does not use locale-like names as a signal", () => {
 
 test("work disk BAM name is detected so it cannot replace a game", async () => {
   const { readFileSync } = await import("node:fs");
-  const blank = new Uint8Array(readFileSync("/workspace/public/software/blank.d64"));
+  const blank = new Uint8Array(
+    readFileSync(join(fileURLToPath(new URL(".", import.meta.url)), "..", "public", "software", "blank.d64")),
+  );
   assert.equal(d64DiskName(blank), "WORK DISK");
   assert.equal(isWorkDiskImage(blank), true);
   const other = blank.slice();
@@ -172,4 +175,13 @@ test("Boulder Dash family plugs into CIA port 1, everything else port 2", () => 
   assert.equal(detectJoyPort("Paradroid.d64"), 2);
   assert.equal(detectJoyPort("byte-hopper.prg"), 2);
   assert.equal(detectJoyPort("WORK DISK.D64"), 2);
+  assert.equal(detectJoyPort("GUI64 [PAL].crt"), 2);
+  assert.equal(detectJoyPort("GUI64 [NTSC].crt"), 2);
+});
+
+test("the user's saved mouse port is not replaced by a title hint", () => {
+  assert.equal(sessionJoyPort(1), 1);
+  assert.equal(sessionJoyPort(2), 2);
+  assert.equal(sessionJoyPort(1), sessionJoyPort(1));
+  assert.notEqual(sessionJoyPort(1), detectJoyPort("GUI64 [PAL].crt"));
 });

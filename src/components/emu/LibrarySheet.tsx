@@ -1,13 +1,16 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Drawer } from "vaul";
 import { Cloud, Disc3, FolderOpen, Play, Trash2, Upload } from "lucide-react";
 import { toast } from "sonner";
 import { CatalogPanel } from "./CatalogPanel";
 import { BUNDLED } from "@/lib/emu/software";
-import { ACCEPT_EXT, KIND_LABEL, isDiskKind } from "@/lib/emu/formats";
+import { ACCEPT_EXT, displayKindOf, isDiskKind, kindLabelFor } from "@/lib/emu/formats";
+import { isReuImageName } from "@/lib/emu/reu-image";
+import { validateCrtImport } from "@/lib/emu/cart-crt-diag";
 import { isWorkDisk, listLibrary, putFile, removeFile, updateFileUnit } from "@/lib/emu/library";
 import { importFromUrl } from "@/lib/emu/import-url";
 import { b64ToU8, explodeArchive, pickBootFile, toArrayBuffer } from "@/lib/emu/archive";
+import { floppyInsertUnit } from "@/lib/emu/play-session";
 import { useEmu } from "@/lib/emu/store";
 import type { BundledTitle, LibraryItem } from "@/lib/emu/types";
 import { IecUnitSeg } from "@/components/emu/IecUnitSeg";
@@ -24,18 +27,41 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
   const library = useEmu((s) => s.library);
   const setLibrary = useEmu((s) => s.setLibrary);
   const running = useEmu((s) => s.running);
-  const defaultUnit = useEmu((s) => s.iecUnit);
+  const iecMap = useEmu((s) => s.iecMap);
   const fileRef = useRef<HTMLInputElement>(null);
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<"catalog" | "library">("catalog");
+  const tab = useEmu((st) => st.libraryTab);
+  const setTab = useEmu((st) => st.setLibraryTab);
+
+  useEffect(() => {
+    if (!open) return;
+    void refresh().catch(() => undefined);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (e.target instanceof HTMLElement && /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+      setOpen(false);
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [open, setOpen]);
 
   async function refresh() {
     setLibrary(await listLibrary());
   }
 
   function runSaved(items: LibraryItem[]) {
-    const boot = pickBootFile(items.filter((i) => !isWorkDisk(i.name)));
+    const pool = items.filter((i) => !isWorkDisk(i.name));
+    const geos =
+      pool.find((i) => /wheels/i.test(i.name) && /\.d64$/i.test(i.name)) ??
+      pool.find((i) => /geos/i.test(i.name) && /\.d64$/i.test(i.name));
+    const boot = geos ?? pickBootFile(pool);
     if (!boot) return false;
     setOpen(false);
     onPlayLocal(boot);
@@ -52,12 +78,18 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
         const buf = new Uint8Array(await f.arrayBuffer());
         const parts = explodeArchive(f.name, buf);
         for (const part of parts) {
+          const reject = validateCrtImport(part.data, part.name);
+          if (reject) {
+            toast.error(reject, { duration: 12_000 });
+            continue;
+          }
           saved.push(await putFile(part.name, toArrayBuffer(part.data), source));
         }
       }
       await refresh();
       toast.success(list.length === 1 ? `Saved ${list[0]!.name}` : `Saved ${list.length} files`);
-      if (!runSaved(saved)) setTab("library");
+      if (saved.length === 1 && !runSaved(saved)) setTab("library");
+      else setTab("library");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not import");
     } finally {
@@ -75,12 +107,18 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
       const parts = explodeArchive(res.name, bin);
       const saved: LibraryItem[] = [];
       for (const part of parts) {
+        const reject = validateCrtImport(part.data, part.name);
+        if (reject) {
+          toast.error(reject, { duration: 12_000 });
+          continue;
+        }
         saved.push(await putFile(part.name, toArrayBuffer(part.data), "cloud"));
       }
       await refresh();
       setUrl("");
       toast.success(`Saved ${res.name}`);
-      if (!runSaved(saved)) setTab("library");
+      if (saved.length === 1 && !runSaved(saved)) setTab("library");
+      else setTab("library");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Download failed");
     } finally {
@@ -91,7 +129,10 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
   return (
     <Drawer.Root open={open} onOpenChange={setOpen}>
       <Drawer.Portal>
-        <Drawer.Overlay className="fixed inset-0 z-[900] bg-black/60" />
+        <Drawer.Overlay
+          className="fixed inset-0 z-[900] bg-black/60"
+          onClick={() => setOpen(false)}
+        />
         <Drawer.Content className="g64-sheet fixed right-0 bottom-0 left-0 z-[950]">
           <div className="g64-handle" />
           <Drawer.Title asChild>
@@ -100,10 +141,28 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
           <p className="lead">Search Assembly64 for games, carts, disks and SID — no links to paste. Tap Play and the file stays on this device so SAVE works.</p>
 
           <div className="g64-seg mb-3">
-            <button type="button" data-on={tab === "catalog"} onClick={() => setTab("catalog")}>
+            <button
+              type="button"
+              data-on={tab === "catalog"}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setTab("catalog");
+              }}
+            >
               Catalog
             </button>
-            <button type="button" data-on={tab === "library"} onClick={() => setTab("library")}>
+            <button
+              type="button"
+              data-on={tab === "library"}
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                setTab("library");
+              }}
+            >
               On this device{library.length ? ` · ${library.length}` : ""}
             </button>
           </div>
@@ -188,17 +247,17 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
                           onPlayLocal(item);
                         }}>
                           <strong>{item.name}</strong>
-                          <em className="g64-tag not-italic">{KIND_LABEL[item.kind]}</em>
+                          <em className="g64-tag not-italic">{isReuImageName(item.name) ? "REU image" : kindLabelFor(item.name, item.kind)}</em>
                           <span>
                             {(item.size / 1024).toFixed(0)} KB ·{" "}
                             {item.source === "catalog" ? "Catalog" : item.source === "cloud" ? "Link" : "Imported"}
                           </span>
                         </button>
                         <div className="g64-card-tools">
-                          {isDiskKind(item.kind) ? (
+                          {isDiskKind(displayKindOf(item.name, item.kind)) ? (
                             <IecUnitSeg
                               compact
-                              value={item.iecUnit ?? defaultUnit}
+                              value={item.iecUnit ?? floppyInsertUnit(iecMap, displayKindOf(item.name, item.kind))}
                               onChange={(unit) => {
                                 void updateFileUnit(item.id, unit).then(refresh);
                               }}
@@ -207,7 +266,7 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
                           <button
                             type="button"
                             className="g64-iconbtn"
-                            aria-label={isDiskKind(item.kind) ? `Run ${item.name}` : `Play ${item.name}`}
+                            aria-label={isDiskKind(displayKindOf(item.name, item.kind)) ? `Run ${item.name}` : `Play ${item.name}`}
                             onClick={() => {
                               setOpen(false);
                               onPlayLocal(item);
@@ -215,7 +274,7 @@ export function LibrarySheet({ onPlayBundled, onPlayLocal, onInsert }: Props) {
                           >
                             <Play className="size-4" />
                           </button>
-                          {onInsert && running && isDiskKind(item.kind) ? (
+                          {onInsert && running && (isDiskKind(displayKindOf(item.name, item.kind)) || isReuImageName(item.name)) ? (
                             <button
                               type="button"
                               className="g64-iconbtn"

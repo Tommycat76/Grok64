@@ -25,6 +25,7 @@ export type HwPress = "short" | "long";
 export type HwAction =
   | "cart-freeze"
   | "cart-reset"
+  | "cart-eject"
   | "sd2iec-next"
   | "sd2iec-prev"
   | "sd2iec-swap89"
@@ -54,6 +55,14 @@ export const HW_BUTTONS: HwButtonSpec[] = [
     longMs: HW_LONG_MS,
     shortHint: "Cartridge freeze — Action Replay / Retro Replay / Freeze Frame",
     longHint: "Hold — cart RESET (Retro Replay reset button)",
+  },
+  {
+    id: "cart-out",
+    device: "cart",
+    label: "CART OUT",
+    shortAction: "cart-eject",
+    longMs: HW_LONG_MS,
+    shortHint: "Eject the freezer / replay cartridge",
   },
   {
     id: "sd-disk",

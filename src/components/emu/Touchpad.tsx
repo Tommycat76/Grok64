@@ -38,9 +38,7 @@ export function Touchpad({ onDelta, onEnd, locked, layoutEdit, onDrag }: Props) 
       const dy = y - prev.y;
       active.set(id, { x, y });
       if (lockedRef.current || layoutEdit) return;
-      const r = pad.getBoundingClientRect();
-      const scale = Math.max(r.width, r.height, 120);
-      onDeltaRef.current(dx / scale, dy / scale);
+      onDeltaRef.current(dx, dy);
     };
 
     const down = (id: number, x: number, y: number, target: EventTarget | null) => {

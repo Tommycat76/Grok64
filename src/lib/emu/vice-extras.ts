@@ -15,11 +15,11 @@ export interface ViceExtrasInput {
 /**
  * VICE libretro `vice_work_disk` for the live unit.
  * CMD HD is a real drive (ROM + DriveNType=4844) — not an `*_fs` virtual card.
- * SD2IEC uses the directory device (`N_fs`) for the FAT card files.
+ * SD2IEC is answered in Grok64 (IEC bus software), not a VICE work disk.
  */
 export function workDiskFor(iec: IecDrive, unit: IecUnit = 8): string {
   if (iec === "cmdhd") return "disabled";
-  if (iec === "sd2iec") return `${unit}_fs`;
+  if (iec === "sd2iec") return "disabled";
   if (iec === "1581") return `${unit}_d81`;
   if (iec === "1541") return `${unit}_d64`;
   return "disabled";
@@ -38,8 +38,10 @@ export function buildViceExtras(input: ViceExtrasInput): Record<string, string> 
     opts.vice_virtual_device_traps = "disabled";
     opts.vice_drive_true_emulation = "enabled";
   } else if (input.iec === "sd2iec") {
-    opts.vice_work_disk = workDiskFor(input.iec, unit);
-    opts.vice_virtual_device_traps = "enabled";
+    opts.vice_work_disk = "disabled";
+    opts.vice_virtual_device_traps = "disabled";
+    opts.vice_drive_true_emulation = "enabled";
+    opts[`vice_drive${unit}_type`] = "None";
   } else {
     opts.vice_work_disk = workDiskFor(input.iec, unit);
     opts.vice_virtual_device_traps = "disabled";
@@ -50,17 +52,16 @@ export function buildViceExtras(input: ViceExtrasInput): Record<string, string> 
   }
 
   if (input.mouse) {
-    const joyOn1 = input.joyPort === 1;
-    opts.vice_joyport = joyOn1 ? "1" : "2";
-    opts.vice_joyport_type = joyOn1 ? "3" : "1";
-    opts.vice_joyport2_type = joyOn1 ? "1" : "3";
+    opts.vice_joyport = input.joyPort === 1 ? "1" : "2";
+    opts.vice_joyport_type = "3";
     opts.vice_analogmouse = "left";
-    opts.vice_mouse_speed = "120";
+    opts.vice_mouse_speed = "100";
     opts.vice_analogmouse_speed = "1.0";
+    opts.vice_analogmouse_deadzone = "0";
+    opts.vice_dpadmouse_speed = "6";
   } else {
     opts.vice_joyport = input.joyPort === 1 ? "1" : "2";
     opts.vice_joyport_type = "1";
-    opts.vice_joyport2_type = "1";
     opts.vice_analogmouse = "disabled";
   }
 

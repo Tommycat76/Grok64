@@ -2,14 +2,20 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeftRight, FastForward, Move } from "lucide-react";
 import type { JoyPort, PadSide } from "@/lib/emu/types";
 import { layoutStyle, type ControlId, type ControlLayout } from "@/lib/emu/control-layout";
-import { snapStick, STICK_OUTER_DEAD, STICK_TAP_HOLD_MS, STICK_TAP_MAX_MS } from "@/lib/emu/stick-precision.mjs";
+import { snapStick, STICK_OUTER_DEAD } from "@/lib/emu/stick-precision.mjs";
 import { Touchpad } from "@/components/emu/Touchpad";
 
 export type StickGate = "4way" | "8way";
 
+/** Extra hit slop around the stick so a fat thumb does not punch through to the CRT. */
+export const STICK_HIT_PAD = 28;
+/** FIRE / LMB / RMB slop — smaller than the stick so the two thumbs stay distinct. */
+export const BUTTON_HIT_PAD = 12;
+
 interface Props {
   onVector: (x: number, y: number, centerHold?: boolean) => void;
   stickHoldRef?: React.MutableRefObject<boolean>;
+  stickDownRef?: React.MutableRefObject<boolean>;
   onFire: (down: boolean) => void;
   onJump?: (down: boolean) => void;
   onMouseDelta?: (dx: number, dy: number) => void;
@@ -94,6 +100,7 @@ export function TouchControls({
   controlLayout,
   onLayoutDrag,
   stickHoldRef,
+  stickDownRef,
 }: Props) {
   const root = useRef<HTMLDivElement>(null);
   const stickEl = useRef<HTMLDivElement>(null);
@@ -129,13 +136,12 @@ export function TouchControls({
   mouseRef.current = mouseMode;
   const lastDir = useRef({ x: 0, y: 0 });
   const sentDir = useRef({ x: 0, y: 0 });
-  const tapHold = useRef<number | null>(null);
-  const downAt = useRef(0);
   const stickFingerDown = useRef(false);
   const stickCenterDrag = useRef(false);
 
   const syncStickHold = () => {
     if (stickHoldRef) stickHoldRef.current = stickCenterDrag.current && stickFingerDown.current;
+    if (stickDownRef) stickDownRef.current = stickFingerDown.current;
   };
 
   const layout = controlLayout;
@@ -220,13 +226,13 @@ export function TouchControls({
       return {
         fire: false,
         jump: false,
-        mouseL: hitRect(mouseLEl.current, x, y, 6),
-        mouseR: hitRect(mouseREl.current, x, y, 6),
+        mouseL: hitRect(mouseLEl.current, x, y, BUTTON_HIT_PAD),
+        mouseR: hitRect(mouseREl.current, x, y, BUTTON_HIT_PAD),
       };
     }
     return {
-      fire: hitRect(fireEl.current, x, y, 6),
-      jump: jumpRef.current && hitRect(jumpEl.current, x, y, 6),
+      fire: hitRect(fireEl.current, x, y, BUTTON_HIT_PAD),
+      jump: jumpRef.current && hitRect(jumpEl.current, x, y, BUTTON_HIT_PAD),
       mouseL: false,
       mouseR: false,
     };
@@ -246,17 +252,18 @@ export function TouchControls({
         mouseR: hits.mouseR,
       };
     }
-    if (mouseRef.current) return null;
     let el = target instanceof Element ? target : null;
     if (!el) el = document.elementFromPoint(x, y);
-    if (stickEl.current?.contains(el) || el?.closest(".g64-stick")) return { stick: true };
-    if (hitRect(stickEl.current, x, y, 4)) return { stick: true };
+    if (stickEl.current?.contains(el) || el?.closest(".g64-stick") || el?.closest(".g64-stick-col")) {
+      return { stick: true };
+    }
+    if (hitRect(stickEl.current, x, y, STICK_HIT_PAD)) return { stick: true };
     return null;
   }
 
   useEffect(() => {
     const host = root.current;
-    if (!host || mouseRef.current) return;
+    if (!host) return;
     const active = new Map<number, PointerZones>();
     let fireOn = false;
     let jumpOn = false;
@@ -293,12 +300,7 @@ export function TouchControls({
       if (lockedRef.current || layoutEditRef.current || active.has(id)) return;
       active.set(id, zones);
       if (zones.stick) {
-        if (tapHold.current) {
-          window.clearTimeout(tapHold.current);
-          tapHold.current = null;
-        }
         stickPid.current = id;
-        downAt.current = Date.now();
         stickFingerDown.current = true;
         stickCenterDrag.current = stickMagnitude(x, y) < STICK_OUTER_DEAD;
         syncStickHold();
@@ -329,19 +331,8 @@ export function TouchControls({
         stickFingerDown.current = false;
         stickCenterDrag.current = false;
         syncStickHold();
-        const held = Date.now() - downAt.current;
-        const dir = lastDir.current;
         const stillStick = [...active.values()].some((z) => z.stick);
-        if (!stillStick) {
-          if (held < STICK_TAP_MAX_MS && (dir.x !== 0 || dir.y !== 0)) {
-            tapHold.current = window.setTimeout(() => {
-              tapHold.current = null;
-              centerStick();
-            }, STICK_TAP_HOLD_MS);
-          } else {
-            centerStick();
-          }
-        }
+        if (!stillStick) centerStick();
       }
       syncButtons();
     };
@@ -408,7 +399,7 @@ export function TouchControls({
       host.removeEventListener("pointerup", onPointerUp);
       host.removeEventListener("pointercancel", onPointerUp);
     };
-  }, [hidden, padActive, jumpEnabled, mouseMode]);
+  }, [hidden, jumpEnabled, mouseMode]);
 
   useEffect(() => {
     const host = root.current;
@@ -516,7 +507,7 @@ export function TouchControls({
       host.removeEventListener("pointerup", onPointerUp);
       host.removeEventListener("pointercancel", onPointerUp);
     };
-  }, [hidden, padActive, mouseMode]);
+  }, [hidden, mouseMode]);
 
   if (hidden) return null;
 
@@ -554,7 +545,7 @@ export function TouchControls({
     </div>
   );
 
-  if (padActive || (stickHidden && !mouseMode)) {
+  if (stickHidden && !mouseMode) {
     return (
       <div ref={root} className="g64-controls" data-pad={padActive ? "true" : "false"}>
         {padActive ? <div className="g64-pad-note">Controller</div> : <div />}
@@ -567,18 +558,54 @@ export function TouchControls({
   const pos = (id: ControlId) => (layoutEdit && layout ? layoutStyle(layout[id], id) : undefined);
 
   if (mouseMode) {
+    const kx = vector?.x ?? knob.x;
+    const ky = vector?.y ?? knob.y;
     return (
       <div
         ref={root}
         className="g64-controls g64-controls-mouse"
         data-pad-side={padSide}
+        data-stick={stickHidden ? "false" : "true"}
         data-layout-edit={layoutEdit ? "true" : "false"}
       >
         {layoutEdit ? <div className="g64-layout-banner">Drag controls to reposition</div> : null}
+        {stickHidden ? null : (
+          <div className="g64-stick-col" style={pos("stick")} onPointerDown={(e) => startLayoutDrag("stick", e)}>
+            <LayoutHandle show={layoutEdit} />
+            <div
+              ref={stickEl}
+              className="g64-stick"
+              data-gate={gate}
+              aria-label="Joystick. Tap a direction or drag."
+            >
+              <span className="g64-stick-tick" data-dir="n" />
+              <span className="g64-stick-tick" data-dir="e" />
+              <span className="g64-stick-tick" data-dir="s" />
+              <span className="g64-stick-tick" data-dir="w" />
+              {gate === "8way" ? (
+                <>
+                  <span className="g64-stick-tick" data-dir="ne" />
+                  <span className="g64-stick-tick" data-dir="se" />
+                  <span className="g64-stick-tick" data-dir="sw" />
+                  <span className="g64-stick-tick" data-dir="nw" />
+                </>
+              ) : null}
+              <div
+                className="g64-knob"
+                style={
+                  {
+                    "--kx": String(kx),
+                    "--ky": String(ky),
+                  } as React.CSSProperties
+                }
+              />
+            </div>
+          </div>
+        )}
         <div className="g64-touchpad-wrap" style={pos("touchpad")} onPointerDown={(e) => startLayoutDrag("touchpad", e)}>
           <LayoutHandle show={layoutEdit} />
           <Touchpad
-            onDelta={(dx, dy) => onMouseDelta?.(dx * 2.4, dy * 2.4)}
+            onDelta={(dx, dy) => onMouseDelta?.(dx, dy)}
             onEnd={onMouseEnd}
             locked={locked}
             layoutEdit={layoutEdit}
