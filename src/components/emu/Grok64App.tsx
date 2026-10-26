@@ -236,6 +236,7 @@ import {
   geosFamilyLoadMs,
   geosFamilyPlayLockMs,
   isGeosFamilyDiskName,
+  geosHostStickOverrideWanted,
   reuForGeosFamilyDisk,
   isWheelsDiskName,
 } from "@/lib/emu/geos-boot";
@@ -503,6 +504,9 @@ export function Grok64App() {
   const playLockRef = useRef(false);
   /** Port-1 on-screen stick → GEOS joystick driver (unplug 1351 while stick is active). */
   const geosStickJoyRef = useRef(false);
+  /** Sticky while a GEOS-family system disk session is up (graphical deskTop). */
+  const geosStickSessionRef = useRef(false);
+  const geosStickRouteClockRef = useRef(0);
   const playLockGen = useRef(0);
   const pendingSnapshotRef = useRef(null);
   const pendingCompanionRef = useRef<{ name: string; data: Uint8Array }[]>([]);
@@ -831,12 +835,21 @@ export function Grok64App() {
           stickPort: libretroStickJoyPort(st.mouseMode, st.joyPort),
           digitalPlayer: digitalJoyPlayer(st.mouseMode, st.joyPort),
           geosStickOverride: hostMousePortJoystickOverrideActive(),
+          geosStickSession: geosStickSessionRef.current,
+          geosHostStickWanted: geosHostStickOverrideWanted(
+            emuRef.current,
+            useEmu.getState().insertedDiskName,
+          ),
         };
       },
       stickDown: () => stickDownRef.current,
       /** QA: simulate on-screen stick finger-down (drives GEOS vs dual-stick routing). */
       holdStick: (down) => {
         stickDownRef.current = !!down;
+      },
+      primeGeosStickSessionForQa: () => {
+        geosStickSessionRef.current = true;
+        useEmu.getState().setInsertedDiskName("GEOS Boot Disk.d64");
       },
       stick: (x, y) => {
         joyRef.current.x = x;
@@ -1355,7 +1368,7 @@ export function Grok64App() {
         await flushEmuFs(emuRef.current, 3000);
         applyRuntimeOptions(emuRef.current, viceGeosFloppyOptions(8));
         setPaused(emuRef.current, false);
-        if (await tryGeosDiskAutostart(emuRef.current, 8)) {
+        if (await tryGeosDiskAutostart(emuRef.current, 8, name)) {
           await feedBasicLine(emuRef.current, "RUN", { runcmd: true });
           const autoEnd = Date.now() + 120_000;
           while (Date.now() < autoEnd) {
@@ -2934,6 +2947,7 @@ export function Grok64App() {
   const playBuffer = useCallback(
     async (filename, data, opts = {}) => {
       await persistNow();
+      useEmu.getState().setSessionRestoreHint(null);
       let mediaName = filename;
       playPayloadRef.current = { filename: mediaName, data, opts };
       const playUnit = opts.iecUnit ?? useEmu.getState().iecUnit;
@@ -3102,6 +3116,9 @@ export function Grok64App() {
       }
       const payloadView = new Uint8Array(safe);
       const bootName = resolvePlayBootName(mediaName, payloadView, bootNameOverride);
+      if (!work && !isGeosFamilyDiskName(filename) && !isGeosFamilyDiskName(bootName)) {
+        geosStickSessionRef.current = false;
+      }
       const forceCartEarly = isCartridgePayload(payloadView, bootName);
       const detected = work
         ? null
@@ -3591,8 +3608,9 @@ export function Grok64App() {
               setSessionDisk(filename, payloadDisk, playAttachUnit);
               await ensureStockKernal(emuRef.current);
               await flushEmuFs(emuRef.current, isIosPhone() ? 2000 : 800);
-              const booted = await tryGeosDiskAutostart(emuRef.current, playAttachUnit);
+              const booted = await tryGeosDiskAutostart(emuRef.current, playAttachUnit, filename);
               if (booted) {
+                geosStickSessionRef.current = true;
                 toast.success(`Inserted GEOS plain boot on drive ${playAttachUnit}`);
                 if (isIosPhone()) kickIosAfterEmuAction(emuRef.current, keepLiveCrt || floppyKeep ? "play-recycle" : "hot-swap");
                 void logFloppyAttach("play-geos-autostart", {
@@ -4002,6 +4020,7 @@ export function Grok64App() {
   playLocalRef.current = playLocal;
   const insertDisk = useCallback(async (item) => {
     s.setLibraryOpen(false);
+    s.setSessionRestoreHint(null);
     const file = await getFile(item.id);
     if (!file) {
       toast.error("Missing disk");
@@ -4728,18 +4747,22 @@ export function Grok64App() {
           if (a.down || w.down) sy = 1;
         }
         const stickDrive = touchStick && (Math.abs(sx) > 0.12 || Math.abs(sy) > 0.12);
-        const dualStick = hostMouseDualStickActive();
-        if (dualStick && geosStickJoyRef.current) {
-          geosStickJoyRef.current = false;
-          setHostMousePortJoystickOverride(false);
-          applySavedJoyAndMouse(emu, st.joyPort, true);
-        } else if (!dualStick && stickDrive) {
+        geosStickRouteClockRef.current += 1;
+        if (geosStickRouteClockRef.current % 12 === 0) {
+          if (geosHostStickOverrideWanted(emu, st.insertedDiskName)) {
+            geosStickSessionRef.current = true;
+          }
+        }
+        const wantGeosPortStick =
+          stickDrive &&
+          (geosStickSessionRef.current || geosHostStickOverrideWanted(emu, st.insertedDiskName));
+        if (wantGeosPortStick) {
           if (!geosStickJoyRef.current) {
             geosStickJoyRef.current = true;
             setHostMousePortJoystickOverride(true);
             applySavedJoyAndMouse(emu, st.joyPort, true);
           }
-        } else if (!dualStick && geosStickJoyRef.current) {
+        } else if (geosStickJoyRef.current) {
           geosStickJoyRef.current = false;
           setHostMousePortJoystickOverride(false);
           applySavedJoyAndMouse(emu, st.joyPort, true);

@@ -111,7 +111,12 @@ import {
 } from "./formats";
 import type { FastLoadCartKind } from "./jiffy-cart-compat";
 import { jiffyAllowedDuringCartBoot } from "./jiffy-cart-compat";
-import { readScreenText, screenTextHasReady } from "./screen-text";
+import {
+  geosBootLooksLaunched,
+  geosBootStuckAtBasic,
+  geosBootSucceeded,
+} from "./geos-boot";
+import { readScreenText, screenRamShowsGeosCatalog, screenTextHasReady } from "./screen-text";
 import { setSessionCart } from "./session-media";
 import type { SdPartition } from "./sd2iec";
 import type { Sd2iecVolume } from "./sd2iec-volume";
@@ -3745,8 +3750,12 @@ export async function bootGeosFloppy(
   return ready;
 }
 
-/** VICE autostart LOAD"*",8,1 — fallback when typed LOAD"GEOS" returns to BASIC. */
-export async function tryGeosDiskAutostart(emu: EjsInstance | null, unit: IecUnit = 8): Promise<boolean> {
+/** VICE autostart LOAD"*",8,1 — GEOS deskTop is often graphical (READY alone is not enough). */
+export async function tryGeosDiskAutostart(
+  emu: EjsInstance | null,
+  unit: IecUnit = 8,
+  fileName?: string | null,
+): Promise<boolean> {
   if (!emu) return false;
   disarmAutostart(emu, "disk");
   applyRuntimeOptions(emu, {
@@ -3760,7 +3769,37 @@ export async function tryGeosDiskAutostart(emu: EjsInstance | null, unit: IecUni
   resetEmu(emu);
   await flushEmuFs(emu, 2000);
   bumpCrtPaint(emu);
-  return await waitForC64Ready(emu, 60_000);
+  const ready = await waitForC64Ready(emu, 90_000);
+  const disk = fileName?.trim() || "";
+  const geosOk = (screen: string) =>
+    geosBootSucceeded(screen, disk || undefined) || geosBootLooksLaunched(screen);
+  const hardFail = (screen: string) =>
+    geosBootStuckAtBasic(screen) || /FILE NOT FOUND|DEVICE NOT PRESENT|I\/O ERROR/i.test(screen);
+
+  if (ready) {
+    const screen = readScreenText(emu);
+    if (hardFail(screen)) return false;
+    if (geosOk(screen) || screenRamShowsGeosCatalog(emu)) return true;
+  } else {
+    const screen = readScreenText(emu);
+    if (geosOk(screen) || screenRamShowsGeosCatalog(emu)) return true;
+    if (hardFail(screen)) return false;
+  }
+
+  const deadline = Date.now() + 55_000;
+  while (Date.now() < deadline) {
+    const screen = readScreenText(emu);
+    if (hardFail(screen)) return false;
+    if (geosOk(screen) || screenRamShowsGeosCatalog(emu)) return true;
+    if (!/SEARCHING FOR|LOADING|LOAD"/i.test(screen) && ready && !geosBootStuckAtBasic(screen)) {
+      return true;
+    }
+    await new Promise((r) => setTimeout(r, 400));
+    bumpCrtPaint(emu);
+  }
+  const tail = readScreenText(emu);
+  if (hardFail(tail)) return false;
+  return ready && !geosBootStuckAtBasic(tail);
 }
 
 export function attachAutostartDisk(
