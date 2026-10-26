@@ -101,7 +101,7 @@ import {
   viceUnitIsMfmDrive,
   attachesOwnImageOnly,
 } from "./vice-disk";
-import { writeC64Bytes } from "./c64-memory";
+import { readC64Byte, writeC64Bytes } from "./c64-memory";
 import {
   isAcceptedD64ByteLength,
   isAcceptedD81ByteLength,
@@ -135,11 +135,13 @@ import { stopIosPresent, stripIosPresent } from "./ios-present";
 import {
   addMouse1351Delta,
   createMouse1351Accum,
+  type Mouse1351Accum,
   createMouse1351ButtonLatch,
   createMouse1351CursorSync,
   crtDisplayBox,
   dpadForAxes,
   hostDragTo1351,
+  hostPointerScreenDrag,
   noteMouse1351ButtonPress,
   resetMouse1351ButtonLatch,
   resetMouse1351CursorSync,
@@ -147,6 +149,7 @@ import {
   resetMouse1351Accum,
   takeMouse1351Counts,
   takeMouse1351Frame,
+  MOUSE_1351_STEP_MAX,
   syncHostPointerTo1351,
   objectFitContainContentBox,
 } from "./mouse-1351";
@@ -1624,15 +1627,51 @@ export function vice1351Direct(emu: EjsInstance | null): boolean {
   return typeof grok64MouseApi(emu)?.mouseMove === "function";
 }
 
-/** Pixel deltas into VICE mouse_move — 1351 POT X/Y. */
+/** Pixel deltas into VICE mouse_move — 1351 POT X/Y (chunked for POT wrap). */
 export function feedVice1351Move(emu: EjsInstance | null, dx: number, dy: number): boolean {
   const fn = grok64MouseApi(emu)?.mouseMove;
   if (!fn || !Number.isFinite(dx) || !Number.isFinite(dy)) return false;
-  const ix = Math.round(dx);
-  const iy = Math.round(dy);
-  if (ix === 0 && iy === 0) return true;
-  fn(ix, iy);
-  return true;
+  let x = Math.round(dx);
+  let y = Math.round(dy);
+  if (x === 0 && y === 0) return true;
+  let moved = false;
+  while (x !== 0 || y !== 0) {
+    let cx = x;
+    let cy = y;
+    if (cx > MOUSE_1351_STEP_MAX) cx = MOUSE_1351_STEP_MAX;
+    if (cx < -MOUSE_1351_STEP_MAX) cx = -MOUSE_1351_STEP_MAX;
+    if (cy > MOUSE_1351_STEP_MAX) cy = MOUSE_1351_STEP_MAX;
+    if (cy < -MOUSE_1351_STEP_MAX) cy = -MOUSE_1351_STEP_MAX;
+    if (cx === 0 && cy === 0) {
+      if (x !== 0) cx = x > 0 ? 1 : -1;
+      else cy = y > 0 ? 1 : -1;
+    }
+    fn(cx, cy);
+    x -= cx;
+    y -= cy;
+    moved = true;
+  }
+  return moved;
+}
+
+/** Drain the host 1351 accumulator into VICE (relative counts only). */
+export function drainHostMouse1351Accum(emu: EjsInstance | null, acc: Mouse1351Accum): void {
+  const fn = grok64MouseApi(emu)?.mouseMove;
+  if (!fn) return;
+  const limit = 24;
+  for (let i = 0; i < limit; i++) {
+    const dx = Math.round(acc.x);
+    const dy = Math.round(acc.y);
+    if (dx === 0 && dy === 0) {
+      if (Math.abs(acc.x) < 0.5 && Math.abs(acc.y) < 0.5) break;
+      if (Math.abs(acc.x) >= Math.abs(acc.y) && acc.x !== 0) acc.x += acc.x > 0 ? -0.5 : 0.5;
+      else if (acc.y !== 0) acc.y += acc.y > 0 ? -0.5 : 0.5;
+      continue;
+    }
+    acc.x -= dx;
+    acc.y -= dy;
+    feedVice1351Move(emu, dx, dy);
+  }
 }
 
 /** 1351 left = FIRE, right = UP — VICE mouse_1351_button_*. */
@@ -1644,10 +1683,25 @@ export function feedVice1351Buttons(emu: EjsInstance | null, left: boolean, righ
 }
 
 /** Mouse resource + JoyPortNDevice = 1351 or joystick. */
+let lastMousePlugRc = -99;
+
+export function lastVice1351PlugRc(): number {
+  return lastMousePlugRc;
+}
+
 export function feedVice1351Plug(emu: EjsInstance | null, port: JoyPort, on: boolean): number {
   const fn = grok64MouseApi(emu)?.mousePlug;
   if (!fn) return -99;
-  return fn(port, on ? 1 : 0);
+  lastMousePlugRc = fn(port, on ? 1 : 0);
+  return lastMousePlugRc;
+}
+
+/** SID POT X/Y as the 1351 presents them ($D419 / $D41A). */
+export function readSid1351Pots(emu: EjsInstance | null): { potX: number; potY: number } | null {
+  const x = readC64Byte(emu, 0xd419);
+  const y = readC64Byte(emu, 0xd41a);
+  if (x === null || y === null) return null;
+  return { potX: x & 0xff, potY: y & 0xff };
 }
 
 export function addHostMouseDelta(dx: number, dy: number) {
@@ -1687,11 +1741,7 @@ export function flushHostMouse1351Now(emu: EjsInstance | null) {
 export function flushHostMouse1351(emu: EjsInstance | null, periodMs = 20) {
   const buttons = takeMouse1351Buttons(hostMouseBtnLatch, hostMouseBtn);
   if (vice1351Direct(emu)) {
-    const dx = Math.round(hostMouse1351.x);
-    const dy = Math.round(hostMouse1351.y);
-    hostMouse1351.x -= dx;
-    hostMouse1351.y -= dy;
-    if (dx !== 0 || dy !== 0) feedVice1351Move(emu, dx, dy);
+    drainHostMouse1351Accum(emu, hostMouse1351);
     const buttonsOk = feedVice1351Buttons(emu, buttons.left, buttons.right);
     if (!buttonsOk) setMouseAnalog(emu, 0, 0, buttons.left, buttons.right);
     return;

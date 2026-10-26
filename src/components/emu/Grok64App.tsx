@@ -92,12 +92,12 @@ import {
   setWarp,
   addHostMouseDelta,
   addHostDrag1351,
-  syncHostScreenPointer1351,
-  resetHostScreenPointer1351Sync,
+  hostPointerScreenDrag,
+  readSid1351Pots,
+  lastVice1351PlugRc,
   applySavedJoyAndMouse,
   setHostMouseButtons,
   flushHostMouse1351,
-  flushHostMouse1351Now,
   setGrok64JoyMouseRestore,
   scheduleJoyMouseRestore,
   clearHostMouse1351,
@@ -487,6 +487,8 @@ export function Grok64App() {
   const bootPathRef = useRef(null);
   const workDiskBytesRef = useRef(null);
   const playLockRef = useRef(false);
+  /** Port-1 on-screen stick → GEOS joystick driver (unplug 1351 while stick is active). */
+  const geosStickJoyRef = useRef(false);
   const playLockGen = useRef(0);
   const pendingSnapshotRef = useRef(null);
   const pendingCompanionRef = useRef<{ name: string; data: Uint8Array }[]>([]);
@@ -578,16 +580,17 @@ export function Grok64App() {
     let y = j.y;
     const a = arrowJoyRef.current;
     const w = wasdJoyRef.current;
-    const mouseOn = useEmu.getState().mouseMode;
-    if (!mouseOn) {
-      if (a.left || w.left) x = -1;
-      if (a.right || w.right) x = 1;
-      if (a.up || w.up) y = -1;
-      if (a.down || w.down) y = 1;
-    }
-    if (jumpHeldRef.current && !mouseOn) y = -1;
-    const player = digitalJoyPlayer(mouseOn);
-    if (mouseOn) {
+    if (a.left || w.left) x = -1;
+    if (a.right || w.right) x = 1;
+    if (a.up || w.up) y = -1;
+    if (a.down || w.down) y = 1;
+    if (jumpHeldRef.current) y = -1;
+    const st = useEmu.getState();
+    const mouseOn = st.mouseMode;
+    const stickActive = Math.abs(x) > 0.05 || Math.abs(y) > 0.05;
+    const geosJoyStick = mouseOn && st.joyPort === 1 && stickActive;
+    const player = geosJoyStick ? 0 : digitalJoyPlayer(mouseOn);
+    if (mouseOn && !geosJoyStick) {
       x = 0;
       y = 0;
       fire = false;
@@ -821,6 +824,9 @@ export function Grok64App() {
       cartReset: () => cartReset(emuRef.current),
       cartEject: () => cartEject(emuRef.current, workDiskBytesRef.current),
       grok64CoreStatus: () => grok64CoreStatus(emuRef.current),
+      mousePots: () => readSid1351Pots(emuRef.current),
+      mousePlugRc: () => lastVice1351PlugRc(),
+      pointerFeed: () => readRealPointerFeed(),
       scpuReset: () => scpuReset(emuRef.current),
       cmdSwapped: () => cmdSwappedRef.current,
       cmdSwap: (next) => hwActionRef.current("cmd-swap", next === false ? "long" : "short"),
@@ -1929,7 +1935,6 @@ export function Grok64App() {
     flushDeferredC64Keyboard(emuRef.current);
     const live = useEmu.getState();
     applySavedJoyAndMouse(emuRef.current, live.joyPort, live.mouseMode);
-    if (live.mouseMode) resetHostScreenPointer1351Sync();
     scheduleJoyMouseRestore(emuRef.current);
   }, [s, clearMenuJoyInput]);
   const logFloppyAttach = useCallback(
@@ -4619,7 +4624,17 @@ export function Grok64App() {
         if (a.right || w.right) sx = 1;
         if (a.up || w.up) sy = -1;
         if (a.down || w.down) sy = 1;
-        if (Math.abs(sx) > 0.32 || Math.abs(sy) > 0.32) {
+        const stickDrive = Math.abs(sx) > 0.32 || Math.abs(sy) > 0.32;
+        if (st.joyPort === 1 && stickDrive) {
+          if (!geosStickJoyRef.current) {
+            geosStickJoyRef.current = true;
+            feedVice1351Plug(emu, 1, false);
+          }
+        } else if (geosStickJoyRef.current) {
+          geosStickJoyRef.current = false;
+          feedVice1351Plug(emu, st.joyPort, true);
+        }
+        if (!geosStickJoyRef.current && stickDrive) {
           addHostMouseDelta(sx * 4, sy * 4);
         }
         setHostMouseButtons(mouseBtnRef.current.left, mouseBtnRef.current.right);
@@ -4643,7 +4658,6 @@ export function Grok64App() {
       const st = useEmu.getState();
       if (!emu) return;
       applySavedJoyAndMouse(emu, st.joyPort, st.mouseMode);
-      if (st.mouseMode) resetHostScreenPointer1351Sync();
     });
     return () => setGrok64JoyMouseRestore(null);
   }, []);
@@ -4657,23 +4671,16 @@ export function Grok64App() {
       const over = Boolean(screen && target && (screen === target || screen.contains(target)));
       if (!over && !locked) {
         mousePtrRef.current = null;
-        resetHostScreenPointer1351Sync();
         return;
       }
-      if (screen) {
-        const rect = screen.getBoundingClientRect();
-        const { dx, dy } = syncHostScreenPointer1351(e.clientX, e.clientY, rect);
-        const buttons = "buttons" in e ? Number(e.buttons) || 0 : 0;
-        if (dx || dy) noteRealPointerFeed(dx, dy, buttons, locked);
-        flushHostMouse1351Now(emuRef.current);
-        return;
-      }
-      const { dx, dy, next } = hostPointerMoveToDelta(e, mousePtrRef.current);
+      const rect = (screen ?? (target as HTMLElement))?.getBoundingClientRect?.();
+      if (!rect || rect.width < 2) return;
+      const { dx, dy, next } = hostPointerScreenDrag(e, mousePtrRef.current, rect);
       mousePtrRef.current = next;
       if (!dx && !dy) return;
       const buttons = "buttons" in e ? Number(e.buttons) || 0 : 0;
       noteRealPointerFeed(dx, dy, buttons, locked);
-      addHostDrag1351(dx, dy);
+      addHostMouseDelta(dx, dy);
     };
     window.addEventListener("pointermove", onPointer, { capture: true, passive: true });
     return () => {
@@ -5232,7 +5239,7 @@ export function Grok64App() {
             onClick={() => {
               const next = !s.mouseMode;
               s.setMouseMode(next);
-              if (next) resetHostScreenPointer1351Sync();
+              if (next) mousePtrRef.current = null;
               applySavedJoyAndMouse(emuRef.current, s.joyPort, next);
               toast.message(next ? `1351 mouse on port ${s.joyPort} — tap P1/P2 to swap` : "Joystick");
             }}
@@ -5488,9 +5495,6 @@ export function Grok64App() {
               e.preventDefault();
               if (s.mouseMode) {
                 mousePtrRef.current = { x: e.clientX, y: e.clientY };
-                const screenEl = e.currentTarget;
-                const rect = screenEl.getBoundingClientRect();
-                syncHostScreenPointer1351(e.clientX, e.clientY, rect);
                 if (e.button === 2) mouseBtnRef.current.right = true;
                 else mouseBtnRef.current.left = true;
                 try {

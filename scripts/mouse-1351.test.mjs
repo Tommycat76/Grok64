@@ -27,6 +27,7 @@ const {
   takeMouse1351Buttons,
   MOUSE_1351_BUTTON_HOLD_FRAMES,
   createMouse1351CursorSync,
+  hostPointerScreenDrag,
   syncHostPointerTo1351,
 } = await server.ssrLoadModule("/src/lib/emu/mouse-1351.ts");
 await server.close();
@@ -83,7 +84,7 @@ test("host drag scales CSS pixels to the 320×200 active display", () => {
 
 test("a taller-than-native box shrinks only the vertical 1351 counts", () => {
   const { dx, dy } = hostDragTo1351(10, 10, 384, 400);
-  assert.equal(dx, 10);
+  assert.ok(Math.abs(dx - 10 * (VICE_ACTIVE_W / 384)) < 1e-9);
   assert.ok(Math.abs(dy - 10 * (VICE_ACTIVE_H / 400)) < 1e-9);
 });
 
@@ -135,7 +136,17 @@ test("a click that is released immediately still holds the 1351 left button for 
   assert.equal(seen, MOUSE_1351_BUTTON_HOLD_FRAMES);
 });
 
-test("absolute host pointer sync maps into CRT deltas", () => {
+test("hostPointerScreenDrag is relative-only (no absolute snap on first sample)", () => {
+  const rect = { left: 0, top: 0, width: 384, height: 272, right: 384, bottom: 272, x: 0, y: 0, toJSON: () => ({}) };
+  const first = hostPointerScreenDrag({ movementX: 0, movementY: 0, clientX: 100, clientY: 80 }, null, rect);
+  assert.equal(first.dx, 0);
+  assert.equal(first.dy, 0);
+  const second = hostPointerScreenDrag({ movementX: 10, movementY: -5, clientX: 110, clientY: 75 }, first.next, rect);
+  assert.ok(Math.abs(second.dx - 10 * (VICE_ACTIVE_W / 384)) < 0.02);
+  assert.ok(Math.abs(second.dy + 5 * (VICE_ACTIVE_H / 272)) < 0.02);
+});
+
+test("absolute host pointer sync maps into CRT deltas (legacy helper)", () => {
   const acc = createMouse1351Accum();
   const sync = createMouse1351CursorSync();
   const rect = { left: 0, top: 0, width: 384, height: 272, right: 384, bottom: 272, x: 0, y: 0, toJSON: () => ({}) };

@@ -134,6 +134,24 @@ export function takeMouse1351Counts(acc: Mouse1351Accum): { dx: number; dy: numb
   return { dx, dy };
 }
 
+/** Max relative mickeys per VICE mouse_move (1351 POT is 7-bit; large steps wrap badly). */
+export const MOUSE_1351_STEP_MAX = 63;
+
+/**
+ * Host pointer event → C64-pixel deltas (relative only — no absolute snap).
+ * Uses movementX/Y when present, else client position delta vs `prev`.
+ */
+export function hostPointerScreenDrag(
+  ev: { movementX?: number; movementY?: number; clientX: number; clientY: number },
+  prev: HostPointerPos | null,
+  screenRect: DOMRect,
+): { dx: number; dy: number; next: HostPointerPos } {
+  const box = objectFitContainContentBox(screenRect.width, screenRect.height);
+  const { dx, dy, next } = hostPointerMoveToDelta(ev, prev);
+  const scaled = hostDragTo1351(dx, dy, box.w, box.h);
+  return { dx: scaled.dx, dy: scaled.dy, next };
+}
+
 export type HostPointerPos = { x: number; y: number };
 
 /**
