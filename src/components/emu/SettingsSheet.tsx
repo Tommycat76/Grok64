@@ -84,16 +84,31 @@ export function SettingsSheet({ resolved }: { resolved?: ResolvedMachine }) {
               {resolved ? <p className="g64-detect-inline">{detectLine(resolved)}</p> : null}
             </div>
             <div className="g64-sheet-body">
-            <div className="g64-row">
-              <span>1351 mouse + touchpad</span>
-              <Switch on={s.mouseMode} onToggle={() => s.setMouseMode(!s.mouseMode)} />
+            <div className="g64-field">
+              <label>Port device</label>
+              <div className="g64-seg">
+                <button
+                  type="button"
+                  data-on={!s.mouseMode && !s.paddleMode}
+                  onClick={() => s.setPortPointer("off")}
+                >
+                  Joystick
+                </button>
+                <button type="button" data-on={s.mouseMode} onClick={() => s.setPortPointer("1351")}>
+                  1351 mouse
+                </button>
+                <button type="button" data-on={s.paddleMode} onClick={() => s.setPortPointer("paddle")}>
+                  Paddle
+                </button>
+              </div>
             </div>
             <p className="mb-3 text-xs text-fg-subtle">
               1351 sits on the selected port; the other port stays a joystick. Drag the screen or
               the trackpad — those pixels become 1351 POT X/Y, one-to-one on both axes. L/R are
-              the 1351 buttons. GEOS JOYSTICK is Port 1: tap P1, turn Keyboard joystick on, then
-              WASD or the on-screen stick. After geos → select input → COMM 1351(a), put the mouse
-              on that port. The port you pick stays across carts, disks, and power.
+              the 1351 buttons. Paddle mode uses VICE paddles on the port (horizontal drag moves
+              POT X; click or FIRE is the button — Arkanoid on port 1). GEOS JOYSTICK is Port 1:
+              tap P1, turn Keyboard joystick on, then WASD or the on-screen stick. The port you
+              pick stays across carts, disks, and power.
             </p>
             <EjsLoaderDiagPanel active={s.settingsOpen || s.aboutOpen} powered={s.powered} />
             {s.mouseMode ? (

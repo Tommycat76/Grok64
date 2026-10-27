@@ -171,8 +171,10 @@ export function keyCodeOf(code: string, key: string): number {
   return 0;
 }
 
-/** Right Ctrl is the only host key mapped to joystick fire. All other keys are C64. */
+/** Default host key for joystick fire (right Control). */
 export const FIRE_KEY_CODE = "ControlRight";
+
+const RIGHT_CONTROL_LOCATION = 2;
 
 /** PETSCII space. Must never be treated as host Reset / RetroArch Start. */
 export const C64_SPACE_KEYCODE = 32;
@@ -211,8 +213,31 @@ export function blurHostButtons() {
   }
 }
 
-export function isJoyFireKey(code: string): boolean {
-  return code === FIRE_KEY_CODE;
+/** True when the host key is the physical right Control (Chrome may report ControlLeft + location 2). */
+export function isHostRightControlKey(code: string, location = 0): boolean {
+  if (code === FIRE_KEY_CODE) return true;
+  if (location === RIGHT_CONTROL_LOCATION && (code === "ControlLeft" || code === "ControlRight")) return true;
+  return false;
+}
+
+export function isJoyFireKey(code: string, location = 0): boolean {
+  return isHostRightControlKey(code, location);
+}
+
+/** Keyboard fire while WASD-as-joystick is on (Space + right Control). */
+export function isKeyboardJoyFireKey(
+  code: string,
+  opts: { wasdIsJoy?: boolean; location?: number; extraKeys?: string[] } = {},
+): boolean {
+  if (isHostRightControlKey(code, opts.location ?? 0)) return true;
+  if (opts.extraKeys?.includes(code)) return true;
+  if (opts.wasdIsJoy && code === "Space") return true;
+  return false;
+}
+
+/** Block C64 Space delivery while WASD drives the stick. */
+export function shouldSwallowC64SpaceForWasdJoy(code: string, key: string, wasdIsJoy: boolean): boolean {
+  return wasdIsJoy && isC64Space(code, key);
 }
 
 type C64KeyMods = { shift?: boolean; ctrl?: boolean; alt?: boolean };
